@@ -1236,6 +1236,23 @@ class AssertSizeStrideLine(WrapperLine):
         return converter._generate_assert_size_stride
 
 
+@dataclasses.dataclass
+class AssertDivByZeroLine(WrapperLine):
+    """Deferred AOTI runtime check that a sizevar divisor is non-zero.
+
+    Queued from CppWrapperCpu.codegen_cpp_sizevar during the build phase
+    and replayed at the position of use so the check lands after the
+    declarations of any unbacked symbols it references.
+    """
+
+    wrapper: PythonWrapperCodegen
+    divisor: str
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_div_by_zero(code, self.divisor, self.op_name)
+
+
 BufferName = str
 Line = MemoryPlanningLine | LineContext
 
@@ -1722,6 +1739,26 @@ class PythonWrapperCodegen(CodeGen):
         """
         code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
+    def write_assert_div_by_zero(self, divisor_str: str, op_name: str) -> None:
+        """Queue a div-by-zero AOTI check for emission during replay.
+
+        codegen_cpp_sizevar is called in both build and replay phases;
+        set_writeline routes the WrapperLine appropriately in either case.
+        """
+        self.writeline(AssertDivByZeroLine(self, divisor_str, op_name))
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target).
+
+        Only emitted by C++ wrappers; the Python wrapper relies on Python's
+        native ZeroDivisionError instead of pre-checking divisors.
+        """
+        raise NotImplementedError(
+            "AOTI div-by-zero check is only emitted by C++ wrappers"
+        )
+
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
         Called from the scheduler after mutated_input_idxs is computed."""
@@ -2091,11 +2128,30 @@ class PythonWrapperCodegen(CodeGen):
             return 1
 
     @contextlib.contextmanager
-    def set_writeline(self, new: Callable[..., None]) -> Iterator[Callable[..., None]]:
+    def set_writeline(
+        self,
+        target: IndentedBuffer,
+        writeline: Callable[..., None] | None = None,
+    ) -> Iterator[Callable[..., None]]:
+        """Temporarily redirect self.writeline to write into `target`.
+
+        Plain strings go through `writeline` (default target.writeline; pass
+        target.writeline_aot/writeline_jit for one side of a dual buffer).
+        WrapperLines are codegen'd into `target` directly.
+        """
         old = self.writeline
+        emit = writeline if writeline is not None else target.writeline
+
+        def dispatch(line: LineContext | DeferredLineBase | WrapperLine | str) -> None:
+            if isinstance(line, WrapperLine):
+                # pyrefly: ignore [missing-attribute]
+                line.codegen(target)
+            else:
+                emit(line)
+
         try:
-            self.writeline = new  # type: ignore[method-assign]
-            yield new
+            self.writeline = dispatch  # type: ignore[method-assign]
+            yield emit
         finally:
             self.writeline = old  # type: ignore[method-assign]
 
@@ -2124,7 +2180,7 @@ class PythonWrapperCodegen(CodeGen):
 
             # At this point, we shouldn't generate any new memory planning lines.
             # Override writeline to point at the wrapper call, in case it gets called.
-            with self.set_writeline(self.wrapper_call.writeline):
+            with self.set_writeline(self.wrapper_call):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
                         # pyrefly: ignore [missing-attribute]
@@ -2807,6 +2863,15 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
+        """Codegen a user-defined Triton kernel and return its cache entry.
+
+        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        name (with a leading dunder stripped to avoid Python class-based name
+        mangling at the call site), and records the kernel in
+        ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
+        inductor_meta, extra_launcher_call_args)``; subsequent calls with the
+        same ``cache_key`` reuse the previously assigned name.
+        """
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -3037,6 +3102,11 @@ class PythonWrapperCodegen(CodeGen):
             )
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+        # when the generated call site is inside a class body.
+        # See https://github.com/pytorch/pytorch/issues/170398
+        if name.startswith("__") and not name.endswith("__"):
+            name = name[1:]
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
