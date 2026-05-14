@@ -178,7 +178,7 @@ class Event(torch._C._CudaEventBase):
 
     .. _CUDA Event Documentation:
        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
-    """  # noqa: B950
+    """
 
     def __new__(
         cls, enable_timing=False, blocking=False, interprocess=False, external=False

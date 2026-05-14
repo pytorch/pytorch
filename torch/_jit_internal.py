@@ -1044,7 +1044,7 @@ def _check_overload_body(func):
         raise RuntimeError(msg)
 
 
-def _overload(func):
+def _overload(func: Callable[_P, _R]) -> Callable[_P, _R]:
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
@@ -1097,7 +1097,7 @@ _overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
-def _overload_method(func):
+def _overload_method(func: Callable[_P, _R]) -> Callable[_P, _R]:
     try:
         _check_overload_body(func)
     except IndentationError:
@@ -1379,8 +1379,7 @@ def _disable_emit_hooks():
         torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
-    # noqa: F841
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:
     def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)

@@ -13,38 +13,21 @@ import json
 import logging
 import re
 import sys
-from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
 
 
 # Add repo root to sys.path so we can import from tools
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.linter.adapters.stable_shim_version_linter import PreprocessorTracker
+from tools.linter.adapters._stable_shim_utils import (
+    LintMessage,
+    LintSeverity,
+    PreprocessorTracker,
+)
 
 
 LINTER_CODE = "STABLE_SHIM_USAGE"
-
-
-class LintSeverity(str, Enum):
-    ERROR = "error"
-    WARNING = "warning"
-    ADVICE = "advice"
-    DISABLED = "disabled"
-
-
-class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
-    code: str
-    severity: LintSeverity
-    name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
 
 
 def get_shim_functions(
@@ -58,15 +41,20 @@ def get_shim_functions(
     Functions without version guards are ignored.
 
     Args:
-        shim_files: List of paths to shim header files. If None, will use the default
-                    paths to torch/csrc/stable/c/shim.h and
-                    torch/csrc/inductor/aoti_torch/c/shim.h based on the repository root.
+        shim_files: List of paths to shim header files. If None, will use the
+                    default set of shim headers under torch/csrc/stable and
+                    torch/csrc/inductor/aoti_torch (including generated shims)
     """
     if shim_files is None:
         repo_root = Path(__file__).resolve().parents[3]
         shim_files_to_check = [
             repo_root / "torch/csrc/stable/c/shim.h",
             repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.h",
         ]
     else:
         shim_files_to_check = [Path(f) for f in shim_files]
@@ -82,7 +70,7 @@ def get_shim_functions(
     functions: dict[str, tuple[int, int]] = {}
 
     # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
-    function_pattern = re.compile(r"AOTI_TORCH_EXPORT\s+\w+\s+(\w+)\s*\(")
+    function_pattern = re.compile(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\(")
     # Also match typedef function pointers
     typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
     # Match using declarations like: using TypeName = ...

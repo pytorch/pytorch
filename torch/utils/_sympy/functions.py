@@ -32,6 +32,24 @@ if TYPE_CHECKING:
 _T = TypeVar("_T", bound=SupportsFloat)
 _Ts = TypeVarTuple("_Ts")
 
+# sympy.gcd on wide Add expressions triggers expensive polynomial-GCD
+# (dmp_sqr / dmp_rr_div) that scales poorly in the number of symbols.
+# safe_gcd() falls back to simple_floordiv_gcd past this threshold.
+_MAX_ADD_TERMS_FOR_POLY_GCD = 20
+
+
+def _is_wide_add(expr: sympy.Basic) -> bool:
+    return isinstance(expr, sympy.Add) and len(expr.args) > _MAX_ADD_TERMS_FOR_POLY_GCD
+
+
+def safe_gcd(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+    """Like sympy.gcd but avoids polynomial-GCD on wide Add expressions,
+    falling back to simple_floordiv_gcd instead."""
+    if _is_wide_add(a) or _is_wide_add(b):
+        return simple_floordiv_gcd(a, b)
+    return sympy.gcd(a, b)
+
+
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
 #
@@ -292,7 +310,7 @@ class FloorDiv(sympy.Function):
         try:
             gcd = simple_floordiv_gcd(base, divisor)
             if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
-                gcd = sympy.gcd(base, divisor)
+                gcd = safe_gcd(base, divisor)
             if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
@@ -333,7 +351,7 @@ class ModularIndexing(sympy.Function):
 
         try:
             if divisor != 1:
-                gcd = sympy.gcd(base, divisor)
+                gcd = safe_gcd(base, divisor)
                 if gcd != 1:
                     return ModularIndexing(
                         sympy.simplify(base / gcd),
@@ -343,11 +361,14 @@ class ModularIndexing(sympy.Function):
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
-        if isinstance(base, sympy.Add):
+        # Guard on width: the per-term gcd calls are cheap (via safe_gcd),
+        # but the result feeds into downstream sympy.expand() which blows up
+        # on wide Add expressions (e.g. in sizevars.simplify).
+        if isinstance(base, sympy.Add) and not _is_wide_add(base):
             new_terms: list[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
-                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
+                if safe_gcd(term, modulus * divisor) != modulus * divisor:
                     if (isinstance(term, sympy.Integer) and term < 0) or (
                         isinstance(term, sympy.Mul)
                         and isinstance(term.args[0], sympy.Integer)
@@ -808,8 +829,8 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                     if isinstance(a, other):
                         a0 = a.args[0]
                         if (  # noqa: E712
-                            (a0 > T) if other == Max else (a0 < T)  # noqa: E712
-                        ) == True:  # noqa: E712
+                            (a0 > T) if other == Max else (a0 < T)
+                        ) == True:
                             args[i] = cls.identity  # type: ignore[attr-defined]
 
         # remove redundant symbolic args
@@ -938,13 +959,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
-        i.is_antihermitian
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_antihermitian for i in s.args
+    )
     _eval_is_commutative = lambda s: _torf(  # noqa: E731
-        i.is_commutative
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_commutative for i in s.args
+    )
     _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
     _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
     _eval_is_even = lambda s: _torf(i.is_even for i in s.args)  # noqa: E731
@@ -957,13 +976,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
     _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
     _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
-        i.is_nonnegative
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_nonnegative for i in s.args
+    )
     _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
-        i.is_nonpositive
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_nonpositive for i in s.args
+    )
     _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
     _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
     _eval_is_polar = lambda s: _torf(i.is_polar for i in s.args)  # noqa: E731
@@ -972,13 +989,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
     _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
     _eval_is_extended_real = lambda s: _torf(  # noqa: E731
-        i.is_extended_real
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_extended_real for i in s.args
+    )
     _eval_is_transcendental = lambda s: _torf(  # noqa: E731
-        i.is_transcendental
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_transcendental for i in s.args
+    )
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
 

@@ -17,11 +17,11 @@ __all__ = [
 ]
 
 
-@substitute_in_graph(struct.pack, can_constant_fold_through=True)  # type: ignore[arg-type]
+@substitute_in_graph(struct.pack, can_constant_fold_through=True)
 def pack(fmt: bytes | str, /, *v: Any) -> bytes:
     return struct.pack(fmt, *v)
 
 
-@substitute_in_graph(struct.unpack, can_constant_fold_through=True)  # type: ignore[arg-type]
+@substitute_in_graph(struct.unpack, can_constant_fold_through=True)
 def unpack(format: bytes | str, buffer: Buffer, /) -> tuple[Any, ...]:
     return struct.unpack(format, buffer)

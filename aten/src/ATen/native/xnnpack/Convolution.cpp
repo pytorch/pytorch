@@ -225,9 +225,9 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
-      weight_reordered.data_ptr<float>(),                             // kernel
+      weight_reordered.const_data_ptr<float>(),                       // kernel
       (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -349,7 +349,7 @@ Tensor run(
 
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
-      padded_input_nhwc.data_ptr<float>(),                   // input
+      padded_input_nhwc.const_data_ptr<float>(),                   // input
       output.data_ptr<float>());                             // output
   } else {
     size_t workspace_size = SIZE_MAX;
@@ -369,7 +369,7 @@ Tensor run(
     setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
       nullptr,                                               // workspace
-      padded_input_nhwc.data_ptr<float>(),                   // input
+      padded_input_nhwc.const_data_ptr<float>(),                   // input
       output.data_ptr<float>());                             // output
   }
 

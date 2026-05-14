@@ -1012,6 +1012,213 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
+class TestJitReplaceSubmodule(TestCase):
+    def test_jit_replace_submodule(self):
+        from torch.jit._recursive import wrap_cpp_module
+
+        class SubA(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class SubB(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) * 2
+
+        class Parent(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = SubA()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Parent())
+        new_child = torch.jit.script(SubB())
+
+        inp = torch.randn(2, 4)
+        out_before = root(inp)
+
+        root = wrap_cpp_module(
+            torch._C._jit_replace_submodule(root._c, "child", new_child._c)
+        )
+
+        out_after = root(inp)
+        self.assertFalse(torch.equal(out_before, out_after))
+        self.assertEqual(
+            root.child._c._type().name(),
+            new_child._c._type().name(),
+        )
+
+    def test_jit_replace_submodule_nested(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self, scale: float) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, x):
+                return x * self.scale
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf(1.0)
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid = Mid()
+
+            def forward(self, x):
+                return self.mid(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf(3.0))
+
+        inp = torch.randn(2, 4)
+        root = torch.jit._recursive.wrap_cpp_module(
+            torch._C._jit_replace_submodule(root._c, "mid.leaf", new_leaf._c)
+        )
+
+        out_after = root(inp)
+        self.assertEqual(out_after, inp * 3.0)
+
+    def test_jit_replace_submodule_empty_qualified_name(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "non-empty qualified_name"):
+            torch._C._jit_replace_submodule(root._c, "", new_child._c)
+
+    def test_jit_replace_submodule_missing_segment(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "could not find submodule path segment 'missing'"):
+            torch._C._jit_replace_submodule(root._c, "missing.leaf", new_child._c)
+
+        with self.assertRaisesRegex(RuntimeError, "could not find submodule path segment 'missing'"):
+            torch._C._jit_replace_submodule(root._c, "missing", new_child._c)
+
+    def test_jit_replace_submodule_non_module_attribute(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            scalar: int
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+                self.scalar = 7
+
+            def forward(self, x):
+                return self.child(x) + self.scalar
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "'scalar'.*is not a submodule"):
+            torch._C._jit_replace_submodule(root._c, "scalar", new_child._c)
+
+        with self.assertRaisesRegex(RuntimeError, "'scalar'.*is not a submodule"):
+            torch._C._jit_replace_submodule(root._c, "scalar.nested", new_child._c)
+
+    def test_jit_replace_submodule_shared_parent_type(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self, scale: float) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, x):
+                return x * self.scale
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf(1.0)
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid_a = Mid()
+                self.mid_b = Mid()
+
+            def forward(self, x):
+                return self.mid_a(x) + self.mid_b(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf(2.0))
+
+        with self.assertRaisesRegex(Exception, "unique parent types"):
+            torch._C._jit_replace_submodule(root._c, "mid_a.leaf", new_leaf._c)
+
+    def test_jit_replace_submodule_empty_path_segment(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid = Mid()
+
+            def forward(self, x):
+                return self.mid(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "empty path segments"):
+            torch._C._jit_replace_submodule(root._c, "mid..leaf", new_leaf._c)
+
+
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
