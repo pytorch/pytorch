@@ -37,7 +37,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     return val;
   };
 
-  if (r->step == Py_None) {
+  if (Py_IsNone(r->step)) {
     step_sym = c10::SymInt(1);
   } else {
     if (torch::is_symint(r->step)) {
@@ -58,7 +58,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
 
   if (torch::is_symint(r->start)) {
     start_sym = py::handle(r->start).cast<c10::SymInt>();
-  } else if (r->start == Py_None) {
+  } else if (Py_IsNone(r->start)) {
     start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX : 0);
   } else {
     Py_ssize_t start = 0;
@@ -71,7 +71,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
 
   if (torch::is_symint(r->stop)) {
     stop_sym = py::handle(r->stop).cast<c10::SymInt>();
-  } else if (r->stop == Py_None) {
+  } else if (Py_IsNone(r->stop)) {
     stop_sym = c10::SymInt(
         step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
   } else {

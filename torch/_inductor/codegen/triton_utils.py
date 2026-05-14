@@ -8,7 +8,12 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
-from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
+from ..utils import (
+    _type_of,
+    device_supports_fp64,
+    expr_fits_within_32bit,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -61,12 +66,20 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
-            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
+            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
+                V.graph.current_device
+            ):
+                return "fp64"
+            return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
             # Unbacked floats from .item() should preserve fp64 precision
-            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
+            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
+                V.graph.current_device
+            ):
+                return "fp64"
+            return "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"
 
@@ -190,7 +203,7 @@ def _arg_equals_1(arg: KernelArgType) -> bool:
     return (
         isinstance(arg, SizeArg)
         and isinstance(arg.expr, (int, sympy.Integer))
-        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)
     )
 
 
@@ -250,7 +263,7 @@ def config_of(
             if include_tensor:
                 offset_aligned = V.graph.sizevars.statically_known_multiple_of(
                     x.offset * x.dtype.itemsize,
-                    alignment,  # type: ignore[arg-type]
+                    alignment,
                 )
                 return offset_aligned and not is_unaligned_buffer(x)
             else:
@@ -264,7 +277,7 @@ def config_of(
                 return False
             if isinstance(x.expr, (float, bool)):
                 return False
-            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
+            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True

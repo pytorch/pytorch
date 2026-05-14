@@ -46,9 +46,13 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    MI350_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     run_tests,
+    runOnRocmArch,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
     skipIfXpu,
@@ -1186,6 +1190,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
@@ -1307,8 +1312,8 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(M, K, device=device, dtype=base_dtype)
-        y = torch.randn(N, K, device=device, dtype=base_dtype).t()
+        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=base_dtype, device=device, reduction_dim=-1)
+        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=base_dtype, device=device, reduction_dim=-1).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
             bias = torch.randn((N,), device=device, dtype=base_dtype)
@@ -1666,6 +1671,7 @@ class TestFP8Matmul(TestCase):
         not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
+    @runOnRocmArch(MI350_ARCH)
     @parametrize("output_dtype", [torch.bfloat16, ])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
@@ -1697,8 +1703,8 @@ class TestFP8Matmul(TestCase):
         # Verify that actual F8 mm raises expected error
         if torch.version.hip:
             # ROCm does not yet support DeepSeek-style blockwise scaling
-            expected_error = ValueError
-            expected_pattern = "Invalid scaling configuration"
+            expected_error = NotImplementedError
+            expected_pattern = "1x128 and 128x128 scaling not available with ROCm"
         else:
             # CUDA non-SM90 should raise NotImplementedError
             expected_error = NotImplementedError
@@ -1807,8 +1813,7 @@ class TestFP8Matmul(TestCase):
                     ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                capability = torch.cuda.get_device_capability()
-                if capability in {(10, 0), (10, 3), (11, 0), (12, 0), (12, 1)}:
+                if SM100OrLater:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)
@@ -2169,7 +2174,9 @@ class TestFP8Matmul(TestCase):
         # No swizzle passed - must fail on swizzle_a
         with self.assertRaisesRegex(
             ValueError,
-            "swizzle_a must have 1 values, got 0",
+            "swizzle_a and swizzle_b must each have 1 value"
+            if torch.version.hip
+            else "swizzle_a must have 1 value, got 0",
         ):
             _ = torch.nn.functional.scaled_mm(
                 x,
@@ -2183,7 +2190,9 @@ class TestFP8Matmul(TestCase):
         # swizzle_a passed, not b, must fail on swizzle_b
         with self.assertRaisesRegex(
             ValueError,
-            "swizzle_b must have 1 values, got 0",
+            "swizzle_a and swizzle_b must each have 1 value"
+            if torch.version.hip
+            else "swizzle_b must have 1 value, got 0",
         ):
             _ = torch.nn.functional.scaled_mm(
                 x,
@@ -2194,6 +2203,21 @@ class TestFP8Matmul(TestCase):
                 ScalingType.BlockWise1x32,
                 swizzle_a=SwizzleType.SWIZZLE_32_4_4,
             )
+        if torch.version.hip:
+            with self.assertRaisesRegex(
+                ValueError,
+                "swizzle_a and swizzle_b must both be NO_SWIZZLE",
+            ):
+                _ = torch.nn.functional.scaled_mm(
+                    x,
+                    w.t(),
+                    x_scale,
+                    ScalingType.BlockWise1x32,
+                    w_scale,
+                    ScalingType.BlockWise1x32,
+                    swizzle_a=SwizzleType.NO_SWIZZLE,
+                    swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                )
 
         # NVFP4 two-level: swizzle=[SWIZZLE_32_4_4, NO_SWIZZLE]
         x = _bfloat16_to_float4_e2m1fn_x2(x.to(torch.bfloat16))
@@ -2206,8 +2230,10 @@ class TestFP8Matmul(TestCase):
 
         # No swizzles passed - must fail on swizzle_a
         with self.assertRaisesRegex(
-            ValueError,
-            "swizzle_a must have 2 values, got 0",
+            NotImplementedError if torch.version.hip else ValueError,
+            "NVFP4 scaling not supported on ROCM"
+            if torch.version.hip
+            else "swizzle_a must have 2 values, got 0",
         ):
             _ = torch.nn.functional.scaled_mm(
                 x,
@@ -2220,8 +2246,10 @@ class TestFP8Matmul(TestCase):
 
         # Not enough swizzles passed - must fail on swizzle_a
         with self.assertRaisesRegex(
-            ValueError,
-            "swizzle_a must have 2 values, got 1",
+            NotImplementedError if torch.version.hip else ValueError,
+            "NVFP4 scaling not supported on ROCM"
+            if torch.version.hip
+            else "swizzle_a must have 2 values, got 1",
         ):
             _ = torch.nn.functional.scaled_mm(
                 x,
@@ -2235,8 +2263,10 @@ class TestFP8Matmul(TestCase):
 
         # Not enough swizzles passed to b - must fail on swizzle_b
         with self.assertRaisesRegex(
-            ValueError,
-            "swizzle_b must have 2 values, got 1",
+            NotImplementedError if torch.version.hip else ValueError,
+            "NVFP4 scaling not supported on ROCM"
+            if torch.version.hip
+            else "swizzle_b must have 2 values, got 1",
         ):
             _ = torch.nn.functional.scaled_mm(
                 x,
@@ -2526,6 +2556,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_nvfp4_compile(self) -> None:
 
@@ -2555,6 +2586,58 @@ class TestFP8Matmul(TestCase):
             use_fast_accum=False,
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm
+    def test_scaled_mm_v2_fullgraph(self, device) -> None:
+        m, n, k = 15, 32, 16
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        b = torch.randn(k, n, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn).t().contiguous().t()
+        scale_a = torch.ones(1, device=device)
+        scale_b = torch.ones(1, device=device)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a, b,
+                scale_a=scale_a,
+                scale_recipe_a=ScalingType.TensorWise,
+                swizzle_a=SwizzleType.NO_SWIZZLE,
+                scale_b=scale_b,
+                scale_recipe_b=ScalingType.TensorWise,
+                swizzle_b=SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
+
+        expected = fn(a, b, scale_a, scale_b)
+        actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b)
+        self.assertEqual(actual, expected)
+
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        a = torch.randn(m, k * n_groups, device=device).to(fp8_dtype)
+        b = torch.randn(n, k * n_groups, device=device).to(fp8_dtype)
+        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+
+        def fn(a, b, scale_a, scale_b, offs):
+            return scaled_grouped_mm(
+                a, b.t(),
+                scale_a,
+                ScalingType.RowWise,
+                scale_b,
+                ScalingType.RowWise,
+                offs=offs,
+                output_dtype=torch.bfloat16,
+            )
+
+        expected = fn(a, b, scale_a, scale_b, offs)
+        actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
+        self.assertEqual(actual, expected)
 
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)

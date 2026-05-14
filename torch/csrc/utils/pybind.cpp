@@ -162,5 +162,4 @@ py::handle type_caster<c10::Scalar>::cast(
     TORCH_INTERNAL_ASSERT(0, "unrecognized scalar type ", scalar.type());
   }
 }
-
 } // namespace pybind11::detail
