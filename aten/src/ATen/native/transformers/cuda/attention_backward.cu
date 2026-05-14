@@ -27,6 +27,7 @@
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/empty_permuted.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
 #include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
@@ -1109,30 +1110,27 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
 
-    auto create_strided_output = [batch_size](const Tensor& tensor) -> Tensor {
+    auto create_permuted_output = [batch_size](const Tensor& tensor) -> Tensor {
       if (!tensor.defined()) {
         return Tensor{};
       }
-      int dim = tensor.dim();
-      std::vector<int64_t> sizes;
-      sizes.reserve(dim);
-      sizes.push_back(batch_size);
-      for (int i = 1; i < dim; i++) {
-        sizes.push_back(tensor.size(i));
-      }
-      return at::empty_strided(std::move(sizes), tensor.strides(), tensor.options());
+      TORCH_INTERNAL_ASSERT(tensor.dim() == 4);
+      return at::empty_permuted(
+          {batch_size, tensor.size(1), tensor.size(2), tensor.size(3)},
+          {0, 2, 1, 3},
+          tensor.options());
     };
 
     if (grad_input_mask[0]) {
-      final_grad_q = create_strided_output(query);
+      final_grad_q = create_permuted_output(query);
     }
 
     if (grad_input_mask[1]) {
-      final_grad_k = create_strided_output(key);
+      final_grad_k = create_permuted_output(key);
     }
 
     if (grad_input_mask[2]) {
-      final_grad_v = create_strided_output(value);
+      final_grad_v = create_permuted_output(value);
     }
     if (grad_input_mask[3] && attn_bias.defined()) {
       final_grad_bias = at::zeros_like(attn_bias);

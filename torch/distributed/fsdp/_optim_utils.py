@@ -1539,7 +1539,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn in fsdp_param_info.param_indices
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
@@ -1547,7 +1547,7 @@ def _allgather_orig_param_states(
     # flat_param (also sharded).
     # Then we perform an allgather_into_tensor to get the full flat_param state.
     # The full flat_param state is the result of concatenation of multiple states
-    # the order of of flat_param._fqns.
+    # the order of flat_param._fqns.
     # The final step is to split the flat_param state into original param states
     # and return the result.
     flat_param = fsdp_param_info.handle.flat_param

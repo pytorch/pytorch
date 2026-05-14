@@ -7,9 +7,9 @@ import re
 import typing_extensions
 from typing import Any, cast, TYPE_CHECKING
 
-import sympy  # noqa: TC002
+import sympy
 
-import torch  # noqa: TC001
+import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import ModularIndexing
 
@@ -915,7 +915,7 @@ class PallasKernel(SIMDKernel):
     compiled and loaded via async_compile.pallas.
     """
 
-    overrides = PallasKernelOverrides  # type: ignore[assignment]
+    overrides = PallasKernelOverrides
     kexpr: Callable[[sympy.Expr], str] = pallas_pexpr  # Use Pallas expression printer
 
     def __init__(self, *args, **kwargs):
@@ -2110,8 +2110,17 @@ class PallasKernel(SIMDKernel):
 
         buf_size = buf_obj.get_size()
 
-        # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
+            return _BufferIndexing(
+                index_str="...", needs_flatten=indexing.needs_flatten
+            )
+
+        # if buffer size is 1, and index is an integer, use "..."
+        if (
+            len(buf_size) == 1
+            and buf_size[0] == 1
+            and not self._has_iteration_vars(index)
+        ):
             return _BufferIndexing(
                 index_str="...", needs_flatten=indexing.needs_flatten
             )
@@ -2736,7 +2745,7 @@ class PallasKernel(SIMDKernel):
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
-                f"{out}[...] = {out}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
+                f"{out}[...] = {out}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
             ]
 
@@ -2760,8 +2769,8 @@ class PallasKernel(SIMDKernel):
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
                 lines.append(
-                    f"{out}[...] = {alias_param}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
-                    f"{value_expr}.flatten()).reshape({out}.shape)"
+                    f"{out}[...] = {alias_param}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
+                    f"jnp.asarray({value_expr}).flatten()).reshape({out}.shape)"
                 )
             else:
                 lines.append(f"{out}[{indexing.index_str}] = {value_expr}")
@@ -3134,6 +3143,11 @@ class PallasKernel(SIMDKernel):
                     # Get base index expression
                     indexing = self._get_index_expr(index)
 
+                    # Adjust index for buffer shape (scalar, multi-dim, etc.)
+                    indexing = self._adjust_index_for_buffer_shape(
+                        name, index, indexing
+                    )
+
                     # Check for im2col-like patterns
                     indexing = self._check_im2col_pattern(index, indexing)
 
@@ -3265,7 +3279,7 @@ class PallasKernel(SIMDKernel):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> CSEVariable | tuple[CSEVariable, ...]:  # type: ignore[override]
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         """
         Generate code for reduction operations in JAX/Pallas.
 
@@ -3310,7 +3324,7 @@ class PallasKernel(SIMDKernel):
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
         n_reduction_dims = sum(
-            1 for var, entry in self.range_tree_nodes.items() if entry.is_reduction
+            1 for entry in self.range_tree_nodes.values() if entry.is_reduction
         )
 
         is_partial_reduction = (
@@ -3574,7 +3588,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def codegen_kernel(self, name: str | None = None) -> str:  # type: ignore[override]
+    def codegen_kernel(self, name: str | None = None) -> str:
         """
         Generate the complete Pallas kernel code as a Python string.
 
@@ -4095,7 +4109,7 @@ from torch._inductor.runtime.runtime_utils import (
         """
         pw_idx = 0
         r_idx = 0
-        n_pw = sum(1 for _, e in self.range_tree_nodes.items() if not e.is_reduction)
+        n_pw = sum(1 for e in self.range_tree_nodes.values() if not e.is_reduction)
         for sym, entry in self.range_tree_nodes.items():
             if sym == var_sym:
                 return pw_idx if not entry.is_reduction else n_pw + r_idx
@@ -4869,7 +4883,7 @@ from torch._inductor.runtime.runtime_utils import (
 
 
 class PallasScheduling(SIMDScheduling):
-    kernel_type = PallasKernel  # type: ignore[assignment]
+    kernel_type = PallasKernel
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
@@ -4877,7 +4891,7 @@ class PallasScheduling(SIMDScheduling):
         # without requiring split reductions
         return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
-    def can_fuse(self, node1, node2):  # type: ignore[override]
+    def can_fuse(self, node1, node2):
         if not super().can_fuse(node1, node2):
             return False
         # Pallas partial reductions use keepdims, so fusing two reductions
@@ -4898,15 +4912,15 @@ class PallasScheduling(SIMDScheduling):
                         return False
         return True
 
-    can_fuse_vertical = can_fuse  # type: ignore[assignment]
-    can_fuse_horizontal = can_fuse  # type: ignore[assignment]
+    can_fuse_vertical = can_fuse
+    can_fuse_horizontal = can_fuse
 
     def define_kernel(
         self,
         src_code: str,
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
