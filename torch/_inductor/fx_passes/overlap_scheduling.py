@@ -498,37 +498,36 @@ class OverlapScheduler:
         self.compute_nodes = [n for n in self.nodes if is_compute_node(n)]
         self.current_compute_index = 0
 
-        # Compute baseline memory profile from original schedule
         self.original_mem_before_compute_index: list[int] = []
-        self.original_peak_memory = self._compute_baseline_memory()
-
-        # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
-        # When both limits are specified, use the more permissive one
-        memory_increase_bytes = None
-        if max_memory_increase_gb is not None:
-            memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
-        if max_memory_increase_ratio is not None:
-            ratio_increase = int(self.original_peak_memory * max_memory_increase_ratio)
-            memory_increase_bytes = (
-                max(memory_increase_bytes, ratio_increase)
-                if memory_increase_bytes is not None
-                else ratio_increase
-            )
-        if memory_increase_bytes is None:
-            memory_increase_bytes = 0
-
-        self.allowed_peak_memory_bytes = (
-            self.original_peak_memory + memory_increase_bytes
+        needs_memory_tracking = (
+            max_memory_increase_gb is not None or max_memory_increase_ratio is not None
         )
+        if needs_memory_tracking:
+            self.original_peak_memory = self._compute_baseline_memory()
+            memory_increase_bytes = None
+            if max_memory_increase_gb is not None:
+                memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
+            if max_memory_increase_ratio is not None:
+                ratio_increase = int(
+                    self.original_peak_memory * max_memory_increase_ratio
+                )
+                memory_increase_bytes = (
+                    max(memory_increase_bytes, ratio_increase)
+                    if memory_increase_bytes is not None
+                    else ratio_increase
+                )
+            self.allowed_peak_memory_bytes = self.original_peak_memory + (
+                memory_increase_bytes or 0
+            )
+            self.memory_tracker = MemoryTracker(self.graph)
+        else:
+            self.original_peak_memory = 0
+            self.allowed_peak_memory_bytes = sys.maxsize
+            self.memory_tracker = None  # type: ignore[assignment]
 
-        # Track cumulative prefetch memory at each compute index
-        # When we prefetch a collective at compute index i that will be used at index j,
-        # it adds memory from i to j, so we need to track this cumulative effect
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
         ]
-
-        self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
