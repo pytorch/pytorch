@@ -9,17 +9,20 @@ from __future__ import annotations
 
 import re
 import unittest
+from types import SimpleNamespace
 
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
     EnterDeviceContextManagerWithStreamInfoLine,
     ExitCudaStreamContextLine,
     ExitDeviceContextManagerWithStreamInfoLine,
 )
+from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.stream_constants import (
     DEFAULT_STREAM,
     DEFAULT_STREAM_IDX,
@@ -28,6 +31,7 @@ from torch._inductor.stream_constants import (
 from torch._inductor.stream_utils import get_raw_stream_name, get_stream_name
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
@@ -176,11 +180,55 @@ class TestStreamCodegen(InductorTestCase):
         code.do_indent()  # Simulate being inside device guard
 
         line = EnterCudaStreamContextLine(stream_idx=1)
-        line.codegen(code)
+        graph = SimpleNamespace(device_ops=CUDADeviceOpOverrides())
+        with V.set_graph_handler(graph):
+            line.codegen(code)
 
         generated = code.getvalue()
         # Should have stream context
         self.assertIn("with torch.cuda.stream(stream1)", generated)
+
+    def test_stream_codegen_uses_device_ops(self):
+        cases = [
+            (
+                CUDADeviceOpOverrides(),
+                """\
+with torch.cuda._DeviceGuard(0):
+    torch.cuda.set_device(0)
+    default_stream = torch.cuda.current_stream()
+    stream1 = get_external_object_by_index(3)
+    with torch.cuda.stream(stream1):
+""",
+            ),
+            (
+                XPUDeviceOpOverrides(),
+                """\
+with torch.xpu._DeviceGuard(0):
+    torch.xpu.set_device(0)
+    default_stream = torch.xpu.current_stream()
+    stream1 = get_external_object_by_index(3)
+    with torch.xpu.stream(stream1):
+""",
+            ),
+        ]
+
+        for device_ops, expected in cases:
+            graph = SimpleNamespace(
+                cpp_wrapper=False,
+                device_ops=device_ops,
+            )
+
+            code = IndentedBuffer()
+            with V.set_graph_handler(graph):
+                EnterDeviceContextManagerWithStreamInfoLine(
+                    device_idx=0,
+                    last_seen_device_guard_index=None,
+                    num_streams=2,
+                    stream_idx_to_user_obj_idx={1: 3},
+                ).codegen(code)
+                EnterCudaStreamContextLine(stream_idx=1).codegen(code)
+
+            self.assertEqual(code.getvalue(), expected)
 
     def test_exit_cuda_stream_context_codegen(self):
         """Test code generation for exiting a CUDA stream context."""

@@ -327,6 +327,15 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_context(self, stream_name: str) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
+
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
 

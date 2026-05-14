@@ -16,5 +16,11 @@ class MTIADeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx: int) -> str:
         return f"torch.mtia.device({device_idx})"
 
+    def current_stream(self) -> str:
+        return "torch.mtia.current_stream()"
+
+    def stream_context(self, stream_name: str) -> str:
+        return f"torch.mtia.stream({stream_name})"
+
 
 register_device_op_overrides("mtia", MTIADeviceOpOverrides())
