@@ -46,7 +46,9 @@ from torch._inductor.runtime.hints import (
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
+    _enforce_reduction_config_block_minimums,
     autotune_hints_to_configs,
+    cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
@@ -94,6 +96,48 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_reduction_min_block_preserves_tile_product(self):
+        cfg = _enforce_reduction_config_block_minimums(
+            [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
+            {"x": 4096, "r0_": 4096},
+            {"min_xblock": 128},
+        )[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 128)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+        cfg = _enforce_reduction_config_block_minimums(
+            [triton.Config({"XBLOCK": 1024, "R0_BLOCK": 64})],
+            {"x": 4096, "r0_": 4096},
+            {"min_rblock": 128},
+        )[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 512)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    def test_cached_autotune_enforces_reduction_min_block(self):
+        def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
+            pass
+
+        class FakeJitFunction:
+            def __init__(self):
+                self.fn = triton_fn
+
+        class CaptureAutotuner:
+            def __init__(self, *args, configs, **kwargs):
+                self.configs = configs
+
+        autotuner = cached_autotune(
+            {"x": 4096, "r0_": 4096},
+            [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
+            triton_meta={},
+            heuristic_type=HeuristicType.REDUCTION,
+            inductor_meta={"min_xblock": 128},
+            caching_autotuner_cls=CaptureAutotuner,
+        )(FakeJitFunction())
+
+        cfg = autotuner.configs[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 128)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
@@ -279,7 +323,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
@@ -320,6 +364,13 @@ class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
     @staticmethod
+    def _get_stream():
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        return device_interface.get_raw_stream(device_interface.current_device())
+
+    @staticmethod
     def _make_kernel_inputs():
         in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
         out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
@@ -345,7 +396,9 @@ class TestCachingAutotunerPlugin(TestCase):
             patch.object(autotuner, "precompile") as mock_precompile,
             patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
         ):
-            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+            result = autotuner.run(
+                *self._make_kernel_inputs(), stream=self._get_stream()
+            )
 
         self.assertIs(result, sentinel)
         mock_precompile.assert_not_called()
@@ -360,7 +413,9 @@ class TestCachingAutotunerPlugin(TestCase):
 
         autotuner = self._make_autotuner([_Plugin()])
         with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
-            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+            result = autotuner.run(
+                *self._make_kernel_inputs(), stream=self._get_stream()
+            )
 
         self.assertIs(result, sentinel)
         mock_autotune.assert_not_called()
@@ -381,7 +436,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner = self._make_autotuner(
             [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
         )
-        result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+        result = autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
 
         self.assertIs(result, sentinel)
         self.assertEqual(seen, ["a", "b", "c"])
@@ -399,7 +454,7 @@ class TestCachingAutotunerPlugin(TestCase):
         full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
 
-        autotuner.run(*self._make_kernel_inputs(), stream=0)
+        autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
 
         self.assertEqual(seen, ["pre_dispatch"])
         self.assertEqual(len(autotuner.launchers), 1)

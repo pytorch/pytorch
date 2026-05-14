@@ -711,7 +711,7 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+        return V.graph.get_dtype(buf_name)
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
@@ -2686,7 +2686,7 @@ class CSEProxy(DefaultHandler):
                 else output_dtype
             )
             var_shape: BlockShapeType = (
-                output_shape[output_idx]  # type: ignore[assignment]
+                output_shape[output_idx]
                 if isinstance(output_shape, (list, tuple))
                 and len(output_shape) > 0
                 and isinstance(output_shape[0], (list, tuple))
