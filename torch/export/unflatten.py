@@ -620,7 +620,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
             if len(flat_args) != signature.in_spec.num_leaves:
                 raise TypeError(
                     f"Flat args adaption failed, number of args mismatch "
-                    f"Adatped: {len(flat_args)} \n"
+                    f"Adapted: {len(flat_args)} \n"
                     f"Exported module: {signature.in_spec.num_leaves}"
                 )
             return flat_args

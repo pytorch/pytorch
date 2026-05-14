@@ -40,6 +40,16 @@ class TORCH_API AOTIModelPackageLoader {
       bool allow_h2d_copy = false);
   std::vector<std::string> get_constant_fqns();
 
+  // Returns the torchbind custom-class constants embedded in this model
+  // package. The IValue payloads alias the live entries inside the runner's
+  // proxy executor: downcasting to a CustomClassHolder subclass and mutating
+  // its state will affect subsequent run() invocations. Returns empty when
+  // the model has no torchbind constants.
+  std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
+    return runner_ ? runner_->get_custom_objs()
+                   : std::unordered_map<std::string, c10::IValue>{};
+  }
+
   void update_constant_buffer(
       std::unordered_map<std::string, at::Tensor>& tensor_map,
       bool use_inactive,

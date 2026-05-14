@@ -1106,6 +1106,162 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
+    @parametrize("case", ["offset", "stride"])
+    def test_cutedsl_captured_alias_views_keep_distinct_layouts(self, device, case):
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        match case:
+            case "offset":
+                base = torch.randn((1, 2, 128, 256), device=device, dtype=torch.float32)
+                expected_reinterpret_tensors = [
+                    "(65536, 32768, 256, 1), 0)",
+                    "(65536, 32768, 256, 1), 128)",
+                ]
+            case "stride":
+                base = torch.randn((1, 2, 256, 128), device=device, dtype=torch.float32)
+                expected_reinterpret_tensors = [
+                    "(65536, 32768, 128, 1), 0)",
+                    "(65536, 32768, 256, 1), 0)",
+                ]
+            case _:
+                raise AssertionError(case)
+
+        def fn(q, k, v, base):
+            match case:
+                case "offset":
+                    left = base[:, :, :, :128]
+                    right = base[:, :, :, 128:]
+                case "stride":
+                    left = base[:, :, :128, :]
+                    right = base[:, :, ::2, :]
+                case _:
+                    raise AssertionError(case)
+
+            def score_mod(score, b, h, m, n):
+                return score + left[b, h, m, n] + right[b, h, m, n]
+
+            return flex_attention(
+                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v, base)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), q, k, v, base
+        )
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+        src = "\n".join(code)
+        for expected_reinterpret_tensor in expected_reinterpret_tensors:
+            self.assertIn(expected_reinterpret_tensor, src)
+
+    @xfailIfSM120OrLater
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_shared_captured_buffers(self, device, dtype):
+        B, H, Q_LEN, KV_LEN, D = 2, 1, 512, 512, 64
+
+        def model(q, k, v, rule_masks_per_query, prefix_mask, backend=None):
+            masks = rule_masks_per_query & prefix_mask.unsqueeze(0)
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                return masks[q_idx, b, kv_idx]
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod,
+                B,
+                1,
+                Q_LEN,
+                KV_LEN,
+                device=device,
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": backend} if backend else {},
+            )
+
+        q = torch.randn(B, H, Q_LEN, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype, requires_grad=True)
+        rule_masks = torch.randint(
+            0, 2, (Q_LEN, B, KV_LEN), dtype=torch.bool, device=device
+        )
+        prefix = torch.randint(0, 2, (B, KV_LEN), dtype=torch.bool, device=device)
+
+        ref = model(q.float(), k.float(), v.float(), rule_masks, prefix)
+        grad = torch.randn_like(ref)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad)
+
+        torch._dynamo.reset()
+        triton_out = torch.compile(model, dynamic=False)(
+            q, k, v, rule_masks, prefix, "TRITON"
+        )
+        triton_grads = torch.autograd.grad(triton_out, (q, k, v), grad.to(dtype))
+
+        torch._dynamo.reset()
+        flash_out = torch.compile(model, dynamic=False)(
+            q, k, v, rule_masks, prefix, "FLASH"
+        )
+        flash_grads = torch.autograd.grad(flash_out, (q, k, v), grad.to(dtype))
+
+        torch.testing.assert_close(triton_out, ref.to(dtype), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(flash_out, ref.to(dtype), atol=1e-2, rtol=1e-2)
+        for actual, expected in zip(triton_grads, ref_grads):
+            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        for actual, expected in zip(flash_grads, ref_grads):
+            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
+    @xfailIfSM120OrLater
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_viewable_captured_buffer_no_copy(self, device, dtype):
+        """A capture that is a view of a plain input buffer should be passed to
+        the CuteDSL kernel via reinterpret_tensor(...) instead of being
+        materialized with a fresh pointwise copy."""
+        from torch._inductor.utils import run_and_get_code
+
+        B, H, Q_LEN, KV_LEN, D = 2, 1, 512, 512, 64
+
+        def model(q, k, v, mask_flat):
+            masks = mask_flat.view(Q_LEN, B, KV_LEN)
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                return masks[q_idx, b, kv_idx]
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, B, 1, Q_LEN, KV_LEN, device=device
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        q = torch.randn(B, H, Q_LEN, D, device=device, dtype=dtype)
+        k = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype)
+        v = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype)
+        mask_flat = torch.randint(
+            0, 2, (Q_LEN * B * KV_LEN,), device=device, dtype=torch.bool
+        )
+
+        torch._dynamo.reset()
+        out, codes = run_and_get_code(
+            torch.compile(model, dynamic=False), q, k, v, mask_flat
+        )
+        wrapper_code = "\n".join(codes)
+        self.assertIn("reinterpret_tensor(", wrapper_code)
+        self.assertNotIn("triton_poi_fused_view", wrapper_code)
+
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
