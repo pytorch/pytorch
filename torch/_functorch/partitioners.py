@@ -2110,7 +2110,10 @@ def solve_min_cut(
         log.info("Ops banned from re-materialization: %s", ops_ignored)
 
     def can_fuse_into_auto_functionalized(a: fx.Node, b: fx.Node) -> bool:
-        if b.target != torch.ops.higher_order.auto_functionalized:
+        if b.target not in (
+            torch.ops.higher_order.auto_functionalized,
+            torch.ops.higher_order.auto_functionalized_v2,
+        ):
             return False
         mutable_op = b.args[0]
         (
