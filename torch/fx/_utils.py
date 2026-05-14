@@ -7,7 +7,7 @@ from torch._logging import LazyString
 
 def lazy_format_graph_code(
     name: str, gm: torch.fx.GraphModule, maybe_id: int | None = None, **kwargs: Any
-) -> LazyString:
+) -> LazyString:  # pyrefly: ignore[implicit-any]
     """
     Returns a LazyString that formats the graph code.
     """

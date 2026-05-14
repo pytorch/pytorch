@@ -44,10 +44,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_disable_for_custom_op(self):
         import torch.library
-        from torch.library import Library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        try:
+        with torch.library._scoped_library("foo", "DEF") as foo:
             foo.define("custom(Tensor self) -> Tensor")
 
             # Dynamic shape data dependent operator. For static shape compilation, Dynamo
@@ -77,8 +75,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 self.assertEqual(ref, res)
             finally:
                 torch.ops.foo.custom = orig_custom
-        finally:
-            foo._destroy()
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
@@ -686,7 +682,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # NOQA: B950
+            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
             self.assertIn(msg, str(e))
 
     def test_nonstrict_trace_custom_class_error(self):
@@ -1655,7 +1651,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
 Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: 'test_decorators.py', function name: 'f', line number: N
     triggered by the following guard failure(s):
     - 0/0: tensor 'x' size mismatch at index 0. expected 4, actual 7
-    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",  # noqa: B950
+    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",
                 post_munge=post_munge,
             )
 

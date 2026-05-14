@@ -26,6 +26,11 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Testing implications** - Does this pattern require awkward test patterns? Internal-only flags often lead to tests that use "forbidden" parameters
 - [ ] **UX implications** - Is this pattern discoverable and understandable to users? Will it appear in autocomplete, type hints, or docs in confusing ways?
 
+### Public API Documentation
+
+- [ ] **`__all__` requires docs** - Any callable added to a module's `__all__` must have a corresponding entry in the module's `.rst`/`.md` doc file (typically in an `autosummary` block). CI enforces this via `docs/source/conf.py`'s `coverage_post_process`
+- [ ] **Never add to coverage ignore lists** - `coverage_ignore_functions` and `coverage_ignore_classes` in `docs/source/conf.py` are legacy allowlists. Never add new entries. Instead, either properly document the API or remove it from `__all__`
+
 ### Code Clarity
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
@@ -160,6 +165,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 ### Test Existence
 
 - [ ] **Tests exist** - New functionality has corresponding tests
+- [ ] **Regression tests for bug fixes** - Bug fixes must include a test that reproduces the bug before the fix
 - [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
 - [ ] **New test file is rare** - New test file should only be added when new major features are added
 

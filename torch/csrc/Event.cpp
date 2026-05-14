@@ -109,7 +109,7 @@ static PyObject* THPEvent_record(
     TORCH_WARN("Parsing THPEvent_record arg fails");
     return nullptr;
   }
-  if (_stream != Py_None) {
+  if (!Py_IsNone(_stream)) {
     auto stream = reinterpret_cast<THPStream*>(_stream);
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
@@ -187,7 +187,7 @@ static PyObject* THPEvent_wait(
       TORCH_WARN("Parsing THPEvent_wait arg fails");
       return nullptr;
     }
-    if (_stream != Py_None) {
+    if (!Py_IsNone(_stream)) {
       auto stream = reinterpret_cast<THPStream*>(_stream);
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
