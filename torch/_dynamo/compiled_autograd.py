@@ -29,6 +29,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
+    call_backward_boxed,
     call_hook,
     FakeCompiledAutogradEngine,
     unwrap_maybe_dynamic_int,
@@ -282,6 +283,7 @@ _impure_targets = OrderedSet(
     [
         call_hook,
         call_backward,
+        call_backward_boxed,
         FakeCompiledAutogradEngine._exec_final_callbacks_stub,
         call_accumulate_grad,
     ]
@@ -716,20 +718,27 @@ class AutogradCompilerInstance:
             )
         else:
             if getattr(ctx._forward_cls, "boxed_grads_call", False):  # type: ignore[attr-defined]
-                raise RuntimeError(
-                    f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
-                    "is not supported with compiled autograd. "
+                proxies = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=call_backward_boxed,
+                    args=(
+                        pctx,
+                        psaved_tensors,
+                        list(pinputs),
+                    ),
+                    kwargs={},
                 )
-            proxies = self.fx_tracer.create_proxy(
-                kind="call_function",
-                target=call_backward,
-                args=(
-                    pctx,
-                    psaved_tensors,
-                    *pinputs,
-                ),
-                kwargs={},
-            )
+            else:
+                proxies = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=call_backward,
+                    args=(
+                        pctx,
+                        psaved_tensors,
+                        *pinputs,
+                    ),
+                    kwargs={},
+                )
         if proxies is None:
             raise AssertionError("proxies must not be None after backward call")
 
