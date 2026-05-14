@@ -429,7 +429,7 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    # Build forward adjacency list once for incremental descendant tracking
+    # Build forward adjacency list for incremental descendant tracking
     children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
     for node in g.nodes:
         for inp in node._input_nodes:
