@@ -1,0 +1,20 @@
+--- a/cache_utils.py
++++ b/cache_utils.py
+@@ -47,7 +47,7 @@
+     if CACHE_DIR is not None:
+         cache_dir = Path(CACHE_DIR)
+     else:
+-        cache_dir = Path(tempfile.gettempdir()) / getuser() / "quack_cache"
++        cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
+     cache_dir.mkdir(parents=True, exist_ok=True)
+     return cache_dir
+ 
+@@ -176,7 +176,7 @@
+                             function_name=EXPORT_FUNC_NAME,
+                         )
+             except Exception as e:
+-                print(f"quack cache: export failed for key {sha}: {e}")
++                print(f"torch._vendor.quack cache: export failed for key {sha}: {e}")
+ 
+         return _noop_kernel if COMPILE_ONLY else compiled_fn
+ 
