@@ -91,6 +91,7 @@ from torch._inductor.utils import (
     fresh_cache,
     get_all_devices,
     get_static_bw_input_idxs,
+    get_static_bw_input_idxs_no_user_inputs,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -2715,9 +2716,7 @@ def compile_fx_backward(
         # code between partitions are NOT at fixed addresses. Only mark
         # primals (params/buffers) as static.
         if elide_cudagraph_copies:
-            # TODO: Can we use get_static_bw_input_idxs(gm) here? I
-            # think it excludes all tangents...
-            static_input_idxs = []
+            static_input_idxs = get_static_bw_input_idxs_no_user_inputs(gm)
         elif compiler_config_extra.forward_is_partitioned.value:
             static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:

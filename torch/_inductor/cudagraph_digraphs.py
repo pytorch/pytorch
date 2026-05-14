@@ -3,9 +3,11 @@ from __future__ import annotations
 import bisect
 import ctypes
 import dataclasses
+import gc
 import itertools
 import operator
 import os
+import pprint
 import sys
 from typing import Any, TYPE_CHECKING
 
@@ -15,9 +17,12 @@ import cuda.bindings.runtime as cuda_runtime  # pyrefly: ignore [missing-import]
 
 import torch
 from torch._dynamo.utils import preserve_rng_state
+from torch._inductor import config
 from torch._inductor.compile_fx import (
     copy_misaligned_inputs,
+    get_expanded_dims,
     get_input_idxs_to_check,
+    index_expanded_dims,
     remove_unaligned_input_idxs,
     static_input,
 )
@@ -27,7 +32,6 @@ from torch._inductor.cudagraph_utils import (
     OutputType,
     PlaceholderInfo,
 )
-from torch._inductor.utils import clone_preserve_strides
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -70,6 +74,90 @@ def nbytes_underlying_storage(tensor: torch.Tensor):
     return covered_bytes
 
 
+@dataclasses.dataclass(frozen=True)
+class NonTensorOutputSpec:
+    value: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class EmptyTensorOutputSpec:
+    device: torch.device
+
+
+@dataclasses.dataclass(frozen=True)
+class InputAliasOutputSpec:
+    input_idx: int
+    offset_from_input: int
+    device: torch.device
+    dtype: torch.dtype
+    stride: tuple[int, ...]
+    size: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SegmentOutputSpec:
+    segment_idx: int
+    storage_offset: int
+    device: torch.device
+    dtype: torch.dtype
+    stride: tuple[int, ...]
+    size: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class InputSlotSpec:
+    input_idx: int
+    segment_idx: int
+    storage_offset: int
+    device: torch.device
+    dtype: torch.dtype
+    stride: tuple[int, ...]
+    size: tuple[int, ...]
+    expanded_dims: list[int]
+
+
+@dataclasses.dataclass(frozen=True)
+class CapturedInputInfo:
+    input_idx: int
+    data_ptr: int
+    nbytes: int
+    itemsize: int
+    device: torch.device
+    dtype: torch.dtype
+    stride: tuple[int, ...]
+    size: tuple[int, ...]
+    expanded_dims: list[int]
+    is_static: bool
+
+
+OutputSpec = (
+    NonTensorOutputSpec
+    | EmptyTensorOutputSpec
+    | InputAliasOutputSpec
+    | SegmentOutputSpec
+)
+
+
+def _direct_tensor_pointer_key(
+    inputs: list[InputType], static_input_idxs: Sequence[int]
+) -> tuple[tuple[int, str, int | None, int], ...]:
+    static_input_idxs_set = OrderedSet(static_input_idxs)
+    pointer_key: list[tuple[int, str, int | None, int]] = []
+    for idx, value in enumerate(inputs):
+        if not isinstance(value, torch.Tensor):
+            continue
+        if idx in static_input_idxs_set or not value.is_cuda:
+            pointer_key.append(
+                (
+                    idx,
+                    value.device.type,
+                    value.device.index,
+                    value.data_ptr(),
+                )
+            )
+    return tuple(pointer_key)
+
+
 def cudagraphify_impl(
     model: ModelType,
     # Some inputs are ints, while others are SymInts, hmmm....
@@ -78,7 +166,11 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
-    fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
+    fn_cache: dict[
+        tuple[Any, tuple[tuple[int, str, int | None, int], ...]], Callable[..., Any]
+    ] = {}
+    shape_cache: dict[Any, Callable[..., Any]] = {}
+    warmed_up_keys: set[Any] = set()
 
     # Detect int inputs: we need to index on these
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
@@ -92,9 +184,31 @@ def cudagraphify_impl(
         nonlocal has_warn
 
         int_key = get_ints(inputs)
-        fn = fn_cache.get(int_key)
+        check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
+        new_static_input_idxs = remove_unaligned_input_idxs(
+            inputs, static_input_idxs
+        )
+        for idx in OrderedSet(static_input_idxs) - OrderedSet(new_static_input_idxs):
+            input = inputs[idx]
+            if not isinstance(input, torch.Tensor):
+                continue
+            print(
+                "WARNING: cudagraph_digraphs static input is misaligned; "
+                "treating it as non-static "
+                f"idx={idx} data_ptr={input.data_ptr()} "
+                f"alignment={max_alignment(input.data_ptr())}"
+            )
+        copy_misaligned_inputs(inputs, check_input_idxs)
+
+        pointer_key = _direct_tensor_pointer_key(inputs, new_static_input_idxs)
+        cache_key = (int_key, pointer_key)
+        fn = fn_cache.get(cache_key)
         if fn is not None:
             return fn(inputs)
+
+        if int_key not in warmed_up_keys:
+            warmed_up_keys.add(int_key)
+            return model(list(inputs))
 
         if int_key is None:
             log.info("recording cudagraph tree for graph without symints")
@@ -102,19 +216,11 @@ def cudagraphify_impl(
             log.info("recording cudagraph tree for symint key %s", int_key)
 
         if not has_warn:
-            has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
+            has_warn = maybe_warning_due_to_dynamic_shape(shape_cache, int_key)
 
-        # first get indices we need to check to align, then update our static inputs,
-        # and finally copy
-        check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
-        new_static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
-        copy_misaligned_inputs(inputs, check_input_idxs)
-
-        # here is the real cudagraphify. If I understand correctly, it
-        # will run eagerly first, and then do stream capture. That
-        # works, right?
         fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
-        fn_cache[int_key] = fn
+        fn_cache[cache_key] = fn
+        shape_cache[int_key] = fn
 
         return out
 
@@ -152,6 +258,12 @@ def find_overlaps(intervals, assert_should_not_happen=False):
                 )
 
 
+def _has_active_memory(segment: dict[str, Any]) -> bool:
+    return int(segment.get("active_size", 0)) != 0 or any(
+        block.get("state") != "inactive" for block in segment.get("blocks", ())
+    )
+
+
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],
@@ -172,70 +284,119 @@ def cudagraphify(
 
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(stream):
-        outputs = model(list(inputs))
 
+    static_input_idxs_set = OrderedSet(static_input_idxs)
     graphs: list[torch.cuda.CUDAGraph] = []
     dynamic_tensors_list: list[list[tuple[int, int]]] = []
     capture_keepalive: list[Any] = []
-    static_inputs: list[InputType] = []
+    capture_pool_keepalive: list[Any] = []
+    capture_inputs: list[InputType] = []
     static_outputs: tuple[torch.Tensor | int | None, ...] = ()
     segment_address_starts: list[int] = []
     segment_sizes: list[int] = []
     segment_devices: list[torch.device] = []
-    segment_idx_containing_this_output_tensor: list[int | None] = []
-    static_output_idx_to_input_idx_and_offset: dict[int, tuple[int, int]] = {}
-    non_tensor_output_idxs: OrderedSet[int] = OrderedSet()
-    empty_tensor_idxs_to_devices: dict[int, torch.device] = {}
+    output_specs: list[OutputSpec] = []
+    input_slot_specs: list[InputSlotSpec] = []
+
+    reserved_mem_before_captures = torch.cuda.memory_reserved(device_index)
 
     for i in range(2):
+        # We want to make sure that a workspace is allocated into the
+        # cuda graph's private pool. We don't want to simply use the
+        # workspace created during warmup, which may die later.
         torch._C._cuda_clearCublasWorkspaces()
         graph = torch.cuda.CUDAGraph(keep_graph=True)
+        mem_allocator = graph.get_mem_allocator()
+        capture_pool = torch.cuda.MemPool(mem_allocator)
+        capture_pool_keepalive.append(capture_pool)
 
-        assert len(static_input_idxs) == 0
+        with torch.cuda.stream(stream):
+            with torch.cuda.use_mem_pool(capture_pool):
+                old_value = torch._C._get_deterministic_fill_uninitialized_memory()
+                torch._C._set_deterministic_fill_uninitialized_memory(False)
+                try:
+                    capture_inputs = [
+                        (
+                            x
+                            if (
+                                not isinstance(x, torch.Tensor)
+                                or not x.is_cuda
+                                or idx in static_input_idxs_set
+                            )
+                            else static_input(x)
+                        )
+                        for idx, x in enumerate(inputs)
+                    ]
+                finally:
+                    torch._C._set_deterministic_fill_uninitialized_memory(old_value)
 
-        old_value = torch._C._get_deterministic_fill_uninitialized_memory()
-        torch._C._set_deterministic_fill_uninitialized_memory(False)
-        try:
-            static_inputs = [
-                (
-                    x
-                    if not isinstance(x, torch.Tensor)
-                    else static_input(
-                        x
-                    )  # this guarantees an alignment of 256 bytes. Hmmm...
-                )
-                for x in inputs
-            ]
-            capture_keepalive.append(static_inputs)
-        finally:
-            torch._C._set_deterministic_fill_uninitialized_memory(old_value)
-
-        for si in static_inputs:
-            if not isinstance(si, torch.Tensor):
+        captured_input_infos: list[CapturedInputInfo] = []
+        for idx, capture_input in enumerate(capture_inputs):
+            if not isinstance(capture_input, torch.Tensor):
                 continue
-            alignment = max_alignment(si.data_ptr())
-            # cuda train AlbertForMaskedLM has a CPU tensor for
-            # some reason, which doesn't have the 256 byte
-            # alignment you would expect.
-            assert (si.is_cuda and alignment == 0 or alignment >= 256) or si.is_cpu, (
-                "Static input alignment is less than expected"
+            if not capture_input.is_cuda:
+                continue
+            captured_input_infos.append(
+                CapturedInputInfo(
+                    input_idx=idx,
+                    data_ptr=capture_input.data_ptr(),
+                    nbytes=nbytes_underlying_storage(capture_input),
+                    itemsize=capture_input.itemsize,
+                    device=capture_input.device,
+                    dtype=capture_input.dtype,
+                    stride=tuple(capture_input.stride()),
+                    size=tuple(capture_input.size()),
+                    expanded_dims=get_expanded_dims(capture_input),
+                    is_static=idx in static_input_idxs_set,
+                )
             )
+            if idx not in static_input_idxs_set:
+                alignment = max_alignment(capture_input.data_ptr())
+                assert alignment == 0 or alignment >= 256, (
+                    "Capture input alignment is less than expected"
+                )
 
-        static_inputs_new_list = list(static_inputs)
+        with torch.cuda.stream(stream):
+            copy_dsts: list[torch.Tensor] = []
+            copy_srcs: list[torch.Tensor] = []
+            for idx, (capture_input, original_input) in enumerate(
+                zip(capture_inputs, inputs)
+            ):
+                if (
+                    idx in static_input_idxs_set
+                    or not isinstance(capture_input, torch.Tensor)
+                    or not capture_input.is_cuda
+                ):
+                    continue
+                assert isinstance(original_input, torch.Tensor)
+                copy_dsts.append(
+                    index_expanded_dims(capture_input, get_expanded_dims(capture_input))
+                )
+                copy_srcs.append(
+                    index_expanded_dims(original_input, get_expanded_dims(capture_input))
+                )
+            if copy_dsts:
+                torch._foreach_copy_(copy_dsts, copy_srcs)
+        copy_dsts = []
+        copy_srcs = []
+        capture_input = None
+        original_input = None
+
         with (
             preserve_rng_state(),
             torch.cuda.graph(
                 graph,
+                pool=capture_pool.id,
                 stream=stream,
                 capture_error_mode="thread_local",
             ),
         ):
-            model_outputs = model(static_inputs_new_list)
+            model_outputs = model(capture_inputs)
 
-        replace_memops_with_kernels(
-            cuda_runtime.cudaGraph_t(init_value=graph.raw_cuda_graph())
-        )
+        if not config.triton.cudagraphs_preserve_memops:
+            replace_memops_with_kernels(
+                cuda_runtime.cudaGraph_t(init_value=graph.raw_cuda_graph())
+            )
 
         if not isinstance(model_outputs, (list, tuple)):
             static_outputs = (model_outputs,)
@@ -243,8 +404,9 @@ def cudagraphify(
             static_outputs = tuple(model_outputs)
         capture_keepalive.append(static_outputs)
 
-        memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(graph.pool())
-        memory_snapshot.sort(key=lambda x: x["address"])
+        memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(
+            graph.pool(), include_traces=True
+        )
 
         segment_address_starts = [
             int(segment_snapshot["address"]) for segment_snapshot in memory_snapshot
@@ -256,93 +418,207 @@ def cudagraphify(
             torch.device("cuda", int(segment_snapshot["device"]))
             for segment_snapshot in memory_snapshot
         ]
-
-        segment_idx_containing_this_output_tensor = []
-
-        static_output_idx_to_input_idx_and_offset = {}
-
-        static_inputs_only_tensors: list[tuple[int, int]] = [
-            (input.data_ptr(), nbytes_underlying_storage(input))
-            for idx, input in enumerate(static_inputs)
-            if isinstance(input, torch.Tensor) and input.is_cuda
+        segment_idxs_sorted_by_address = sorted(
+            range(len(segment_address_starts)),
+            key=lambda idx: segment_address_starts[idx],
+        )
+        segment_address_starts_sorted = [
+            segment_address_starts[idx] for idx in segment_idxs_sorted_by_address
         ]
 
-        non_tensor_output_idxs = OrderedSet()
-        empty_tensor_idxs_to_devices = {}
+        def lookup_segment_idx(ptr: int) -> int:
+            sorted_idx = bisect.bisect(segment_address_starts_sorted, ptr) - 1
+            if sorted_idx == -1:
+                return -1
+            segment_idx = segment_idxs_sorted_by_address[sorted_idx]
+            if ptr < segment_address_starts[segment_idx] + segment_sizes[segment_idx]:
+                return segment_idx
+            return -1
+
+        static_captured_input_ranges: list[tuple[int, int, int]] = []
+        input_segment_idxs: dict[int, list[int]] = {}
+        input_slot_specs = []
+        for input_info in captured_input_infos:
+            if input_info.is_static:
+                static_captured_input_ranges.append(
+                    (
+                        input_info.input_idx,
+                        input_info.data_ptr,
+                        input_info.nbytes,
+                    )
+                )
+                continue
+            segment_idx = lookup_segment_idx(input_info.data_ptr)
+            if segment_idx == -1:
+                raise RuntimeError(
+                    "Non-static CUDA graph input was not allocated in the "
+                    "capture pool"
+                )
+            storage_offset = (
+                input_info.data_ptr - segment_address_starts[segment_idx]
+            )
+            assert storage_offset % input_info.itemsize == 0
+            assert storage_offset + input_info.nbytes <= segment_sizes[segment_idx]
+            input_segment_idxs.setdefault(segment_idx, []).append(input_info.input_idx)
+            input_slot_specs.append(
+                InputSlotSpec(
+                    input_idx=input_info.input_idx,
+                    segment_idx=segment_idx,
+                    storage_offset=storage_offset // input_info.itemsize,
+                    device=input_info.device,
+                    dtype=input_info.dtype,
+                    stride=input_info.stride,
+                    size=input_info.size,
+                    expanded_dims=input_info.expanded_dims,
+                )
+            )
+
+        output_specs = []
+        output_segment_idxs: dict[int, list[int]] = {}
 
         # I need to map each segment index to all output tensors, I think.
         for static_output_idx, static_output in enumerate(static_outputs):
             if not isinstance(static_output, torch.Tensor):
                 assert static_output is None or isinstance(static_output, int)
-                non_tensor_output_idxs.add(static_output_idx)
-                segment_idx_containing_this_output_tensor.append(None)
+                output_specs.append(NonTensorOutputSpec(static_output))
                 continue
             if static_output.data_ptr() == 0:
                 assert static_output.nbytes == 0
-                empty_tensor_idxs_to_devices[static_output_idx] = static_output.device
-                segment_idx_containing_this_output_tensor.append(None)
+                output_specs.append(EmptyTensorOutputSpec(static_output.device))
                 continue
             assert static_output.is_cuda, (
                 "I suppose non cuda outputs are allowed, but I would like to "
                 "catch them explicitly for now"
             )
-            segment_idx = (
-                bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1
-            )
-            not_found = (
-                segment_idx == -1
-                or not static_output.data_ptr()
-                < segment_address_starts[segment_idx] + segment_sizes[segment_idx]
-            )
-            if not_found:
-                segment_idx_containing_this_output_tensor.append(-1)
-                for i, (static_input_data_ptr, static_input_nbytes) in enumerate(
-                    static_inputs_only_tensors
+            input_alias_spec: InputAliasOutputSpec | None = None
+            for input_idx, input_data_ptr, input_nbytes in static_captured_input_ranges:
+                if (
+                    input_data_ptr <= static_output.data_ptr()
+                    and static_output.data_ptr()
+                    + nbytes_underlying_storage(static_output)
+                    <= input_data_ptr + input_nbytes
                 ):
-                    if (
-                        static_input_data_ptr <= static_output.data_ptr()
-                        and static_output.data_ptr()
-                        + nbytes_underlying_storage(static_output)
-                        <= static_input_data_ptr + static_input_nbytes
-                    ):
-                        assert (
-                            static_output_idx
-                            not in static_output_idx_to_input_idx_and_offset
-                        ), (
-                            "Static inputs should never share a buffer "
-                            "during stream capture!!!"
-                        )
-                        # TODO: define the behavior when inputs alias each other.
-                        offset_from_input = (
-                            static_output.data_ptr() - static_input_data_ptr
-                        )
-                        assert offset_from_input % static_output.itemsize == 0
-                        offset_from_input = offset_from_input // static_output.itemsize
-                        static_output_idx_to_input_idx_and_offset[static_output_idx] = (
-                            i,
-                            offset_from_input,
-                        )
+                    assert input_alias_spec is None, (
+                        "Static inputs should never share a buffer "
+                        "during stream capture!!!"
+                    )
+                    offset_from_input = static_output.data_ptr() - input_data_ptr
+                    assert offset_from_input % static_output.itemsize == 0
+                    offset_from_input = offset_from_input // static_output.itemsize
+                    input_alias_spec = InputAliasOutputSpec(
+                        input_idx=input_idx,
+                        offset_from_input=offset_from_input,
+                        device=static_output.device,
+                        dtype=static_output.dtype,
+                        stride=tuple(static_output.stride()),
+                        size=tuple(static_output.size()),
+                    )
+            if input_alias_spec is not None:
+                output_specs.append(input_alias_spec)
+                continue
+
+            segment_idx = lookup_segment_idx(static_output.data_ptr())
+            if segment_idx == -1:
                 # In this case, the output must be part of a
                 # non-dynamic input tensor (which we should
                 # verify!). In that situation, the output tensor
                 # should always have the same output address across
                 # runs.
-                assert static_output_idx in static_output_idx_to_input_idx_and_offset, (
+                raise AssertionError(
                     static_output_idx,
                     static_output.data_ptr(),
                     nbytes_underlying_storage(static_output),
                 )
-                continue
-            segment_idx_containing_this_output_tensor.append(segment_idx)
+            storage_offset = (
+                static_output.data_ptr() - segment_address_starts[segment_idx]
+            )
+            assert storage_offset < segment_sizes[segment_idx]
+            assert nbytes_underlying_storage(static_output) <= segment_sizes[segment_idx]
+            assert (
+                storage_offset + nbytes_underlying_storage(static_output)
+                <= segment_sizes[segment_idx]
+            )
+            assert storage_offset % static_output.itemsize == 0
+            output_segment_idxs.setdefault(segment_idx, []).append(static_output_idx)
+            output_specs.append(
+                SegmentOutputSpec(
+                    segment_idx=segment_idx,
+                    storage_offset=storage_offset // static_output.itemsize,
+                    device=static_output.device,
+                    dtype=static_output.dtype,
+                    stride=tuple(static_output.stride()),
+                    size=tuple(static_output.size()),
+                )
+            )
 
-        find_overlaps(list(static_inputs_only_tensors), True)
-        dynamic_tensor_allocations = list(static_inputs_only_tensors)
+        input_segments = sorted(
+            input_segment_idxs, key=lambda idx: tuple(input_segment_idxs[idx])
+        )
+        output_segments = sorted(
+            (idx for idx in output_segment_idxs if idx not in input_segment_idxs),
+            key=lambda idx: tuple(output_segment_idxs[idx]),
+        )
+        remaining_segments = sorted(
+            (
+                idx
+                for idx in range(len(segment_sizes))
+                if idx not in input_segment_idxs and idx not in output_segment_idxs
+            ),
+            key=lambda idx: (
+                segment_sizes[idx],
+                tuple(
+                    (
+                        block.get("size"),
+                        block.get("requested_size", 0),
+                        block.get("state"),
+                    )
+                    for block in memory_snapshot[idx].get("blocks", ())
+                ),
+            ),
+        )
+        segment_order = input_segments + output_segments + remaining_segments
+        old_to_new_segment_idx = {
+            old_idx: new_idx for new_idx, old_idx in enumerate(segment_order)
+        }
+        segment_address_starts = [
+            segment_address_starts[idx] for idx in segment_order
+        ]
+        segment_sizes = [segment_sizes[idx] for idx in segment_order]
+        segment_devices = [segment_devices[idx] for idx in segment_order]
+        input_slot_specs = [
+            dataclasses.replace(
+                input_slot_spec,
+                segment_idx=old_to_new_segment_idx[input_slot_spec.segment_idx],
+            )
+            for input_slot_spec in input_slot_specs
+        ]
+        output_specs = [
+            dataclasses.replace(
+                output_spec,
+                segment_idx=old_to_new_segment_idx[output_spec.segment_idx],
+            )
+            if isinstance(output_spec, SegmentOutputSpec)
+            else output_spec
+            for output_spec in output_specs
+        ]
+
         find_overlaps(list(zip(segment_address_starts, segment_sizes)), True)
-        dynamic_tensor_allocations.extend(zip(segment_address_starts, segment_sizes))
+        dynamic_tensor_allocations = list(zip(segment_address_starts, segment_sizes))
 
         dynamic_tensors_list.append(dynamic_tensor_allocations)
         graphs.append(graph)
 
+    for graph_idx, captured_graph in enumerate(graphs):
+        pool_id = captured_graph.pool()
+        # print(
+        #     "GALVEZ: torch.cuda.memory_snapshot("
+        #     f"pool_id={pool_id}, include_traces=True) "
+        #     f"for cudagraph_digraphs graph {graph_idx}"
+        # )
+        # pprint.pprint(
+        #     torch.cuda.memory_snapshot(pool_id, include_traces=True),
+        #     sort_dicts=False,
+        # )
     graph = graphs[1]
     find_overlaps(dynamic_tensors_list[0], True)
     find_overlaps(dynamic_tensors_list[1], True)
@@ -354,92 +630,134 @@ def cudagraphify(
         dynamic_tensors_list[0],
     )
 
-    assert len(static_input_idxs) == 0
+    num_inputs = len(inputs)
+    output_alias_input_idxs = OrderedSet(
+        output_spec.input_idx
+        for output_spec in output_specs
+        if isinstance(output_spec, InputAliasOutputSpec)
+    )
+    copyback_input_idxs = OrderedSet(mutated_input_idxs) | output_alias_input_idxs
 
-    dynamic_input_idxs: OrderedSet[int] = OrderedSet()
-    for idx, static_input_value in enumerate(static_inputs):
-        if (
-            idx not in static_input_idxs
-            and isinstance(static_input_value, torch.Tensor)
-            and static_input_value.is_cuda
-        ):
-            dynamic_input_idxs.add(idx)
+    capture_keepalive.clear()
+    capture_inputs = []
+    static_outputs = ()
+    model_outputs = None
+    static_output = None
+    capture_input = None
+    copy_dsts = []
+    copy_srcs = []
+    original_input = None
+    capture_pool = None
+    gc.collect()
+    for graph_idx, captured_graph in enumerate(graphs):
+        pool_id = captured_graph.pool()
+        pool_snapshot = torch.cuda.memory_snapshot(pool_id, include_traces=True)
+        active_segments = [
+            segment for segment in pool_snapshot if _has_active_memory(segment)
+        ]
+        print(
+            "GALVEZ: cudagraph_digraphs pool memory snapshot "
+            f"graph_idx={graph_idx} pool_id={pool_id} "
+            f"num_segments={len(pool_snapshot)} "
+            f"num_active_segments={len(active_segments)}"
+        )
+        # print.pprint(pool_snapshot, sort_dicts=False)
+        if active_segments:
+            print(
+                "GALVEZ: WARNING cudagraph_digraphs active pool segments before "
+                f"release_pool_memory graph_idx={graph_idx} pool_id={pool_id}"
+            )
+            pprint.pprint(active_segments, sort_dicts=False)
+        captured_graph.release_pool_memory()
+    mem_allocator = None
+    capture_pool_keepalive.clear()
+    # torch.cuda.synchronize() # TODO: is this necessary? I don't think it is...
+    # gc.collect()
+    # torch.cuda.empty_cache()
+
+    # I need to call this only after the private memory pools' segments are no longer active.
+    torch.cuda.reset_peak_memory_stats(device_index)
+    reserved_mem_after_capture_cleanup = torch.cuda.memory_reserved(device_index)
+    reserved_mem_delta_after_capture_cleanup = (
+        reserved_mem_after_capture_cleanup - reserved_mem_before_captures
+    )
+    print(
+        "GALVEZ: cudagraph_digraphs_reserved_mem_after_capture_cleanup "
+        f"before_gb={reserved_mem_before_captures / 10**9} "
+        f"after_gb={reserved_mem_after_capture_cleanup / 10**9} "
+        f"delta_gb={reserved_mem_delta_after_capture_cleanup / 10**9}"
+    )
 
     def run(new_inputs: list[InputType]) -> OutputType:
         """Replay the graph with new input and output storage pointers."""
-        assert len(static_inputs) == len(new_inputs)
+        assert num_inputs == len(new_inputs)
 
         dynamic_tensors: list[torch.Tensor] = []
-
-        old_tensors: list[torch.Tensor] = []
-        new_tensors: list[torch.Tensor] = []
-
-        # We need to speed this up somehow. Maybe I can keep the
-        # parameters as static inputs. I just need to make sure that
-        # tangents are not considered static, IIUC. There are way too
-        # many inputs, and this loop ends up taking >100 microseconds,
-        # which makes parameterized cuda graph launch slower than
-        # cudagraph trees in the end.
-        torch.cuda.nvtx.range_push("push inputs")
-        for idx in dynamic_input_idxs:
-            new_input = new_inputs[idx]
-            assert isinstance(new_input, torch.Tensor)
-            # TODO: This isn't quite right, is it? It's possible that
-            # a CUDA kernel may expect a larger alignment than the
-            # dynamic input may have.  We can get an upper bound on
-            # the alignment of a tensor, though I suppose we can
-            # assume that the alignment is always at least 256 bytes,
-            # since cudaMalloc() is guaranteed to return a pointer
-            # with at least that much alignment, and each tensor
-            # returned by pytorch has at least 512 byte alignment
-            # inside that buffer.
-            # So the mod 16 here should be really be modulo the
-            # original tensor's alignment, for safety.
-            if new_input.data_ptr() % 16 == 0:
-                dynamic_tensors.append(new_input)
-            else:
-                dynamic_tensors.append(clone_preserve_strides(new_input))
-                new_tensors.append(dynamic_tensors[-1])
-                old_tensors.append(new_input)
-        torch.cuda.nvtx.range_pop()
 
         dynamic_tensors.extend(
             torch.empty(size, dtype=torch.int8, device=device)
             for size, device in zip(segment_sizes, segment_devices)
         )
 
+        copy_dsts: list[torch.Tensor] = []
+        copy_srcs: list[torch.Tensor] = []
+        copyback_dsts: list[torch.Tensor] = []
+        copyback_srcs: list[torch.Tensor] = []
+
+        torch.cuda.nvtx.range_push("push inputs")
+        for input_slot_spec in input_slot_specs:
+            new_input = new_inputs[input_slot_spec.input_idx]
+            assert isinstance(new_input, torch.Tensor)
+            if not new_input.is_cuda:
+                raise RuntimeError(
+                    "Non-static CUDA graph input was recorded as a CUDA tensor, "
+                    f"but replay input {input_slot_spec.input_idx} is on "
+                    f"{new_input.device}"
+                )
+            storage_tensor = dynamic_tensors[input_slot_spec.segment_idx]
+            input_slot = torch.empty(
+                (), device=input_slot_spec.device, dtype=input_slot_spec.dtype
+            )
+            input_slot.set_(
+                storage_tensor.untyped_storage(),
+                storage_offset=input_slot_spec.storage_offset,
+                stride=input_slot_spec.stride,
+                size=input_slot_spec.size,
+            )
+            input_copy_dst = index_expanded_dims(
+                input_slot, input_slot_spec.expanded_dims
+            )
+            input_copy_src = index_expanded_dims(
+                new_input, input_slot_spec.expanded_dims
+            )
+            copy_dsts.append(input_copy_dst)
+            copy_srcs.append(input_copy_src)
+            if input_slot_spec.input_idx in copyback_input_idxs:
+                copyback_dsts.append(input_copy_src)
+                copyback_srcs.append(input_copy_dst)
+        if copy_dsts:
+            torch._foreach_copy_(copy_dsts, copy_srcs)
+        torch.cuda.nvtx.range_pop()
+
         graph_runner.replay(dynamic_tensors)
 
-        if old_tensors:
-            # Copy data back. I need to do this only if the input is
-            # marked as mutable or if an output aliases the input
-            torch._foreach_copy_(old_tensors, new_tensors)
-
-        new_inputs_only_tensors = [
-            input
-            for input in new_inputs
-            if isinstance(input, torch.Tensor) and input.is_cuda
-        ]
+        if copyback_dsts:
+            torch._foreach_copy_(copyback_dsts, copyback_srcs)
 
         outputs: OutputType = []
 
-        for i, static_output in enumerate(static_outputs):
-            if i in non_tensor_output_idxs:
-                outputs.append(static_output)
+        for output_spec in output_specs:
+            if isinstance(output_spec, NonTensorOutputSpec):
+                outputs.append(output_spec.value)
                 continue
-            if i in empty_tensor_idxs_to_devices:
-                outputs.append(torch.empty(0, device=empty_tensor_idxs_to_devices[i]))
+            if isinstance(output_spec, EmptyTensorOutputSpec):
+                outputs.append(torch.empty(0, device=output_spec.device))
                 continue
-            containing_segment_idx = segment_idx_containing_this_output_tensor[i]
-            assert containing_segment_idx is not None
-            assert isinstance(static_output, torch.Tensor)
-            if containing_segment_idx == -1:
-                input_idx, offset_from_input = (
-                    static_output_idx_to_input_idx_and_offset[i]
-                )
-                input_tensor = new_inputs_only_tensors[input_idx]
+            if isinstance(output_spec, InputAliasOutputSpec):
+                input_tensor = new_inputs[output_spec.input_idx]
+                assert isinstance(input_tensor, torch.Tensor)
                 true_output_tensor = torch.empty(
-                    (), device=static_output.device, dtype=static_output.dtype
+                    (), device=output_spec.device, dtype=output_spec.dtype
                 )
                 input_offset_from_storage = (
                     input_tensor.data_ptr() - input_tensor.untyped_storage().data_ptr()
@@ -450,49 +768,32 @@ def cudagraphify(
                 )
                 true_output_tensor.set_(
                     input_tensor.untyped_storage(),
-                    storage_offset=offset_from_input + input_offset_from_storage,
-                    stride=static_output.stride(),
-                    size=static_output.size(),
+                    storage_offset=(
+                        output_spec.offset_from_input + input_offset_from_storage
+                    ),
+                    stride=output_spec.stride,
+                    size=output_spec.size,
                 )
 
                 outputs.append(true_output_tensor)
                 continue
-            storage_tensor = dynamic_tensors[
-                len(dynamic_input_idxs) + containing_segment_idx
-            ]
-            storage_offset = (
-                static_output.data_ptr()
-                - segment_address_starts[containing_segment_idx]
-            )
-            assert storage_offset < segment_sizes[containing_segment_idx]
-            assert (
-                nbytes_underlying_storage(static_output)
-                <= segment_sizes[containing_segment_idx]
-            )
-            assert (
-                storage_offset + nbytes_underlying_storage(static_output)
-                <= segment_sizes[containing_segment_idx]
-            )
+            assert isinstance(output_spec, SegmentOutputSpec)
+            storage_tensor = dynamic_tensors[output_spec.segment_idx]
             true_output_tensor = torch.empty(
-                (), device=static_output.device, dtype=static_output.dtype
+                (), device=output_spec.device, dtype=output_spec.dtype
             )
-
-            # This is the storage_offset in bytes, but set_ requires
-            # an offset in terms of the dtype of the tensor
-            assert storage_offset % static_output.itemsize == 0
-            storage_offset_itemsize = storage_offset // static_output.itemsize
 
             true_output_tensor.set_(
                 storage_tensor.untyped_storage(),
-                storage_offset=storage_offset_itemsize,
-                stride=static_output.stride(),
-                size=static_output.size(),
+                storage_offset=output_spec.storage_offset,
+                stride=output_spec.stride,
+                size=output_spec.size,
             )
             outputs.append(true_output_tensor)
 
         return outputs
 
-    return run, outputs
+    return run, run(list(inputs))
 
 
 def cuda_python_error_check(function_call_output):
@@ -540,121 +841,162 @@ class KernelParamPointerUpdate:
 
 
 @dataclasses.dataclass(frozen=True)
-class KernelNodeParamsTemplate:
-    func: int
-    gridDimX: int
-    gridDimY: int
-    gridDimZ: int
-    blockDimX: int
-    blockDimY: int
-    blockDimZ: int
-    sharedMemBytes: int
-    kern: int
-    ctx: int
-
-    @staticmethod
-    def from_params(params: Any) -> KernelNodeParamsTemplate:
-        if int(params.func) == 0 and int(params.kern) == 0:
-            raise RuntimeError("CUDA graph kernel node has neither func nor kern set")
-        return KernelNodeParamsTemplate(
-            func=int(params.func),
-            gridDimX=params.gridDimX,
-            gridDimY=params.gridDimY,
-            gridDimZ=params.gridDimZ,
-            blockDimX=params.blockDimX,
-            blockDimY=params.blockDimY,
-            blockDimZ=params.blockDimZ,
-            sharedMemBytes=params.sharedMemBytes,
-            kern=int(params.kern),
-            ctx=int(params.ctx),
-        )
-
-    def to_params(
-        self, arg_buffers: Sequence[bytes | bytearray]
-    ) -> tuple[Any, list[Any]]:
-        params = cuda_driver.CUDA_KERNEL_NODE_PARAMS()
-        params.gridDimX = self.gridDimX
-        params.gridDimY = self.gridDimY
-        params.gridDimZ = self.gridDimZ
-        params.blockDimX = self.blockDimX
-        params.blockDimY = self.blockDimY
-        params.blockDimZ = self.blockDimZ
-        params.sharedMemBytes = self.sharedMemBytes
-        params.extra = 0
-
-        keepalive: list[Any] = []
-        if self.func != 0:
-            func = cuda_driver.CUfunction(init_value=self.func)
-            keepalive.append(func)
-            params.func = func
-        elif self.kern != 0:
-            kern = cuda_driver.CUkernel(init_value=self.kern)
-            keepalive.append(kern)
-            params.kern = kern
-            if self.ctx != 0:
-                ctx = cuda_driver.CUcontext(init_value=self.ctx)
-                keepalive.append(ctx)
-                params.ctx = ctx
-        else:
-            raise RuntimeError("CUDA graph kernel node has neither func nor kern set")
-
-        arg_ptrs = (ctypes.c_void_p * len(arg_buffers))()
-        for i, arg_buffer in enumerate(arg_buffers):
-            buffer = ctypes.create_string_buffer(bytes(arg_buffer), len(arg_buffer))
-            keepalive.append(buffer)
-            arg_ptrs[i] = ctypes.addressof(buffer)
-
-        keepalive.append(arg_ptrs)
-        params.kernelParams = ctypes.addressof(arg_ptrs)
-        return params, keepalive
+class GraphPointerUpdate:
+    alloc_idx: int
+    alloc_offset: int
 
 
 @dataclasses.dataclass(frozen=True)
-class KernelNodeUpdate:
-    node: Any
-    params_template: KernelNodeParamsTemplate
-    original_arg_buffers: tuple[bytes, ...]
-    pointer_updates: tuple[KernelParamPointerUpdate, ...]
+class MemcpyNodeUpdate:
+    node: int
+    src_ptr: int
+    src_pitch: int
+    src_xsize: int
+    src_ysize: int
+    src_pos: tuple[int, int, int]
+    dst_ptr: int
+    dst_pitch: int
+    dst_xsize: int
+    dst_ysize: int
+    dst_pos: tuple[int, int, int]
+    extent: tuple[int, int, int]
+    src_update: GraphPointerUpdate | None
+    dst_update: GraphPointerUpdate | None
 
-    def to_params(self, actual_data_ptrs: list[int]) -> tuple[Any, list[Any]]:
-        arg_buffers = [bytearray(buffer) for buffer in self.original_arg_buffers]
-        for update in self.pointer_updates:
-            new_ptr = actual_data_ptrs[update.alloc_idx] + update.alloc_offset
-            arg_buffer = arg_buffers[update.param_index]
-            arg_buffer[
-                update.param_byte_offset : update.param_byte_offset
-                + ctypes.sizeof(ctypes.c_void_p)
-            ] = new_ptr.to_bytes(ctypes.sizeof(ctypes.c_void_p), sys.byteorder)
-        return self.params_template.to_params(arg_buffers)
+    def to_params(self, actual_data_ptrs: list[int]) -> Any:
+        src_ptr = self.src_ptr
+        if self.src_update is not None:
+            src_ptr = (
+                actual_data_ptrs[self.src_update.alloc_idx]
+                + self.src_update.alloc_offset
+            )
+        dst_ptr = self.dst_ptr
+        if self.dst_update is not None:
+            dst_ptr = (
+                actual_data_ptrs[self.dst_update.alloc_idx]
+                + self.dst_update.alloc_offset
+            )
+
+        params = cuda_driver.CUDA_MEMCPY3D()
+        params.srcXInBytes, params.srcY, params.srcZ = self.src_pos
+        params.srcMemoryType = cuda_driver.CUmemorytype.CU_MEMORYTYPE_DEVICE
+        params.srcDevice = cuda_driver.CUdeviceptr(init_value=src_ptr)
+        params.srcPitch = self.src_pitch
+        params.srcHeight = self.src_ysize
+        params.dstXInBytes, params.dstY, params.dstZ = self.dst_pos
+        params.dstMemoryType = cuda_driver.CUmemorytype.CU_MEMORYTYPE_DEVICE
+        params.dstDevice = cuda_driver.CUdeviceptr(init_value=dst_ptr)
+        params.dstPitch = self.dst_pitch
+        params.dstHeight = self.dst_ysize
+        params.WidthInBytes, params.Height, params.Depth = self.extent
+        return params
+
+
+@dataclasses.dataclass(frozen=True)
+class MemsetNodeUpdate:
+    node: int
+    dst: int
+    pitch: int
+    value: int
+    element_size: int
+    width: int
+    height: int
+    dst_update: GraphPointerUpdate
+
+    def to_params(self, actual_data_ptrs: list[int]) -> Any:
+        params = cuda_driver.CUDA_MEMSET_NODE_PARAMS()
+        params.dst = cuda_driver.CUdeviceptr(
+            init_value=(
+                actual_data_ptrs[self.dst_update.alloc_idx]
+                + self.dst_update.alloc_offset
+            )
+        )
+        params.pitch = self.pitch
+        params.value = self.value
+        params.elementSize = self.element_size
+        params.width = self.width
+        params.height = self.height
+        return params
 
 
 class PythonDynamicCUDAGraph:
     def __init__(
         self,
         graph: torch.cuda.CUDAGraph,
-        kernel_node_updates: list[KernelNodeUpdate],
+        device_nodes: list[int],
+        param_offsets: list[int],
+        alloc_indices: list[int],
+        alloc_offsets: list[int],
+        memcpy_node_updates: list[MemcpyNodeUpdate],
+        memset_node_updates: list[MemsetNodeUpdate],
     ) -> None:
         self.graph = graph
-        self.kernel_node_updates = kernel_node_updates
-        self._last_param_keepalive: list[Any] = []
+        device_dynamic_tensor_indices = sorted(set(alloc_indices))
+        device_dynamic_tensor_idx_map = {
+            old_idx: new_idx
+            for new_idx, old_idx in enumerate(device_dynamic_tensor_indices)
+        }
+        self.device_nodes = torch.tensor(device_nodes, dtype=torch.int64, device="cpu")
+        self.param_offsets = torch.tensor(
+            param_offsets, dtype=torch.int64, device="cpu"
+        )
+        self.alloc_indices = torch.tensor(
+            [device_dynamic_tensor_idx_map[idx] for idx in alloc_indices],
+            dtype=torch.int64,
+            device="cpu",
+        )
+        self.alloc_offsets = torch.tensor(
+            alloc_offsets, dtype=torch.int64, device="cpu"
+        )
+        self.device_dynamic_tensor_indices = device_dynamic_tensor_indices
+        self.memcpy_node_updates = memcpy_node_updates
+        self.memset_node_updates = memset_node_updates
 
     def replay(self, dynamic_tensors: list[torch.Tensor]) -> None:
-        actual_data_ptrs = [tensor.data_ptr() for tensor in dynamic_tensors]
-        keepalive: list[Any] = []
-        graph_exec = cuda_driver.CUgraphExec(
-            init_value=self.graph.raw_cuda_graph_exec()
-        )
-
-        for update in self.kernel_node_updates:
-            params, params_keepalive = update.to_params(actual_data_ptrs)
-            keepalive.extend(params_keepalive)
-            cuda_python_error_check(
-                cuda_driver.cuGraphExecKernelNodeSetParams(
-                    graph_exec, update.node, params
-                )
+        if self.memcpy_node_updates or self.memset_node_updates:
+            actual_data_ptrs = [tensor.data_ptr() for tensor in dynamic_tensors]
+            graph_exec = cuda_driver.CUgraphExec(
+                init_value=self.graph.raw_cuda_graph_exec()
             )
-
-        self._last_param_keepalive = keepalive
+            ctx = cuda_python_error_check(cuda_driver.cuCtxGetCurrent())
+            for update in self.memcpy_node_updates:
+                cuda_python_error_check(
+                    cuda_driver.cuGraphExecMemcpyNodeSetParams(
+                        graph_exec,
+                        cuda_driver.CUgraphNode(init_value=update.node),
+                        update.to_params(actual_data_ptrs),
+                        ctx,
+                    )
+                )
+            for update in self.memset_node_updates:
+                cuda_python_error_check(
+                    cuda_driver.cuGraphExecMemsetNodeSetParams(
+                        graph_exec,
+                        cuda_driver.CUgraphNode(init_value=update.node),
+                        update.to_params(actual_data_ptrs),
+                        ctx,
+                    )
+                )
+        if self.device_nodes.numel():
+            device_dynamic_tensors = [
+                dynamic_tensors[idx] for idx in self.device_dynamic_tensor_indices
+            ]
+            for idx, tensor in zip(
+                self.device_dynamic_tensor_indices, device_dynamic_tensors
+            ):
+                if not tensor.is_cuda:
+                    raise RuntimeError(
+                        "CUDA graph kernel pointer update references dynamic "
+                        f"tensor allocation {idx}, but replay tensor is on "
+                        f"{tensor.device}"
+                    )
+            torch._C._cuda_graph_apply_device_kernel_node_updates(
+                self.device_nodes,
+                self.param_offsets,
+                self.alloc_indices,
+                self.alloc_offsets,
+                device_dynamic_tensors,
+            )
         self.graph.replay()
 
 
@@ -686,6 +1028,32 @@ def _check_allocation_within_graph(
     if ptr < allocation.ptr + allocation.size:
         return allocation.alloc_idx, ptr - allocation.ptr
     return None
+
+
+def _dynamic_update_for_graph_pointer(
+    ptr: int,
+    other_ptr: int,
+    sorted_allocations: list[DynamicAllocation],
+    allocation_starts: list[int],
+    other_sorted_allocations: list[DynamicAllocation],
+    other_allocation_starts: list[int],
+) -> GraphPointerUpdate | None:
+    if ptr == other_ptr:
+        return None
+    result = _check_allocation_within_graph(
+        ptr, sorted_allocations, allocation_starts
+    )
+    other_result = _check_allocation_within_graph(
+        other_ptr, other_sorted_allocations, other_allocation_starts
+    )
+    if result is None and other_result is None:
+        return None
+    if result is None or other_result is None or result != other_result:
+        raise RuntimeError(
+            "CUDA graph pointer did not map consistently across captures"
+        )
+    alloc_idx, alloc_offset = result
+    return GraphPointerUpdate(alloc_idx=alloc_idx, alloc_offset=alloc_offset)
 
 
 def _graph_nodes(graph: Any) -> list[Any]:
@@ -779,6 +1147,9 @@ def _dynamic_pointer_updates_for_kernel(
     allocation_starts: list[int],
     other_sorted_allocations: list[DynamicAllocation],
     other_allocation_starts: list[int],
+    *,
+    debug_node_idx: int | None = None,
+    debug_name: str | None = None,
 ) -> list[KernelParamPointerUpdate]:
     pointer_size = ctypes.sizeof(ctypes.c_void_p)
     updates = []
@@ -798,13 +1169,54 @@ def _dynamic_pointer_updates_for_kernel(
                 other_arg_buffer[param_byte_offset : param_byte_offset + pointer_size],
                 sys.byteorder,
             )
+            if ptr == other_ptr:
+                continue
             result = _check_allocation_within_graph(
                 ptr, sorted_allocations, allocation_starts
             )
             other_result = _check_allocation_within_graph(
                 other_ptr, other_sorted_allocations, other_allocation_starts
             )
-            if result and other_result:
+            if result is not None or other_result is not None:
+                # Packed kernel argument structs can contain non-pointer 64-bit
+                # fields that happen to fall inside a capture's allocation
+                # range. The captures can assign the same logical allocation to
+                # different segment indices, so require agreement on offset but
+                # use the allocation index from the graph we will replay.
+                if result is None or other_result is None:
+                    debug_path = os.environ.get(
+                        "TORCHINDUCTOR_CUDAGRAPH_DIGRAPHS_DEBUG_FILE"
+                    )
+                    if debug_path:
+                        with open(debug_path, "a") as debug_file:
+                            debug_file.write(
+                                "ignored_one_sided_match "
+                                f"node={debug_node_idx} "
+                                f"name={debug_name} "
+                                f"param={param_index} "
+                                f"offset=0x{param_byte_offset:x} "
+                                f"ptr=0x{ptr:x} other_ptr=0x{other_ptr:x} "
+                                f"match={result} other_match={other_result}\n"
+                            )
+                    continue
+                if result[1] != other_result[1]:
+                    debug_path = os.environ.get(
+                        "TORCHINDUCTOR_CUDAGRAPH_DIGRAPHS_DEBUG_FILE"
+                    )
+                    if debug_path:
+                        with open(debug_path, "a") as debug_file:
+                            debug_file.write(
+                                "ignored_mismatch "
+                                f"node={debug_node_idx} "
+                                f"name={debug_name} "
+                                f"param={param_index} "
+                                f"offset=0x{param_byte_offset:x} "
+                                f"ptr=0x{ptr:x} other_ptr=0x{other_ptr:x} "
+                                f"match={result} other_match={other_result}\n"
+                            )
+                    raise RuntimeError(
+                        "CUDA graph pointer did not map consistently across captures"
+                    )
                 alloc_idx, alloc_offset = result
                 updates.append(
                     KernelParamPointerUpdate(
@@ -942,6 +1354,178 @@ def _dump_kernel_pointer_debug(
         debug_file.write("\n\n")
 
 
+def _make_device_updatable_kernel_node(node: Any) -> int:
+    attr_value = cuda_runtime.cudaKernelNodeAttrValue()
+    attr_value.deviceUpdatableKernelNode.deviceUpdatable = 1
+    cuda_python_error_check(
+        cuda_runtime.cudaGraphKernelNodeSetAttribute(
+            node,
+            cuda_runtime.cudaKernelNodeAttrID.cudaLaunchAttributeDeviceUpdatableKernelNode,
+            attr_value,
+        )
+    )
+    dev_node = int(attr_value.deviceUpdatableKernelNode.devNode)
+    if dev_node == 0:
+        raise RuntimeError("CUDA did not return a device-updatable kernel node")
+    return dev_node
+
+
+def _check_memcpy_params_supported(params: Any) -> None:
+    if int(params.srcArray) != 0 or int(params.dstArray) != 0:
+        raise RuntimeError("CUDA array memcpy nodes are not supported")
+    if params.kind not in (
+        cuda_runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
+        cuda_runtime.cudaMemcpyKind.cudaMemcpyDefault,
+    ):
+        raise RuntimeError(f"Unsupported CUDA graph memcpy kind: {params.kind}")
+    assert params.extent.height == 1 and params.extent.depth == 1, (
+        "Expected 1D CUDA graph memcpy node, got "
+        f"width={params.extent.width}, "
+        f"height={params.extent.height}, "
+        f"depth={params.extent.depth}"
+    )
+    assert (
+        params.srcPos.y == 0
+        and params.srcPos.z == 0
+        and params.dstPos.y == 0
+        and params.dstPos.z == 0
+    ), (
+        "Expected 1D CUDA graph memcpy node positions, got "
+        f"srcPos=({params.srcPos.x}, {params.srcPos.y}, "
+        f"{params.srcPos.z}), dstPos=({params.dstPos.x}, "
+        f"{params.dstPos.y}, {params.dstPos.z})"
+    )
+
+
+def _memcpy_metadata_key(params: Any) -> tuple[Any, ...]:
+    return (
+        params.kind,
+        params.srcPtr.pitch,
+        params.srcPtr.xsize,
+        params.srcPtr.ysize,
+        params.srcPos.x,
+        params.srcPos.y,
+        params.srcPos.z,
+        params.dstPtr.pitch,
+        params.dstPtr.xsize,
+        params.dstPtr.ysize,
+        params.dstPos.x,
+        params.dstPos.y,
+        params.dstPos.z,
+        params.extent.width,
+        params.extent.height,
+        params.extent.depth,
+    )
+
+
+def _memcpy_node_update(
+    node: Any,
+    params: Any,
+    other_params: Any,
+    sorted_allocations: list[DynamicAllocation],
+    allocation_starts: list[int],
+    other_sorted_allocations: list[DynamicAllocation],
+    other_allocation_starts: list[int],
+) -> MemcpyNodeUpdate | None:
+    _check_memcpy_params_supported(params)
+    _check_memcpy_params_supported(other_params)
+    if _memcpy_metadata_key(params) != _memcpy_metadata_key(other_params):
+        raise RuntimeError("Captured CUDA graph memcpy params differ")
+
+    src_update = _dynamic_update_for_graph_pointer(
+        int(params.srcPtr.ptr),
+        int(other_params.srcPtr.ptr),
+        sorted_allocations,
+        allocation_starts,
+        other_sorted_allocations,
+        other_allocation_starts,
+    )
+    dst_update = _dynamic_update_for_graph_pointer(
+        int(params.dstPtr.ptr),
+        int(other_params.dstPtr.ptr),
+        sorted_allocations,
+        allocation_starts,
+        other_sorted_allocations,
+        other_allocation_starts,
+    )
+    if src_update is None and dst_update is None:
+        return None
+    return MemcpyNodeUpdate(
+        node=int(node),
+        src_ptr=int(params.srcPtr.ptr),
+        src_pitch=params.srcPtr.pitch,
+        src_xsize=params.srcPtr.xsize,
+        src_ysize=params.srcPtr.ysize,
+        src_pos=(params.srcPos.x, params.srcPos.y, params.srcPos.z),
+        dst_ptr=int(params.dstPtr.ptr),
+        dst_pitch=params.dstPtr.pitch,
+        dst_xsize=params.dstPtr.xsize,
+        dst_ysize=params.dstPtr.ysize,
+        dst_pos=(params.dstPos.x, params.dstPos.y, params.dstPos.z),
+        extent=(params.extent.width, params.extent.height, params.extent.depth),
+        src_update=src_update,
+        dst_update=dst_update,
+    )
+
+
+def _check_memset_params_supported(params: Any) -> None:
+    assert params.height == 1, (
+        "Expected 1D CUDA graph memset node, got "
+        f"width={params.width}, height={params.height}, pitch={params.pitch}, "
+        f"elementSize={params.elementSize}"
+    )
+    if params.elementSize not in (1, 2, 4):
+        raise RuntimeError(
+            f"Unsupported CUDA graph memset element size: {params.elementSize}"
+        )
+
+
+def _memset_metadata_key(params: Any) -> tuple[int, int, int, int, int]:
+    return (
+        params.pitch,
+        params.value,
+        params.elementSize,
+        params.width,
+        params.height,
+    )
+
+
+def _memset_node_update(
+    node: Any,
+    params: Any,
+    other_params: Any,
+    sorted_allocations: list[DynamicAllocation],
+    allocation_starts: list[int],
+    other_sorted_allocations: list[DynamicAllocation],
+    other_allocation_starts: list[int],
+) -> MemsetNodeUpdate | None:
+    _check_memset_params_supported(params)
+    _check_memset_params_supported(other_params)
+    if _memset_metadata_key(params) != _memset_metadata_key(other_params):
+        raise RuntimeError("Captured CUDA graph memset params differ")
+
+    dst_update = _dynamic_update_for_graph_pointer(
+        int(params.dst),
+        int(other_params.dst),
+        sorted_allocations,
+        allocation_starts,
+        other_sorted_allocations,
+        other_allocation_starts,
+    )
+    if dst_update is None:
+        return None
+    return MemsetNodeUpdate(
+        node=int(node),
+        dst=int(params.dst),
+        pitch=params.pitch,
+        value=params.value,
+        element_size=params.elementSize,
+        width=params.width,
+        height=params.height,
+        dst_update=dst_update,
+    )
+
+
 def make_dynamic_graph_runner(
     graph: torch.cuda.CUDAGraph,
     dynamic_tensors: list[tuple[int, int]],
@@ -967,7 +1551,12 @@ def make_dynamic_graph_runner(
     if len(nodes) != len(other_nodes):
         raise RuntimeError("Captured CUDA graphs are not topologically identical")
 
-    kernel_node_updates = []
+    device_nodes: list[int] = []
+    param_offsets: list[int] = []
+    alloc_indices: list[int] = []
+    alloc_offsets: list[int] = []
+    memcpy_node_updates: list[MemcpyNodeUpdate] = []
+    memset_node_updates: list[MemsetNodeUpdate] = []
     allowed_node_types = OrderedSet(
         [
             cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeEmpty,
@@ -1003,16 +1592,39 @@ def make_dynamic_graph_runner(
 
             arg_buffers = _kernel_arg_buffers(params, param_infos)
             other_arg_buffers = _kernel_arg_buffers(other_params, other_param_infos)
-            pointer_updates = _dynamic_pointer_updates_for_kernel(
-                arg_buffers,
-                other_arg_buffers,
-                sorted_allocations,
-                allocation_starts,
-                other_sorted_allocations,
-                other_allocation_starts,
-            )
+            name = _kernel_name(params.func)
+            try:
+                pointer_updates = _dynamic_pointer_updates_for_kernel(
+                    arg_buffers,
+                    other_arg_buffers,
+                    sorted_allocations,
+                    allocation_starts,
+                    other_sorted_allocations,
+                    other_allocation_starts,
+                    debug_node_idx=node_idx,
+                    debug_name=name,
+                )
+            except RuntimeError as e:
+                _dump_kernel_pointer_debug(
+                    node_idx,
+                    name,
+                    params,
+                    param_infos,
+                    arg_buffers,
+                    other_arg_buffers,
+                    [],
+                    sorted_allocations,
+                    allocation_starts,
+                    other_sorted_allocations,
+                    other_allocation_starts,
+                )
+                raise RuntimeError(
+                    "Failed to identify CUDA graph kernel pointer updates "
+                    f"for node_idx={node_idx} kernel={name} "
+                    f"grid=({params.gridDimX}, {params.gridDimY}, {params.gridDimZ}) "
+                    f"block=({params.blockDimX}, {params.blockDimY}, {params.blockDimZ})"
+                ) from e
             if os.environ.get("TORCHINDUCTOR_CUDAGRAPH_DIGRAPHS_DEBUG_FILE"):
-                name = _kernel_name(params.func)
                 if "cublas" in name:
                     _dump_kernel_pointer_debug(
                         node_idx,
@@ -1028,19 +1640,49 @@ def make_dynamic_graph_runner(
                         other_allocation_starts,
                     )
             if pointer_updates:
-                kernel_node_updates.append(
-                    KernelNodeUpdate(
-                        node=node,
-                        params_template=KernelNodeParamsTemplate.from_params(params),
-                        original_arg_buffers=arg_buffers,
-                        pointer_updates=tuple(pointer_updates),
-                    )
-                )
-        elif node_type in (
-            cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy,
-            cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemset,
-        ):
-            raise RuntimeError("memcpy and memset nodes should have been removed")
+                dev_node = _make_device_updatable_kernel_node(node)
+                for update in pointer_updates:
+                    param_offset, _ = param_infos[update.param_index]
+                    device_nodes.append(dev_node)
+                    param_offsets.append(param_offset + update.param_byte_offset)
+                    alloc_indices.append(update.alloc_idx)
+                    alloc_offsets.append(update.alloc_offset)
+        elif node_type == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy:
+            if not config.triton.cudagraphs_preserve_memops:
+                raise RuntimeError("memcpy nodes should have been removed")
+            memcpy_update = _memcpy_node_update(
+                node,
+                cuda_python_error_check(
+                    cuda_runtime.cudaGraphMemcpyNodeGetParams(node)
+                ),
+                cuda_python_error_check(
+                    cuda_runtime.cudaGraphMemcpyNodeGetParams(other_node)
+                ),
+                sorted_allocations,
+                allocation_starts,
+                other_sorted_allocations,
+                other_allocation_starts,
+            )
+            if memcpy_update is not None:
+                memcpy_node_updates.append(memcpy_update)
+        elif node_type == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemset:
+            if not config.triton.cudagraphs_preserve_memops:
+                raise RuntimeError("memset nodes should have been removed")
+            memset_update = _memset_node_update(
+                node,
+                cuda_python_error_check(
+                    cuda_runtime.cudaGraphMemsetNodeGetParams(node)
+                ),
+                cuda_python_error_check(
+                    cuda_runtime.cudaGraphMemsetNodeGetParams(other_node)
+                ),
+                sorted_allocations,
+                allocation_starts,
+                other_sorted_allocations,
+                other_allocation_starts,
+            )
+            if memset_update is not None:
+                memset_node_updates.append(memset_update)
         elif node_type in (
             cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeGraph,
             cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional,
@@ -1050,7 +1692,26 @@ def make_dynamic_graph_runner(
             raise RuntimeError(f"Unsupported CUDA graph node type: {node_type}")
 
     graph.instantiate()
-    return PythonDynamicCUDAGraph(graph, kernel_node_updates)
+    if device_nodes:
+        stream = torch.cuda.current_stream()
+        cuda_python_error_check(
+            cuda_runtime.cudaGraphUpload(
+                cuda_runtime.cudaGraphExec_t(
+                    init_value=graph.raw_cuda_graph_exec()
+                ),
+                cuda_runtime.cudaStream_t(init_value=stream.cuda_stream),
+            )
+        )
+        stream.synchronize()
+    return PythonDynamicCUDAGraph(
+        graph,
+        device_nodes,
+        param_offsets,
+        alloc_indices,
+        alloc_offsets,
+        memcpy_node_updates,
+        memset_node_updates,
+    )
 
 
 memcpy_kernel = None

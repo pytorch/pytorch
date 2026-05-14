@@ -741,8 +741,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 
     if (size == 2) {
       // (int, int) - mempool_id only
-      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
-      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+      PyObject* id1 = PyTuple_GetItem(arg, 0);
+      PyObject* id2 = PyTuple_GetItem(arg, 1);
       TORCH_CHECK(
           THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
           "mempool_id elements must be integers");
@@ -750,17 +750,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
     } else if (size == 3) {
       // (int, int, bool) - mempool_id + include_traces
-      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
-      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
-      auto traces = THPObjectPtr(PyTuple_GetItem(arg, 2));
+      PyObject* id1 = PyTuple_GetItem(arg, 0);
+      PyObject* id2 = PyTuple_GetItem(arg, 1);
+      PyObject* traces = PyTuple_GetItem(arg, 2);
       TORCH_CHECK(
           THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
           "mempool_id elements must be integers");
       TORCH_CHECK(
-          PyBool_Check(traces.get()), "include_traces must be a boolean");
+          PyBool_Check(traces), "include_traces must be a boolean");
       mempool_id = c10::cuda::MempoolId_t(
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
-      include_traces = (Py_IsTrue(traces.get()));
+      include_traces = (Py_IsTrue(traces));
     } else {
       TORCH_CHECK(false, "Expected tuple of size 2 or 3");
     }

@@ -24,6 +24,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
+    from torch._C import _cuda_CUDAAllocator
     from torch.cuda import _POOL_HANDLE
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
@@ -184,6 +185,19 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.check_alive(self.pool())
         super().replay()
+
+    def release_pool_memory(self) -> None:
+        r"""Release this graph's private allocator pool.
+
+        This is only valid for specialized users that have rewritten captured
+        graph pointers so replay no longer references the graph-private pool.
+        Normal CUDA graph users should not call this method.
+        """
+        super().release_pool_memory()
+
+    def get_mem_allocator(self) -> _cuda_CUDAAllocator:
+        r"""Return a CUDA allocator suitable for dynamic CUDAGraph captures."""
+        return super().get_mem_allocator()
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""

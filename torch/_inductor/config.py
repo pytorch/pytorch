@@ -1823,6 +1823,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_ELIDE_INPUT_OUTPUT_COPIES") == "1"
     )
 
+    # Preserve memcpy and memset nodes for parameterized cudagraph replay instead
+    # of replacing them with CUDA kernels. This lets those nodes use copy engines,
+    # but their dynamic pointers must be updated by host-side graph exec APIs.
+    cudagraphs_preserve_memops = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_PRESERVE_MEMOPS") == "1"
+    )
+
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = (
         os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_ELIDE_INPUT_OUTPUT_COPIES") != "1"
