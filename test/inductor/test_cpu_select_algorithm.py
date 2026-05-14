@@ -3396,7 +3396,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         batch_size, in_features, out_features = 32, 64, 32
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
-        mod = DynamicQLinearUnaryModule(out_features, in_features, qmax, x_qmin, x_qmax).eval()
+        mod = DynamicQLinearUnaryModule(
+            out_features, in_features, qmax, x_qmin, x_qmax
+        ).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
@@ -3492,7 +3494,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size, in_features, out_features = 32, 64, 32
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
         other = torch.randn(batch_size, out_features, dtype=torch.float32)
-        mod = DynamicQLinearBinaryModule(out_features, in_features, qmax, x_qmin, x_qmax).eval()
+        mod = DynamicQLinearBinaryModule(
+            out_features, in_features, qmax, x_qmin, x_qmax
+        ).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
