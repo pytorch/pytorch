@@ -260,7 +260,7 @@ def _set_shape_type(
         # we don't need to set it again.
         #
         # When a user specifies complex in onnx_symbolic, we consider that to
-        # be the intention even though non of the ONNX ops deals with complex values.
+        # be the intention even though none of the ONNX ops deals with complex values.
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
