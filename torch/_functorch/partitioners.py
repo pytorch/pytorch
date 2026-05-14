@@ -2115,6 +2115,9 @@ def solve_min_cut(
             torch.ops.higher_order.auto_functionalized_v2,
         ):
             return False
+        if b.target is torch.ops.higher_order.auto_functionalized_v2:
+            all_bases = b.kwargs.get("_all_bases")
+            return isinstance(all_bases, list) and any(a is base for base in all_bases)
         mutable_op = b.args[0]
         (
             mutable_arg_names,
