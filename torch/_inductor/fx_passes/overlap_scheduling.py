@@ -109,260 +109,6 @@ class WhyNoOverlap:
             )
 
 
-class NodeReachability:
-    """Lazy reachability index for FX graph nodes using on-demand DFS.
-
-    Answers reachability queries ("is A an ancestor of B?") without
-    precomputing the full transitive closure.  Uses topological order for
-    O(1) necessary-condition elimination (A can only be an ancestor of B
-    if topo_idx[A] < topo_idx[B]), then falls back to backward DFS for
-    exact answers.  Results are cached across calls.
-
-    Example::
-
-        reachability = NodeReachability(list(graph.nodes))
-        reachability.is_ancestor(node_a, node_d)       # True/False
-        reachability.has_dependency(node_a, node_b)     # either direction
-        reachability.get_unscheduled_ancestors(target, scheduled_set)
-
-    Args:
-        nodes: topologically sorted list of FX nodes
-        extra_inputs: optional additional edges beyond the FX graph
-            (e.g. hiding-interval deps), mapping node -> set of extra parents
-
-    See also: :class:`BitsetAncestors` for the precomputed variant that
-    trades O(N^2 / 64) memory for O(1) membership queries.
-    """
-
-    def __init__(
-        self,
-        nodes: list[fx.Node],
-        extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
-    ):
-        self.topo_idx: dict[fx.Node, int] = {n: i for i, n in enumerate(nodes)}
-        self.extra_inputs = extra_inputs or {}
-        self._cache: dict[tuple[int, int], bool] = {}
-
-    def _get_inputs(self, node: fx.Node) -> list[fx.Node]:
-        inputs = list(node.all_input_nodes)
-        extra = self.extra_inputs.get(node)
-        if extra:
-            inputs.extend(extra)
-        return inputs
-
-    def is_ancestor(self, ancestor: fx.Node, descendant: fx.Node) -> bool:
-        """Check if ancestor is a transitive ancestor of descendant."""
-        a_idx = self.topo_idx.get(ancestor)
-        d_idx = self.topo_idx.get(descendant)
-        if a_idx is None or d_idx is None or a_idx >= d_idx:
-            return False
-        key = (a_idx, d_idx)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
-        result = self._dfs_reach(ancestor, a_idx, descendant)
-        self._cache[key] = result
-        return result
-
-    def _dfs_reach(self, ancestor: fx.Node, a_idx: int, descendant: fx.Node) -> bool:
-        visited: OrderedSet[fx.Node] = OrderedSet()
-        stack = self._get_inputs(descendant)
-        while stack:
-            n = stack.pop()
-            if n is ancestor:
-                return True
-            if n in visited:
-                continue
-            n_idx = self.topo_idx.get(n)
-            if n_idx is None or n_idx <= a_idx:
-                visited.add(n)
-                continue
-            visited.add(n)
-            stack.extend(self._get_inputs(n))
-        return False
-
-    def has_dependency(self, n1: fx.Node, n2: fx.Node) -> bool:
-        """Check if either node is an ancestor of the other."""
-        return self.is_ancestor(n1, n2) or self.is_ancestor(n2, n1)
-
-    def get_unscheduled_ancestors(
-        self, target: fx.Node, scheduled: OrderedSet[fx.Node]
-    ) -> OrderedSet[fx.Node]:
-        """Get all ancestors of target not in scheduled (backward DFS)."""
-        result: OrderedSet[fx.Node] = OrderedSet()
-        visited: OrderedSet[fx.Node] = OrderedSet()
-        stack = self._get_inputs(target)
-        while stack:
-            n = stack.pop()
-            if n in visited or n in scheduled:
-                continue
-            visited.add(n)
-            result.add(n)
-            stack.extend(self._get_inputs(n))
-        return result
-
-
-class _BitsetAncestorView:
-    """Read-only view of one node's ancestor set, backed by a Python int.
-
-    Returned by ``BitsetAncestors[node]``.  The underlying ``int`` has bit j
-    set when node j is a transitive ancestor.  This class wraps that int to
-    provide the same interface callers used with ``OrderedSet[fx.Node]``.
-
-    Supported operations (all use the node-to-index mapping for translation)::
-
-        node_a in view          # O(1) -- test bit at node_a's index
-        for a in view: ...      # iterate ancestors via lowest-bit scan
-        len(view)               # popcount via int.bit_count()
-        view & other_view       # bitwise AND then scan set bits
-        view & ordered_set      # iterate smaller set, test membership
-
-    Example::
-
-        ancestors = BitsetAncestors(nodes)
-        view = ancestors[some_node]
-        if predecessor in view:       # O(1) bit test
-            print("predecessor is an ancestor")
-        for a in view:                # iterate all ancestors
-            print(a.name)
-    """
-
-    __slots__ = ("_bits", "_node_to_idx", "_idx_to_node")
-
-    def __init__(
-        self,
-        bits: int,
-        node_to_idx: dict[fx.Node, int],
-        idx_to_node: list[fx.Node],
-    ):
-        self._bits = bits
-        self._node_to_idx = node_to_idx
-        self._idx_to_node = idx_to_node
-
-    def __contains__(self, item: fx.Node) -> bool:
-        idx = self._node_to_idx.get(item)
-        if idx is None:
-            return False
-        return bool((self._bits >> idx) & 1)
-
-    def __iter__(self):
-        bits = self._bits
-        idx_to_node = self._idx_to_node
-        while bits:
-            idx = (bits & -bits).bit_length() - 1
-            yield idx_to_node[idx]
-            bits &= bits - 1
-
-    def __len__(self) -> int:
-        return self._bits.bit_count()
-
-    def __and__(
-        self, other: "OrderedSet[fx.Node] | _BitsetAncestorView"
-    ) -> OrderedSet[fx.Node]:
-        if isinstance(other, _BitsetAncestorView):
-            result_bits = self._bits & other._bits
-            result: OrderedSet[fx.Node] = OrderedSet()
-            while result_bits:
-                idx = (result_bits & -result_bits).bit_length() - 1
-                result.add(self._idx_to_node[idx])
-                result_bits &= result_bits - 1
-            return result
-        result = OrderedSet()
-        for item in other:
-            if item in self:
-                result.add(item)
-        return result
-
-    def __rand__(self, other: "OrderedSet[fx.Node]") -> OrderedSet[fx.Node]:
-        return self.__and__(other)
-
-
-class BitsetAncestors:
-    """Precomputed transitive ancestor sets for an FX graph using int bitsets.
-
-    Drop-in replacement for ``dict[fx.Node, OrderedSet[fx.Node]]``.
-    Access ``ancestors[node]`` returns a :class:`_BitsetAncestorView`.
-
-    Mental model
-    ------------
-    Consider a small diamond graph (edges point downward)::
-
-            a          index 0
-           / \\
-          b   c        index 1, 2
-           \\ /
-            d          index 3
-
-    Each node gets an index from topological order.  An ancestor set is
-    a single Python ``int`` where bit j means "node j is my ancestor"::
-
-        ancestors of a = 0b0000 = 0   (no ancestors)
-        ancestors of b = 0b0001 = 1   (bit 0 set -> a)
-        ancestors of c = 0b0001 = 1   (bit 0 set -> a)
-        ancestors of d = 0b0111 = 7   (bits 0,1,2 -> a, b, c)
-
-    Building the closure: for each node i in topo order, for each parent j::
-
-        bits[i] |= (1 << j) | bits[j]
-
-    The ``|=`` merges j's ancestors into i.  For Python ints this is a
-    single C-level loop over 64-bit machine words -- O(N/64) per union
-    vs O(N) for ``OrderedSet.__ior__`` / ``dict.update``.
-
-    For a 36 000-node graph each int is ~4.5 KB (~563 machine words).
-
-    Querying::
-
-        ancestors = BitsetAncestors(topo_sorted_nodes)
-        a_in_d = a in ancestors[d]       # (bits[3] >> 0) & 1 == True
-        all_of_d = list(ancestors[d])    # [a, b, c]  via bit-scan
-        common = ancestors[d] & ancestors[c]  # bitwise AND
-
-    Extra edges
-    -----------
-    ``extra_inputs`` adds edges beyond the FX graph data dependencies
-    (e.g. hiding-interval deps in the overlap bucketer).  They are folded
-    into the same bitwise closure during construction.
-
-    Attributes:
-        _bits:        list[int]  -- _bits[i] is the ancestor bitset for node i
-        _node_to_idx: dict       -- fx.Node -> int index
-        _idx_to_node: list       -- int index -> fx.Node
-    """
-
-    def __init__(
-        self,
-        nodes: list[fx.Node],
-        extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
-    ):
-        n = len(nodes)
-        node_to_idx: dict[fx.Node, int] = {nd: i for i, nd in enumerate(nodes)}
-        bits = [0] * n
-        extra = extra_inputs or {}
-
-        for i, node in enumerate(nodes):
-            b = 0
-            for inp in node._input_nodes:
-                j = node_to_idx.get(inp)
-                if j is not None:
-                    b |= (1 << j) | bits[j]
-            for inp in extra.get(node, ()):
-                j = node_to_idx.get(inp)
-                if j is not None:
-                    b |= (1 << j) | bits[j]
-            bits[i] = b
-
-        self._bits = bits
-        self._node_to_idx = node_to_idx
-        self._idx_to_node = nodes
-
-    def __getitem__(self, node: fx.Node) -> _BitsetAncestorView:
-        idx = self._node_to_idx[node]
-        return _BitsetAncestorView(
-            self._bits[idx], self._node_to_idx, self._idx_to_node
-        )
-
-
 @functools.cache
 def get_group_name(n: fx.Node) -> str:
     """Extract the group name from a collective operation node."""
@@ -740,7 +486,9 @@ class OverlapScheduler:
         self._parent_lists: list[list[fx.Node]] = [
             list(n._input_nodes) for n in self.nodes
         ]
-        self.node_ancestors: BitsetAncestors = self._collect_node_ancestors()
+        self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
+            self._collect_node_ancestors()
+        )
 
         # Identify collectives and compute nodes
         self.collective_info: dict[fx.Node, CollectiveInfo] = {}
@@ -784,12 +532,6 @@ class OverlapScheduler:
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
         self.wasted_compute = 0.0
-
-        # Bitset masks for fast pre-filtering in _find_schedulable_path
-        self._scheduled_bits: int = 0
-        self._compute_bits: int = 0
-        for n in self.compute_nodes:
-            self._compute_bits |= 1 << self.node_idx[n]
 
         # Calculate domination indices for both compute and reduce_scatter nodes
         self.reduce_scatter_nodes = self.graph.find_nodes(
@@ -835,9 +577,15 @@ class OverlapScheduler:
             score = self._compute_on_path_score(node)
             heapq.heappush(self.on_path_ready, (score, node))
 
-    def _collect_node_ancestors(self) -> BitsetAncestors:
-        """Collect all ancestors for each node using int-bitset representation."""
-        return BitsetAncestors(self.nodes)
+    def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Collect all ancestors for each node."""
+        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in self.nodes:
+            for input_node in node.all_input_nodes:
+                ancestors[node].add(input_node)
+                ancestors[node] |= ancestors[input_node]
+
+        return ancestors
 
     def _compute_baseline_memory(self) -> int:
         """
@@ -1371,7 +1119,6 @@ class OverlapScheduler:
         assert node not in self.scheduled
         assert all(n in self.scheduled for n in node.all_input_nodes)
         self.scheduled.add(node)
-        self._scheduled_bits |= 1 << self.node_idx[node]
         self.memory_tracker.schedule_node(node)
 
         log.debug(
@@ -1664,23 +1411,12 @@ class OverlapScheduler:
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
-        target_idx = self.node_idx[target]
-
-        # Bitset pre-filter: check if any compute node is an unscheduled ancestor
-        ancestor_bits = self.node_ancestors._bits[target_idx]
-        unscheduled_bits = ancestor_bits & ~self._scheduled_bits
-        if unscheduled_bits & self._compute_bits:
-            why("bitset: unscheduled compute ancestor")
-            return None
-
-        if not unscheduled_bits:
-            return OrderedSet()
-
         # Backward BFS from target, stopping at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
         parent_lists = self._parent_lists
         node_idx = self.node_idx
+        target_idx = node_idx[target]
         stack = parent_lists[target_idx][:]
         scheduled = self.scheduled
         while stack:
