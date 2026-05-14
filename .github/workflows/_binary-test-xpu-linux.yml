@@ -55,7 +55,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
       image: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
-      options: --device=/dev/dri --group-add video --group-add render
+      options: --device=/dev/dri --group-add video --group-add render -e ZE_AFFINITY_MASK
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
@@ -126,3 +126,9 @@ jobs:
           bash .ci/pytorch/binary_linux_test.sh
           source "${BINARY_ENV_FILE}"
           bash -x /run.sh
+
+      - name: Cleanup artifacts directory
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "${RUNNER_TEMP}/artifacts"
