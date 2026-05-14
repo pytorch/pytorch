@@ -3468,6 +3468,8 @@ class DeferredRecordingTest(TestMixin, TestCase):
         call_count = 0
         deferred_obj: interfaces.DeferredRecording | None = None
 
+        finalize_done = Event()
+
         def future_encoder_factory(fn) -> object:
             def future_encoder(*args: object, **kwargs: object) -> object:
                 def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
@@ -3479,6 +3481,7 @@ class DeferredRecordingTest(TestMixin, TestCase):
                     def on_complete(completed_future: Future[int]) -> None:
                         actual_result = completed_future.result()
                         deferred.finalize(actual_result)
+                        finalize_done.set()
 
                     future_result.add_done_callback(on_complete)
                     deferred_obj = deferred
@@ -3519,6 +3522,11 @@ class DeferredRecordingTest(TestMixin, TestCase):
             # Wait for Future to complete
             result = future1.result(timeout=5)
             self.assertEqual(result, 10)
+
+            # Future.set_result() invokes done callbacks after releasing its
+            # condition lock, so future.result() can return before on_complete
+            # (and thus deferred.finalize()) has run.  Wait for finalize.
+            self.assertTrue(finalize_done.wait(timeout=5))
 
             # Verify deferred recording completed
             self.assertIsNotNone(deferred_obj)

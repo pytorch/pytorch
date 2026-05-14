@@ -298,22 +298,26 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             return carry, []
 
         num_elems = xs[0].shape[dim]
-        ind = 0
-
-        # Compute dummy shapes for the pre-allocation
         num_init_leaves = len(init)
-        dummy_carry, dummy_out = _extract_carry_and_out(
+
+        # Process element 0 to infer output shapes for pre-allocation
+        # AND produce the first real result in a single call.  The previous
+        # approach used first_slice_copy() for shape inference and then
+        # re-processed element 0 in the main loop, calling the operator
+        # num_elems+1 times.  That extra invocation is incorrect for
+        # operators with side effects.
+        carry, out_0 = _extract_carry_and_out(
             call_operator(
                 operator,
                 *carry,
-                *[first_slice_copy(elem, dim) for elem in xs],
+                *[elem.select(dim, 0) for elem in xs],
                 *additional_inputs,
             ),
             num_init_leaves,
         )
 
-        out_tensor_mask = get_tensor_mask(dummy_out)
-        dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
+        out_tensor_mask = get_tensor_mask(out_0)
+        out_0_masked = mask_list(out_tensor_mask, out_0)
 
         # Pre-allocate
         # outs -> Output matrix
@@ -321,16 +325,15 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         # out: (num_elems, M, N, ...)
         # idx: (1, M, N)
         outs = [
-            torch.zeros(
+            torch.empty(
                 [num_elems] + list(e.size()),
                 dtype=e.dtype,
                 device=e.device,
             )
-            for i, e in enumerate(dummy_out_masked)
+            for e in out_0_masked
         ]
         idxs = [
-            torch.ones_like(e, dtype=torch.int64).unsqueeze(0)
-            for i, e in enumerate(dummy_out_masked)
+            torch.ones_like(e, dtype=torch.int64).unsqueeze(0) for e in out_0_masked
         ]
 
         def store_out_in_outs(out, ind):
@@ -342,20 +345,21 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 # essentially: o[ind][n][k] = x[0][n][k]
                 o.scatter_(0, ind * idx, x.unsqueeze(0))
 
-        for i in range(num_elems):
-            ind = i
+        # Store element 0's result, then continue from element 1.
+        store_out_in_outs(out_0_masked, 0)
+
+        for i in range(1, num_elems):
             carry, out = _extract_carry_and_out(
                 call_operator(
                     operator,
                     *carry,
-                    *[elem.select(dim, ind) for elem in xs],
+                    *[elem.select(dim, i) for elem in xs],
                     *additional_inputs,
                 ),
                 num_init_leaves,
             )
 
-            # Store the inits in the outs matrix.
-            store_out_in_outs(mask_list(out_tensor_mask, out), ind)
+            store_out_in_outs(mask_list(out_tensor_mask, out), i)
 
         # Expand outs with None depending on the tensor mask of the output
         outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
@@ -489,19 +493,19 @@ class ScanAutogradOp(torch.autograd.Function):
 
 class ScanForwardIntermediatesHandlingPolicy(enum.Enum):
     """
-    Partitioner can add interemdiates to the output of original graph.
+    Partitioner can add intermediates to the output of original graph.
     These intermediates fall into 4 categories and we want to have different policies for handling them by
     modifying the graph:
 
     CLONE: we clone the intermediate when it is a carried input (i.e. init). In this case, this carry will be
         replaced with new values at each forward step so we need to clone the carry as part of return (i.e. ys)
-        so as to remove the aliasing and that each step's intermediate will be stacked together and saved in bacwkard.
+        so as to remove the aliasing and that each step's intermediate will be stacked together and saved in backward.
 
     REMOVE_XS: we remove the intermediate from output when it is part of xs. Since xs is read-only, in this case,
         we can directly save them for backward to use.
 
-    REMOVE_ADDITIONAL_INPUTS: we remove the intermediate from output when it is part of additinonal_inputs. additional_inputs
-        are also read-only in each step, we can directly save them for bacwkard to use. We differentiate XS and ADDITIONAL_INPUTS
+    REMOVE_ADDITIONAL_INPUTS: we remove the intermediate from output when it is part of additional_inputs. additional_inputs
+        are also read-only in each step, we can directly save them for backward to use. We differentiate XS and ADDITIONAL_INPUTS
         so that we could have different treatment for them in backward. In backward, we need to put xs intermediates in carry but
         put additional_inputs as backward scan's additional_inputs.
 
@@ -669,9 +673,9 @@ class ScanAutogradImpl:
         """
         Recall that fw_outputs = (*carry, *ys), bw_gm takes in (*fw_intermediates, *grad_carry, *grad_ys)
         and returns (*grad_init, *grad_xs, *grad_additional_inputs)
-        The bacwkard is a reversed scan that can be constructed as follows:
+        The backward is a reversed scan that can be constructed as follows:
 
-          grad_additonal_inputs = torch.zeros_like(additional_inputs)
+          grad_additional_inputs = torch.zeros_like(additional_inputs)
           bw_init = (grad_carry, grad_additional_inputs)
           bw_xs = (fw_intermediates, grad_ys)
           grad_init, grad_additional_inputs, grad_xs = scan(

@@ -33,6 +33,7 @@
     set_stream
     stream
     synchronize
+    temperature
 ```
 
 ## Random Number Generator

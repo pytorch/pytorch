@@ -5,9 +5,11 @@ import re
 import sys
 import unittest
 
+import numpy as np
+
 import torch
 import torch._dynamo
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -628,7 +630,7 @@ class PallasTestsMixin:
         x = base_2d[::2, ::2].unsqueeze(0)
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="TPU doesn't support float 64")
     def test_stride_non_contiguous_dtypes(self):
         """Test non-contiguous patterns with various dtypes."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -793,7 +795,7 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="Cannot do int indexing on TPU")
     @skip_if_cuda(reason="gather not supported in Pallas GPU (Mosaic) backend")
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
@@ -813,7 +815,7 @@ class PallasTestsMixin:
         expected = fn(x, indices)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="Cannot do int indexing on TPU")
     # Pallas Mosaic backend doesn't support gather operations with array indices
     # This limitation is in the Pallas/Mosaic lowering, not our implementation
     @skip_if_cuda(
@@ -1027,7 +1029,6 @@ class PallasTestsMixin:
                 expected = fn(a, b)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -1068,7 +1069,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(
+        reason="Pallas loweing crash: https://github.com/jax-ml/jax/issues/36149"
+    )
     def test_erf(self):
         """Test erf operation."""
 
@@ -1082,7 +1085,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(
+        reason="Pallas loweing crash: https://github.com/jax-ml/jax/issues/36149"
+    )
     def test_atan2(self):
         """Test atan2 operation."""
 
@@ -1148,7 +1153,7 @@ class PallasTestsMixin:
                 expected = fn(x)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="reduce_prod primitive not implemented in Pallas TPU lowering")
     @skip_if_cuda(reason="reduce_prod primitive not implemented in Pallas Mosaic GPU")
     def test_prod_reduction(self):
         """Test prod reduction."""
@@ -1227,7 +1232,6 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1241,9 +1245,11 @@ class PallasTestsMixin:
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
                 var_result, mean_result = compiled(x)
-                var_expected, mean_expected = fn(x)
-                self.assertEqual(mean_result, mean_expected)
-                self.assertEqual(var_result, var_expected)
+                # Eager mode torch_tpu doesn't support lowering var_mean, so comparing with numpy
+                var_expected = np.var(x.cpu().numpy(), axis=-1, keepdims=True, ddof=1)
+                mean_expected = np.mean(x.cpu().numpy(), axis=-1, keepdims=True)
+                self.assertEqual(mean_result.cpu().numpy(), mean_expected)
+                self.assertEqual(var_result.cpu().numpy(), var_expected)
 
     @skip_if_cuda
     def test_layer_norm(self):
@@ -2147,6 +2153,461 @@ class PallasTestsMixin:
                 result = compiled(x)
                 expected = fn(x)
                 self.assertEqual(result, expected)
+
+    def _run_transformer(
+        self,
+        num_layers,
+        seq_len,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
+    ):
+        """Run a multi-layer Llama-style transformer and verify correctness."""
+        torch._dynamo.reset()
+
+        def transformer(x, mask, *layer_params):
+            T, C = x.shape
+            params_per_layer = (
+                9  # rms_w1, rms_w2, w_q, w_k, w_v, w_o, w_gate, w_up, w_down
+            )
+
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+
+                # Pre-attention RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+                # Multi-head self-attention
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+
+                x = x + (attn_out @ w_o)
+
+                # Pre-FFN RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+                # SwiGLU FFN
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+
+            return x
+
+        compiled = self._compile(transformer)
+
+        s = hidden_dim**-0.5
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),  # rms_w1
+                    torch.ones(hidden_dim, device=self.DEVICE),  # rms_w2
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_q
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_k
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_v
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_o
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,  # w_gate
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,  # w_up
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,  # w_down
+                ]
+            )
+
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
+
+        result = compiled(x, mask, *all_params)
+        expected = transformer(x, mask, *all_params)
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    @skip_if_cuda
+    def test_transformer_tiny(self):
+        """Test a 4-layer Llama-style transformer at tiny dimensions."""
+        self._run_transformer(
+            num_layers=4,
+            seq_len=32,
+            hidden_dim=64,
+            num_heads=2,
+            head_dim=32,
+            ffn_dim=256,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @skip_if_cuda
+    def test_transformer_medium(self):
+        """Test a 4-layer transformer at Llama-7B-like dimensions."""
+        self._run_transformer(
+            num_layers=4,
+            seq_len=128,
+            hidden_dim=4096,
+            num_heads=32,
+            head_dim=128,
+            ffn_dim=11008,
+            atol=0.1,
+            rtol=1e-2,
+        )
+
+    def _run_transformer_lm(
+        self,
+        num_layers,
+        seq_len,
+        vocab_size,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
+    ):
+        """Run a full Llama-style LM (embedding + layers + norm + lm_head)."""
+        torch._dynamo.reset()
+
+        def transformer_lm(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *layer_params
+        ):
+            # Token embedding via gather
+            x = embed_table[token_ids]  # (T, C)
+            T, C = x.shape
+            params_per_layer = 9
+
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+
+                # Pre-attention RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+                # Multi-head self-attention
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+
+                x = x + (attn_out @ w_o)
+
+                # Pre-FFN RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+                # SwiGLU FFN
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+
+            # Final RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6) * final_rms_w
+
+            # LM head
+            logits = x @ lm_head_w  # (T, V)
+            return logits
+
+        compiled = self._compile(transformer_lm)
+
+        s = hidden_dim**-0.5
+        embed_table = torch.randn(vocab_size, hidden_dim, device=self.DEVICE) * s
+        final_rms_w = torch.ones(hidden_dim, device=self.DEVICE)
+        lm_head_w = torch.randn(hidden_dim, vocab_size, device=self.DEVICE) * s
+
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,
+                ]
+            )
+
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        token_ids = torch.randint(0, vocab_size, (seq_len,), device=self.DEVICE)
+
+        result = compiled(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *all_params
+        )
+        expected = transformer_lm(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *all_params
+        )
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    @unittest.skip("numerical mismatch in embedding + RMSNorm fusion")
+    def test_transformer_lm_tiny(self):
+        """Test a full LM (embed + 4 layers + norm + lm_head) at tiny dims."""
+        self._run_transformer_lm(
+            num_layers=4,
+            seq_len=32,
+            vocab_size=256,
+            hidden_dim=64,
+            num_heads=2,
+            head_dim=32,
+            ffn_dim=256,
+        )
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_embedding_lookup(self):
+        """Test simple embedding table lookup (integer indexing)."""
+
+        def fn(token_ids, embed_table):
+            return embed_table[token_ids]
+
+        compiled = self._compile(fn)
+        embed_table = torch.randn(256, 64, device=self.DEVICE)
+        token_ids = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(token_ids, embed_table)
+        expected = fn(token_ids, embed_table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_basic(self):
+        """Test bare embedding lookup via indirect access detection."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_non_128_dim(self):
+        """Test indirect access with D not divisible by 128."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 100, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_large_vocab(self):
+        """Test indirect access with larger vocabulary."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(2048, 128, device=self.DEVICE)
+        indices = torch.randint(0, 2048, (64,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_add(self):
+        """Test embedding + pointwise add fused."""
+
+        def fn(indices, table, bias):
+            return table[indices] + bias
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        bias = torch.randn(32, 64, device=self.DEVICE)
+        result = compiled(indices, table, bias)
+        expected = fn(indices, table, bias)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_mul(self):
+        """Test embedding + pointwise multiply with broadcast."""
+
+        def fn(indices, table, scale):
+            return table[indices] * scale
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        scale = torch.randn(64, device=self.DEVICE)
+        result = compiled(indices, table, scale)
+        expected = fn(indices, table, scale)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_chain(self):
+        """Test embedding + chained add and multiply."""
+
+        def fn(indices, table, bias, scale):
+            x = table[indices] + bias
+            return x * scale
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        bias = torch.randn(32, 64, device=self.DEVICE)
+        scale = torch.randn(64, device=self.DEVICE)
+        result = compiled(indices, table, bias, scale)
+        expected = fn(indices, table, bias, scale)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_nn_embedding(self):
+        """Test nn.functional.embedding path through indirect access."""
+
+        def fn(indices, weight):
+            return torch.nn.functional.embedding(indices, weight)
+
+        compiled = self._compile(fn)
+        weight = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, weight)
+        expected = fn(indices, weight)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_single_token(self):
+        """Test indirect access with seq=1."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (1,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_duplicate_indices(self):
+        """Test indirect access with repeated indices."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.tensor([0, 1, 0, 1, 2, 2, 3, 3], device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_transformer_with_final_norm_and_lm_head(self):
+        """Test multi-layer transformer + final RMSNorm + LM head (no embedding)."""
+        torch._dynamo.reset()
+        num_layers = 4
+        seq_len = 32
+        hidden_dim = 64
+        num_heads = 2
+        head_dim = 32
+        ffn_dim = 256
+        vocab_size = 256
+
+        def transformer_with_head(x, final_rms_w, lm_head_w, mask, *layer_params):
+            T, C = x.shape
+            params_per_layer = 9
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+                x = x + (attn_out @ w_o)
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6) * final_rms_w
+            return x @ lm_head_w
+
+        compiled = self._compile(transformer_with_head)
+        s = hidden_dim**-0.5
+        final_rms_w = torch.ones(hidden_dim, device=self.DEVICE)
+        lm_head_w = torch.randn(hidden_dim, vocab_size, device=self.DEVICE) * s
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,
+                ]
+            )
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
+        result = compiled(x, final_rms_w, lm_head_w, mask, *all_params)
+        expected = transformer_with_head(x, final_rms_w, lm_head_w, mask, *all_params)
+        self.assertEqual(result, expected)
 
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""

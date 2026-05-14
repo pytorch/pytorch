@@ -39,6 +39,8 @@ inline bool is_contiguous_strides_for_shape(
 template <typename T>
 class ArrayRefTensor {
  public:
+  using value_type = T;
+
   ArrayRefTensor() = default;
 
   explicit ArrayRefTensor(
@@ -146,6 +148,16 @@ static_assert(
         3 * sizeof(MiniIntArrayRef) + 3 * sizeof(int32_t) +
             (alignof(ArrayRefTensor<int>) > 4 ? sizeof(int32_t) : 0),
     "changing the size of ArrayRefTensor breaks ABI compatibility!");
+
+// Type trait to detect ArrayRefTensor<T> at compile time.
+// Used by codegen_subgraph_prefix to conditionally borrow arrayref inputs.
+template <typename T>
+struct is_arrayref_tensor_type : std::false_type {};
+template <typename T>
+struct is_arrayref_tensor_type<ArrayRefTensor<T>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_arrayref_tensor_type_v =
+    is_arrayref_tensor_type<T>::value;
 
 template <typename T>
 inline ArrayRefTensor<T> reinterpret_tensor_wrapper(

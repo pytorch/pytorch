@@ -41,13 +41,11 @@ def concated_logs() -> str:
     for log_file in glob.glob(
         f"{REPO_ROOT}/test/test-reports/**/*.log", recursive=True
     ):
-        # pyrefly: ignore [bad-argument-type]
         logs.append(f"=== {log_file} ===")
         with open(log_file) as f:
             # For every line, prefix with fake timestamp for log classifier
             for line in f:
                 line = line.rstrip("\n")  # Remove any trailing newline
-                # pyrefly: ignore [bad-argument-type]
                 logs.append(f"2020-01-01T00:00:00.0000000Z {line}")
     return "\n".join(logs)
 
@@ -131,7 +129,7 @@ def trigger_upload_test_stats_intermediate_workflow() -> None:
     # The GITHUB_TOKEN cannot trigger workflow so this isn't used for now
     print("Triggering upload_test_stats_intermediate workflow")
     x = requests.post(
-        "https://api.github.com/repos/pytorch/pytorch/actions/workflows/upload_test_stats_intermediate.yml/dispatches",  # noqa: B950 @lint-ignore
+        "https://api.github.com/repos/pytorch/pytorch/actions/workflows/upload_test_stats_intermediate.yml/dispatches",
         headers={
             "Accept": "application/vnd.github.v3+json",
             "Authorization": f"Bearer {os.environ.get('GITHUB_TOKEN')}",

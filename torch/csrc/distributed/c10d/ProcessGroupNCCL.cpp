@@ -77,7 +77,7 @@ ncclRedOpRAII unpackPreMulSum(
     const ReduceOp& reduceOp,
     const ncclComm_t& comm) {
   const auto* preMulSupplement =
-      reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
+      reinterpret_cast<PreMulSumSupplement*>(reduceOp.supplement_.get());
   ncclRedOp_t preMulSum{};
   bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
@@ -133,7 +133,6 @@ ncclRedOpRAII getNcclReduceOp(
           C10_THROW_ERROR(
               TypeError,
               "PreMulSum Data type must be half, float, bfloat16 or double");
-          return ncclRedOp_t{};
       }
 #else
       C10_THROW_ERROR(ValueError, "PreMulSum requires NCCL>=2.11.1");
@@ -881,7 +880,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
-      // If throwing timed out excepiton without aborting nccl communicators
+      // If throwing timed out exception without aborting nccl communicators
       // here, it was observed that CUDA GPU will have 100% utilization and
       // can not run new events successfully.
       if (timedOut) {
@@ -973,6 +972,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
+  this->setUsePgForSymmMemRendezvous(options_->use_pg_for_symm_mem_rendezvous);
   this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
@@ -5703,18 +5703,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   std::vector<at::Tensor> outputs;
 
   if (getRank() == opts.rootRank) {
-    if (outputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputTensors[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputTensors, getSize());
 
     const auto& options = inputTensor.options();
     const auto& sizes = inputTensor.sizes();
@@ -5722,9 +5711,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     outputs = outputTensors[0];
   } else {
     // if not in the root rank, initialize outputs as empty list
-    if (!outputTensors.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
@@ -5791,18 +5778,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   std::vector<at::Tensor> inputs;
 
   if (getRank() == opts.rootRank) {
-    if (inputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element input list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect input list size " << inputTensors[0].size()
-         << ". Input list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertScatterInputTensorList(invalidArgument, inputTensors, getSize());
 
     const auto& options = outputTensor.options();
     const auto& sizes = outputTensor.sizes();
@@ -5811,9 +5787,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   } else {
     // if not in the root rank, initialize inputTensors as empty place holder
     // with an empty list
-    if (!inputTensors.empty()) {
-      invalidArgument("requires empty input on non-root");
-    }
+    assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function

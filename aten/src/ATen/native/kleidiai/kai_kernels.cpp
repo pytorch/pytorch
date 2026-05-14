@@ -149,9 +149,9 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
   uint8_t* dst_act_mtx_f32 = reinterpret_cast<uint8_t*>(output.data_ptr());
   const uint8_t* lhs_native_mtx_f32 =
-      reinterpret_cast<const uint8_t*>(input.data_ptr());
+      reinterpret_cast<const uint8_t*>(input.const_data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
-      reinterpret_cast<const uint8_t*>(weight.data_ptr());
+      reinterpret_cast<const uint8_t*>(weight.const_data_ptr());
   uint8_t* lhs_packed_base = lhs_packed.get();
 
   const size_t lhs_stride = k * sizeof(float);
@@ -259,9 +259,9 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
   uint8_t* dst_act_mtx_f32 = reinterpret_cast<uint8_t*>(output.data_ptr());
   const uint8_t* lhs_native_mtx_f32 =
-      reinterpret_cast<const uint8_t*>(input.data_ptr());
+      reinterpret_cast<const uint8_t*>(input.const_data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
-      reinterpret_cast<const uint8_t*>(weight.data_ptr());
+      reinterpret_cast<const uint8_t*>(weight.const_data_ptr());
   uint8_t* lhs_packed_base = lhs_packed.get();
 
   const size_t lhs_stride = k * sizeof(float);
@@ -368,9 +368,9 @@ static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
   uint8_t* dst_act_mtx_bf16 = reinterpret_cast<uint8_t*>(output.data_ptr());
   const uint8_t* lhs_native_mtx_bf16 =
-      reinterpret_cast<const uint8_t*>(input.data_ptr());
+      reinterpret_cast<const uint8_t*>(input.const_data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
-      reinterpret_cast<const uint8_t*>(weight.data_ptr());
+      reinterpret_cast<const uint8_t*>(weight.const_data_ptr());
   uint8_t* lhs_packed_base = lhs_packed.get();
 
   constexpr int32_t element_size = sizeof(uint16_t);

@@ -9,7 +9,7 @@ import torch
 from torch._dynamo.utils import warn_once
 from torch.utils._triton import has_triton
 
-from ._triton_ops_meta import get_meta
+from ._triton_ops_meta import _get_device_name, get_meta
 
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
@@ -31,7 +31,7 @@ def check_bsr_layout(f_name, t):
 
 def check_device(f_name, t, device):
     check(
-        t.device == device and t.device.type == "cuda",
+        t.device == device and t.device.type in ("cuda", "xpu"),
         f"{f_name}(): all inputs are expected to be on the same GPU device.",
     )
 
@@ -529,7 +529,7 @@ def scatter_mm_meta(
     **extra,
 ):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         meta = get_meta(
             "scatter_mm",
             (M, K, N, Ms, Ks),
@@ -552,28 +552,28 @@ def scatter_mm_meta(
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 8
@@ -581,28 +581,28 @@ def scatter_mm_meta(
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -610,35 +610,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -646,35 +646,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 8
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 2
@@ -682,21 +682,21 @@ def scatter_mm_meta(
                 TILE_N = 256
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 2
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
@@ -785,7 +785,7 @@ def bsr_dense_addmm_meta(
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         if dtype is out_dtype:
             version_dtype = dtype

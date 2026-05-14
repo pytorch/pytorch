@@ -168,6 +168,8 @@ def vector_norm(
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
         if dim == []:
             dim = None
+        elif dim is not None:
+            dim = utils.canonicalize_dims(x.ndim, dim)
 
         if (dim is None and guard_or_false(x.numel() == 1)) or (
             dim is not None
@@ -432,5 +434,5 @@ def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
     out.copy_(x)
 
 
-mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
+mps_lib = torch.library.Library("aten", "IMPL", "MPS")
 mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

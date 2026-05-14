@@ -35,7 +35,6 @@ namespace at::native::mps {
 //   - Benchmark on whether or not this is really the case
 //   - Instantiate specialized tensors from template
 //   - Have proper error checking for 64-bit tensors
-//   - Add flavors for 64-bit tensors
 //   - Merged both scatter and gather templates together, as they more or less alike
 
 static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t dim, bool needsScatter) {
@@ -79,6 +78,30 @@ static id<MTLComputePipelineState> getPipelineState(const std::string& kernel,
   return (needsScatter ? scatterLib : gatherLib).getPipelineStateForFunc(kernel, {dtypeSrc, dtypeDst, cvtFunc});
 }
 
+static bool viewNeeds64BitOffsets(const at::Tensor& view) {
+  int64_t max_offset = 0;
+  for (const auto i : c10::irange(view.dim())) {
+    if (view.size(i) > 0) {
+      max_offset += (view.size(i) - 1) * view.stride(i);
+    }
+  }
+  return max_offset >= (int64_t(1) << 32);
+}
+
+template <typename OffsetT>
+static std::vector<OffsetT> makeStridesBuffer(const at::Tensor& view) {
+  uint32_t kernel_size = view.sizes().size();
+  std::vector<OffsetT> strides(kernel_size == 0 ? 1 : kernel_size);
+  if (kernel_size == 0) {
+    strides[0] = 1;
+  } else {
+    for (const auto i : c10::irange(kernel_size)) {
+      strides[i] = static_cast<OffsetT>(view.strides()[i]);
+    }
+  }
+  return strides;
+}
+
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   Tensor output = dst;
   if (!dst.has_storage()) {
@@ -90,12 +113,13 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   }
 
   uint32_t numThreads = output.numel();
+  const bool needs64Bit = viewNeeds64BitOffsets(src);
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
-    id<MTLComputePipelineState> gatherPSO = getPipelineState(functionName,
+    id<MTLComputePipelineState> gatherPSO = getPipelineState(functionName + (needs64Bit ? "_u64" : "_u32"),
                                                              scalarToMetalTypeString(src),
                                                              scalarToMetalTypeString(output),
                                                              /*needsScatter=*/false,
@@ -106,19 +130,23 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
 
     uint32_t kernel_size = src.sizes().size();
     std::vector<uint32_t> src_sizes(kernel_size == 0 ? 1 : kernel_size);
-    std::vector<uint32_t> src_strides(kernel_size == 0 ? 1 : kernel_size);
-
     if (kernel_size == 0) {
-      src_sizes[0] = src_strides[0] = 1;
+      src_sizes[0] = 1;
     } else {
       for (const auto i : c10::irange(kernel_size)) {
         src_sizes[i] = (uint32_t)(src.sizes()[i]);
-        src_strides[i] = (uint32_t)(src.strides()[i]);
       }
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    mtl_setArgs(computeEncoder, src, dst.has_storage() ? dst : output, src_sizes, src_strides, numThreads);
+    auto encode = [&](auto strides) {
+      mtl_setArgs(computeEncoder, src, dst.has_storage() ? dst : output, src_sizes, strides, numThreads);
+    };
+    if (needs64Bit) {
+      encode(makeStridesBuffer<uint64_t>(src));
+    } else {
+      encode(makeStridesBuffer<uint32_t>(src));
+    }
     if (src.dim() > 4) {
       mtl_setBytes<int32_t>(computeEncoder, src.dim(), 5);
     }
@@ -136,13 +164,15 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   }
 
   uint32_t numThreads = src.numel();
+  const bool needs64Bit = viewNeeds64BitOffsets(output);
+
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =
           getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
-      id<MTLComputePipelineState> scatterPSO = getPipelineState(functionName,
+      id<MTLComputePipelineState> scatterPSO = getPipelineState(functionName + (needs64Bit ? "_u64" : "_u32"),
                                                                 scalarToMetalTypeString(src),
                                                                 scalarToMetalTypeString(output),
                                                                 /*needsScatter=*/true,
@@ -152,19 +182,21 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
 
       uint32_t kernel_size = output.sizes().size();
       std::vector<uint32_t> output_sizes(kernel_size == 0 ? 1 : kernel_size);
-      std::vector<uint32_t> output_strides(kernel_size == 0 ? 1 : kernel_size);
-
       if (kernel_size == 0) {
-        output_sizes[0] = output_strides[0] = 1;
+        output_sizes[0] = 1;
       } else {
         for (const auto i : c10::irange(kernel_size)) {
           output_sizes[i] = (uint32_t)(output.sizes()[i]);
-          output_strides[i] = (uint32_t)(output.strides()[i]);
         }
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      mtl_setArgs(computeEncoder, src, output, output_sizes, output_strides, numThreads);
+      auto encode = [&](auto strides) { mtl_setArgs(computeEncoder, src, output, output_sizes, strides, numThreads); };
+      if (needs64Bit) {
+        encode(makeStridesBuffer<uint64_t>(output));
+      } else {
+        encode(makeStridesBuffer<uint32_t>(output));
+      }
       if (output.dim() > 4) {
         mtl_setBytes<int32_t>(computeEncoder, output.dim(), 5);
       }

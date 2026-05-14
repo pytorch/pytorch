@@ -94,7 +94,7 @@ class Vectorized<double> {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
-        count * sizeof(double));
+        std::min<int64_t>(count, size()) * sizeof(double));
     return _mm256_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -103,7 +103,8 @@ class Vectorized<double> {
     } else if (count > 0) {
       double tmp_values[size()];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(double));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(double));
     }
   }
   const double& operator[](int idx) const = delete;

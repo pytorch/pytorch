@@ -105,7 +105,7 @@ void TransformerDecoderLayerImpl::reset() {
           MultiheadAttentionOptions(options.d_model(), options.nhead())
               .dropout(options.dropout())));
 
-  // initialize multihed attention
+  // initialize multihead attention
   multihead_attn = this->register_module(
       "multihead_attn",
       MultiheadAttention(

@@ -137,7 +137,7 @@ def _unused_constant(node: torch.fx.Node) -> list[torch.fx.Node] | None:
 
     This function returns None if this constant is being used, otherwise it returns the
     lift_fresh and detach node to be removed later.
-    """  # noqa: B950
+    """
     if len(node.users) > 1:
         return None
 

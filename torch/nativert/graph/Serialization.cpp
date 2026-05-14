@@ -87,8 +87,8 @@ Value* symbolicToValue(
           }
           case torch::_export::SymIntArgument::Tag::AS_INT: {
             // These are concrete int values in the SymIntList, e.g [s0, 8]
-            // We convert them into a constant Value in graph. These value
-            // doesn't have producer node
+            // We convert them into a constant Value in graph. These values
+            // don't have producer node
             int64_t value = listEl.get_as_int();
             TORCH_CHECK(
                 value >= std::numeric_limits<int>::min() &&
@@ -354,7 +354,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
       } else if (arg.tag() == torch::_export::Argument::Tag::AS_NONE) {
         node->addInput(NamedArgument{
             input.get_name(),
-            graph->addValue(std::nullopt, Type::Kind::None, node)});
+            graph->addValue(std::nullopt, Type::Kind::None, nullptr)});
       } else {
         node->addAttribute(Attribute{
             input.get_name(),
@@ -726,6 +726,17 @@ Constant constantToValue(
         std::vector<int64_t> inner_ret;
         for (const auto& val : inner_list) {
           inner_ret.push_back(val);
+        }
+        ret.push_back(inner_ret);
+      }
+      return ret;
+    }
+    case torch::_export::Argument::Tag::AS_FLOAT_LISTS: {
+      std::vector<std::vector<double>> ret;
+      for (const auto& inner_list : jsonArg.get_as_float_lists()) {
+        std::vector<double> inner_ret;
+        for (const auto& val : inner_list) {
+          inner_ret.push_back(val.get());
         }
         ret.push_back(inner_ret);
       }

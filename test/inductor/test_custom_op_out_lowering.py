@@ -26,7 +26,7 @@ class TestCustomOpOutLowering(InductorTestCase):
         lib.define("add_one(Tensor x) -> Tensor")
         lib.define(
             "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=(torch.Tag.out_variant,),
+            tags=(torch.Tag.out,),
         )
 
         def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
@@ -69,7 +69,7 @@ class TestCustomOpOutLowering(InductorTestCase):
         lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
         lib.define(
             "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
-            tags=(torch.Tag.out_variant,),
+            tags=(torch.Tag.out,),
         )
 
         def _split_add_impl(x, a, b):

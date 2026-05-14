@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import types
+import typing
 import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
@@ -20,6 +21,7 @@ from torch._prims_common import (
     TensorLikeType,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._inspect import _fast_bind
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -82,12 +84,9 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
 
 
 def _annotation_has_type(*, typ, annotation):
-    if hasattr(annotation, "__args__"):
-        for a in annotation.__args__:
-            if _annotation_has_type(typ=typ, annotation=a):
-                return True
-        return False
-
+    args = typing.get_args(annotation)
+    if args:
+        return any(_annotation_has_type(typ=typ, annotation=a) for a in args)
     return typ is annotation
 
 
@@ -129,7 +128,7 @@ class elementwise_type_promotion_wrapper:
         @torch._disable_dynamo
         @wraps(fn)
         def _fn(*args, **kwargs):
-            bound = sig.bind(*args, **kwargs)
+            bound = _fast_bind(sig, *args, **kwargs)
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]

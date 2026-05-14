@@ -15,6 +15,7 @@ __all__ = [
     "set_grad_enabled",
     "inference_mode",
     "set_multithreading_enabled",
+    "enforce_grad_layout_policy",
 ]
 
 
@@ -346,6 +347,60 @@ class set_multithreading_enabled(_DecoratorContextManager):
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
+        r"""
+        Create a copy of this class
+        """
+        return self.__class__(self.mode)
+
+
+class enforce_grad_layout_policy(_DecoratorContextManager):
+    r"""Context-manager that controls the gradient layout policy enforcement.
+
+    The gradient layout contract ensures that accumulated gradients have
+    strides matching their corresponding parameters (for non-overlapping
+    dense parameters) or are row-major contiguous (otherwise). This aids
+    performance in optimizers and distributed reducers.
+
+    When ``enable=False``, the autograd engine relaxes this enforcement:
+
+    - Stealable gradients whose layout does *not* match the parameter can
+      still be stolen directly (avoiding an extra copy).
+    - The "grad and param do not obey the gradient layout contract" warning
+      is suppressed.
+
+    The logic that *creates* a brand-new gradient (e.g., cloning into the
+    correct layout when the gradient is not stealable) is **not** affected
+    by this flag.
+
+    This can be used as a context-manager or as a function. It is
+    thread-local and will not affect computation in other threads.
+
+    Args:
+        enable (bool): Whether to enforce the gradient layout contract
+            (``True``, default) or relax enforcement (``False``).
+
+    Example::
+        >>> # xdoctest: +SKIP
+        >>> import torch
+        >>> p = torch.empty(2, 3, 4).permute(2, 0, 1).requires_grad_()
+        >>> with torch.autograd.enforce_grad_layout_policy(False):
+        ...     (p * 2).sum().backward()
+        ...     # p.grad may now have the same strides as the incoming
+        ...     # gradient rather than being forced to match p's strides.
+    """
+
+    def __init__(self, enable: bool = True) -> None:
+        self.prev = torch._C._is_grad_layout_enforcement_enabled()
+        torch._C._set_grad_layout_enforcement_enabled(enable)
+        self.mode = enable
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_grad_layout_enforcement_enabled(self.prev)
+
+    def clone(self) -> "enforce_grad_layout_policy":
         r"""
         Create a copy of this class
         """

@@ -11,7 +11,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningShapeError
+from torch.distributed.pipelining._utils import PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -368,6 +368,7 @@ class StageNegativeTest(MultiProcContinuousTest):
             self.world_size,
             self.device,
         )
+        stage._runtime_validate = True
 
         # Attach to a schedule
         schedule = ScheduleGPipe(stage, chunks)
@@ -382,20 +383,20 @@ class StageNegativeTest(MultiProcContinuousTest):
         _run_step(x)
 
         if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
                 _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
 
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x.to(torch.int32))
 
             # output of stage's mlp layer will be flattened by this hook, the stage should err
             handle = stage_mod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
                 _run_step(x)
             handle.remove()
 
             stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])

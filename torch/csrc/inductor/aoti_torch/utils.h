@@ -8,19 +8,35 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/OptionalArrayRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <optional>
 
-#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
-  try {                                                    \
-    __VA_ARGS__                                            \
-  } catch (const std::exception& e) {                      \
-    LOG(ERROR) << "Exception in aoti_torch: " << e.what(); \
-    return AOTI_TORCH_FAILURE;                             \
-  } catch (...) {                                          \
-    LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";      \
-    return AOTI_TORCH_FAILURE;                             \
-  }                                                        \
+namespace torch::aot_inductor {
+TORCH_API const char* get_last_error();
+TORCH_API void set_last_error(const char* msg);
+} // namespace torch::aot_inductor
+
+#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)                     \
+  try {                                                                     \
+    __VA_ARGS__                                                             \
+  } catch (const c10::Error& e) {                                           \
+    torch::csrc::shim::details::set_torch_exception_what(e.what());         \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        e.what_without_backtrace());                                        \
+    return AOTI_TORCH_FAILURE;                                              \
+  } catch (const std::exception& e) {                                       \
+    torch::csrc::shim::details::set_torch_exception_what(e.what());         \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        torch::csrc::shim::details::get_torch_exception_what());            \
+    return AOTI_TORCH_FAILURE;                                              \
+  } catch (...) {                                                           \
+    torch::csrc::shim::details::set_torch_exception_what("UNKNOWN");        \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        torch::csrc::shim::details::get_torch_exception_what());            \
+    return AOTI_TORCH_FAILURE;                                              \
+  }                                                                         \
   return AOTI_TORCH_SUCCESS;
 
 namespace torch::aot_inductor {
@@ -162,7 +178,7 @@ inline std::vector<T> pointer_to_list(U* ptr, int64_t len) {
   // site
   std::vector<T> result;
   result.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     result.emplace_back(T(ptr[i]));
   }
   return result;
@@ -175,7 +191,7 @@ inline std::vector<T> pointer_to_list(U** ptr, int64_t len) {
   // site
   std::vector<T> result;
   result.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     result.emplace_back(pointer_to_optional(ptr[i]));
   }
   return result;
@@ -187,7 +203,7 @@ inline std::vector<at::Tensor> pointer_to_list(
     int64_t len) {
   std::vector<at::Tensor> result;
   result.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     result.emplace_back(*tensor_handle_to_tensor_pointer(ptr[i]));
   }
   return result;
@@ -199,7 +215,7 @@ inline std::vector<std::optional<at::Tensor>> pointer_to_list(
     int64_t len) {
   std::vector<std::optional<at::Tensor>> result;
   result.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     result.emplace_back(pointer_to_optional<at::Tensor>(ptr[i]));
   }
   return result;
@@ -226,7 +242,7 @@ template <typename T>
 static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   c10::List<T> scalars_list;
   scalars_list.reserve(len);
-  for (int64_t i = 0; i < len; i++) {
+  for (const auto i : c10::irange(len)) {
     scalars_list.emplace_back(scalars[i]);
   }
   return scalars_list;

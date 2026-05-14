@@ -309,7 +309,7 @@ class Transformer(Module):
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self) -> None:
-        r"""Initiate parameters in the transformer model."""
+        r"""Initialize parameters in the transformer model."""
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)

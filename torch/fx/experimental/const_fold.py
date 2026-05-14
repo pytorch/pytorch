@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import re
 from collections.abc import Callable
+from typing import Any
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -31,7 +31,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         const_subgraph: torch.fx.Graph | None = None,
         fx_const_folded_attrs_name: str | None = None,
         device_for_folded_attrs: str = "cuda",
-    ):
+    ) -> None:
         super().__init__(root, graph)
         self.const_subgraph_module = (
             None
@@ -42,12 +42,12 @@ class FoldedGraphModule(torch.fx.GraphModule):
         self.fx_const_folded_attrs_name = fx_const_folded_attrs_name
         self.device_for_folded_attrs = device_for_folded_attrs
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> Any:
         if not self.has_folding_been_run:
             self.run_folding()
         return super().__call__(*args)
 
-    def run_folding(self):
+    def run_folding(self) -> None:
         # If there's no const subgraph module or attr output names to use, return
         # early as there is no const folding to perform.
         if (
@@ -65,7 +65,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         # Tuple[Tensor,].
         folded_attrs = self.const_subgraph_module()
 
-        def _create_param(i):
+        def _create_param(i: torch.Tensor | int) -> torch.nn.Parameter:
             return torch.nn.Parameter(
                 i.detach().clone()
                 if not isinstance(i, int)
@@ -110,7 +110,7 @@ def _inline_module(
     replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
-    def replacement_fn(node):
+    def replacement_fn(node: torch.fx.Node) -> torch.fx.Node:
         new_node = replacement_mapping[node]
         new_node.meta = node.meta.copy()
         return new_node
@@ -281,21 +281,34 @@ def split_const_subgraphs(
 
     # Partition the module into two: submod_0 for constant folding subgraph, and
     # submod_1 for the rest.
-    def mod_partition(node: torch.fx.Node):
+    def mod_partition(node: torch.fx.Node) -> int:
         return 0 if node in const_nodes else 1
 
     split = split_module(mod_traced, module, mod_partition)
 
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
     # Safely get submod_1 in case there are no non-const nodes
-    const_gm, non_const_gm = split.submod_0, getattr(split, non_const_mod_name, None)
+    const_gm = getattr(split, const_mod_name)
+    if not isinstance(const_gm, torch.fx.GraphModule):
+        raise AssertionError(
+            f"Expected GraphModule for {const_mod_name}, got {type(const_gm)}"
+        )
+    non_const_mod = getattr(split, non_const_mod_name, None)
+    non_const_gm: torch.fx.GraphModule | None = None
+    if non_const_mod is not None:
+        if not isinstance(non_const_mod, torch.fx.GraphModule):
+            raise AssertionError(
+                f"Expected GraphModule for {non_const_mod_name}, got {type(non_const_mod)}"
+            )
+        non_const_gm = non_const_mod
 
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `split` as it's the owning module now.
-    for node in non_const_gm.graph.nodes if non_const_gm else []:
-        if node.op == "call_module":
-            setattr(split, node.target, getattr(non_const_gm, node.target))
+    if non_const_gm is not None:
+        for node in non_const_gm.graph.nodes:
+            if node.op == "call_module":
+                setattr(split, node.target, getattr(non_const_gm, node.target))
     for node in const_gm.graph.nodes:
         if node.op == "call_module":
             setattr(split, node.target, getattr(const_gm, node.target))

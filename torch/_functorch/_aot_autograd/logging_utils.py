@@ -117,6 +117,7 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
 
             fx_traceback.set_stack_trace(stack_)
             fx_traceback.set_grad_fn_seq_nr(seq_nr)
+            fx_traceback._mark_autograd_backward()
 
         return prehook
 
@@ -126,6 +127,7 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
         def posthook(grad_input: Any, grad_output: Any) -> None:
             fx_traceback.set_stack_trace(special_stack_)
             fx_traceback.reset_grad_fn_seq_nr()
+            fx_traceback._reset_autograd_backward()
 
         return posthook
 
@@ -137,6 +139,16 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
         special_stack = forward_node_stack.copy()
         special_stack.append(fx_traceback.GRADIENT_ACC_SPECIAL_STACK)
         node.register_hook(get_posthook(special_stack, node._sequence_nr()))
+
+
+def setup_stacktrace_preservation_hooks_from_tensors(outputs: Any) -> None:
+    roots = [
+        t.grad_fn
+        for t in (outputs if isinstance(outputs, (list, tuple)) else (outputs,))
+        if isinstance(t, torch.Tensor) and t.grad_fn is not None
+    ]
+    if roots:
+        setup_stacktrace_preservation_hooks(roots)
 
 
 def describe_input(i: int, aot_config: AOTConfig) -> str:

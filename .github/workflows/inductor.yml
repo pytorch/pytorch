@@ -25,6 +25,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   unit-test:
@@ -73,6 +74,7 @@ jobs:
       build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
+      enable-torch-trace: "1"
     secrets: inherit
 
   inductor-cpu-build:

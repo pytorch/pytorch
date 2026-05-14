@@ -72,6 +72,8 @@ struct AllocatorConfigInfo {
   bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
+  size_t max_round_threshold;
+  size_t max_cached_size;
 };
 
 struct SnapshotInfo {
@@ -95,14 +97,26 @@ using OutOfMemoryObserver = std::function<void(
     size_t device_total,
     size_t device_free)>;
 
+// Observer called when an allocation is preemptively rejected due to
+// throw_on_cudamalloc_oom policy. Parameters:
+//   - device: GPU device index
+//   - alloc_size: size of the rejected allocation request
+//   - total_allocated: total memory allocated before the request
+//   - device_total: total GPU memory
+using OomRejectionObserver = std::function<void(
+    int64_t device,
+    size_t alloc_size,
+    size_t total_allocated,
+    size_t device_total)>;
+
 struct ShareableHandle {
   ptrdiff_t offset;
   std::string handle;
 };
 
 struct StreamSegmentSize {
-  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
-      : stream(s), is_small_pool(small), total_size(sz) {}
+  StreamSegmentSize(cudaStream_t s, bool small_, size_t sz)
+      : stream(s), is_small_pool(small_), total_size(sz) {}
   cudaStream_t stream;
   bool is_small_pool;
   size_t total_size;
@@ -138,6 +152,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  // Notify the allocator that a CUDA stream capture has actually started /
+  // ended. Distinct from begin/endAllocateToPool, which only routes
+  // allocations into a private mempool and can be invoked without an active
+  // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
+  // registration, or inductor cudagraph_trees warmup).
+  virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
+  virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -216,6 +237,7 @@ class CUDAAllocator : public DeviceAllocator {
     return "";
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
+  virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
   // per-device allocator lock is held. Any additional locks taken from within
@@ -372,6 +394,14 @@ inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
 }
 
+inline void markCaptureBegin(c10::DeviceIndex device) {
+  get()->markCaptureBegin(device);
+}
+
+inline void markCaptureEnd(c10::DeviceIndex device) {
+  get()->markCaptureEnd(device);
+}
+
 inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
@@ -419,6 +449,10 @@ inline bool checkPoolLiveAllocations(
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   get()->attachOutOfMemoryObserver(std::move(observer));
+}
+
+inline void attachOomRejectionObserver(OomRejectionObserver observer) {
+  get()->attachOomRejectionObserver(std::move(observer));
 }
 
 inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {

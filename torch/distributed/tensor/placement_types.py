@@ -4,7 +4,7 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeVar
+from typing import cast, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -62,6 +62,10 @@ class Shard(torch._C._distributed.Shard):
 
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
+
+    .. note:: When checking whether a placement is shard-like, use
+        :func:`_is_shard_like` instead of ``isinstance(p, Shard)`` to also
+        match :class:`_StridedShard`.
     """
 
     def _split_tensor(
@@ -255,7 +259,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
-        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        # pyrefly: ignore [bad-argument-type, bad-return]
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -419,7 +423,7 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: IntLikeType,
         num_chunks: int,
     ) -> torch.Tensor:
-        from torch.fx.experimental.symbolic_shapes import guard_or_true
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
         # Assume padding (uneven sharding) as general case for unbacked sizes.
         is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
@@ -428,6 +432,22 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+
+        # Bind derived symbolic sizes (e.g. 2*(s//2)) back to the original
+        # symbol - needed for correct shape propagation and dynamo generation
+        if local_tensor.size(self.dim) is not logical_dim_size:
+            orig_size = local_tensor.size(self.dim)
+            torch._check(orig_size >= logical_dim_size)
+            local_tensor = local_tensor.narrow(self.dim, 0, logical_dim_size)
+
+            # Safety check: the narrow should never change the concrete size.
+            # Use guard_or_false so we don't trigger data-dependent guards
+            # on unbacked symints.
+            if guard_or_false(local_tensor.size(self.dim) != orig_size):
+                raise RuntimeError(
+                    f"narrow unexpectedly changed concrete size on dim {self.dim}: "
+                    f"{orig_size} -> {local_tensor.size(self.dim)}"
+                )
 
         return local_tensor
 
@@ -726,7 +746,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Needed for passing this type as an opaque object input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",
             {},
         )
 
@@ -1158,6 +1178,17 @@ class _StridedShard(torch._C._distributed.StridedShard):
         return local_shard_size, offsets
 
 
+def _is_shard_like(p: "Placement") -> TypeGuard[Shard | _StridedShard]:
+    """Check if a placement is Shard or _StridedShard.
+
+    Use this instead of ``isinstance(p, Shard)`` to avoid silently missing
+    ``_StridedShard``.  When ``_StridedShard`` is unified with ``Shard``
+    (see TODO on the class), this helper can be collapsed to a single
+    ``isinstance`` check.
+    """
+    return isinstance(p, Shard | _StridedShard)
+
+
 class Replicate(torch._C._distributed.Replicate):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
@@ -1505,7 +1536,7 @@ class _MaskPartial(Partial):
         Needed for passing this type as an input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",
             {},
         )
 

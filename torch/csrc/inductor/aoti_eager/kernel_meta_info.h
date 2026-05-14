@@ -117,7 +117,7 @@ struct ParameterMetadata {
   ParameterMetadataValue value_;
   // The order of the parameter is used to distinguish the parameters with the
   // same tag. For example, an operation with two input tensors, the first
-  // tensor is a optional tensor and the second tensor is a tensor. The first
+  // tensor is an optional tensor and the second tensor is a tensor. The first
   // tensor will have the order 0 and the second tensor will have the order 1.
   uint64_t order_{};
 
@@ -128,10 +128,10 @@ struct ParameterMetadata {
       const std::vector<at::Tensor>& tensor_list,
       uint64_t input_order);
   ParameterMetadata(
-      const std::vector<TensorMetadata>& tensor_metadata_list,
+      std::vector<TensorMetadata> tensor_metadata_list,
       uint64_t input_order);
   ParameterMetadata(const c10::Scalar& scalar, uint64_t input_order);
-  ParameterMetadata(const std::string& string_value, uint64_t input_order);
+  ParameterMetadata(std::string string_value, uint64_t input_order);
   ParameterMetadata(const c10::Device& device, uint64_t input_order);
 
   bool operator==(const ParameterMetadata& other) const;

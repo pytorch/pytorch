@@ -42,8 +42,9 @@ from ..source import (
 )
 from ..utils import GLOBAL_KEY_PREFIX
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
+from .constant import ConstantVariable
 from .dicts import ConstDictVariable
+from .hashable import HashableTracker
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
@@ -71,7 +72,8 @@ def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
         manager = get_manager(x.device.index, False)
         is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
         if manager:
-            assert manager.current_node is not None
+            if manager.current_node is None:
+                raise AssertionError("CUDA graph manager has no current node")
             return (
                 is_static_address
                 or manager.current_node._is_cuda_graph_recorded_tensor(x)
@@ -147,8 +149,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
         if name in ("_init_group"):
-            assert self.source
-            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
+            if not self.source:
+                raise AssertionError(
+                    "OptimizerVariable requires a source for var_getattr"
+                )
+            return GetAttrVariable(
+                self,
+                name,
+                py_type=type(getattr(self.value, name)),
+                source=AttrSource(self.source, name),
+            )
 
         if name == "param_groups":
             from ..decorators import mark_static_address
@@ -207,10 +217,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
-            param_group_vt.items[key] = CONSTANT_VARIABLE_TRUE
+            key = HashableTracker(ConstantVariable.create("capturable"))
+            param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(
         self, *args: Any, **kwargs: Any
@@ -273,7 +281,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
-        assert state_source is not None
+        if state_source is None:
+            raise AssertionError("state_source must not be None")
         tx.output.guard_on_key_order.add(state_source)
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
@@ -390,9 +399,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                assert isinstance(py_arg, list), (
-                    "py_arg should be a list in optimizer variable"
-                )
+                if not isinstance(py_arg, list):
+                    raise AssertionError(
+                        "py_arg should be a list in optimizer variable"
+                    )
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

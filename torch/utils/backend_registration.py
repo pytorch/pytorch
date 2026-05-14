@@ -17,6 +17,35 @@ __all__ = [
 _privateuse1_backend_name = "privateuseone"
 
 
+def _rename_profiler_activity(backend_name: str) -> None:
+    """Mirror the privateuse1 rename in ProfilerActivity so users can write e.g.
+    ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1."""
+    from torch._C._profiler import ProfilerActivity
+
+    alias = backend_name.upper()
+    setattr(ProfilerActivity, alias, ProfilerActivity.PrivateUse1)
+
+    pu1 = ProfilerActivity.PrivateUse1
+    original_repr = ProfilerActivity.__repr__
+    original_str = ProfilerActivity.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<ProfilerActivity.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"ProfilerActivity.{alias}"
+        return original_str(self)
+
+    ProfilerActivity.__repr__ = custom_repr
+    ProfilerActivity.__str__ = custom_str
+    ProfilerActivity.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     Rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
@@ -79,6 +108,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
+    _rename_profiler_activity(backend_name)
 
 
 def _check_register_once(module, attr) -> None:
@@ -186,9 +216,10 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         )
 
     def wrap_module_to(
+        # pyrefly: ignore [invalid-type-var]
         self: torch.nn.modules.module.T,
         device: int | torch.device | None = None,
-    ) -> torch.nn.modules.module.T:
+    ) -> torch.nn.modules.module.T:  # pyrefly: ignore [invalid-type-var]
         r"""Move all model parameters and buffers to the custom device.
 
         This also makes associated parameters and buffers different objects. So

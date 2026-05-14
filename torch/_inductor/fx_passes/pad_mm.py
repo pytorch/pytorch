@@ -159,10 +159,11 @@ def can_pad(
             return False
 
     # In deterministic mode, we can't safely benchmark - disallow padding
-    # Check this after other basic checks so force_shape_pad can override
+    # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
         torch._inductor.config.deterministic
         and not torch._inductor.config.force_shape_pad
+        and not torch._inductor.config.use_autoheuristic("pad_mm")
     ):
         return False
 
@@ -671,6 +672,10 @@ def _should_pad(
             )
             if ah_should_pad is not None:
                 return ah_should_pad
+
+        # AH didn't make a decision, so if we're in deterministic mode, we should return false
+        if torch._inductor.config.deterministic:
+            return False
 
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)

@@ -2,6 +2,7 @@
 
 ```{eval-rst}
 .. automodule:: torch.accelerator
+   :no-members:
 ```
 
 ```{eval-rst}
@@ -20,6 +21,7 @@
     set_device_idx
     current_device_index
     current_device_idx
+    get_device_capability
     set_stream
     current_stream
     synchronize

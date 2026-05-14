@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
 jobs:
 
   get-label-type:
@@ -78,9 +83,6 @@ jobs:
     name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-noble-xpu-n-py3_10-build
-    permissions:
-      id-token: write
-      contents: read
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
@@ -107,9 +109,6 @@ jobs:
     name: linux-noble-xpu-n-py3.10-client
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-noble-xpu-n-py3_10-client-build
-    permissions:
-      id-token: write
-      contents: read
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.docker-image }}

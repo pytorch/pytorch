@@ -3,6 +3,7 @@ import copy
 import glob
 import importlib
 import importlib.abc
+import importlib.util
 import os
 import re
 import shlex
@@ -71,8 +72,8 @@ CUDA_GCC_VERSIONS: VersionMap = {
     '12.5': ((6, 0, 0), (14, 0)),
     '12.6': ((6, 0, 0), (14, 0)),
     '12.7': ((6, 0, 0), (14, 0)),
-    '12.8': ((6, 0, 0), (14, 0)),
-    '12.9': ((6, 0, 0), (14, 0)),
+    '12.8': ((6, 0, 0), (15, 0)),
+    '12.9': ((6, 0, 0), (15, 0)),
     '13.0': ((6, 0, 0), (16, 0)),
 }
 
@@ -145,7 +146,15 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2
+        # Guess #2: Support for ROCm distribution from TheRock
+        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
+        # (include/, lib/, bin/, ...), so the module's own location is the
+        # ROCM_HOME we want. Use find_spec to locate it without importing.
+        spec = importlib.util.find_spec('_rocm_sdk_core')
+        if spec is not None and spec.origin is not None:
+            rocm_home = str(Path(spec.origin).parent.resolve())
+    if rocm_home is None:
+        # Guess #3
         hipcc_path = shutil.which('hipcc')
         if hipcc_path is not None:
             rocm_home = os.path.dirname(os.path.dirname(
@@ -154,7 +163,7 @@ def _find_rocm_home() -> str | None:
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
         else:
-            # Guess #3
+            # Guess #4
             fallback_path = '/opt/rocm'
             if os.path.exists(fallback_path):
                 rocm_home = fallback_path
@@ -211,6 +220,61 @@ def _join_sycl_home(*paths) -> str:
 
     return os.path.join(SYCL_HOME, *paths)
 
+
+
+def _wrap_compiler(compiler: str | list[str]) -> list[str]:
+    """Prepend a compiler wrapper (ccache/sccache) if available.
+
+    Accepts a compiler as a string or list. Always returns a list with the
+    wrapper prepended, or the original value as a list if no wrapper is found.
+    Disabled when TORCH_NO_COMPILER_WRAPPER is set.
+    """
+    if isinstance(compiler, str):
+        compiler = [compiler]
+    # hipcc with ccache/sccache is currently broken
+    # I.e. compilation fails with
+    #  sccache: caused by: Compiler not supported: "sh: 1: /usr/local/cuda/bin/nvcc: not found\n
+    # sh: 1: nvcc: not found\nDevice not supported - Defaulting to AMD\n
+    # failed to execute:/opt/rocm/lib/llvm/bin/clang++  -O3  -E -x c /tmp/sccachei1cosZ/testfile.c\n"
+    if os.environ.get('TORCH_NO_COMPILER_WRAPPER') or IS_WINDOWS or torch.version.hip is not None:
+        return compiler
+    for wrapper in ('ccache', 'sccache'):
+        if shutil.which(wrapper):
+            return [wrapper] + compiler
+    return compiler
+
+
+def _windows_quote(arg: str) -> str:
+    """Quote a single argument per the MSVC ``CommandLineToArgvW`` rules."""
+    if arg and not any(c in arg for c in ' \t\n\v"'):
+        return arg
+    out = ['"']
+    backslashes = 0
+    for c in arg:
+        if c == '\\':
+            backslashes += 1
+            continue
+        if c == '"':
+            out.append('\\' * (2 * backslashes + 1))
+            out.append('"')
+        else:
+            out.append('\\' * backslashes)
+            out.append(c)
+        backslashes = 0
+    out.append('\\' * (2 * backslashes))
+    out.append('"')
+    return ''.join(out)
+
+
+def _shell_join(cmd: list[str]) -> str:
+    """Quote and join ``cmd`` for the current platform's shell.
+
+    ``shlex.join`` produces POSIX-style quoting which ninja does not parse
+    correctly on Windows for paths like ``C:\\Program Files\\...``.
+    """
+    if IS_WINDOWS:
+        return ' '.join(_windows_quote(a) for a in cmd)
+    return shlex.join(cmd)
 
 
 ABI_INCOMPATIBILITY_WARNING = (
@@ -801,15 +865,17 @@ class BuildExtension(build_ext):
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = [_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc')]
-                    self.compiler.set_executable('compiler_so', nvcc)
+                    self.compiler.set_executable('compiler_so', _wrap_compiler(nvcc))
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if IS_HIP_EXTENSION:
                         cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
-                elif isinstance(cflags, dict):
-                    cflags = cflags['cxx']
+                else:
+                    self.compiler.set_executable('compiler_so', _wrap_compiler(list(original_compiler)))
+                    if isinstance(cflags, dict):
+                        cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
                 append_std17_if_no_std_present(cflags)
@@ -1016,15 +1082,17 @@ class BuildExtension(build_ext):
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
-                        cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
-                    elif isinstance(self.cflags, dict):
-                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
-                        append_std17_if_no_std_present(cflags)
-                        cmd += cflags
-                    elif isinstance(self.cflags, list):
-                        cflags = COMMON_MSVC_FLAGS + self.cflags
-                        append_std17_if_no_std_present(cflags)
-                        cmd += cflags
+                        cmd = _wrap_compiler([nvcc, '-c', src, '-o', obj] + include_list + cflags)
+                    else:
+                        if isinstance(self.cflags, dict):
+                            cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
+                            append_std17_if_no_std_present(cflags)
+                            cmd += cflags
+                        elif isinstance(self.cflags, list):
+                            cflags = COMMON_MSVC_FLAGS + self.cflags
+                            append_std17_if_no_std_present(cflags)
+                            cmd += cflags
+                        cmd = _wrap_compiler(cmd)
 
                 return original_spawn(cmd)
 
@@ -1243,11 +1311,11 @@ class BuildExtension(build_ext):
                     parts = flag.split("=", 1)
                     if len(parts) == 2:
                         flag_part, value_part = parts
-                        # replace fist instance of "CUDA" with "HIP" only in the flag and not flag value
+                        # replace first instance of "CUDA" with "HIP" only in the flag and not flag value
                         modified_flag_part = flag_part.replace("CUDA", "HIP", 1)
                         modified_flag = f"{modified_flag_part}={value_part}"
                     else:
-                        # replace fist instance of "CUDA" with "HIP" in flag
+                        # replace first instance of "CUDA" with "HIP" in flag
                         modified_flag = flag.replace("CUDA", "HIP", 1)
                     modified_flags.append(modified_flag)
                     logger.info('Modified flag: %s -> %s', flag, modified_flag)
@@ -1880,6 +1948,8 @@ def _check_and_build_extension_h_precompiler_headers(
     if b_is_gcc is False:
         return
 
+    compiler = _shell_join(_wrap_compiler(compiler))
+
     head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
     head_file_signature = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.sign')
@@ -2261,8 +2331,11 @@ def _jit_compile(name,
                         hipified_sources = set()
                         for source in sources:
                             s_abs = os.path.abspath(source)
-                            hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
-
+                            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                                hipified_s_abs = hipify_result[s_abs].hipified_path
+                            else:
+                                hipified_s_abs = s_abs
+                            hipified_sources.add(hipified_s_abs)
                         sources = list(hipified_sources)
 
                     _write_ninja_file_and_build_library(
@@ -3029,7 +3102,7 @@ e.
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append(f'cxx = {compiler}')
+    config.append(f'cxx = {_shell_join(_wrap_compiler(compiler))}')
     if with_cuda or cuda_dlink_post_cflags:
         if "PYTORCH_NVCC" in os.environ:
             nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
@@ -3038,6 +3111,7 @@ e.
                 nvcc = _get_hipcc_path()
             else:
                 nvcc = _join_cuda_home('bin', 'nvcc')
+            nvcc = _shell_join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
         sycl = 'icx' if IS_WINDOWS else 'icpx'

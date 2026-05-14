@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
 import copy
 import math
 from dataclasses import dataclass
@@ -615,13 +614,13 @@ class GraphModule(torch.nn.Module):
 
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = l_x_.clone();  l_x_ = None
-            outs: "f32[]" = mul * clone
+            outs: "f32[]" = mul * clone;  mul = clone = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((outs, mul, clone), (l_weird_b, l_weird_c))
+            return ((outs,), (l_weird_b, l_weird_c))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad: "f32[]", unused_0, unused_1, l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
@@ -844,7 +843,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, gO):
                 return torch.tensor(float("nan")).expand(10, 10)
 
-        def run_fn(a):  # noqa: F841
+        def run_fn(a):
             out = MyFunc2.apply(a)
             return out.sum()
 
@@ -1136,13 +1135,13 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             t: "f32[3, 4]" = l_weight_.t()
-            y: "f32[5, 4]" = l_x_.matmul(t)
+            y: "f32[5, 4]" = l_x_.matmul(t);  t = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((y, t), (l_weight_, l_x_))
+            return ((y,), (l_weight_, l_x_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y: "f32[5, 4]", unused_0, l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
+        def forward(self, y: "f32[5, 4]", l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
@@ -1668,7 +1667,7 @@ class GraphModule(torch.nn.Module):
             mask = block_start < n_elements
             grad_out = tl.load(grad_out_ptr + block_start, mask=mask)
             # Read offsets (read-only, not written back)
-            _offsets_val = tl.load(offsets_ptr + 0)  # noqa: F841
+            _offsets_val = tl.load(offsets_ptr + 0)
             tl.store(grad_x_ptr + block_start, grad_out, mask=mask)
 
         class FnWithReadOnlyBwdInput(torch.autograd.Function):
@@ -1806,13 +1805,13 @@ class GraphModule(torch.nn.Module):
 
             result: "f32[s17, 8]" = a * b
 
-            out: "f32[s17, 8]" = a + b
+            out: "f32[s17, 8]" = a + b;  b = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((result, out, a, b), (s17, a, cos, result))
+            return ((result, out), (s17, a, cos, result))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", unused_0, unused_1, s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
+        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[s17, 8]" = a * grad_b;  a = grad_b = None
@@ -2051,17 +2050,17 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = l_module_b * 5;  l_module_b = None
-            mul_1: "f32[4, 4]" = mul * l_input_data_values
-            output_tensor: "f32[4, 4]" = 4 + mul_1
+            mul_1: "f32[4, 4]" = mul * l_input_data_values;  mul = None
+            output_tensor: "f32[4, 4]" = 4 + mul_1;  mul_1 = None
 
-            out: "f32[4, 4]" = output_tensor + l_x_
+            out: "f32[4, 4]" = output_tensor + l_x_;  output_tensor = None
             out_1: "f32[4, 4]" = l_input_data_values + l_x_;  l_input_data_values = l_x_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((out, out_1, mul, mul_1, output_tensor), ())
+            return ((out, out_1), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]", unused_0, unused_1, unused_2):
+        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = grad_output * 4;  mul = None
@@ -2132,6 +2131,520 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
         res = opt_fn(input_data, x)
         self.assertEqual(ref, res)
+
+    def test_inplace_op_with_side_effect_wrong_grad(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/180642
+        # In-place op inside autograd.Function.forward combined with a side
+        # effect (list append) causes collect_intermediate_outputs to add a
+        # pre-mutation alias as an extra subgraph output. Because the alias
+        # shares the same TensorImpl as the real return value,
+        # set_gradient_edge overwrites output_nr, routing the backward
+        # gradient to the wrong slot and producing zero gradients.
+        captured = []
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                intermediate = torch.sin(x)
+                captured.append(intermediate)
+                loss = torch.tensor(0.0, device=x.device)
+                loss += x.sum()
+                return loss
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.expand(8)
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(8, device="cpu", requires_grad=True)
+
+        # Eager reference
+        x_ref = x.detach().clone().requires_grad_(True)
+        captured.clear()
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        # Compiled
+        torch._dynamo.reset()
+        captured.clear()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_aliased_intermediate_captured_by_side_effect(self):
+        # An intermediate that aliases an input is captured via side effect
+        # and used by the outer graph. filter_aliased_intermediates drops it
+        # from the subgraph outputs, but the outer graph still needs it.
+        # We should get a clear error telling the user to clone.
+        captured = []
+
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                view = x.view(-1)
+                captured.append(view)
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.expand(8)
+
+        def fn(x):
+            out = Bar.apply(x)
+            return out + captured[0].sum()
+
+        x = torch.randn(8, requires_grad=True)
+        captured.clear()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aliases an input or output.*clone",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_nullified_ctx_manager_side_effect_in_backward(self):
+        # A context manager that flips a boolean attribute on enter and
+        # restores it on exit has no net side effect. Dynamo defers the
+        # check and validates nullification after tracing.
+        import contextlib
+
+        class State:
+            def __init__(self):
+                self.enabled = False
+
+        state = State()
+
+        @contextlib.contextmanager
+        def toggle_flag():
+            old = state.enabled
+            state.enabled = True
+            try:
+                yield
+            finally:
+                state.enabled = old
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                with toggle_flag():
+                    return grad.clone()
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+
+        # Eager reference
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        # Compiled
+        torch._dynamo.reset()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_non_nullified_side_effect_in_backward_fails(self):
+        # A backward that mutates an outer-scope attribute without restoring
+        # it should still fail, even with deferred side-effect checking.
+        class State:
+            def __init__(self):
+                self.enabled = False
+
+        state = State()
+
+        class Bad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                state.enabled = True
+                return grad.clone()
+
+        def fn(x):
+            return Bad.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
+
+    def test_nullified_dict_attr_side_effect_in_backward(self):
+        # Attribute that holds a dict is swapped and restored — nullified.
+        class Config:
+            def __init__(self):
+                self.options = {"mode": "fast", "level": 3}
+
+        cfg = Config()
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                old = cfg.options
+                cfg.options = {"mode": "slow", "level": 1}
+                cfg.options = old
+                return grad.clone()
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        torch._dynamo.reset()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_non_nullified_dict_attr_side_effect_in_backward_fails(self):
+        # Attribute that holds a dict is swapped but NOT restored.
+        class Config:
+            def __init__(self):
+                self.options = {"mode": "fast", "level": 3}
+
+        cfg = Config()
+
+        class Bad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                cfg.options = {"mode": "slow", "level": 1}
+                return grad.clone()
+
+        def fn(x):
+            return Bad.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
+
+    def test_nullified_integer_counter_in_backward(self):
+        # Integer attribute incremented then decremented — nullified.
+        class Counter:
+            def __init__(self):
+                self.depth = 0
+
+        counter = Counter()
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                counter.depth += 1
+                result = grad.clone()
+                counter.depth -= 1
+                return result
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        torch._dynamo.reset()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_read_after_mutate_in_backward(self):
+        # Code inside the backward reads the flipped value, confirming
+        # the traced mutation is visible during tracing.
+        import contextlib
+
+        class State:
+            def __init__(self):
+                self.mode = "default"
+
+        state = State()
+
+        @contextlib.contextmanager
+        def set_mode(mode):
+            old = state.mode
+            state.mode = mode
+            try:
+                yield
+            finally:
+                state.mode = old
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                with set_mode("special"):
+                    if state.mode == "special":
+                        return grad * 2.0
+                    return grad
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        torch._dynamo.reset()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_property_with_side_effect_in_backward_fails(self):
+        # A property setter that has a real side effect (incrementing a
+        # counter) is NOT a nullified mutation even if the value is restored.
+        # Dynamo traces through the setter and sees the non-nullified
+        # set_count increment.
+        import contextlib
+
+        class State:
+            def __init__(self):
+                self._enabled = False
+                self.set_count = 0
+
+            @property
+            def enabled(self):
+                return self._enabled
+
+            @enabled.setter
+            def enabled(self, val):
+                self.set_count += 1
+                self._enabled = val
+
+        state = State()
+
+        @contextlib.contextmanager
+        def toggle():
+            old = state.enabled
+            state.enabled = True
+            try:
+                yield
+            finally:
+                state.enabled = old
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                with toggle():
+                    return grad.clone()
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
+
+    def test_apply_kwargs_old_style(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                ctx.save_for_backward(input)
+                ctx.factor = factor
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        def fn(x):
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        ref.backward()
+        grad_ref = x.grad.clone()
+        x.grad = None
+        res.backward()
+        self.assertEqual(x.grad, grad_ref)
+
+    def test_apply_kwargs_setup_context(self):
+        class MyScale(torch.autograd.Function):
+            @staticmethod
+            def forward(x, factor=1):
+                return factor * x
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, factor = inputs
+                ctx.save_for_backward(x)
+                ctx.factor = factor
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * ctx.factor, None
+
+        def fn(x):
+            return MyScale.apply(x, factor=3)
+
+        x = torch.tensor([2.0], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        ref.backward()
+        grad_ref = x.grad.clone()
+        x.grad = None
+        res.backward()
+        self.assertEqual(x.grad, grad_ref)
+
+    def test_apply_kwargs_all_kwargs(self):
+        class Add(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x + y
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        def fn(x, y):
+            return Add.apply(y=y, x=x)
+
+        x = torch.tensor([2.0], requires_grad=True)
+        y = torch.tensor([3.0], requires_grad=True)
+        ref = fn(x, y)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_inference(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, None
+
+        def fn(x):
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812])
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_with_custom_signature(self):
+        # __signature__ is ignored; resolution uses __code__ (matching C++ behavior)
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                ctx.save_for_backward(input)
+                ctx.factor = factor
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        # Set a __signature__ with different param names
+        import inspect as _inspect
+
+        MySin.forward.__signature__ = _inspect.Signature(
+            [
+                _inspect.Parameter("ctx", _inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                _inspect.Parameter("x", _inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                _inspect.Parameter(
+                    "scale",
+                    _inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    default=1,
+                ),
+            ]
+        )
+
+        def fn(x):
+            # "factor" matches __code__, not __signature__
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_with_wrapped(self):
+        # __wrapped__ is ignored; resolution uses __code__ of the wrapper
+        import functools
+
+        def my_decorator(f):
+            @functools.wraps(f)
+            def wrapper(ctx, input, factor=1):
+                return f(ctx, input, factor)
+
+            return wrapper
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            @my_decorator
+            def forward(ctx, input, multiplier=1):
+                ctx.save_for_backward(input)
+                ctx.factor = multiplier
+                return multiplier * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        def fn(x):
+            # "factor" matches the wrapper's __code__, not the wrapped fn
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):

@@ -5,7 +5,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
-from torch import Tensor  # noqa: F401
+from torch import Tensor
 from torch._jit_internal import Dict, List, Optional, Tuple, Union  # noqa: F401
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils.rnn import PackedSequence

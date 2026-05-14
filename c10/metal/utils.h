@@ -82,6 +82,11 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 
+template <>
+struct OpMathType<half2> {
+  using type = float2;
+};
+
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -134,6 +139,26 @@ template <>
 inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+}
+
+// Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
+// which gave wrong results at large threadgroup sizes on M2.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  if (a != a)
+    return false;
+  if (b != b)
+    return true;
+  return a < b;
+}
+
+template <typename T>
+inline ::metal::enable_if_t<!::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  return a < b;
 }
 
 template <typename T>

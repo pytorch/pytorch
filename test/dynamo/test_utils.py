@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import json
 import os
 import pprint
 import sys
@@ -193,7 +194,8 @@ class TestUtils(TestCase):
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            y = break_it(z)
+            with torch._dynamo.disable_nested_graph_breaks():
+                y = break_it(z)
             return y * 2
 
         x = torch.randn(3)
@@ -296,6 +298,14 @@ class TestUtils(TestCase):
             ReinplaceCounters._values,
             "Should not use enum value (integer) in key, should use trigger.name instead",
         )
+
+    def test_get_dynamo_config_for_logging_ignores_logging_functions(self):
+        with dynamo_config.patch(ignore_logging_functions={print}):
+            result = utils._get_dynamo_config_for_logging()
+            parsed = json.loads(result)
+
+        self.assertIsInstance(parsed, dict)
+        self.assertNotIn("ignore_logging_functions", parsed)
 
 
 class TestModel(torch.nn.Module):
@@ -596,7 +606,7 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
  'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -629,7 +639,7 @@ class TestDynamoTimed(TestCase):
  'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate the CompilationMetrics logs. We expect a log for the
@@ -853,7 +863,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Second event is for the backward
@@ -1053,7 +1063,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
     @dynamo_config.patch(

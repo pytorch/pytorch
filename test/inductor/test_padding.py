@@ -778,6 +778,52 @@ class PaddingTest(TestCaseBase):
         output_line = f"buf12 = empty_strided_{GPU_TYPE}({output_shape}, {output_stride}, torch.float32)"
         self.assertTrue(output_line in code[0])
 
+    @requires_gpu()
+    def test_concat_output_no_redundant_copy_with_padding(self):
+        """
+        When comprehensive_padding is enabled, ConcatKernel pads its output
+        buffer strides. The graph output should accept the padded strides
+        directly instead of generating a redundant copy kernel.
+        """
+
+        def f(x):
+            a = x + 1
+            # a has two consumers (mul and cat), which forces ConcatKernel
+            # over pointwise_cat. Both inputs are Pointwise with
+            # FlexibleLayout so they realize directly into concat slices.
+            b = a * 2
+            return torch.cat([a, b], dim=1)
+
+        # Use dim=131 so concat output dim (262) is not aligned to
+        # padding_alignment_bytes/4=32, triggering stride padding.
+        x = torch.randn(128, 131, device=GPU_TYPE)
+
+        with config.patch(
+            {
+                "comprehensive_padding": True,
+                "pad_outputs": True,
+                "padding_stride_threshold": 0,
+                "inplace_buffers": False,
+            }
+        ):
+            result, code = run_and_get_code(torch.compile(f), x)
+
+        ref = f(x)
+        self.assertTrue(torch.allclose(ref, result, atol=1e-3, rtol=1e-3))
+        # Only one output buffer should be allocated for the concat result.
+        # Without the fix, a second empty_strided is allocated and a copy
+        # kernel is generated to copy from the padded concat buffer to it.
+        # Count actual buffer allocations (not import lines) by matching
+        # "= empty_strided_<device>(" pattern.
+        import re
+
+        num_allocs = len(re.findall(rf"= empty_strided_{GPU_TYPE}\(", code[0]))
+        self.assertEqual(
+            num_allocs,
+            1,
+            "Expected exactly one buffer allocation for concat output (no redundant copy)",
+        )
+
     @parametrize(
         "shape,alignment_bytes,enable_pad",
         [
@@ -907,6 +953,25 @@ class PaddingTest(TestCaseBase):
             result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
         )
         self.assertEqual(result.stride(), expected_stride)
+
+    def test_reduction_comprehensive_padding_stride(self):
+        """Comprehensive padding should not cause stride mismatches for
+        user-visible reductions.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/179931
+        """
+
+        def program(x):
+            y = torch.nn.functional.adaptive_avg_pool2d(x, 7)
+            return y.flatten(1).sum(dim=-1)
+
+        x = torch.randn(4, 2049, 8, 8, dtype=torch.float32, device=GPU_TYPE)
+        eager = program(x.clone())
+
+        with config.patch({"comprehensive_padding": True}):
+            compiled = torch.compile(program, backend="inductor")(x.clone())
+
+        self.assertEqual(eager, compiled)
 
 
 if __name__ == "__main__":

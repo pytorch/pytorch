@@ -19,10 +19,7 @@ from torch._C._functorch import (
     _func_increment_nesting,  # type: ignore[attr-defined]
     _grad_decrement_nesting,
     _grad_increment_nesting,
-    _jvp_decrement_nesting,
-    _jvp_increment_nesting,
     _propagate_functional_input_mutation,  # type: ignore[attr-defined]
-    _unwrap_for_grad,
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -30,6 +27,11 @@ from torch._C._functorch import (
     get_unwrapped,
     is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
+)
+from torch._functorch.predispatch import (
+    _jvp_decrement_nesting,
+    _jvp_increment_nesting,
+    _unwrap_for_grad,
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor

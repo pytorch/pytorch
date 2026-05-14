@@ -31,13 +31,7 @@ from typing import Optional
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
 
-from .api import (  # noqa: F401
-    Event,
-    EventMetadataValue,
-    EventSource,
-    NodeState,
-    RdzvEvent,
-)
+from .api import Event, EventMetadataValue, EventSource, NodeState, RdzvEvent
 
 
 _events_loggers: dict[str, logging.Logger] = {}

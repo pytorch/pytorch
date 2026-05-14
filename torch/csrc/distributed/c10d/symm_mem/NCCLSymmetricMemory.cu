@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
@@ -61,32 +62,16 @@ struct NCCLAllocation {
 
 namespace {
 
-struct NCCLSymmMemKey {
-  void* ptr;
-  std::string group_name;
-
-  bool operator==(const NCCLSymmMemKey& other) const noexcept {
-    return ptr == other.ptr && group_name == other.group_name;
-  }
-};
-
-struct NCCLSymmMemKeyHash {
-  size_t operator()(const NCCLSymmMemKey& key) const {
-    auto seed = c10::hash_combine(0, std::hash<void*>{}(key.ptr));
-    return c10::hash_combine(seed, std::hash<std::string>{}(key.group_name));
-  }
-};
-
 // Base allocation ptr -> owning NCCL allocation metadata.
 using NCCLAllocMap = ska::flat_hash_map<void*, std::unique_ptr<NCCLAllocation>>;
 // (Tensor storage/data ptr, group name) -> cached SymmetricMemory handle.
 using NCCLSymmMemMap = ska::flat_hash_map<
-    NCCLSymmMemKey,
+    SymmMemKey,
     c10::intrusive_ptr<NCCLSymmetricMemory>,
-    NCCLSymmMemKeyHash>;
+    SymmMemKeyHash>;
 // Base allocation ptr -> cached `(tensor ptr, group)` keys derived from it.
 using NCCLSymmMemKeysByAlloc =
-    ska::flat_hash_map<void*, ska::flat_hash_set<NCCLSymmMemKey, NCCLSymmMemKeyHash>>;
+    ska::flat_hash_map<void*, ska::flat_hash_set<SymmMemKey, SymmMemKeyHash>>;
 
 bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
   auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
@@ -507,7 +492,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     NCCLAllocation* allocation;
-    NCCLSymmMemKey key{ptr, *group_name};
+    SymmMemKey key{ptr, *group_name};
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
@@ -561,6 +546,11 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   bool has_multicast_support(int device_idx) override {
     return device_has_multicast_support(device_idx);
+  }
+
+  bool has_allocation(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return find_allocation_covering(ptr, allocations_) != allocations_.end();
   }
 
   c10::DeviceType supported_device_type() override {

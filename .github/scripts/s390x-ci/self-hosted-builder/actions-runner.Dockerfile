@@ -95,6 +95,9 @@ RUN chmod +x /usr/bin/actions-runner /usr/bin/entrypoint
 COPY --from=podman /tmp/podman /tmp/podman
 RUN apt-get update && apt -y install /tmp/podman/*.deb && /bin/rm -rfv /tmp/podman
 
+# fix container detection for pytorch/setup-linux workflow action
+RUN touch /.incontainer
+
 # amd64 Github Actions Runner.
 RUN useradd -m actions-runner
 USER actions-runner

@@ -525,8 +525,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         )
 
         _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
-        # flex in forward and flex_backward in backward
-        self.assertEqual(len(codes), 2)
+        # flex in forward and flex_backward in backward; contiguous partitioning
+        # may split non-contiguous annotated nodes into separate regions
+        self.assertGreaterEqual(len(codes), 2)
 
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
@@ -834,7 +835,7 @@ def forward(self, primals_1, primals_2):
     getitem_10 = invoke_subgraph_6[1]
     getitem_1 = invoke_subgraph_6[0];  invoke_subgraph_6 = None
     sin_3 = torch.ops.aten.sin.default(getitem_1)
-    return (sin_3, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, getitem_10, getitem_1)""",  # noqa: B950
+    return (sin_3, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, getitem_10, getitem_1)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -859,7 +860,7 @@ def forward(self, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, g
     add = torch.ops.aten.add.Tensor(getitem_3, getitem_6);  getitem_3 = getitem_6 = None
     cos_3 = torch.ops.aten.cos.default(primals_1);  primals_1 = None
     mul_3 = torch.ops.aten.mul.Tensor(getitem_5, cos_3);  getitem_5 = cos_3 = None
-    return (mul_3, add)""",  # noqa: B950
+    return (mul_3, add)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -986,11 +987,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  flex_attention = None
-    alias = torch.ops.aten.alias.default(getitem)
-    alias_1 = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
-    alias_2 = torch.ops.aten.alias.default(alias);  alias = None
-    alias_3 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3)""",  # noqa: B950
+    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )
@@ -998,17 +995,17 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             self.assertExpectedInline(
                 captured_gms[1].code.strip(),
                 """\
-def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3, tangents_0):
+def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1, tangents_0):
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, alias_2, alias_3, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = alias_2 = alias_3 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
     add = torch.ops.aten.add.Tensor(getitem_3, getitem_4);  getitem_3 = getitem_4 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_5);  add = getitem_5 = None
-    return (add_1, None, None, None, None, None, None, None, None)""",  # noqa: B950
+    return (add_1, None, None, None, None, None, None, None, None)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )
@@ -1306,6 +1303,196 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 original_mincut_partitioner
             )
 
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_multi_invocation_chunked_loss_with_backward(self, serialize):
+        # Single nested_compile_region invoked many times in a for-loop, summed,
+        # then a single outer .backward(). Exercises pairing fw/bw HOPs by
+        # call_id when there are multiple fw calls per region.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, targets_chunks):
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_two_regions_chunked_loss(self, serialize):
+        # Two nested_compile_regions composed in one fwd+bwd: `attn` called per
+        # layer, `chunk_loss` called per chunk. The fw and bw HOP counts per
+        # region differ, so positional zip-pairing fails; call_id pairing works.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def attn(q, k):
+            return (q * k).sum(dim=-1, keepdim=True) + q
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, y, targets_chunks):
+            for _ in range(3):
+                x = attn(x, y)
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), y.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, y, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    def test_one_fw_subgraph_multiple_bw_subgraphs(self, serialize):
+        # Same fw region called 5 times under dynamic batch dim. The tangents
+        # flowing into each call have different strides depending on their
+        # position in the fw graph, so AOTAutograd's lazy-bw cache produces
+        # multiple bw subgraphs for the same fw — bw HOPs end up with args[1]
+        # like `bw_subgraph_0_0`, `bw_subgraph_0_1`, etc., even though all fws
+        # share `fw_subgraph_0`. Each bw has its own joint partitioning, and
+        # call_id pairing routes each bw to the fw call with the matching
+        # primals — gradients must match eager.
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            a = gn(x)
+            a2 = gn(a)
+            b = torch.sin(a2)
+            c = gn(b)
+            c2 = gn(c)
+            return c.sum() + c2.sum() + gn(x).sum()
+
+        x = torch.randn(8, 16, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        x_ref = x.detach().clone().requires_grad_(True)
+        torch._dynamo.mark_dynamic(x_ref, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_nested_compile_region_basic_nesting(self, serialize):
+        # Outer nested_compile_region calls inner nested_compile_region once.
+        # `run_joint_graph_passes_on_hops` only sees the outer HOP at the joint
+        # graph level; inner is inside outer's subgraph and is handled by
+        # recursive regional inductor compilation, not by the joint partitioner.
+        # call_id pairing for the visible (outer) HOP must still hold.
+        @torch.compiler.nested_compile_region
+        def inner(x):
+            return x * 2
+
+        @torch.compiler.nested_compile_region
+        def outer(x):
+            return inner(x) + 1
+
+        def fn(x):
+            return outer(x).sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_nested_compile_region_multi_invocation(self, serialize):
+        # Outer is called multiple times in a Python for-loop; each outer call
+        # also invokes inner. Joint pass sees N outer fws and N outer bws (one
+        # per call); call_id pairs them correctly. Inner HOPs are nested inside
+        # each outer subgraph and not visible to the joint pass.
+        @torch.compiler.nested_compile_region
+        def inner(x, t):
+            return (x - t).pow(2)
+
+        @torch.compiler.nested_compile_region
+        def outer(x, t):
+            return inner(x, t).mean()
+
+        def fn(x, ts):
+            x_d = x.detach().requires_grad_()
+            total = sum(outer(x_d, t) for t in ts)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        ts = [torch.randn(8, 4) for _ in range(3)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), ts)
+        out_loss, out_grad = opt_fn(x, ts)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
 
@@ -1364,6 +1551,149 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
 
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
+
+    @requires_cuda_and_triton
+    @parametrize("serialize", [False])
+    def test_comprehensive_padding_saved_tensor_stride(self, serialize):
+        # When an op inside a nested_compile_region produces a tensor whose
+        # natural stride exceeds padding_stride_threshold and is not
+        # 128-byte aligned, Inductor's comprehensive_padding pads its runtime
+        # stride. If that tensor is saved for backward, the bw subgraph
+        # (separately compiled, IR traced with natural strides) asserts the
+        # natural stride and crashes with assert_size_stride. The fix is to
+        # mark all subgraph outputs as user-visible inside
+        # invoke_subgraph_inductor_compile so Inductor preserves their strides.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+        # 2056 is divisible by 8 but not by 64, exceeds padding_stride_threshold (1024),
+        # so bf16 rows pad 2056 -> 2112 elements without the fix.
+        out_features = 2056
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(x, w):
+            logits = torch.nn.functional.linear(x, w)
+            return (logits * logits).sum()
+
+        def fn(x, w):
+            return loss_region(x, w)
+
+        x = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        w = torch.randn(
+            out_features, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        ref = fn(x_ref, w_ref)
+        ref.backward()
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+        out = opt_fn(x, w)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_joint_graph_passes_run_on_hop_subgraph(self, serialize):
+        # Inductor's joint-graph passes (e.g. scatter_upon_const_tensor, which
+        # rewrites full+scatter into eq+where to avoid materializing a sparse
+        # buffer) must run on the HOP subgraph's joint graph, not just the
+        # outer one. nll_loss_backward decomposes to full+scatter; without the
+        # rewrite the bw subgraph keeps a (B, V) scatter destination buffer.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(logits_f32, targets):
+            return torch.nn.functional.cross_entropy(
+                logits_f32, targets, reduction="none"
+            )
+
+        def fn(logits, targets):
+            return loss_region(logits.to(torch.float32), targets).sum()
+
+        logits = torch.randn(8, 64, requires_grad=True)
+        targets = torch.randint(0, 64, (8,))
+
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            opt_fn = torch.compile(
+                fn,
+                backend=aot_eager_regional_inductor(
+                    serialize=serialize, on_invoke_subgraph=True
+                ),
+                fullgraph=True,
+            )
+            opt_fn(logits, targets).backward()
+
+        # captured_gms[0] is the fw subgraph and captured_gms[1] is the bw
+        # subgraph. The bw should NOT contain aten.scatter — the joint pass
+        # rewrote full+scatter into eq+where.
+        self.assertExpectedInline(
+            captured_gms[0].code.strip(),
+            """\
+def forward(self, primals_0, primals_1):
+    amax = torch.ops.aten.amax.default(primals_0, [1], True)
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax)
+    exp = torch.ops.aten.exp.default(sub)
+    sum_1 = torch.ops.aten.sum.dim_IntList(exp, [1], True);  exp = None
+    log = torch.ops.aten.log.default(sum_1);  sum_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = None
+    ne = torch.ops.aten.ne.Scalar(primals_1, -100)
+    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where = torch.ops.aten.where.self(ne, primals_1, full_default);  full_default = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(where, 1);  where = None
+    gather = torch.ops.aten.gather.default(sub_1, 1, unsqueeze);  sub_1 = unsqueeze = None
+    squeeze = torch.ops.aten.squeeze.dim(gather, 1);  gather = None
+    neg = torch.ops.aten.neg.default(squeeze);  squeeze = None
+    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_1 = torch.ops.aten.where.self(ne, neg, full_default_1);  ne = neg = full_default_1 = None
+    return (where_1, primals_0, primals_1, amax, log)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+        self.assertExpectedInline(
+            captured_gms[1].code.strip(),
+            """\
+def forward(self, primals_0, primals_1, amax, log, tangents_0):
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
+    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
+    ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
+    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_1);  unsqueeze_2 = full_default_1 = None
+    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default);  ne_2 = unsqueeze_1 = full_default = None
+    iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
+    view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
+    expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
+    eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
+    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None
+    mul = torch.ops.aten.mul.Tensor(where_self, where_3);  where_self = where_3 = None
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax);  primals_0 = amax = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = log = None
+    exp_1 = torch.ops.aten.exp.default(sub_1);  sub_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(mul, [1], True)
+    mul_1 = torch.ops.aten.mul.Tensor(exp_1, sum_2);  exp_1 = sum_2 = None
+    sub_2 = torch.ops.aten.sub.Tensor(mul, mul_1);  mul = mul_1 = None
+    return (sub_2, None)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
@@ -1522,6 +1852,153 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         post_compiled = fw_compiled.post_compile(loaded_code, fx_config)
         self.assertIsNotNone(post_compiled)
         self.assertIsNotNone(post_compiled._graph_module)  # Now deserialized
+
+
+class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
+    """Tests for _RegionScooper partitioning behavior.
+
+    Uses CapabilityBasedPartitioner per region ID. Nodes with the same region ID
+    are merged as aggressively as possible (only cycles prevent merging). Nodes
+    with different region IDs are never merged.
+    """
+
+    def _make_tag_node(self, g, inp, scalar, tagged):
+        node = g.call_function(torch.ops.aten.mul.Scalar, (inp, scalar))
+        if tagged:
+            node.meta["custom"] = {"compile_with_inductor": True}
+        node.meta["val"] = torch.empty(10)
+        return node
+
+    def _scoop_and_count(self, gm):
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        return sum(
+            1
+            for node in partitioned.graph.nodes
+            if node.op == "call_module"
+            and node.target.startswith("__marked_inductor_submod")
+        )
+
+    def _build_chain(self, tags):
+        """Build a linear chain: x -> op0 -> op1 -> ... -> output"""
+        g = torch.fx.Graph()
+        current = g.placeholder("x")
+        for tagged in tags:
+            current = self._make_tag_node(g, current, 1.0, tagged)
+        g.output(current)
+        return torch.fx.GraphModule(torch.nn.Module(), g)
+
+    def test_linear_chain_partitioning(self):
+        """Contiguous runs of tagged nodes form separate partitions."""
+        cases = [
+            # (tags, expected_partitions)
+            ([False, True, True, True, False], 1),
+            ([True, True, False, True, True], 2),
+            ([True, False, True, False, True], 3),
+            ([True, False, True, False, True, False, True], 4),
+            ([False, False, False], 0),
+        ]
+        for tags, expected in cases:
+            with self.subTest(tags=tags):
+                gm = self._build_chain(tags)
+                self.assertEqual(self._scoop_and_count(gm), expected)
+
+    def test_parallel_branches_not_fused(self):
+        """Two adjacent independent tagged branches form 1 partition."""
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_parallel_branches_with_gap_same_region(self):
+        """Two independent tagged nodes separated by an untagged node but
+        sharing the same region ID are fused into 1 partition (no cycle).
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_parallel_branches_with_gap_different_regions(self):
+        """Two independent tagged nodes with different region IDs produce
+        2 separate partitions regardless of graph topology.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_a.meta["custom"] = {"compile_with_inductor": {"inductor_region": 0}}
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        mul_b.meta["custom"] = {"compile_with_inductor": {"inductor_region": 1}}
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_dependent_partitions_merged_across_gap(self):
+        """Two tagged nodes (same region) separated by an untagged node and
+        connected by a data dependency are merged into 1 partition.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        # mul_b consumes mul_a, creating a data dependency across the gap
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_different_annotations_not_merged(self):
+        """Two tagged nodes with different region IDs are NOT merged,
+        even if connected by a data dependency.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_a.meta["custom"] = {"compile_with_inductor": {"inductor_region": 0}}
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        mul_b.meta["custom"] = {"compile_with_inductor": {"inductor_region": 1}}
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_chained_merges_across_multiple_gaps(self):
+        """Multiple tagged nodes (same region) with chained data dependencies
+        across untagged gaps are all merged into 1 partition.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        tagged_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        # Untagged node consuming x (not tagged_a), just occupying a slot
+        filler_1 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_1.meta["val"] = torch.empty(10)
+        tagged_b = self._make_tag_node(g, tagged_a, 3.0, tagged=True)
+        filler_2 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_2.meta["val"] = torch.empty(10)
+        tagged_c = self._make_tag_node(g, tagged_b, 4.0, tagged=True)
+        g.output(tagged_c)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
 
 
 if __name__ == "__main__":

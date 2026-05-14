@@ -3,32 +3,32 @@
 #include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
-    !__has_include("ext/stdio_filebuf.h")
+#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
+    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
 namespace torch::unwind {
 std::vector<void*> unwind() {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
 std::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 #endif
 
 Stats stats() {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
@@ -41,8 +41,11 @@ Stats stats() {
 #include <elf.h>
 #include <link.h>
 #include <linux/limits.h>
+#include <pthread.h>
 #include <algorithm>
 #include <climits>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -53,7 +56,14 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
+#if defined(__aarch64__)
+extern "C" void unwind_c(
+    std::vector<void*>* result,
+    uintptr_t fp,
+    uintptr_t lr);
+#else
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
+#endif
 extern "C" void unwind_entry(std::vector<void*>* result);
 
 namespace torch::unwind {
@@ -81,15 +91,20 @@ struct LibraryInfo {
   LibraryInfo(
       std::string name,
       uint64_t load_bias,
+      uint64_t first_addr,
       uint64_t last_addr,
       void* eh_frame_hdr_ptr_)
       : name_(std::move(name)),
         load_bias_(load_bias),
+        first_addr_(first_addr),
         last_addr_(last_addr),
         eh_frame_hdr_(eh_frame_hdr_ptr_) {}
 
   uint64_t load_bias() const {
     return load_bias_;
+  }
+  uint64_t first_addr() const {
+    return first_addr_;
   }
   uint64_t last_addr() const {
     return last_addr_;
@@ -98,7 +113,8 @@ struct LibraryInfo {
     void* fde_data = eh_frame_hdr_.entryForAddr(addr);
     FDE fde(fde_data, name().c_str(), load_bias());
     TableState state = fde.readUpTo(addr);
-    return Unwinder(state.cfa, state.registers[D_RIP], state.registers[D_RBP]);
+    return Unwinder(
+        state.cfa, state.registers[D_RET_ADDR], state.registers[D_FRAME_PTR]);
   }
   const std::string& name() const {
     return name_;
@@ -106,7 +122,8 @@ struct LibraryInfo {
 
  private:
   std::string name_;
-  uint64_t load_bias_; // addr >= load_bias_
+  uint64_t load_bias_;
+  uint64_t first_addr_; // addr >= first_addr_
   uint64_t last_addr_; // addr < last_addr_
   EHFrameHdr eh_frame_hdr_;
 };
@@ -151,25 +168,27 @@ struct UnwindCache {
            size_t size [[maybe_unused]],
            void* data) {
           auto self = (UnwindCache*)data;
+          uint64_t load_bias = info->dlpi_addr;
+          uint64_t first_addr = std::numeric_limits<uint64_t>::max();
           uint64_t last_addr = 0;
           auto segments = (Elf64_Phdr*)info->dlpi_phdr;
           for (auto i : c10::irange(info->dlpi_phnum)) {
             if (segments[i].p_type == PT_LOAD) {
-              auto begin = ((uint64_t)info->dlpi_addr + segments[i].p_vaddr);
-              auto end = (begin + segments[i].p_memsz);
+              auto begin = load_bias + segments[i].p_vaddr;
+              auto end = begin + segments[i].p_memsz;
+              first_addr = std::min(begin, first_addr);
               last_addr = std::max(end, last_addr);
-            }
-            if (segments[i].p_type == PT_GNU_EH_FRAME) {
+            } else if (segments[i].p_type == PT_GNU_EH_FRAME) {
               std::string library_name = info->dlpi_name;
               if (library_name.empty()) {
                 library_name = process_name();
               }
-              auto eh_frame_hdr =
-                  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                  (void*)(segments[i].p_vaddr + info->dlpi_addr);
+              // NOLINTNEXTLINE(performance-no-int-to-ptr)
+              auto eh_frame_hdr = (void*)(load_bias + segments[i].p_vaddr);
               self->all_libraries_.emplace_back(
                   std::move(library_name),
-                  info->dlpi_addr,
+                  load_bias,
+                  first_addr,
                   last_addr,
                   eh_frame_hdr);
               return 0;
@@ -183,7 +202,7 @@ struct UnwindCache {
         all_libraries_.begin(),
         all_libraries_.end(),
         [](const LibraryInfo& lhs, const LibraryInfo& rhs) {
-          return lhs.load_bias() < rhs.load_bias();
+          return lhs.first_addr() < rhs.first_addr();
         });
   }
   void checkRefresh(std::shared_lock<std::shared_timed_mutex>& rdlock) {
@@ -261,20 +280,20 @@ struct UnwindCache {
     uint64_t high = all_libraries_.size();
     while (low + 1 < high) {
       auto mid = (low + high) / 2;
-      if (addr < all_libraries_.at(mid).load_bias()) {
+      if (addr < all_libraries_.at(mid).first_addr()) {
         high = mid;
       } else {
         low = mid;
       }
     }
     LibraryInfo* r = &all_libraries_.at(low);
-    if (addr < r->load_bias() || addr >= r->last_addr()) {
+    if (addr < r->first_addr() || addr >= r->last_addr()) {
       return nullptr;
     }
     return r;
   }
 
-  // sorted by load_bias
+  // sorted by first_addr
   std::vector<LibraryInfo> all_libraries_;
   ska::flat_hash_map<uint64_t, Unwinder> ip_cache_;
 
@@ -501,6 +520,111 @@ Stats stats() {
 
 } // namespace torch::unwind
 
+#if defined(__aarch64__)
+// aarch64 uses frame-pointer chain walking instead of DWARF unwinding.
+// Each frame has: *(FP) = caller's FP, *(FP+8) = saved LR (return address).
+// This is simpler and avoids issues with tail calls producing stale x30
+// values in DWARF-based unwinding.  GCC/Clang on aarch64 emit frame
+// pointers by default even at -O2.
+//
+// External libraries (CPython, libc, CUDA runtime) may be built without
+// frame pointers, making x29 an arbitrary callee-saved value.  We obtain
+// the current thread's stack bounds and reject any fp outside that range
+// to avoid dereferencing garbage pointers.
+//
+// No cache_mutex_ needed: frame-pointer walking reads only the stack,
+// unlike the x86 path which queries the DWARF FDE cache.
+
+// Stack bounds are essentially immutable over a thread's lifetime (base and
+// size are fixed at pthread_create for spawned threads).  On glibc aarch64
+// the main thread is the pathological case: pthread_getattr_np() parses
+// /proc/self/maps on every call because the main-thread stack isn't recorded
+// in TLS at pthread_create.  Cache once per thread to avoid that parse on
+// every unwind.  This mirrors the process-global caches the x86 unwinder
+// uses for /proc-derived data (library list, exe path); here the data is
+// per-thread, so thread_local is the right scope.
+//
+// Edge case: main thread's stack can grow up to RLIMIT_STACK, and this cache
+// freezes the bounds at first observation.  If the stack later grows past
+// cached lo, unwind_c will terminate early on those frames rather than
+// follow them - truncated backtrace, not incorrect.  In practice main-thread
+// stack reaches steady-state depth during init, long before heavy unwinding.
+namespace {
+struct StackBounds {
+  uintptr_t lo = 0;
+  uintptr_t hi = 0;
+  bool initialized = false;
+};
+thread_local StackBounds tls_stack_bounds;
+} // namespace
+
+static bool get_stack_bounds(uintptr_t& lo, uintptr_t& hi) {
+  auto& b = tls_stack_bounds;
+  if (!b.initialized) {
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+      return false;
+    }
+    void* base = nullptr;
+    size_t size = 0;
+    int rc = pthread_attr_getstack(&attr, &base, &size);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+      return false;
+    }
+    b.lo = reinterpret_cast<uintptr_t>(base);
+    b.hi = b.lo + size;
+    b.initialized = true;
+  }
+  lo = b.lo;
+  hi = b.hi;
+  return true;
+}
+
+extern "C" C10_USED void unwind_c(
+    std::vector<void*>* result,
+    uintptr_t fp,
+    uintptr_t lr) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  result->push_back((void*)lr);
+
+  uintptr_t stack_lo = 0, stack_hi = 0;
+  if (!get_stack_bounds(stack_lo, stack_hi)) {
+    return;
+  }
+
+  constexpr int kMaxFrames = 4096;
+  int depth = 0;
+  while (fp != 0 && (fp & 0xF) == 0 && depth++ < kMaxFrames) {
+    if (fp < stack_lo || fp + 16 > stack_hi) {
+      break;
+    }
+    uintptr_t saved_lr;
+    std::memcpy(
+        &saved_lr, reinterpret_cast<const void*>(fp + 8), sizeof(saved_lr));
+    if (saved_lr == 0) {
+      break;
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    result->push_back((void*)saved_lr);
+    uintptr_t next_fp;
+    std::memcpy(&next_fp, reinterpret_cast<const void*>(fp), sizeof(next_fp));
+    if (next_fp <= fp) {
+      break;
+    }
+    fp = next_fp;
+  }
+}
+
+// x0 already holds the result pointer.
+// Pass FP (x29) and LR (x30), then tail-call unwind_c.
+__asm__(
+    ".global unwind_entry\n"
+    "unwind_entry:\n"
+    "mov x1, x29\n"
+    "mov x2, x30\n"
+    "b unwind_c\n");
+#else
 extern "C" C10_USED void unwind_c(
     std::vector<void*>* result,
     int64_t rsp,
@@ -508,17 +632,17 @@ extern "C" C10_USED void unwind_c(
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)rsp;
+  state.pc = *(int64_t*)rsp;
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
-  state.rsp = rsp + 8;
-  state.rbp = rbp;
+  state.sp = rsp + 8;
+  state.fp = rbp;
   torch::unwind::unwind_cache.checkRefresh(lock);
-  while (true) { // unwind for _start sets rip as being undefined
+  while (true) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    result->push_back((void*)state.rip);
+    result->push_back((void*)state.pc);
     const torch::unwind::Unwinder& uw =
-        torch::unwind::unwind_cache.unwinderFor(state.rip, lock);
+        torch::unwind::unwind_cache.unwinderFor(state.pc, lock);
     if (uw.terminator()) {
       if (uw.isUnknown()) {
         result->push_back(nullptr);
@@ -529,8 +653,7 @@ extern "C" C10_USED void unwind_c(
   }
 }
 
-// calling convention puts the first three pointer/int64_t arguments in
-// rdi rsi rdx (all caller-saved)
+// x86-64 calling convention: rdi rsi rdx (all caller-saved)
 // rdi already holds the pointer to the result vector
 // we add arguments for current rsp and rbp and then tail call
 // into unwind_c
@@ -540,5 +663,6 @@ __asm__(
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
     "jmp unwind_c;\n");
+#endif
 
 #endif

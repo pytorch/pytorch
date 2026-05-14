@@ -132,7 +132,6 @@ void checkDoubleInRange(double a) {
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
         "Cannot convert float " + std::to_string(a) + " to integer");
-    return;
   }
 }
 

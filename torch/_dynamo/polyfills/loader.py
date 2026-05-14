@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "_collections",
     "builtins",
+    "copy",
     "functools",
     "itertools",
     "operator",

@@ -187,7 +187,6 @@ namespace c10 {
   _(aten, append)                    \
   _(aten, as_tensor)                 \
   _(aten, adaptive_avg_pool2d_backward) \
-  _(aten, dim)                       \
   _(aten, format)                    \
   _(aten, percentFormat)             \
   _(aten, __not__)                   \

@@ -492,6 +492,20 @@ int64_t _fused_sdp_choice_meta(
     return choice_int;
   }
 #endif
+  bool has_xpu = query_key_set.has(c10::DispatchKey::XPU);
+  if (has_xpu) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kXPU,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
+    return choice_int;
+  }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
@@ -676,11 +690,11 @@ Tensor _safe_softmax(
 // greater than 0.0 is specified.
 //
 // Args:
-//     query (Tensor): Query tensor; shape (N, ..., L, E)
-//     key (Tensor): Key tensor; shape (N, ..., S, E)
-//     value (Tensor): Value tensor; shape (N, ..., S, E)
+//     query (Tensor): Query tensor; shape (N, ..., Hq, L, E)
+//     key (Tensor): Key tensor; shape (N, ..., H, S, E)
+//     value (Tensor): Value tensor; shape (N, ..., H, S, Ev)
 //     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-//         which is (N,..., L, S). Two types of masks are supported.
+//         which is (N,..., Hq, L, S). Two types of masks are supported.
 //         A boolean mask where a value of True indicates that the element *should* take part in attention.
 //         A float mask of the same type as query, key, value that is added to the attention score.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
@@ -692,14 +706,17 @@ Tensor _safe_softmax(
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
 // Returns a tensor:
-//     output (Tensor): Attention output; shape (N, ..., L, E)
+//     output (Tensor): Attention output; shape (N, ..., Hq, L, Ev)
 //
 // Shape legend:
 //     N: Batch size
 //     ...: Any number of other batch dimensions (optional)
 //     S: Source sequence length
 //     L: Target sequence length
-//     E: Embedding dimension
+//     E: Embedding dimension of the query and key
+//     Ev: Embedding dimension of the value
+//     Hq: Number of heads of query
+//     H: Number of heads of key and value
 Tensor scaled_dot_product_attention(
     const Tensor& query_,
     const Tensor& key,
@@ -775,48 +792,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
-#ifdef USE_MPS
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(query_.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        query_.scalar_type());
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(key.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        key.scalar_type());
-      TORCH_CHECK_NOT_IMPLEMENTED(
-        c10::isFloatingType(value.scalar_type()),
-        "scaled_dot_product_attention for MPS does not support dtype ",
-        value.scalar_type());
-      const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
-      if (query_device_type == DeviceType::MPS && dropout_p == 0.0
-          && !(GradMode::is_enabled() && any_inputs_require_grad)
-          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
-          && !any_nested) {
-        if (enable_gqa) {
-          int64_t q_heads = query_.size(-3);
-          int64_t k_heads = key.size(-3);
-          int64_t repeat_factor = q_heads / k_heads;
-
-          if (repeat_factor > 1) {
-            TORCH_CHECK(q_heads % k_heads == 0,
-                          "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
-                                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
-            auto repeated_key = key.repeat_interleave(repeat_factor, /*dim=*/-3);
-            auto repeated_value = value.repeat_interleave(repeat_factor, /*dim=*/-3);
-            return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
-              query_,
-              repeated_key,
-              repeated_value,
-              attn_mask,
-              dropout_p,
-              is_causal,
-              std::nullopt, /*dropout_mask*/
-              scale));
-          }
-        }
+      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -825,9 +802,9 @@ Tensor scaled_dot_product_attention(
             dropout_p,
             is_causal,
             std::nullopt, /*dropout_mask*/
-            scale));
+            scale,
+            enable_gqa));
       }
-#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,

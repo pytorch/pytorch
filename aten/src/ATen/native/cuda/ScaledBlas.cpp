@@ -35,6 +35,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_scaled_mm_v2_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
@@ -826,7 +827,7 @@ _scaled_block1x128_block1x128(
     scale_a.stride(0) == 1 &&
     (
       scale_a.stride(1) == M ||
-      (scale_a.size(1) == 1 && scale_b.stride(1) == 1)
+      (scale_a.size(1) == 1 && scale_a.stride(1) == 1)
     ),
     "scale_a strides must be (", 1, ", ", M, "); got: ", scale_a.strides()
   );
@@ -848,7 +849,7 @@ _scaled_block1x128_block1x128(
         scale_b.stride(1) == 1
       )
     ),
-    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_a.strides()
+    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_b.strides()
   );
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
@@ -986,7 +987,7 @@ _scaled_block1x128_block128x128(
         scale_a.stride(1) == 1
       )
     ),
-    "scale_a must have strides (1, ", M, "); got ", scale_b.strides()
+    "scale_a must have strides (1, ", M, "); got ", scale_a.strides()
   );
   // scale_b shape
   TORCH_CHECK_VALUE(
@@ -1073,12 +1074,13 @@ _scaled_mxfp8_mxfp8(
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
               "Block-wise scaling only supports BFloat16 or Half output types");
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
-#endif
-
+#else
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
+#endif
 }
 
 void
@@ -1187,9 +1189,7 @@ _scaled_nvfp4_nvfp4(
           Tensor& out,
           const std::optional<Tensor>& global_scale_a = std::nullopt,
           const std::optional<Tensor>& global_scale_b = std::nullopt) {
-#ifdef USE_ROCM
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
-#endif
+#ifndef USE_ROCM
   std::optional<Tensor> alpha = std::nullopt;
   // Note: "Or" here means that if only one scale is passed, we check for the other. Otherwise,
   //       if this is "And" we would silently do nothing in the case where one global scale is
@@ -1223,15 +1223,14 @@ _scaled_nvfp4_nvfp4(
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
+#endif
 }
 
 void check_swizzle_lengths(ScaledGemmImplementation impl,
                            std::vector<SwizzleType>& swizzle_a,
                            std::vector<SwizzleType>& swizzle_b) {
-#ifdef ROCM
-  // ROCM doesn't swizzle their formats - we don't care what's passed.
-  return;
-#else
   // Store implementations that care about swizzling, and how many swizzle arguments
   // they have to have
   // NOTE(slayton): auto here is unable to deduce the correct type..
@@ -1248,13 +1247,45 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
     if (impl != check_impl) {
       continue;
     }
-    TORCH_CHECK_VALUE(swizzle_a.size() == num_args, "swizzle_a must have ", num_args, " values, got ", swizzle_a.size());
-    TORCH_CHECK_VALUE(swizzle_b.size() == num_args, "swizzle_b must have ", num_args, " values, got ", swizzle_b.size());
+#ifdef USE_ROCM
+    if (
+        check_impl != ScaledGemmImplementation::MXFP8_MXFP8 &&
+        check_impl != ScaledGemmImplementation::MXFP4_MXFP4) {
+      // ROCm currently does not support NVFP4 paths.
+      break;
+    }
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == 1 && swizzle_b.size() == 1,
+        "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
+        swizzle_a.size(),
+        " and ",
+        swizzle_b.size());
+    TORCH_CHECK_VALUE(
+        swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
+            swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE");
+#else
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == num_args,
+        "swizzle_a must have ",
+        num_args,
+        " value",
+        num_args == 1 ? "" : "s",
+        ", got ",
+        swizzle_a.size());
+    TORCH_CHECK_VALUE(
+        swizzle_b.size() == num_args,
+        "swizzle_b must have ",
+        num_args,
+        " value",
+        num_args == 1 ? "" : "s",
+        ", got ",
+        swizzle_b.size());
+#endif
 
     // No need to check anything else
     break;
   }
-#endif
 }
 
 };  // anonymous namespace

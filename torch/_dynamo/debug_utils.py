@@ -222,7 +222,11 @@ class NNModuleToString:
             if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
                 from torch._tensor_str import PRINT_OPTS
 
-                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                    raise AssertionError(
+                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                    )
                 tensor_str = repr(buffer)
             elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
@@ -461,7 +465,10 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
             node.op == "call_function"
             and node.target is torch.ops.prims.convert_element_type.default
         ):
-            assert len(node.args) == 2
+            if len(node.args) != 2:
+                raise AssertionError(
+                    f"Expected node to have 2 args, got {len(node.args)}"
+                )
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
         if node.op == "call_function":
@@ -588,6 +595,9 @@ class NopInputReader:
     def unsupported(self, name: str) -> None:
         pass
 
+    def generator(self, device_type: str, device_index: int) -> None:
+        pass
+
     def opaque(self, script_class_name: str) -> None:
         self.total += 1
 
@@ -665,7 +675,11 @@ class InputReader:
                 t = t.clone(memory_format=torch.preserve_format)
             with torch.no_grad():
                 t.set_(storage, storage_offset, shape, stride)
-        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
+        if torch._subclasses.meta_utils.safe_is_leaf(t) != is_leaf:
+            raise AssertionError(
+                f"Tensor leaf status mismatch: safe_is_leaf(t) = "
+                f"{torch._subclasses.meta_utils.safe_is_leaf(t)}, expected {is_leaf}"
+            )
         torch._utils.set_tensor_metadata(t, metadata)
         self.args.append(t)
         return t  # for BC
@@ -679,6 +693,12 @@ class InputReader:
 
     def unsupported(self, name: str) -> None:
         self.args.append(None)
+
+    def generator(self, device_type: str, device_index: int) -> Any:
+        device = torch.device(device_type, device_index)
+        gen = torch.Generator(device=device)
+        self.args.append(gen)
+        return gen
 
     def opaque(self, script_class_name: str) -> None:
         self.args.append(None)
@@ -744,7 +764,10 @@ class InputWriter:
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
-            assert device_hint is not None
+            if device_hint is None:
+                raise AssertionError(
+                    "device_hint must be provided when storage device is 'meta'"
+                )
             device = device_hint  # type: ignore[assignment]
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
@@ -820,6 +843,12 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
+
+    def generator(self, name: str, arg: torch._C.Generator) -> None:
+        device = arg.device
+        self._lines.append(
+            f"reader.generator({device.type!r}, {device.index!r})  # {name}"
+        )
 
     def opaque(self, name: str, script_class_name: str) -> None:
         self._lines.append(f"reader.opaque({script_class_name!r})  # {name}")

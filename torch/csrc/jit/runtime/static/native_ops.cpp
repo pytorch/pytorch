@@ -532,7 +532,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
       } else {
         TORCH_CHECK(
             in1_i,
-            "dytpe cannot be None when copy is True for aten::to.prim_dtype");
+            "dtype cannot be None when copy is True for aten::to.prim_dtype");
         p_node->Output(0) = at::native::to(in0_t, *in1_i, in2_i, in3_i);
       }
     };

@@ -11,11 +11,11 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -1577,7 +1577,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
     @onlyCUDA
-    @skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
         x = torch.randn(1000, dtype=torch.complex64)

@@ -196,7 +196,7 @@ def _get_make_file(package_name: str, model_names: list[str], device_type: str) 
             "cmake_minimum_required(VERSION 3.10)",
             "project(TestProject)",
             "",
-            "set(CMAKE_CXX_STANDARD 17)",
+            "set(CMAKE_CXX_STANDARD 20)",
             "",
         ]
     )

@@ -35,6 +35,7 @@ from .common import (
     infer_dense_strides,
     load_flex_template,
     maybe_realize,
+    realize_captures_for_cutedsl,
     set_head_dim_values,
     SubgraphResults,
 )
@@ -179,6 +180,10 @@ def flex_attention(
                 "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
                 "value as a tensor on device instead of capturing a Python scalar."
             )
+
+    if backend == "FLASH":
+        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
+        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -698,6 +703,10 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    if backend == "FLASH":
+        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
+        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+
     # Add check for mixed dtypes
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
@@ -711,6 +720,10 @@ def flex_attention_backward(*args, **kwargs):
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    kernel_options.setdefault("WRITE_DQ", True)
     seq_q_divisible = V.graph.sizevars.statically_known_true(
         sympy.Eq(Mod(seq_len_q, 128), 0)
     )

@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-# flake8: noqa: B950
 
 import functools
 import sys
@@ -2026,7 +2025,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return causal_offset_mask
 
-        def noop(score, b, h, q_idx, kv_idx):  # noqa: F841
+        def noop(score, b, h, q_idx, kv_idx):
             return score
 
         mod = generate_causal_offset(
