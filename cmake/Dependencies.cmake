@@ -123,7 +123,11 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
       caffe2_update_option(USE_ASAN OFF)
     endif()
-    if(TARGET Sanitizer::undefined)
+    # UBSan (-fsanitize=undefined) combined with ASAN on ROCm Clang causes
+    # ASAN global metadata to reference unaligned original globals instead
+    # of aligned __sanitized_padded_global copies, triggering an unconditional
+    # alignment check abort in the ASAN runtime.
+    if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
   endif()

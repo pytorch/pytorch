@@ -103,6 +103,19 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
           $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_VECTOR>
           $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>
       )
+      # Work around an ASAN instrumentation bug where the global metadata
+      # references the original (potentially unaligned) global instead of
+      # the __sanitized_padded_global. Without private aliases, string
+      # literals can end up at non-8-byte-aligned offsets in .rodata,
+      # causing an unconditional alignment check failure in the ASAN
+      # runtime that is not suppressible via detect_odr_violation=0.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(
+          Sanitizer::${sanitizer_name}
+          INTERFACE
+          "SHELL:-mllvm -asan-use-private-alias=1"
+        )
+      endif()
       target_link_options(
         Sanitizer::${sanitizer_name}
         INTERFACE
