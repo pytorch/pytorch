@@ -405,29 +405,49 @@ def get_caching_autotuner_plugins(
     return plugins
 
 
+def _run_combo_kernel_standalone_autotune_seed_one(seed_kernel, seed_args):
+    from torch._dynamo.device_interface import DeviceGuard
+
+    device_interface = seed_kernel.get_device_interface()
+    device_idx = seed_kernel.device_props.index
+    with DeviceGuard(device_interface, device_idx):
+        stream = device_interface.get_raw_stream(device_idx)
+        seed_kernel.autotune_to_one_config_no_launch(*seed_args, stream=stream)
+    assert seed_kernel.launchers
+    log.debug(
+        "Combo standalone autotune seed: selected standalone config %s",
+        seed_kernel.launchers[0].config,
+    )
+    return seed_kernel.launchers[0].config
+
+
 def _run_combo_kernel_standalone_autotune_seed(seed_specs):
-    seed_configs = []
     log.debug(
         "Combo standalone autotune seed: tuning %d standalone kernels",
         len(seed_specs),
     )
-    for seed_kernel, seed_args in seed_specs:
-        from torch._dynamo.device_interface import DeviceGuard
+    return [
+        _run_combo_kernel_standalone_autotune_seed_one(seed_kernel, seed_args)
+        for seed_kernel, seed_args in seed_specs
+    ]
 
-        device_interface = seed_kernel.get_device_interface()
-        device_idx = seed_kernel.device_props.index
-        with DeviceGuard(device_interface, device_idx):
-            stream = device_interface.get_raw_stream(device_idx)
-            seed_kernel.autotune_to_one_config_no_launch(
-                *seed_args, stream=stream
-            )
-        assert seed_kernel.launchers
-        log.debug(
-            "Combo standalone autotune seed: selected standalone config %s",
-            seed_kernel.launchers[0].config,
-        )
-        seed_configs.append(seed_kernel.launchers[0].config)
-    return seed_configs
+
+def _has_combo_standalone_autotune_seed_config(combo_kernel) -> bool:
+    for configs in (
+        getattr(combo_kernel, "configs", None),
+        [launcher.config for launcher in getattr(combo_kernel, "launchers", ())],
+        [
+            compile_result.config
+            for compile_result in getattr(combo_kernel, "compile_results", ())
+        ],
+    ):
+        if (
+            configs is not None
+            and len(configs) == 1
+            and getattr(configs[0], "found_by_combo_autotune", False)
+        ):
+            return True
+    return False
 
 
 def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
@@ -437,6 +457,8 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
         return
     if combo_kernel.combo_standalone_autotune_seed_future is not None:
         return
+    if _has_combo_standalone_autotune_seed_config(combo_kernel):
+        return
 
     from torch._inductor.autotune_process import PrecompileThreadPool
 
@@ -445,11 +467,15 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
         len(seed_specs),
         combo_kernel.fn.__name__,
     )
-    combo_kernel.combo_standalone_autotune_seed_future = (
-        PrecompileThreadPool.get_instance().submit(
-            _run_combo_kernel_standalone_autotune_seed, seed_specs
+    pool = PrecompileThreadPool.get_instance()
+    combo_kernel.combo_standalone_autotune_seed_future = [
+        pool.submit(
+            _run_combo_kernel_standalone_autotune_seed_one,
+            seed_kernel,
+            seed_args,
         )
-    )
+        for seed_kernel, seed_args in seed_specs
+    ]
 
 
 class CachingAutotuner(KernelInterface):
@@ -973,6 +999,8 @@ class CachingAutotuner(KernelInterface):
             **self.__dict__,
             "lock": None,
             "_plugins": [],
+            "combo_standalone_autotune_seed_future": None,
+            "combo_standalone_autotune_seed_configs": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -1567,11 +1595,27 @@ class CachingAutotuner(KernelInterface):
         return self.launchers[0].config
 
     def _consume_combo_standalone_autotune_seed_configs(self):
-        future = self.combo_standalone_autotune_seed_future
-        assert future is not None
+        futures = self.combo_standalone_autotune_seed_future
+        assert futures is not None
         if self.combo_standalone_autotune_seed_configs is None:
-            self.combo_standalone_autotune_seed_configs = future.result()
+            if isinstance(futures, list):
+                self.combo_standalone_autotune_seed_configs = [
+                    future.result() for future in futures
+                ]
+            else:
+                self.combo_standalone_autotune_seed_configs = futures.result()
         return self.combo_standalone_autotune_seed_configs
+
+    def _cancel_combo_standalone_autotune_seed(self) -> None:
+        futures = self.combo_standalone_autotune_seed_future
+        if futures is None:
+            return
+        if not isinstance(futures, list):
+            futures = [futures]
+        for future in futures:
+            if not future.cancel():
+                future.result()
+        self.combo_standalone_autotune_seed_future = None
 
     def _apply_combo_standalone_autotune_seed(
         self,
@@ -1597,6 +1641,13 @@ class CachingAutotuner(KernelInterface):
         current_config = launcher.config
         seeded_kwargs = dict(current_config.kwargs)
         applied_seed = False
+        seed_warp_stage_candidates = OrderedSet(
+            (cfg.num_warps, cfg.num_stages) for cfg in seed_configs
+        )
+        found_new_warp_stage = any(
+            candidate != (current_config.num_warps, current_config.num_stages)
+            for candidate in seed_warp_stage_candidates
+        )
 
         for idx, cfg in enumerate(seed_configs):
             before = dict(seeded_kwargs)
@@ -1609,7 +1660,7 @@ class CachingAutotuner(KernelInterface):
             )
             applied_seed = applied_seed or seeded_kwargs != before
 
-        if not applied_seed:
+        if not applied_seed and not found_new_warp_stage:
             log.debug(
                 "Combo standalone autotune seed: no combo block field changes for %s",
                 self.fn.__name__,
@@ -1620,6 +1671,7 @@ class CachingAutotuner(KernelInterface):
         warp_stage_candidates = OrderedSet(
             [
                 (current_config.num_warps, current_config.num_stages),
+                *seed_warp_stage_candidates,
                 *self.inductor_meta.get("combo_warp_stage_candidates", ()),
             ]
         )
@@ -1842,12 +1894,18 @@ class CachingAutotuner(KernelInterface):
         )
         coordesc_time_taken_ns = time.time_ns() - start_time
         best_config.found_by_coordesc = True
+        found_by_combo_autotune = getattr(
+            launcher.config, "found_by_combo_autotune", False
+        )
+        if found_by_combo_autotune:
+            best_config.found_by_combo_autotune = True
 
         if self.save_cache_hook:
             self.save_cache_hook(
                 best_config,
                 self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
+                found_by_combo_autotune=found_by_combo_autotune,
             )
 
         if best_config not in config2launcher:
@@ -2004,9 +2062,11 @@ class CachingAutotuner(KernelInterface):
                     self.autotune_to_one_config(*args, **kwargs)
 
         combo_tuning_groups = self.inductor_meta.get("combo_tuning_groups")
-        if combo_tuning_groups and not getattr(
+        if combo_tuning_groups and getattr(
             self.launchers[0].config, "found_by_combo_autotune", False
         ):
+            self._cancel_combo_standalone_autotune_seed()
+        elif combo_tuning_groups:
             with dynamo_timed(
                 "CachingAutotuner.combo_standalone_autotune_seed",
                 log_pt2_compile_event=False,

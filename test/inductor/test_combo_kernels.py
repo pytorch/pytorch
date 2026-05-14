@@ -1381,6 +1381,22 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
+    @torch._inductor.config.patch({"triton.autotune_at_compile_time": True})
+    def test_combo_kernel_seed_autotune_at_compile_time(self):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(64, 512, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
+        self._assert_combo_seed_launch_path(code, logs, seed_count=2)
+        self.assertEqual(out_eager, out_compiled)
+
+    @requires_gpu_and_triton
     def test_combo_kernel_max_autotune_with_reduction(self):
         def fn(x, y):
             return x.sum(dim=-1), y.mean(dim=-1)

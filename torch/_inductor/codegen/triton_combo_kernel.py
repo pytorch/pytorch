@@ -468,7 +468,9 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
-        self.standalone_autotune_seed_infos: list[tuple[str, list[Any]]] = []
+        self.standalone_autotune_seed_infos: list[
+            tuple[str, list[Any], list[Any]]
+        ] = []
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -1170,7 +1172,11 @@ class ComboKernel(Kernel):
                     inplaced_call_arg_replacements[other_name] = live_name
 
             seed_specs = []
-            for seed_name, seed_call_args in self.standalone_autotune_seed_infos:
+            for (
+                seed_name,
+                seed_call_args,
+                _seed_arg_types,
+            ) in self.standalone_autotune_seed_infos:
                 seed_call_args = [
                     inplaced_call_arg_replacements.get(arg, arg)
                     if isinstance(arg, str)
@@ -1198,6 +1204,7 @@ class ComboKernel(Kernel):
             arg_types=arg_types,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
+            triton_autotune_seed_infos=self.standalone_autotune_seed_infos,
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:

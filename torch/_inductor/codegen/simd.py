@@ -2625,7 +2625,9 @@ class SIMDScheduling(BaseScheduling):
                         seed_kernel.add_numel_to_call_args(
                             seed_kernel_name, seed_call_args, seed_arg_types
                         )
-                        seed_infos.append((seed_kernel_name, seed_call_args))
+                        seed_infos.append(
+                            (seed_kernel_name, seed_call_args, seed_arg_types)
+                        )
                     kernel.standalone_autotune_seed_infos = seed_infos
 
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
@@ -3425,6 +3427,7 @@ class SIMDScheduling(BaseScheduling):
         kernel = self.kernel_type(
             node_info.tiling,
             features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
         )
         self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
         config_patches = self._collect_config_patches(node_info.node_schedule)
