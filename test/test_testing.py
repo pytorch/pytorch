@@ -580,6 +580,7 @@ class TestEnvironmentDefFlag(TestCase):
     """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
 
     def setUp(self):
+        super().setUp()
         import torch.testing._internal.common_utils as _cu
         self._cu = _cu
         self._defined: list[str] = []

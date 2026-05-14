@@ -357,6 +357,8 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
+        self.assertFalse(s0.is_shared())
+
         with self.assertRaisesRegex(NotImplementedError, r'Not available'):
             s0.tolist()
 
@@ -11227,6 +11229,33 @@ class TestIndexAddOverrideCorrectness(TestCase):
         src = torch.randn(100, 128, device="cuda")
         idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int64)
         got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
+        ref = _naive_index_add(self_t, idx, src, alpha=0.5)
+        self.assertEqual(got, ref)
+
+    def test_repeated_index_accumulates(self):
+        # All indices target row 0 -> result[0] = sum(alpha * src[i]).
+        # Stresses the alpha != 1 scale path under maximum bulk-reduce
+        # contention against a single output row.
+        torch.manual_seed(0)
+        self_t = torch.zeros(10, 128, device="cuda")
+        src = torch.randn(64, 128, device="cuda")
+        idx = torch.zeros(64, device="cuda", dtype=torch.int64)
+        for alpha in (1.0, 0.5):
+            got = torch.index_add(self_t, 0, idx, src, alpha=alpha)
+            ref = _naive_index_add(self_t, idx, src, alpha=alpha)
+            self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
+
+    def test_deterministic_mode_uses_aten(self):
+        # Under deterministic mode the override cond rejects, and the
+        # op falls through to aten. Verify end-to-end (the cond-only
+        # test in the conds class doesn't catch a wiring break that
+        # silently bypasses the determinism gate).
+        torch.manual_seed(0)
+        self_t = torch.zeros(200, 128, device="cuda")
+        src = torch.randn(100, 128, device="cuda")
+        idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int64)
+        with DeterministicGuard(True):
+            got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
         ref = _naive_index_add(self_t, idx, src, alpha=0.5)
         self.assertEqual(got, ref)
 

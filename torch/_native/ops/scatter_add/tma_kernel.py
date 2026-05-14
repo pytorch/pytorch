@@ -138,16 +138,30 @@ def _make_kernel(
     num_chunks = (N + chunk_elems - 1) // chunk_elems
 
     @cute.jit
-    def _scale_smem(cbuf_ptr, alpha, dtype):
+    def _scale_smem(cbuf_ptr, alpha, dtype, lane_id):
         """Multiply chunk_elems smem slots starting at cbuf_ptr by
-        ``alpha`` (cast to ``dtype``), then release the generic write to
-        the async proxy so a subsequent bulk-reduce sees the scaled
-        values. Only lane 0 in a single-warp pipeline needs to call
-        this."""
+        ``alpha`` (cast to ``dtype``) using up to 32 warp lanes
+        cooperatively. Each lane handles slot indices
+        ``lane_id, lane_id+32, lane_id+64, ...``. After this returns
+        the caller MUST issue ``cute.arch.sync_warp()`` so lane 0's
+        subsequent bulk-reduce sees every lane's writes through the
+        async proxy.
+
+        Must be called outside any ``if lane_id == 0:`` gate so all
+        lanes participate.
+        """
         alpha_t = dtype(alpha)
-        for i in cutlass.range_constexpr(chunk_elems):
-            slot = cute.make_tensor(cbuf_ptr + Int32(i), cute.make_layout(1))
-            slot[0] = slot[0] * alpha_t
+        if const_expr(chunk_elems >= 32):
+            slots_per_lane = chunk_elems // 32
+            for k in cutlass.range_constexpr(slots_per_lane):
+                i = lane_id + Int32(k * 32)
+                slot = cute.make_tensor(cbuf_ptr + i, cute.make_layout(1))
+                slot[0] = slot[0] * alpha_t
+        else:
+            # chunk_elems < 32: only the first chunk_elems lanes work.
+            if lane_id < Int32(chunk_elems):
+                slot = cute.make_tensor(cbuf_ptr + lane_id, cute.make_layout(1))
+                slot[0] = slot[0] * alpha_t
         cute.arch.fence_view_async_shared()
 
     @cute.kernel
@@ -163,6 +177,8 @@ def _make_kernel(
         tidx, _, _ = cute.arch.thread_idx()
         bidx, bidy, _ = cute.arch.block_idx()
         gdim_x, _, _ = cute.arch.grid_dim()
+        # Single warp per CTA; lane_id == tidx.
+        lane_id = tidx % Int32(32)
 
         # num_entries (M_src) comes from mIndex's shape; mIndex is 1D
         # of length M_src after host-side flattening.
@@ -238,34 +254,51 @@ def _make_kernel(
 
             chunk_idx = chunk_start
             while chunk_idx < chunk_end:
-                if tidx == Int32(0):
-                    r = Int64(mIndex[entry_id])
-                    # Bounds check: index values must be valid output
-                    # rows. Compiling with ``--enable-assertions`` turns
-                    # this into a device-side trap; otherwise it folds
-                    # away. Driver thread only -- no need to replicate
-                    # the check across all 32 lanes.
+                # All 32 lanes execute the loop body in lockstep. The
+                # mbarrier ops with arrive_count=1 (producer_acquire,
+                # consumer_release) are gated on lane 0 so we don't
+                # over-arrive. Per-thread ops (consumer_wait,
+                # mbarrier_wait inside) and the cute.copy TMA load
+                # (which elects internally per CuTeDSL contract) run
+                # on all 32 lanes; this keeps the warp converged so
+                # sync_warp + warp-cooperative scale work.
+                # Driver-thread-only ops (bulk-reduce gmem issue) stay
+                # lane-0-gated. mIndex[entry_id] is read by all lanes
+                # (uniform load, coalesces) but the bounds assert is
+                # lane-0-only -- 32 redundant trap checks per row would
+                # be 32x the assertion cost under --enable-assertions.
+                r = Int64(mIndex[entry_id])
+                if lane_id == Int32(0):
                     cute_testing.assert_(r >= Int64(0))
                     cute_testing.assert_(r < Int64(mOut.shape[0]))
 
-                    pipe.producer_acquire(producer_state)
-                    cute.copy(
-                        tma_atom,
-                        tma_gmem[None, entry_id, chunk_idx],
-                        tma_smem[None, producer_state.index],
-                        tma_bar_ptr=pipe.producer_get_barrier(producer_state),
-                    )
-                    pipe.producer_commit(producer_state)
-                    producer_state.advance()
+                # producer_acquire on ALL lanes -- stock
+                # PipelineTmaAsync uses elect_one() internally for the
+                # arrive_and_expect_tx, and elect.sync requires the
+                # warp to be converged. Calling from `if lane_id == 0`
+                # would deadlock.
+                pipe.producer_acquire(producer_state)
+                cute.copy(
+                    tma_atom,
+                    tma_gmem[None, entry_id, chunk_idx],
+                    tma_smem[None, producer_state.index],
+                    tma_bar_ptr=pipe.producer_get_barrier(producer_state),
+                )
+                pipe.producer_commit(producer_state)  # no-op for TMA
+                producer_state.advance()
 
-                    if pair_count > Int32(0):
-                        pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
-                            chunk_elems
-                        )
-                        if const_expr(scale):
-                            _scale_smem(cbuf_ptr, alpha, dtype)
+                if pair_count > Int32(0):
+                    pipe.consumer_wait(consumer_state)
+                    cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
+                    if const_expr(scale):
+                        # Warp-cooperative scale: each lane scales a
+                        # strided subset of the chunk's smem slots,
+                        # then sync_warp so lane 0's bulk-reduce sees
+                        # every lane's writes via the async proxy.
+                        _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
+                        cute.arch.sync_warp()
 
+                    if lane_id == Int32(0):
                         # Partial-chunk handling: actual valid element
                         # count is min(chunk_elems, N - off). TMA
                         # OOB-clamped the tail to 0 in smem, we reduce
@@ -282,24 +315,25 @@ def _make_kernel(
                         cute.arch.cp_async_bulk_commit_group()
                         cute.arch.cp_async_bulk_wait_group(0, read=False)
                         pipe.consumer_release(consumer_state)
-                        consumer_state.advance()
+                    consumer_state.advance()
 
-                    prev_chunk_idx = chunk_idx
-                    prev_r = r
-                    pair_count = pair_count + Int32(1)
+                prev_chunk_idx = chunk_idx
+                prev_r = r
+                pair_count = pair_count + Int32(1)
 
                 chunk_idx = chunk_idx + Int32(1)
 
             base = base + gdim_x
 
         # Epilogue: drain the last outstanding TMA load.
-        if tidx == Int32(0):
-            if pair_count > Int32(0):
-                pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
-                if const_expr(scale):
-                    _scale_smem(cbuf_ptr, alpha, dtype)
+        if pair_count > Int32(0):
+            pipe.consumer_wait(consumer_state)
+            cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
+            if const_expr(scale):
+                _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
+                cute.arch.sync_warp()
 
+            if lane_id == Int32(0):
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
                 if cur_elems > Int32(chunk_elems):

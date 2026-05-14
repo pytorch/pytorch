@@ -223,6 +223,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    # https://github.com/pytorch/pytorch/issues/149468
+    def test_opcheck_cpu_stride_mismatch(self, device):
+        @torch.library.custom_op("test::stride_mismatch", mutates_args=())
+        def stride_mismatch(x: torch.Tensor) -> torch.Tensor:
+            return x.clone().permute(2, 0, 1)
+
+        @stride_mismatch.register_fake
+        def _(x):
+            c, h, w = x.shape[2], x.shape[0], x.shape[1]
+            return x.new_empty(c, h, w)
+
+        x = torch.randn(4, 4, 3, device=device)
+        with self.assertRaisesRegex(optests.OpCheckError, "Stride mismatch"):
+            torch.library.opcheck(stride_mismatch, (x,))
+
     # https://github.com/pytorch/pytorch/issues/142410
     def test_opcheck_unbacked_stride(self, device):
         @torch.library.custom_op("test::f", mutates_args=[])
@@ -2277,7 +2292,7 @@ Dynamic shape operator
         def foo_impl2(x):
             return torch.cat([x, x])
 
-        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
+        with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
             torch.library.register_fake(
                 op_name, foo_impl2, lib=lib, allow_override=False
             )
@@ -4898,6 +4913,7 @@ class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
 
     def setUp(self):
+        super().setUp()
         self.supported_base_types = [
             int,
             float,
