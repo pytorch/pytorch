@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/macros.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
@@ -12,7 +13,7 @@ using DeleterFnPtr = void (*)(void*);
 
 namespace {
 inline void delete_device_guard(void* ptr) {
-  TORCH_ERROR_CODE_CHECK(
+  STABLE_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_device_guard(reinterpret_cast<DeviceGuardHandle>(ptr)));
 }
 
@@ -52,7 +53,8 @@ class DeviceGuard {
   explicit DeviceGuard(DeviceIndex device_index)
       : guard_(nullptr, delete_device_guard) {
     DeviceGuardHandle ptr = nullptr;
-    TORCH_ERROR_CODE_CHECK(aoti_torch_create_device_guard(device_index, &ptr));
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_create_device_guard(device_index, &ptr));
     guard_.reset(ptr);
   }
 
@@ -64,7 +66,7 @@ class DeviceGuard {
    * Minimum compatible version: PyTorch 2.9.
    */
   void set_index(DeviceIndex device_index) {
-    TORCH_ERROR_CODE_CHECK(
+    STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_device_guard_set_index(guard_.get(), device_index));
   }
 
@@ -80,12 +82,13 @@ class Stream {
   // Steals ownership from the StreamHandle
   explicit Stream(StreamHandle stream)
       : stream_(stream, [](StreamHandle stream) {
-          TORCH_ERROR_CODE_CHECK(aoti_torch_delete_stream(stream));
+          STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_stream(stream));
         }) {}
 
   StreamId id() const {
     StreamId stream_id;
-    TORCH_ERROR_CODE_CHECK(aoti_torch_stream_id(stream_.get(), &stream_id));
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_stream_id(stream_.get(), &stream_id));
     return stream_id;
   }
 
@@ -95,7 +98,8 @@ class Stream {
 
 inline Stream getCurrentStream(DeviceIndex device_index) {
   StreamHandle stream = nullptr;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_stream(device_index, &stream));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_current_stream(device_index, &stream));
   return Stream(stream);
 }
 
@@ -110,7 +114,8 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
  */
 inline DeviceIndex getCurrentDeviceIndex() {
   DeviceIndex device_index;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_device_index(&device_index));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_current_device_index(&device_index));
   return device_index;
 }
 

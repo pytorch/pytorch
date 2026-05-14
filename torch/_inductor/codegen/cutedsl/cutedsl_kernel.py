@@ -219,11 +219,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
-            from torch._inductor.codegen.cutedsl._cutedsl_utils import (
-                result_to_ssa,
-                ssa_to_fragment,
-                ssa_to_indexable,
-            )
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
             """
         )
         return imports.getvalue()

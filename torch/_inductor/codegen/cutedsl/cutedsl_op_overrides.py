@@ -352,19 +352,13 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(
-            a,
-            b,
-            "((({a} % {b}) + {b}) % {b})",
-            lambda a_expr, b_expr: a_expr % b_expr,
+            a, b, "({a} % {b})", lambda a_expr, b_expr: a_expr % b_expr
         )
 
     @staticmethod
     def remainder(a, b):
         return CuteDSLOpOverrides._apply_binary_op(
-            a,
-            b,
-            "((({a} % {b}) + {b}) % {b})",
-            lambda a_expr, b_expr: a_expr % b_expr,
+            a, b, "({a} % {b})", lambda a_expr, b_expr: a_expr % b_expr
         )
 
     @staticmethod
