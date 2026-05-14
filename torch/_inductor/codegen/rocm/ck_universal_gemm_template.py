@@ -417,6 +417,8 @@ class CKGemmTemplate(CKTemplate):
             return None
         if op.c_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
+        if self.is_blocked_by_tf32_setting(op):
+            return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
             return None

@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -116,9 +117,7 @@ static void unary_op(const Tensor& self,
                      std::string op_name,
                      UnaryOpBlock unaryBlock,
                      is_noop_p is_noop = is_empty_tensor) {
-  if (!output_.is_same_size(self)) {
-    output_.resize_(self.sizes());
-  }
+  at::native::resize_output(output_, self.sizes());
 
   if (is_noop(self)) {
     output_.copy_(self);
