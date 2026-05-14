@@ -3419,6 +3419,42 @@ def forward(self, primals_1, primals_2):
     return (as_strided_scatter, add, view_1)""",
         )
 
+    def test_input_aliased_with_mutation_nontensor_interleaved(self):
+        def f(a, scale, b):
+            b.mul_(2)
+            return a + scale
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            return [base], [x.view(-1), 3, x.view(-1)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
+    def test_input_aliased_with_mutation_multiple_nontensors(self):
+        def f(a, scale, b, offset, c):
+            c.mul_(2)
+            return a + scale + offset
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            standalone = torch.ones(4, requires_grad=req_grad)
+            y = standalone.add(1)
+            return [base, standalone], [x.view(-1), 3, y, 5, x.view(-1)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
             # a and b alias, and we do a metadata mutation on a
@@ -7900,6 +7936,320 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_get_rng_state_", source)
 
+    # --- CompiledFunction.forward codegen tests ---
+
+    def test_compiled_forward_codegen_emitted(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _compiled_forward(", source)
+        self.assertIn("_normalize_as_list_", source)
+
+    def test_compiled_forward_elides_backward_state(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("BackwardState", source)
+
+    def test_compiled_forward_elides_amp(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("DisableAutocast", source)
+
+    def test_compiled_forward_includes_amp_when_active(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            with torch.autocast("cpu"):
+                x = torch.randn(4, requires_grad=True)
+                f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_DisableAutocast_", source)
+
+    def test_compiled_forward_no_codegen_for_inference(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_compiled_forward_elides_rng_when_off(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_rng_add_(ctx, args)", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_forward_rng_codegen(self):
+        # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
+        # requires recomputable RNG ops (e.g. from activation checkpointing).
+        from torch.utils.checkpoint import checkpoint
+
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            def gn(x):
+                return torch.rand_like(x) * x
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return checkpoint(gn, x, use_reentrant=False)
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_rng_add_(ctx, args)", source)
+
+    def test_compiled_forward_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y, x + y
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        o1, o2 = f(x, y)
+        (o1.sum() + o2.sum()).backward()
+        self.assertEqual(x.grad, y + 1)
+        self.assertEqual(y.grad, x + 1)
+
+    # --- CompiledFunction.backward codegen tests ---
+
+    def test_compiled_backward_codegen_emitted(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _compiled_backward(", source)
+
+    def test_compiled_backward_no_codegen_for_inference(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_compiled_backward_elides_rng(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_rng_add_(_ctx_", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_backward_rng_codegen(self):
+        # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
+        # requires recomputable RNG ops (e.g. from activation checkpointing),
+        # not functionalize_rng_ops (a separate mechanism using seed/offset).
+        from torch.utils.checkpoint import checkpoint
+
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            def gn(x):
+                return torch.rand_like(x) * x
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return checkpoint(gn, x, use_reentrant=False)
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_rng_add_(_ctx_", source)
+
+    def test_compiled_backward_elides_vc_check(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_tensors_no_vc_check", source)
+
+    def test_compiled_backward_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y + 1
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        out = f(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
+
+    def test_compiled_backward_vc_check_codegen(self):
+        class VcCheckFn(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.out = output
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * ctx.out
+
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return VcCheckFn.apply(x)
+
+            x = torch.randn(4, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_tensors_no_vc_check", source)
+        self.assertEqual(x.grad, 2 * x)
+
+    def test_compiled_backward_double_backward(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * x
+
+        x = torch.randn(4, requires_grad=True)
+        out = f(x)
+        (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        self.assertEqual(grad_x, 2 * x)
+
+    def test_compiled_backward_multiple_outputs(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2, x * x, x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        a, b, c = f(x)
+        (a + b + c).sum().backward()
+        self.assertEqual(x.grad, 2 + 2 * x + 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_backward_rng_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x) + x
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+    def test_compiled_backward_dynamic_shapes(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x):
+            return x * x
+
+        for n in [4, 8, 16]:
+            x = torch.randn(n, requires_grad=True)
+            f(x).sum().backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    def test_compiled_backward_rejects_non_list_args(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_compiled_backward,
+        )
+
+        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+
+        def noop(*a, **kw):
+            return None
+
+        with self.assertRaisesRegex(AssertionError, "single mutable list"):
+            bwd_fn(
+                (torch.tensor(1.0),),
+                None,
+                noop,
+                noop,
+                noop,
+                noop,
+                noop,
+            )
+        with self.assertRaisesRegex(AssertionError, "single mutable list"):
+            bwd_fn(
+                (torch.tensor(1.0), torch.tensor(2.0)),
+                None,
+                noop,
+                noop,
+                noop,
+                noop,
+                noop,
+            )
+
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):
@@ -8621,6 +8971,245 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
+
+    # --- AOTSyntheticBaseWrapper codegen tests ---
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_emitted(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+
+            def f(a, b):
+                a.mul_(2)
+                return a + 1
+
+            base = torch.randn(8)
+            compiled_f = aot_function(f, nop)
+            compiled_f(base[:6], base[2:])
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _synthetic_base_wrapper(", source)
+        self.assertIn("_bases", source)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+        a_ref = a.clone()
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+        self.assertEqual(a, a_ref * 2)
+
+    def test_synthetic_base_no_codegen_when_not_needed(self):
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_metadata_mutation(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            b.t_()
+            return a + 1
+
+        base = torch.randn(4, 4)
+        a = base[:3, :]
+        b = base[1:, :]
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a, b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("as_strided_", source)
+        self.assertIn("_meta_mut", source)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_multiple_base_groups(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        base1 = torch.randn(8)
+        base2 = torch.randn(8)
+        a1 = base1[:6]
+        a2 = base1[2:]
+        b1 = base2[:6]
+        b2 = base2[2:]
+
+        def f(a1, a2, b1, b2):
+            a1.mul_(2)
+            b1.mul_(3)
+            return a1 + a2 + b1 + b2
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a1, a2, b1, b2)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("[None] * 2", source)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_with_non_aliased_args(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+        c = torch.randn(6)
+
+        def f(a, b, c):
+            a.mul_(2)
+            return a + b + c
+
+        compiled_f = aot_function(f, nop)
+        a_ref = a.clone()
+        compiled_f(a, b, c)
+        self.assertEqual(a, a_ref * 2)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_base_is_none(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.add_(1)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6].detach()
+        b = base[2:].detach()
+        self.assertIsNone(a._base)
+        self.assertIsNone(b._base)
+
+        a_ref = a.clone()
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a, b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("torch.empty((0,)", source)
+        self.assertIn("set_", source)
+        self.assertEqual(a, a_ref + 1)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_metadata_mutation_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            b.t_()
+            return a + 1
+
+        base = torch.randn(4, 4)
+        a = base[:3, :]
+        b = base[1:, :]
+
+        a_ref = a.clone()
+        b_shape_before = b.shape
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+
+        self.assertEqual(a, a_ref * 2)
+        self.assertEqual(b.shape, (b_shape_before[1], b_shape_before[0]))
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_multiple_groups_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        base1 = torch.randn(8)
+        base2 = torch.randn(8)
+        a1 = base1[:6]
+        a2 = base1[2:]
+        b1 = base2[:6]
+        b2 = base2[2:]
+
+        def f(a1, a2, b1, b2):
+            a1.mul_(2)
+            b1.mul_(3)
+            return a1 + a2 + b1 + b2
+
+        a1_ref = a1.clone()
+        b1_ref = b1.clone()
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(a1, a2, b1, b2)
+
+        self.assertEqual(a1, a1_ref * 2)
+        self.assertEqual(b1, b1_ref * 3)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_all_aliased_no_others(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+
+        a_ref = a.clone()
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a, b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_bases + []", source)
+        self.assertEqual(a, a_ref * 2)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_non_aliased_before_aliased(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(c, a, b):
+            a.mul_(2)
+            return a + b + c
+
+        c = torch.randn(6)
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+
+        c_ref = c.clone()
+        a_ref = a.clone()
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(c, a, b)
+
+        self.assertEqual(a, a_ref * 2)
+        self.assertEqual(c, c_ref)
 
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
