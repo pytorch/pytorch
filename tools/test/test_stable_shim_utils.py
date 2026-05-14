@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
@@ -10,12 +11,12 @@ import re
 
 from tools.linter.adapters._stable_shim_utils import (
     FUNCTION_IDENTIFIER_MATCHER,
-    STRUCT_CLASS_IDENTIFIER_MATCHER,
-    TYPEDEF_IDENTIFIER_MATCHER,
-    USING_IDENTIFIER_MATCHER,
     IdentifierMatcher,
     IdentifierUse,
     MatcherAccumulator,
+    STRUCT_CLASS_IDENTIFIER_MATCHER,
+    TYPEDEF_IDENTIFIER_MATCHER,
+    USING_IDENTIFIER_MATCHER,
 )
 
 
@@ -26,8 +27,8 @@ class TestStableShimUtils(unittest.TestCase):
         self,
         sample: str,
         matcher: MatcherAccumulator,
-        expected_version: tuple[int, int],
-    ):
+        expected_version: tuple[int, int] | None,
+    ) -> dict[int, list[str]]:
         # Run through the lines, collect all identifiers on the line and return.
         result = {}
         for li, line in enumerate(sample.split("\n"), 1):
@@ -134,6 +135,12 @@ class TestStableShimUtils(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_future_multiple_identifier_accumulator(self):
+        # This is a test that implements functionality that is not yet needed, but
+        # ensurse that the API can handle a single section returning multiple
+        # identifiers at different versions.
+        # In this case it parses a macro called `TO_BE_DETERMINED_MULTI_VERSION_MACRO`
+        # with two arguments, where one argument gets the provided version, while the
+        # other arguments is always set to the None version.
         def bespoke_macro_parser(buffer: str, current_version: tuple[int, int] | None):
             pattern = r"TO_BE_DETERMINED_MULTI_VERSION_MACRO\(([^,]*),([^\)]*)\)"
             buffer_without_space = buffer.replace(" ", "").replace("\n", "")
@@ -146,7 +153,6 @@ class TestStableShimUtils(unittest.TestCase):
         matcher = MatcherAccumulator(
             [
                 IdentifierMatcher(
-                    category="multi_version_macro",
                     start_pattern=r"\s*TO_BE_DETERMINED_MULTI_VERSION_MACRO",
                     end_pattern=";",
                     handler=bespoke_macro_parser,

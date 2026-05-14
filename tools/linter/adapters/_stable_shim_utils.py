@@ -13,7 +13,11 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -41,12 +45,153 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
+class IdentifierUse(NamedTuple):
+    identifier: str
+    version: tuple[int, int] | None
+
+
+class IdentifierMatcher(NamedTuple):
+    start_pattern: str | re.Pattern
+    end_pattern: str | re.Pattern
+    # Handler is passed the accumulated buffer and should return identifiers
+    # from the buffer.
+    handler: Callable[[str, tuple[int, int] | None], list[IdentifierUse]]
+
+
+def extract_factory(
+    pattern,
+) -> Callable[[str, tuple[int, int] | None], list[IdentifierUse]]:
+    p = re.compile(pattern, flags=re.DOTALL)
+
+    def extractor(buffer: str, current_version: tuple[int, int] | None):
+        identifier = p.search(buffer)
+
+        if identifier:
+            return [
+                IdentifierUse(identifier=identifier.group(1), version=current_version)
+            ]
+
+        # If no identifier was found, this is a bug in the matcher as it means the extractor
+        # did not find anything between the start and end pattern.
+        raise ValueError(
+            "extractor didn't find results, mismatch between start-end patterns and handler"
+        )
+
+    return extractor
+
+
+# When adding a matcher, please add a test to tools/test/test_stable_shim_utils.py
+# to verify it works as expected, and allow easy iteration on the pattern.
+
+# Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
+FUNCTION_IDENTIFIER_MATCHER = IdentifierMatcher(
+    start_pattern=r"\s*AOTI_TORCH_EXPORT",
+    end_pattern=";",
+    handler=extract_factory(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\("),
+)
+
+# Also match typedef function pointers
+TYPEDEF_IDENTIFIER_MATCHER = IdentifierMatcher(
+    start_pattern=r"\s*typedef",
+    end_pattern=";",
+    handler=extract_factory(r"typedef\s+.*\(\*(\w+)\)"),
+)
+
+# Match using declarations like: using TypeName = ...
+USING_IDENTIFIER_MATCHER = IdentifierMatcher(
+    start_pattern=r"\s*using",
+    end_pattern=";",
+    handler=extract_factory(r"using\s+(\w+)\s*="),
+)
+# Match struct/class declarations like: struct StructName or class ClassName
+STRUCT_CLASS_IDENTIFIER_MATCHER = IdentifierMatcher(
+    start_pattern=r"\s*(?:struct|class)",
+    end_pattern=";",
+    handler=extract_factory(r"(?:struct|class)\s+(\w+)"),
+)
+IDENTIFIER_MATCHERS = [
+    FUNCTION_IDENTIFIER_MATCHER,
+    TYPEDEF_IDENTIFIER_MATCHER,
+    USING_IDENTIFIER_MATCHER,
+    STRUCT_CLASS_IDENTIFIER_MATCHER,
+]
+
+
+class MatcherAccumulator:
+    def __init__(self, matchers: list[IdentifierMatcher]):
+        self._matchers = []
+        # Compile the regexes.
+        for m in matchers:
+            end_pattern = re.compile(m.end_pattern)
+            start_pattern = re.compile(m.start_pattern)
+            self._matchers.append(
+                IdentifierMatcher(
+                    start_pattern=start_pattern,
+                    end_pattern=end_pattern,
+                    handler=m.handler,
+                )
+            )
+        self._scope_version = None
+        self.reset()
+
+    def reset(self):
+        self._buffer = ""
+        self._end_token_found = False
+        self._active_matcher = None
+
+    def set_scope_version(self, scope_version: tuple[int, int] | None):
+        self._scope_version = scope_version
+
+    def process_line(
+        self,
+        line: str,
+    ) -> bool:
+        if self._end_token_found:
+            self.reset()
+
+        # If no matcher is active yet, check if any of them found a start token.
+        if not self._active_matcher:
+            for matcher in self._matchers:
+                found_start = matcher.start_pattern.finditer(line)
+                for match in found_start:
+                    self._active_matcher = matcher
+                    line = line[match.start() :]
+                    break
+                if self._active_matcher:
+                    break
+
+        if self._active_matcher:
+            # First see if the end token is present, if so strip the line down to just that segment.
+            for match in self._active_matcher.end_pattern.finditer(line):
+                line = line[: match.end()]
+                self._end_token_found = True
+
+            # Ignore the part of the line that is commented because comments may have the end token in them.
+            self._buffer += line[: line.find("//") if "//" in line else None]
+
+        return self._active_matcher is not None
+
+    def information(self) -> None | list[IdentifierUse]:
+        if not self._end_token_found or not self._active_matcher:
+            return None
+
+        # We found the end token, so we can invoke the handler to extract the entries.
+        return self._active_matcher.handler(self._buffer, self._scope_version)
+
+
 class PreprocessorTracker:
     """
     Helper class to track preprocessor directives and version blocks.
 
     This class maintains state as it processes C/C++ preprocessor directives
     (#if, #elif, #else, #endif) and tracks which code is inside version blocks.
+
+    While processing the lines, it does keep an internal buffer to accumulate
+    information from multiple lines, this is mostly important when identifying
+    the version required for identifiers. An example are exported functions,
+    they start with `AOTI_TORCH_EXPORT` and end with `;`,  but those two
+    strings may be on separate lines. The function name itself cannot be split
+    over multiple lines.
     """
 
     def __init__(self):
