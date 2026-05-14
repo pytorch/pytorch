@@ -711,8 +711,12 @@ def _analyze_memory_coalescing(
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
-    # Extract the innermost variable for stride checks below.
-    innermost_var = next(reversed(var_ranges)) if var_ranges else None
+    # Only check pointwise-only kernels
+    index_vars = norm_read_writes.index_vars
+    reduce_vars = norm_read_writes.reduce_vars
+    innermost_var = (
+        next(reversed(index_vars)) if index_vars and not reduce_vars else None
+    )
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
