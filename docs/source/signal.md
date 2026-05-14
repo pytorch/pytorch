@@ -65,21 +65,3 @@ The `torch.signal` module, modeled after SciPy's [signal](https://docs.scipy.org
 ```{eval-rst}
 .. autofunction:: nuttall
 ```
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    bartlett
-    blackman
-    cosine
-    exponential
-    gaussian
-    general_cosine
-    general_hamming
-    hamming
-    hann
-    kaiser
-    nuttall
-```
