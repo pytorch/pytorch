@@ -91,7 +91,7 @@ Automatic differentiation engine powering neural network training.
 Dataset and DataLoader utilities for efficient data pipelines.
 :::
 
-:::{grid-item-card} {octicon}`package;1.5em` Tensors
+:::{grid-item-card} {octicon}`package;1.5em` torch.Tensor
 :link: tensors.html
 
 Tensor class reference — dtypes, views, and operations.
@@ -102,6 +102,15 @@ Tensor class reference — dtypes, views, and operations.
 
 dtype, device, layout, and memory format details.
 :::
+
+::::
+
+---
+
+## Math Namespaces
+
+::::{grid} 1 2 3 3
+:gutter: 3
 
 :::{grid-item-card} {octicon}`pulse;1.5em` torch.fft
 :link: fft.html
@@ -127,49 +136,73 @@ Special mathematical functions.
 Signal processing — window functions and filtering.
 :::
 
+:::{grid-item-card} {octicon}`beaker;1.5em` torch.func
+:link: func.html
+
+JAX-like composable function transforms (vmap, grad, etc.).
+:::
+
 ::::
 
 ---
 
-## Hardware Acceleration
+## Utilities & Ecosystem
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} {octicon}`zap;1.5em` torch.cuda
-:link: cuda.html
+:::{grid-item-card} {octicon}`multi-select;1.5em` torch.multiprocessing
+:link: multiprocessing.html
 
-CUDA tensor types, streams, and GPU operations.
+Shared-memory multiprocessing utilities.
 :::
 
-:::{grid-item-card} {octicon}`cpu;1.5em` CPU
-:link: cpu.html
+:::{grid-item-card} {octicon}`codescan-checkmark;1.5em` torch.testing
+:link: testing.html
 
-CPU-specific operations and optimizations.
+Testing utilities and assertions.
 :::
 
-:::{grid-item-card} {octicon}`device-desktop;1.5em` torch.mps
-:link: mps.html
+:::{grid-item-card} {octicon}`checklist;1.5em` torch.utils.checkpoint
+:link: checkpoint.html
 
-Apple Metal Performance Shaders backend.
+Gradient checkpointing for memory-efficient training.
 :::
 
-:::{grid-item-card} {octicon}`server;1.5em` torch.xpu
-:link: xpu.html
+:::{grid-item-card} {octicon}`tools;1.5em` torch.utils.benchmark
+:link: benchmark_utils.html
 
-Intel XPU device support.
+Utilities for precise microbenchmarking.
 :::
 
-:::{grid-item-card} {octicon}`rocket;1.5em` torch.accelerator
-:link: accelerator.html
+:::{grid-item-card} {octicon}`file-binary;1.5em` torch.utils.cpp_extension
+:link: cpp_extension.html
 
-Unified accelerator abstraction layer.
+Build custom C++/CUDA extensions for PyTorch.
 :::
 
-:::{grid-item-card} {octicon}`meter;1.5em` torch.amp
-:link: amp.html
+:::{grid-item-card} {octicon}`log;1.5em` torch.utils.tensorboard
+:link: tensorboard.html
 
-Automatic mixed precision training.
+TensorBoard integration for visualization.
+:::
+
+:::{grid-item-card} {octicon}`comment-discussion;1.5em` torch.distributions
+:link: distributions.html
+
+Probability distributions and sampling.
+:::
+
+:::{grid-item-card} {octicon}`shield-check;1.5em` torch.library
+:link: library.html
+
+Register custom operators with PyTorch dispatcher.
+:::
+
+:::{grid-item-card} {octicon}`package-dependents;1.5em` torch.package
+:link: package.html
+
+Serialize and package PyTorch models with dependencies.
 :::
 
 ::::
@@ -193,28 +226,10 @@ Compiler-based model optimization with TorchDynamo and TorchInductor.
 Export models to a portable, standardized representation.
 :::
 
-:::{grid-item-card} {octicon}`code;1.5em` torch.fx
-:link: fx.html
-
-Python-to-Python code transformation framework.
-:::
-
-:::{grid-item-card} {octicon}`share-android;1.5em` ONNX
+:::{grid-item-card} {octicon}`share-android;1.5em` torch.onnx
 :link: onnx.html
 
 Export models to the ONNX interchange format.
-:::
-
-:::{grid-item-card} {octicon}`plug;1.5em` NativeRT
-:link: nativert.html
-
-Native runtime for executing exported programs.
-:::
-
-:::{grid-item-card} {octicon}`beaker;1.5em` torch.func
-:link: func.html
-
-JAX-like composable function transforms (vmap, grad, etc.).
 :::
 
 ::::
@@ -256,25 +271,19 @@ Tensor parallelism for large model training.
 Pipeline parallelism for splitting model stages across devices.
 :::
 
-:::{grid-item-card} {octicon}`download;1.5em` Distributed Checkpoint
+:::{grid-item-card} {octicon}`download;1.5em` torch.distributed.checkpoint
 :link: distributed.checkpoint.html
 
 Save and load distributed model state.
 :::
 
-:::{grid-item-card} {octicon}`broadcast;1.5em` RPC
-:link: rpc.html
-
-Remote Procedure Call framework for distributed operations.
-:::
-
-:::{grid-item-card} {octicon}`link-external;1.5em` Elastic Training
+:::{grid-item-card} {octicon}`link-external;1.5em` torch.distributed.elastic
 :link: distributed.elastic.html
 
 Fault-tolerant, elastic distributed training with torchelastic.
 :::
 
-:::{grid-item-card} {octicon}`sync;1.5em` Distributed Optim
+:::{grid-item-card} {octicon}`sync;1.5em` torch.distributed.optim
 :link: distributed.optim.html
 
 Distributed optimizer implementations.
@@ -295,85 +304,61 @@ Distributed optimizer implementations.
 Post-training quantization and quantization-aware training.
 :::
 
-:::{grid-item-card} {octicon}`stopwatch;1.5em` Profiler
+:::{grid-item-card} {octicon}`stopwatch;1.5em` torch.profiler
 :link: profiler.html
 
 Performance profiling for CPU and GPU workloads.
 :::
 
-:::{grid-item-card} {octicon}`tools;1.5em` Benchmark Utils
-:link: benchmark_utils.html
-
-Utilities for precise microbenchmarking.
-:::
-
-:::{grid-item-card} {octicon}`graph;1.5em` Sparse Tensors
+:::{grid-item-card} {octicon}`graph;1.5em` torch.sparse
 :link: sparse.html
 
 Sparse tensor support and operations.
+:::
+
+:::{grid-item-card} {octicon}`meter;1.5em` torch.amp
+:link: amp.html
+
+Automatic mixed precision training.
 :::
 
 ::::
 
 ---
 
-## Utilities & Ecosystem
+## Hardware Acceleration
 
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} {octicon}`archive;1.5em` torch.hub
-:link: hub.html
+:::{grid-item-card} {octicon}`rocket;1.5em` torch.accelerator
+:link: accelerator.html
 
-Load pre-trained models from GitHub repositories.
+Unified accelerator abstraction layer.
 :::
 
-:::{grid-item-card} {octicon}`multi-select;1.5em` Multiprocessing
-:link: multiprocessing.html
+:::{grid-item-card} {octicon}`zap;1.5em` torch.cuda
+:link: cuda.html
 
-Shared-memory multiprocessing utilities.
+CUDA tensor types, streams, and GPU operations.
 :::
 
-:::{grid-item-card} {octicon}`codescan-checkmark;1.5em` torch.testing
-:link: testing.html
+:::{grid-item-card} {octicon}`cpu;1.5em` torch.cpu
+:link: cpu.html
 
-Testing utilities and assertions.
+CPU-specific operations and optimizations.
 :::
 
-:::{grid-item-card} {octicon}`checklist;1.5em` torch.utils.checkpoint
-:link: checkpoint.html
+:::{grid-item-card} {octicon}`device-desktop;1.5em` torch.mps
+:link: mps.html
 
-Gradient checkpointing for memory-efficient training.
+Apple Metal Performance Shaders backend.
 :::
 
-:::{grid-item-card} {octicon}`file-binary;1.5em` C++ Extension
-:link: cpp_extension.html
+:::{grid-item-card} {octicon}`server;1.5em` torch.xpu
+:link: xpu.html
 
-Build custom C++/CUDA extensions for PyTorch.
-:::
-
-:::{grid-item-card} {octicon}`log;1.5em` TensorBoard
-:link: tensorboard.html
-
-TensorBoard integration for visualization.
-:::
-
-:::{grid-item-card} {octicon}`comment-discussion;1.5em` torch.distributions
-:link: distributions.html
-
-Probability distributions and sampling.
-:::
-
-:::{grid-item-card} {octicon}`shield-check;1.5em` torch.library
-:link: library.html
-
-Register custom operators with PyTorch dispatcher.
-:::
-
-:::{grid-item-card} {octicon}`package-dependents;1.5em` torch.package
-:link: package.html
-
-Serialize and package PyTorch models with dependencies.
+Intel XPU device support.
 :::
 
 ::::
@@ -444,6 +429,7 @@ Complete list of all PyTorch Python and C++ APIs.
 - {doc}`torch.linalg <linalg>`
 - {doc}`torch.special <special>`
 - {doc}`torch.signal <signal>`
+- {doc}`torch.func <func>`
 - {doc}`Complex Numbers <complex_numbers>`
 
 **Hardware Acceleration**
@@ -458,7 +444,6 @@ Complete list of all PyTorch Python and C++ APIs.
 - {doc}`torch.mtia.memory <mtia.memory>`
 - {doc}`torch.mtia.mtia_graph <mtia.mtia_graph>`
 - {doc}`Meta device <meta>`
-- {doc}`torch.amp <amp>`
 - {doc}`torch.backends <backends>`
 
 **Compiler & Export**
@@ -467,9 +452,7 @@ Complete list of all PyTorch Python and C++ APIs.
 - {doc}`torch.export <user_guide/torch_compiler/export>`
 - {doc}`torch.fx <fx>`
 - {doc}`torch.fx.experimental <fx.experimental>`
-- {doc}`torch.func <func>`
 - {doc}`torch.onnx <onnx>`
-- {doc}`torch.nativert <nativert>`
 
 **Distributed**
 
@@ -490,9 +473,9 @@ Complete list of all PyTorch Python and C++ APIs.
 **Quantization & Performance**
 
 - {doc}`Quantization <quantization>`
+- {doc}`torch.amp <amp>`
 - {doc}`torch.profiler <profiler>`
 - {doc}`torch.sparse <sparse>`
-- {doc}`torch.utils.benchmark <benchmark_utils>`
 
 **Utilities**
 
@@ -512,7 +495,6 @@ Complete list of all PyTorch Python and C++ APIs.
 - {doc}`torch.utils.benchmark <benchmark_utils>`
 - {doc}`torch.utils.checkpoint <checkpoint>`
 - {doc}`torch.utils.cpp_extension <cpp_extension>`
-- {doc}`torch.utils.data <data>`
 - {doc}`torch.utils.deterministic <deterministic>`
 - {doc}`torch.utils.jit <jit_utils>`
 - {doc}`torch.utils.dlpack <dlpack>`
