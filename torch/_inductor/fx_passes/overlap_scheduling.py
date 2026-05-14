@@ -121,8 +121,8 @@ class NodeReachability:
     Example::
 
         reachability = NodeReachability(list(graph.nodes))
-        reachability.is_ancestor(node_a, node_d)       # True/False
-        reachability.has_dependency(node_a, node_b)     # either direction
+        reachability.is_ancestor(node_a, node_d)  # True/False
+        reachability.has_dependency(node_a, node_b)  # either direction
         reachability.get_unscheduled_ancestors(target, scheduled_set)
 
     Args:
@@ -211,19 +211,20 @@ class _BitsetAncestorView:
 
     Supported operations (all use the node-to-index mapping for translation)::
 
-        node_a in view          # O(1) -- test bit at node_a's index
-        for a in view: ...      # iterate ancestors via lowest-bit scan
-        len(view)               # popcount via int.bit_count()
-        view & other_view       # bitwise AND then scan set bits
-        view & ordered_set      # iterate smaller set, test membership
+        node_a in view  # O(1) -- test bit at node_a's index
+        for a in view:
+            ...  # iterate ancestors via lowest-bit scan
+        len(view)  # popcount via int.bit_count()
+        view & other_view  # bitwise AND then scan set bits
+        view & ordered_set  # iterate smaller set, test membership
 
     Example::
 
         ancestors = BitsetAncestors(nodes)
         view = ancestors[some_node]
-        if predecessor in view:       # O(1) bit test
+        if predecessor in view:  # O(1) bit test
             print("predecessor is an ancestor")
-        for a in view:                # iterate all ancestors
+        for a in view:  # iterate all ancestors
             print(a.name)
     """
 
@@ -737,6 +738,9 @@ class OverlapScheduler:
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
+        self._parent_lists: list[list[fx.Node]] = [
+            list(n._input_nodes) for n in self.nodes
+        ]
         self.node_ancestors: BitsetAncestors = self._collect_node_ancestors()
 
         # Identify collectives and compute nodes
@@ -747,37 +751,36 @@ class OverlapScheduler:
         self.compute_nodes = [n for n in self.nodes if is_compute_node(n)]
         self.current_compute_index = 0
 
-        # Compute baseline memory profile from original schedule
         self.original_mem_before_compute_index: list[int] = []
-        self.original_peak_memory = self._compute_baseline_memory()
-
-        # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
-        # When both limits are specified, use the more permissive one
-        memory_increase_bytes = None
-        if max_memory_increase_gb is not None:
-            memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
-        if max_memory_increase_ratio is not None:
-            ratio_increase = int(self.original_peak_memory * max_memory_increase_ratio)
-            memory_increase_bytes = (
-                max(memory_increase_bytes, ratio_increase)
-                if memory_increase_bytes is not None
-                else ratio_increase
-            )
-        if memory_increase_bytes is None:
-            memory_increase_bytes = 0
-
-        self.allowed_peak_memory_bytes = (
-            self.original_peak_memory + memory_increase_bytes
+        needs_memory_tracking = (
+            max_memory_increase_gb is not None or max_memory_increase_ratio is not None
         )
+        if needs_memory_tracking:
+            self.original_peak_memory = self._compute_baseline_memory()
+            memory_increase_bytes = None
+            if max_memory_increase_gb is not None:
+                memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
+            if max_memory_increase_ratio is not None:
+                ratio_increase = int(
+                    self.original_peak_memory * max_memory_increase_ratio
+                )
+                memory_increase_bytes = (
+                    max(memory_increase_bytes, ratio_increase)
+                    if memory_increase_bytes is not None
+                    else ratio_increase
+                )
+            self.allowed_peak_memory_bytes = self.original_peak_memory + (
+                memory_increase_bytes or 0
+            )
+            self.memory_tracker = MemoryTracker(self.graph)
+        else:
+            self.original_peak_memory = 0
+            self.allowed_peak_memory_bytes = sys.maxsize
+            self.memory_tracker = None  # type: ignore[assignment]
 
-        # Track cumulative prefetch memory at each compute index
-        # When we prefetch a collective at compute index i that will be used at index j,
-        # it adds memory from i to j, so we need to track this cumulative effect
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
         ]
-
-        self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
@@ -967,9 +970,10 @@ class OverlapScheduler:
         For each node, returns the minimum index of target nodes it blocks/dominates.
         Returns sys.maxsize if the node doesn't block any target nodes.
         """
+        target_set = OrderedSet(target_nodes)
         target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if node in target_nodes:
+            if node in target_set:
                 target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
@@ -1676,7 +1680,10 @@ class OverlapScheduler:
         # Backward BFS from target, stopping at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
-        stack = list(target._input_nodes)
+        parent_lists = self._parent_lists
+        node_idx = self.node_idx
+        target_idx = node_idx[target]
+        stack = parent_lists[target_idx][:]
         scheduled = self.scheduled
         while stack:
             n = stack.pop()
@@ -1684,7 +1691,7 @@ class OverlapScheduler:
                 continue
             seen.add(n)
             unscheduled_ancestors.add(n)
-            stack.extend(n._input_nodes)
+            stack.extend(parent_lists[node_idx[n]])
 
         # only schedule non distributed, non compute nodes
         for node in unscheduled_ancestors:
