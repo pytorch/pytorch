@@ -1516,10 +1516,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                             # All args and kwargs peeked — try folding
                             try:
                                 res = fn(*peeked_args, **peeked_kwargs)
-                            except Exception as exc:
-                                if isinstance(
-                                    exc, TypeError
-                                ) and "unsupported operand type" in str(exc):
+                            except TypeError as exc:
+                                exc_str = str(exc)
+                                if "unsupported operand type" in exc_str:
                                     raise_observed_exception(
                                         TypeError,
                                         tx,
@@ -1530,11 +1529,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                                             )
                                         ),
                                     )
-                                raise_observed_exception(
-                                    type(exc),
-                                    tx,
-                                    args=list(exc.args),
-                                )
+                            except Exception:
+                                pass
                             else:
                                 if any_unrealized:
                                     LazyVariableTracker.realize_all((args, kwargs))
@@ -3073,12 +3069,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_op(tx, a, b, "nb_subtract", "-")
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__sub__", [b], {})
+        return None
 
     def call_isub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_iop(tx, a, b, "nb_inplace_subtract", "nb_subtract", "-=")
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__isub__", [b], {})
+        return None
 
     def call_and_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
