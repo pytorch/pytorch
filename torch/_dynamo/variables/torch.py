@@ -505,25 +505,7 @@ class BaseTorchVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        return self._nb_binop_impl(tx, other, "__or__", "__ror__", reverse)
-
-    def nb_subtract_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        return self._nb_binop_impl(tx, other, "__sub__", "__rsub__", reverse)
-
-    def _nb_binop_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        forward: str,
-        reverse_dunder: str,
-        reverse: bool,
-    ) -> VariableTracker:
-        dunder = reverse_dunder if reverse else forward
+        dunder = "__ror__" if reverse else "__or__"
         method = getattr(type(self.value), dunder, None)
         if method is None:
             return VariableTracker.build(tx, NotImplemented)
