@@ -962,6 +962,8 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
 @functools.cache
 def fallback_random_decomps_for_fractional_pool() -> dict[Any, Callable[..., Any]]:
     result = dict(decompositions)
+    # Fractional max pool needs fallback RNG, but bernoulli lowering handles this
+    # mode explicitly and should remain available.
     result.pop(aten.bernoulli.default, None)
     return result
 

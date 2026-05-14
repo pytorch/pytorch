@@ -72,7 +72,7 @@ def has_fractional_pool_sample_rand(graph: torch.fx.Graph) -> bool:
     )
 
 
-def _has_explicit_random_samples(node: torch.fx.Node) -> bool:
+def _fractional_pool_has_explicit_samples(node: torch.fx.Node) -> bool:
     return _fractional_pool_random_samples(node) is not None
 
 
@@ -82,7 +82,7 @@ def has_fractional_pool_implicit_random(graph: torch.fx.Graph) -> bool:
     return any(
         node.op == "call_function"
         and node.target in _FRACTIONAL_MAX_POOL_FUNCTIONAL_OPS
-        and not _has_explicit_random_samples(node)
+        and not _fractional_pool_has_explicit_samples(node)
         for node in graph.nodes
     )
 

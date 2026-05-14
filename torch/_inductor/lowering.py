@@ -60,6 +60,7 @@ from torch.utils._sympy.functions import (
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .fx_passes.random_utils import FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY
 from .ir import (
     BaseView,
     DtypeView,
@@ -2762,13 +2763,10 @@ make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
 
 
-_FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY = "fallback_random_for_fractional_pool"
-
-
 def _current_node_uses_fallback_random_for_fractional_pool() -> bool:
     node = getattr(V.graph, "current_node", None)
     return bool(
-        node is not None and node.meta.get(_FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY)
+        node is not None and node.meta.get(FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY)
     )
 
 
