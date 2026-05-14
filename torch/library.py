@@ -1062,11 +1062,12 @@ def register_autocast(
 ):
     r"""Register an autocast dispatch rule for this custom op.
 
-    Valid `device_type` include: "cpu" and "cuda".
+    Valid ``device_type`` values include any device type that supports autocast.
+    See :func:`torch.amp.is_autocast_available` for details.
 
     Args:
         op (str | OpOverload): The operator to register an autocast dispatch rule to.
-        device_type(str):  Device type to use. 'cuda' or 'cpu'.
+        device_type(str):  Device type to use. 'cuda', `cpu`, `xpu`, or any other device type that supports autocast.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,

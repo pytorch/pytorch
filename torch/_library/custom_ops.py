@@ -853,36 +853,37 @@ class CustomOpDef:
     ):
         r"""Register an autocast dispatch rule for this custom op.
 
-        Valid `device_type` include: "cpu" and "cuda".
+            Valid ``device_type`` values include any device type that supports autocast.
+        See :func:`torch.amp.is_autocast_available` for details.
 
-        Args:
-            op (str | OpOverload): The operator to register an autocast dispatch rule to.
-            device_type(str):  Device type to use. 'cuda' or 'cpu'.
-                The type is the same as the `type` attribute of a :class:`torch.device`.
-                Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
-            cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
-                casts incoming floating-point Tensors to the target dtype (non-floating-point Tensors
-                are not affected), then executes custom op with autocast disabled.
-            lib (Optional[Library]): If provided, the lifetime of this registration
+            Args:
+                op (str | OpOverload): The operator to register an autocast dispatch rule to.
+                device_type(str):  Device type to use. 'cuda', `cpu`, `xpu`, or any other device type that supports autocast.
+                    The type is the same as the `type` attribute of a :class:`torch.device`.
+                    Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+                cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
+                    casts incoming floating-point Tensors to the target dtype (non-floating-point Tensors
+                    are not affected), then executes custom op with autocast disabled.
+                lib (Optional[Library]): If provided, the lifetime of this registration
 
-        Examples::
-            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-            >>> import torch
-            >>> from torch import Tensor
-            >>> from torch.library import custom_op
-            >>>
-            >>> # Create a custom op that works on cuda
-            >>> @torch.library.custom_op("mylib::my_sin", mutates_args=())
-            >>> def my_sin(x: Tensor) -> Tensor:
-            >>>     return torch.sin(x)
-            >>>
-            >>> # Register autocast dispatch rule for the cuda device
-            >>> torch.library.register_autocast("mylib::my_sin", "cuda", torch.float16)
-            >>>
-            >>> x = torch.randn(3, dtype=torch.float32, device="cuda")
-            >>> with torch.autocast("cuda", dtype=torch.float16):
-            >>>     y = torch.ops.mylib.my_sin(x)
-            >>> assert y.dtype == torch.float16
+            Examples::
+                >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+                >>> import torch
+                >>> from torch import Tensor
+                >>> from torch.library import custom_op
+                >>>
+                >>> # Create a custom op that works on cuda
+                >>> @torch.library.custom_op("mylib::my_sin", mutates_args=())
+                >>> def my_sin(x: Tensor) -> Tensor:
+                >>>     return torch.sin(x)
+                >>>
+                >>> # Register autocast dispatch rule for the cuda device
+                >>> torch.library.register_autocast("mylib::my_sin", "cuda", torch.float16)
+                >>>
+                >>> x = torch.randn(3, dtype=torch.float32, device="cuda")
+                >>> with torch.autocast("cuda", dtype=torch.float16):
+                >>>     y = torch.ops.mylib.my_sin(x)
+                >>> assert y.dtype == torch.float16
 
         """
         if not isinstance(device_type, str):
