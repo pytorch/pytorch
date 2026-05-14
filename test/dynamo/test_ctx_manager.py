@@ -580,7 +580,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
+        self.assertExpectedInline(str(cnts.op_count), """17""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -1174,10 +1174,10 @@ class GraphModule(torch.nn.Module):
 
         _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', None, True, None)
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -1209,7 +1209,7 @@ class GraphModule(torch.nn.Module):
 
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        x: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
+        matmul: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
@@ -1219,7 +1219,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -1503,11 +1503,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
@@ -1546,11 +1546,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
@@ -1595,17 +1595,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
-        add: "f32[1]" = x + y;  y = None
+        add: "f32[1]" = ones + zeros;  zeros = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
-        add_1: "f32[1]" = add + x;  add = x = None
+        add_1: "f32[1]" = add + ones;  add = ones = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
@@ -1638,10 +1638,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y,)
+        return (add,)
 """,
         )
 
@@ -1682,14 +1682,14 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y *= 2;  y_1: "f32[]" = y;  y = None
+        add *= 2;  imul: "f32[]" = add;  add = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y_1,)
+        return (imul,)
 """,
         )
 
@@ -3355,6 +3355,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
 
@@ -3381,6 +3382,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
+    @onlyCUDA
     def test_autocast_float64(self, device):
         device_type = torch.device(device).type
 
@@ -3545,10 +3547,10 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
 
-        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+        tensor: "c128[2]" = torch.tensor([3.0, (3+5j)])
 
         set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
-        return (x,)
+        return (tensor,)
 """,
         )
 
@@ -4514,26 +4516,26 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        diff_args: "f32[3, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        _wrap_for_grad: "f32[3, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        _set_tensor_requires_grad: "f32[3, 3]" = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args);  _set_tensor_requires_grad = None
+        _set_tensor_requires_grad: "f32[3, 3]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad);  _set_tensor_requires_grad = None
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        sin: "f32[3, 3]" = diff_args.sin()
-        output: "f32[]" = sin.sum();  sin = None
+        sin: "f32[3, 3]" = _wrap_for_grad.sin()
+        sum_1: "f32[]" = sin.sum();  sin = None
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
-        grad_input: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad((sum_1,), [_wrap_for_grad], create_graph = True);  _wrap_for_grad = None
+        getitem: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
-        grad_input_1: "f32[3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-        output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
+        _unwrap_for_grad: "f32[]" = torch._functorch.predispatch._unwrap_for_grad(sum_1, 1);  sum_1 = _unwrap_for_grad = None
+        _unwrap_for_grad_1: "f32[3, 3]" = torch._functorch.predispatch._unwrap_for_grad(getitem, 1);  getitem = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (grad_input_1,)
+        return (_unwrap_for_grad_1,)
 """,
         )
 
