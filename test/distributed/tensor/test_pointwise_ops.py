@@ -291,15 +291,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_dropout_errors(self):
+    def test_dropout_partial_redistributes(self):
+        """Dropout on Partial input redistributes to Replicate first (no error)."""
         device_mesh = self.build_device_mesh()
-        with self.assertRaisesRegex(RuntimeError, "supported"):
-            self._run_sharded_elementwise_ops(
-                device_mesh=device_mesh,
-                placements=[Partial("sum")],
-                input_size=(8, 5),
-                op=torch.nn.functional.dropout,
-            )
+        input_tensor = torch.randn(8, 5, device=self.device_type)
+        dt = DTensor.from_local(input_tensor, device_mesh, [Partial("sum")])
+        result = torch.nn.functional.dropout(dt, training=True)
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(result.placements, (Replicate(),))
 
     @with_comms
     def test_mul_out(self):

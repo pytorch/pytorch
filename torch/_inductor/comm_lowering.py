@@ -183,6 +183,12 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     )
 
 
+def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
+    node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
+    assert isinstance(node, ir.IRNode)
+    return ir.TensorBox.create(node)
+
+
 def register_comm_lowerings():
     """
     Register lowerings for the comm subsystem.
@@ -235,9 +241,9 @@ def register_comm_lowerings():
         # _AllReduce_Kernel instead of _AllReduceKernel.
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,  # type: ignore[arg-type]
+            inp,
             reduce_op,
-            group_name,  # type: ignore[arg-type]
+            group_name,
         )
         return inp  # type: ignore[return-value]
 
@@ -260,9 +266,9 @@ def register_comm_lowerings():
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,  # type: ignore[arg-type]
+            inp,
             reduce_op,
-            group_name,  # type: ignore[arg-type]
+            group_name,
         )
         return inp  # type: ignore[return-value]
 
@@ -286,11 +292,6 @@ def register_comm_lowerings():
             group_name,
         )
         return inputs
-
-    def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
-        node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
-        assert isinstance(node, ir.IRNode)
-        return ir.TensorBox.create(node)
 
     @register_comm_lowering(c10d.all_gather_into_tensor)
     def _all_gather_into_tensor(inp, group_size, group_name):
@@ -402,12 +403,12 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
-    @register_comm_lowering(c10d.isend)  # type: ignore[misc]
+    @register_comm_lowering(c10d.isend)
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         return _create_out_of_place(c10d.isend.default, inp, dst, tag, group_name)
 
-    @register_comm_lowering(c10d.irecv)  # type: ignore[misc]
+    @register_comm_lowering(c10d.irecv)
     def _irecv(inp, src, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
@@ -415,7 +416,7 @@ def register_comm_lowerings():
         )
         return inp
 
-    @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
+    @register_comm_lowering(c10d.batch_p2p_ops)
     def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
@@ -518,7 +519,7 @@ def register_symm_mem_lowerings():
 
     def _maybe_realize_symm_mem(
         inp: ir.TensorBox,
-        group_name: str,  # type: ignore[arg-type]
+        group_name: str,
     ) -> ir.TensorBox:
         """
         Ensure inp is in P2P memory for a symm_mem collective.
@@ -864,3 +865,35 @@ def register_symm_mem_lowerings():
             reduce_op,
         )
         return None
+
+    @register_lowering(symm_mem._low_contention_all_gather)
+    def _symm_mem_low_contention_all_gather(
+        inp: ir.TensorBox,
+        group_name: str,
+    ):
+        # Use _CollectiveKernel so that _WaitKernel.get_volatile_reads()
+        # can track the input's lifetime through wait_tensor, preventing
+        # the memory planner from reusing the input buffer while the
+        # backend stream is still reading it.
+        return _create_out_of_place(
+            symm_mem._low_contention_all_gather.default,
+            inp,
+            group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_reduce_scatter)
+    def _symm_mem_low_contention_reduce_scatter(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        # Use _CollectiveKernel so that _WaitKernel.get_volatile_reads()
+        # can track the input's lifetime through wait_tensor, preventing
+        # the memory planner from reusing the input buffer while the
+        # backend stream is still reading it.
+        return _create_out_of_place(
+            symm_mem._low_contention_reduce_scatter.default,
+            inp,
+            reduce_op,
+            group_name,
+        )
