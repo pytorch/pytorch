@@ -189,6 +189,9 @@
 - test/distributed/**/*mem*
 - test/distributed/**/*mem*/**
 
+"no-runner-experiments":
+- .ci/docker/**
+
 "ciflow/torchtitan":
 # torchtitan commit pin updates
 - .github/ci_commit_pins/torchtitan.txt
