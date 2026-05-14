@@ -5130,6 +5130,14 @@ class TestMPS(TestCaseMPS):
             for _ in range(4):
                 self.assertEqual(x.sum().item(), ref, msg=f"unstable sum for N={N}")
 
+    def test_trace_repeated(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178497
+        torch.manual_seed(42)
+        x = torch.rand(3000, 3000, device="mps", dtype=torch.float32)
+        ref = x.trace().item()
+        for _ in range(2000):
+            self.assertEqual(x.trace().item(), ref)
+
     # Test forward max
     # Note - don't test grad now
     def test_max_el(self):
@@ -6315,6 +6323,86 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(torch.gather(mps, -1, mi).cpu(), mv.cpu())
             if stable:
                 self.assertEqual(ci, mi.cpu())
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
+    @parametrize("descending", [False, True])
+    @parametrize("dup", [False, True])
+    def test_sort_multi_block(self, dtype, descending, dup):
+        # shapes chosen to hit the metal multi block merge path
+        cases = {
+            2: [((1, 4096), -1), ((2, 3000), -1)],
+            4: [((1, 2049), -1), ((1, 8192), -1), ((2, 16384), -1),
+                ((5, 8192), -1), ((10, 8192), -1), ((10, 5000, 20), 1),
+                ((4, 1000, 8), 1)],  # n_blocks=1 non-last-dim: exercises permute
+            8: [((10, 2000), -1)],
+        }
+        strided_cases = {
+            4: [((2, 16384), -1)],
+            8: [((10, 4000), -1)],
+        }
+        elem_size = torch.tensor([], dtype=dtype).element_size()
+        lo, hi = (0, 5) if dup else (-1000, 1000)
+
+        def make(shape):
+            if dtype.is_floating_point:
+                return torch.randint(lo, hi, shape).to(dtype)
+            return torch.randint(lo, hi, shape, dtype=dtype)
+
+        def check(cpu, dim=-1):
+            mps = cpu.to("mps")
+            cv, _ = torch.sort(cpu, dim=dim, descending=descending)
+            mv, mi = torch.sort(mps, dim=dim, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, dim, mi).cpu(), mv.cpu())
+            sorted_mi, _ = torch.sort(mi, dim=dim)
+            shape = [1] * mi.ndim
+            shape[dim] = mi.size(dim)
+            self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(dim)).view(shape).expand_as(mi))
+
+        for shape, dim in cases.get(elem_size, []):
+            check(make(shape), dim)
+        for shape, dim in strided_cases.get(elem_size, []):
+            check(make(shape)[:, ::2], dim)
+
+    # xfailIf doesn't catch the SIGABRT from MPSGraph's gather assert
+    @unittest.skipIf(MACOS_VERSION < 15.0, "MPSGraph gather > 4GB assert aborts process on macOS 14")
+    @parametrize("dtype", [torch.float32, torch.int32, torch.bfloat16, torch.float16,
+                           torch.int16, torch.int8, torch.uint8, torch.bool])
+    @parametrize("descending", [False, True])
+    @parametrize("dup", [False, True])
+    def test_sort_radix(self, dtype, descending, dup):
+        # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
+        # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
+        # small_tg (RTPTG=512) variant. Strided cases exercise non-contiguous input.
+        if torch.tensor([], dtype=dtype).element_size() == 4:
+            cases = [((4, 65536), -1), ((1, 1048576), -1), ((8, 131072), -1),
+                     ((4, 8, 65536), 2), ((2, 65536, 4), 1)]
+            strided_shape = (4, 131072)
+        else:  # 1- and 2-byte share shapes
+            cases = [((4, 8192), -1), ((32, 8192), -1), ((1, 1048576), -1),
+                     ((8, 16384), -1), ((2, 8192, 4), 1)]
+            strided_shape = (4, 16384)
+
+        lo, hi = ((0, 2) if dtype == torch.bool else (0, 5) if dup else
+                  (0, 200) if dtype == torch.uint8 else (-100, 100))
+
+        def make(shape):
+            return torch.randint(lo, hi, shape).to(dtype)
+
+        def check(cpu, dim=-1):
+            mps = cpu.to("mps")
+            cv, _ = torch.sort(cpu, dim=dim, descending=descending)
+            mv, mi = torch.sort(mps, dim=dim, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, dim, mi).cpu(), mv.cpu())
+            sorted_mi, _ = torch.sort(mi, dim=dim)
+            shape = [1] * mi.ndim
+            shape[dim] = mi.size(dim)
+            self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(dim)).view(shape).expand_as(mi))
+
+        for shape, dim in cases:
+            check(make(shape), dim)
+        check(make(strided_shape)[:, ::2], -1)
 
     def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -10274,6 +10362,17 @@ class TestPad(TestCaseMPS):
         input_mps = torch.randn((2, 3, 4), device="mps")
         output_mps = torch.constant_pad_nd(input_mps, [])
         self.assertEqual(output_mps, input_mps)
+
+    def test_replication_pad1d_non_contig_out(self):
+        x = torch.randn(2, 3, 5, device="mps")
+        out = torch.empty(2, 7, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d.out(x, (1, 1), out=out)
+        self.assertEqual(out.cpu(), F.pad(x.cpu(), (1, 1), mode="replicate"))
+        go = torch.randn(2, 3, 7, device="mps")
+        gi = torch.empty(2, 5, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d_backward.grad_input(go, x, (1, 1), grad_input=gi)
+        gi_ref = torch.ops.aten.replication_pad1d_backward(go.cpu(), x.cpu(), (1, 1))
+        self.assertEqual(gi.cpu(), gi_ref)
 
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
