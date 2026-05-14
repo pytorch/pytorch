@@ -236,7 +236,7 @@ class CustomOpDef:
         self._backward_fn: Callable | None = None
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Callable | None = None
-        self._autocast_dtype: _dtype | None = None
+        self._autocast_dtype: dict[str, _dtype | None] = {}
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
@@ -892,8 +892,8 @@ class CustomOpDef:
         if not torch._C._is_autocast_available(device_type):
             raise ValueError(f"Device type '{device_type}' does not support autocast.")
 
-        need_register = self._autocast_dtype is None
-        self._autocast_dtype = cast_inputs
+        need_register = self._autocast_dtype.get(device_type) is None
+        self._autocast_dtype[device_type] = cast_inputs
         autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
         autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
 
@@ -907,7 +907,7 @@ class CustomOpDef:
             ):
                 return self._opoverload(*_cast(args, device_type, cast_inputs))
 
-        if need_register and self._autocast_dtype:
+        if need_register and self._autocast_dtype.get(device_type) is not None:
             self._lib.impl(self._name, kernel, autocast_key, with_keyset=True)
 
         return kernel
