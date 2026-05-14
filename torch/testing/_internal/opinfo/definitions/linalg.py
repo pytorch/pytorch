@@ -2701,6 +2701,7 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cpu",
+                dtypes=(torch.float64,),
                 active_if=(
                     TEST_WITH_TORCHINDUCTOR
                     and isinstance(
