@@ -4240,9 +4240,31 @@ def object_has_getattribute(value: Any) -> bool:
 
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
-    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
-    d = object.__getattribute__(obj, "__dict__")
+    # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        # threading.local stores attributes in a per-thread C-backed dict that
+        # object.__getattribute__ cannot see. CPython passes that dict directly
+        # to _PyObject_GenericSetAttrWithDict:
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
+        d = threading.local.__getattribute__(obj, "__dict__")
     d[name] = value
+
+
+def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
+    # Same path as object_setattr_ignore_descriptor with a NULL value.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        d = threading.local.__getattribute__(obj, "__dict__")
+    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:
@@ -4972,6 +4994,19 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return type(attr) is types.GetSetDescriptorType
     except AttributeError:
         return False
+
+
+def is_torch_class(cls: type) -> bool:
+    """Check if cls is defined in torch or a torch submodule.
+
+    Torch-internal C-level descriptors (e.g. torch.Tensor.unsqueeze_) need
+    to go through VariableTracker.build / trace_rules so they get the right
+    VT (TorchInGraphFunctionVariable), which has guards like
+    inplace-view-on-input-tensor detection. This helper identifies classes
+    whose descriptors should take that path instead of descriptor VTs.
+    """
+    module = getattr(cls, "__module__", None)
+    return module is not None and (module == "torch" or module.startswith("torch."))
 
 
 def is_torch_function_object(value: Any) -> bool:

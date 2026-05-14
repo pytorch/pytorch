@@ -38,7 +38,7 @@ def enter_dual_level():
     if new_level != _current_level + 1:
         raise RuntimeError(
             "Entering a new forward AD level but the current level "
-            "is not valid. Make sure you did not modified it directly."
+            "is not valid. Make sure you did not modify it directly."
         )
     _current_level = new_level
     return new_level
