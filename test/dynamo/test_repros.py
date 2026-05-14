@@ -1653,6 +1653,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_out, out)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_threading_local_dunder_dict_mutation(self):
+        import threading
+
+        foo = threading.local()
+
+        def f(x):
+            del foo.__dict__["old"]
+            foo.__dict__["new"] = x + 2
+            return foo.new * 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+
+        inp = torch.ones(1)
+        foo.old = torch.zeros(1)
+        expected = f(inp)
+        expected_new = foo.new
+        self.assertFalse(hasattr(foo, "old"))
+
+        foo.old = torch.zeros(1)
+        del foo.new
+        actual = opt_f(inp)
+        self.assertEqual(actual, expected)
+        self.assertFalse(hasattr(foo, "old"))
+        self.assertEqual(foo.new, expected_new)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
         model = SequentialAppendList(
