@@ -4762,13 +4762,7 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4868,7 +4862,13 @@ def pool2d_shape_check(
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        outputWidth >= 1,
+        lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
+        f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
+        "Output size is too small",
+    )
+    torch._check(
+        outputHeight >= 1,
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -4941,30 +4941,35 @@ def pool3d_shape_check(
         )
 
     if check_input_size:  # AveragePool3d
+        for dim_in, dim_k, name_in, name_k in [
+            (itime, kT, "T", "kT"), (iheight, kH, "H", "kH"), (iwidth, kW, "W", "kW"),
+        ]:
+            torch._check(
+                dim_in >= dim_k,
+                lambda: (
+                    f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
+                    f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
+                ),
+            )
+
+    for dim_k, dim_p in [(kT, pT), (kW, pW), (kH, pH)]:
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            kT / 2 >= pT,
             lambda: (
-                f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
-                f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
+                f"pad should be smaller than or equal to half of kernel size, but got "
+                f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
             ),
         )
 
-    torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
-        lambda: (
-            f"pad should be smaller than or equal to half of kernel size, but got "
-            f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
-        ),
-    )
-
-    torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
-        lambda: (
-            f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
-            f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
-            f"Output size is too small"
-        ),
-    )
+    for dim_o in [otime, owidth, oheight]:
+        torch._check(
+            dim_o >= 1,
+            lambda: (
+                f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
+                f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
+                f"Output size is too small"
+            ),
+        )
 
 
 def max_pool3d_backward_shape_check(
