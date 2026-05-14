@@ -863,23 +863,36 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-    def test_pointless_convert(self):
-        def fn1(x):
-            x = torch.ops.prims.convert_element_type.default(x, torch.float16)
-            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+    @parametrize(
+        "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
+        [
+            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, True, 2),
+            (torch.float16, torch.float32, True, 1),
+        ],
+    )
+    def test_pointless_convert(
+        self, input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls
+    ):
+        def fn(x):
+            x = torch.ops.prims.convert_element_type.default(x, intermediate_dtype)
+            x = torch.ops.prims.convert_element_type.default(x, input_dtype)
             return x
 
-        gm = torch.fx.symbolic_trace(fn1)
+        x = torch.randn(8, device=GPU_TYPE, dtype=input_dtype)
+        gm = make_fx(fn)(x)
         self.assertEqual(count_calls(gm.graph), 2)
-        joint_graph.joint_graph_passes(gm)
-        self.assertEqual(count_calls(gm.graph), 1)
+        with inductor_config.patch(emulate_precision_casts=emulate_precision_casts):
+            joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), expected_calls)
 
-        def fn2(x):
+        def fn_int(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.int32)
             x = torch.ops.prims.convert_element_type.default(x, torch.float32)
             return x
 
-        gm = torch.fx.symbolic_trace(fn2)
+        x = torch.randn(8, device=GPU_TYPE, dtype=torch.float32)
+        gm = make_fx(fn_int)(x)
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
@@ -2299,6 +2312,41 @@ class TestPatternMatcher(TestCase):
             fn, options={"post_grad_custom_post_pass": custom_pass}
         )
         compiled_fn(x, y)
+
+    def test_replace_by_example_returns_inserted_nodes(self):
+        test_pass = PatternMatcherPass()
+        replacement_targets = []
+
+        @register_graph_pattern(
+            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+            pass_dict=test_pass,
+        )
+        def add_to_mul_add(match: Match, x, y):
+            def repl(a, b):
+                prod = a * b
+                return prod + b
+
+            with V.fake_mode:
+                replacement_nodes = match.replace_by_example(repl, [x, y])
+
+            replacement_targets.extend(
+                node.target for node in replacement_nodes if node.op == "call_function"
+            )
+
+        def custom_pass(graph: torch.fx.Graph):
+            test_pass.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        self.assertEqual(compiled_fn(x, y), x * y + y)
+        self.assertEqual(replacement_targets, [aten.mul.Tensor, aten.add.Tensor])
 
     def test_metadata_propagation_replace_by_example_multinode(self):
         """Verify metadata propagation for replace_by_example with a multi-node

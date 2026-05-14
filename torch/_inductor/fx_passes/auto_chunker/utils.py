@@ -21,10 +21,7 @@ def use_tangent(node: Node) -> bool:
     Whether the fx node uses tangent input.
     """
 
-    return any(
-        is_tangent_node(arg)  # type: ignore[operator]
-        for arg in get_args_of_node_type(node)
-    )
+    return any(is_tangent_node(arg) for arg in get_args_of_node_type(node))
 
 
 def compute_tensor_size(*args: Any, count_bytes: bool = True, **kwargs: Any) -> int:
@@ -112,7 +109,7 @@ def get_scale_by_from_metas(*metas: ChunkingMeta) -> Node | None:
     raise a CantChunk exception.
 
     If no ChunkingMeta has scale_by field, return None.
-    Other wise return the only scale_by field.
+    Otherwise return the only scale_by field.
     """
 
     scale_by_list = []
