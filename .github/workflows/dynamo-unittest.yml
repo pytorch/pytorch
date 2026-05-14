@@ -38,6 +38,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     with:
@@ -63,6 +64,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: [get-label-type, dynamo-build]
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     with:
