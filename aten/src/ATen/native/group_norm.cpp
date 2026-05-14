@@ -236,10 +236,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
 
   std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
   weight_bias_shape[1] = C;
-  if (weight_opt) {
+  if (weight_opt && weight_opt->defined()) {
     out.mul_(weight_opt->view(weight_bias_shape));
   }
-  if (bias_opt) {
+  if (bias_opt && bias_opt->defined()) {
     out.add_(bias_opt->view(weight_bias_shape));
   }
 
