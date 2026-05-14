@@ -1108,6 +1108,9 @@ class OverFusionTest(TestBase):
         {
             "triton.mix_order_reduction": True,
             "triton.mix_order_reduction_max_reads": 10,
+            # These assertions inspect scheduler/codegen metrics populated only
+            # during fresh compilation; a warm FX graph cache bypasses that path.
+            "force_disable_caches": True,
         }
     )
     def test_max_reads_limits_fusion(self):
