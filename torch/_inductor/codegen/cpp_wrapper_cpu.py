@@ -2458,6 +2458,30 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src};")
 
+    @staticmethod
+    def _get_while_loop_carried_output_names(while_loop):
+        mutation_output_names = {
+            mutation_name: mutation_output.get_name()
+            for mutation_output in while_loop.mutation_outputs
+            for mutation_name in mutation_output.get_mutation_names()
+        }
+        outputs_iter = iter(while_loop.outputs)
+        output_names = []
+        for carried_input in while_loop.carried_inputs:
+            if carried_input.get_name() in mutation_output_names:
+                output_names.append(mutation_output_names[carried_input.get_name()])
+            else:
+                output_names.append(next(outputs_iter).get_name())
+
+        try:
+            next(outputs_iter)
+        except StopIteration:
+            pass
+        else:
+            raise AssertionError("while_loop has unused non-mutated outputs")
+
+        return output_names
+
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
             "codegen invoke_subgraph is not implemented for cpp wrapper"
@@ -2529,6 +2553,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -2536,12 +2561,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
             # will be assigned the carried values.
-            out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
