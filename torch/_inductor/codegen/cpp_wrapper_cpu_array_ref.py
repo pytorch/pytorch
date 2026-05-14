@@ -140,15 +140,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
 
-        # Temporarily redirect self.prefix so the base class
-        # codegen_input_symbol_assignment writes into our buffer.
-        orig_prefix = self.prefix
-        self.prefix = code
-        try:
+        # Redirect self.prefix so the base class codegen_input_symbol_assignment
+        # writes into our buffer.
+        with self._target_buf("prefix", code):
             for name, value in inputs:
                 self.codegen_input_symbol_assignment(name, value, bound_vars)
-        finally:
-            self.prefix = orig_prefix
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
@@ -1115,6 +1111,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         super().generate_fallback_kernel_with_runtime_lookup(
             buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
+
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+        return [f"borrow_arrayref_tensor_as_tensor({arg})" for arg in tensor_call_args]
 
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,

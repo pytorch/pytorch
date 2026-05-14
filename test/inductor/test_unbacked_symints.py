@@ -1008,6 +1008,37 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, 8)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch(
+        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
+    )
+    def test_cat_sympy_channels_last_contiguous(self, device):
+        """torch.cat with symbolic shapes in shapes / strides should not raise
+        GuardOnDataDependentSymNode when checking channels_last contiguity."""
+
+        def fn(x, y):
+            # nonzero produces an unbacked symint in dim 0
+            nz = torch.nonzero(x)  # (u0, 1)
+            u0 = nz.size(0)
+            # All inputs are unrealized Pointwise (new_zeros), so
+            # any_input_is_storage_and_layout is False, reaching the
+            # meta["val"] channels_last check. Lower both pointwise cat
+            # thresholds to force ConcatKernel path instead of pointwise_cat.
+            inputs = [
+                y.new_zeros(y.size(0), u0, y.size(2), y.size(3)),
+                y.new_zeros(y.size(0), u0 + 1, y.size(2), y.size(3)),
+            ]
+            return torch.cat(inputs, dim=1)
+
+        example_inputs = (
+            torch.tensor([1.0, 0.0, 1.0, 1.0], device=device),
+            torch.randn(2, 3, 4, 10, device=device),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

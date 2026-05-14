@@ -2110,8 +2110,17 @@ class PallasKernel(SIMDKernel):
 
         buf_size = buf_obj.get_size()
 
-        # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
+            return _BufferIndexing(
+                index_str="...", needs_flatten=indexing.needs_flatten
+            )
+
+        # if buffer size is 1, and index is an integer, use "..."
+        if (
+            len(buf_size) == 1
+            and buf_size[0] == 1
+            and not self._has_iteration_vars(index)
+        ):
             return _BufferIndexing(
                 index_str="...", needs_flatten=indexing.needs_flatten
             )
@@ -2736,7 +2745,7 @@ class PallasKernel(SIMDKernel):
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
-                f"{out}[...] = {out}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
+                f"{out}[...] = {out}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
             ]
 
@@ -2760,8 +2769,8 @@ class PallasKernel(SIMDKernel):
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
                 lines.append(
-                    f"{out}[...] = {alias_param}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
-                    f"{value_expr}.flatten()).reshape({out}.shape)"
+                    f"{out}[...] = {alias_param}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
+                    f"jnp.asarray({value_expr}).flatten()).reshape({out}.shape)"
                 )
             else:
                 lines.append(f"{out}[{indexing.index_str}] = {value_expr}")
@@ -3133,6 +3142,11 @@ class PallasKernel(SIMDKernel):
                 else:
                     # Get base index expression
                     indexing = self._get_index_expr(index)
+
+                    # Adjust index for buffer shape (scalar, multi-dim, etc.)
+                    indexing = self._adjust_index_for_buffer_shape(
+                        name, index, indexing
+                    )
 
                     # Check for im2col-like patterns
                     indexing = self._check_im2col_pattern(index, indexing)
