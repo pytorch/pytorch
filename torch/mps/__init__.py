@@ -233,6 +233,7 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 
 from . import profiler
 from .event import Event
+from .graphs import MPSGraph, graph, make_graphed_callables
 
 
 __all__ = [
@@ -252,4 +253,7 @@ __all__ = [
     "profiler",
     "recommended_max_memory",
     "is_available",
+    "MPSGraph",
+    "graph",
+    "make_graphed_callables",
 ]
