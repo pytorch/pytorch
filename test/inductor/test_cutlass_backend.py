@@ -306,8 +306,6 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        try_import_cutlass.cache_clear()
-        self.addCleanup(try_import_cutlass.cache_clear)
         self.assertTrue(try_import_cutlass())
 
         import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
@@ -315,8 +313,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     def test_cutlass_key(self):
-        try_import_cutlass.cache_clear()
-        self.addCleanup(try_import_cutlass.cache_clear)
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
 
@@ -335,8 +331,6 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        try_import_cutlass.cache_clear()
-        self.addCleanup(try_import_cutlass.cache_clear)
         cutlass_dir = _get_cutlass_dir()
         self.assertTrue(
             try_import_cutlass(),
