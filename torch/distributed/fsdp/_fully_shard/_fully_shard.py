@@ -19,7 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -142,8 +142,32 @@ def fully_shard(
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
 
+    When called with a list (``fully_shard([a, b, ...])``), the model's
+    forward may run only a subset of the grouped modules, with the rest
+    called later in the same iteration. Chunked-loss training with
+    ``fully_shard([norm, head])`` is the motivating case: the main forward
+    runs norm only, then head is invoked per chunk. Caveats:
+
+    - Each standalone per-chunk invocation registers its own post_backward
+      autograd node, so N chunk calls produce N reduce-scatters for that
+      group.
+    - ``mp_policy.cast_forward_inputs`` and ``mp_policy.output_dtype``
+      both apply per module in the group — every invocation (including
+      each standalone per-chunk call) casts its inputs to ``param_dtype``
+      and its output to ``output_dtype``.
+
+    .. note::
+       If ``forward()`` or ``backward()`` raises, FSDP's per-iteration
+       state (iteration forward-root marker, grouped-module run
+       trackers, in-flight collective state, per-group training states)
+       is left in an undefined condition. To recover and run another
+       iteration, call :meth:`FSDPModule.reset_iter_state` on the root
+       FSDP module. The failed iteration's gradients are discarded,
+       including any ``no_sync`` / HSDP partial-reduce accumulation
+       state.
+
     Args:
-        module (Union[nn.Module, List[nn.Module]): The module or modules to
+        module (Union[nn.Module, List[nn.Module]]): The module or modules to
             shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
@@ -347,6 +371,34 @@ class FSDPModule:
             return handle
         handle.wait()
         return None
+
+    @_dynamo_disable
+    def reset_iter_state(self) -> None:
+        """
+        Resets FSDP's per-iteration state after an exception aborted a
+        forward or backward mid-flight. The supported recovery workflow is:
+
+        1. Catch the exception from ``forward()`` or ``backward()``.
+        2. Call ``reset_iter_state()`` on the *root* FSDP module.
+        3. Run the next iteration normally.
+
+        The reset waits on any in-flight all-gather/reduce-scatter events,
+        reshards every parameter group, and clears iteration trackers
+        (``iter_forward_root``, ``_modules_to_run_forward``, post-forward
+        order, per-group training states). Any in-flight gradient
+        reductions are discarded: the failed iteration's gradients are
+        lost, including HSDP partial-reduce-accumulation state and
+        ``no_sync`` grad-accumulation state. Callers doing gradient
+        accumulation should treat the microbatch sequence as invalidated
+        and restart it.
+
+        Must be called on the root FSDP module — i.e. the module the
+        top-level ``fully_shard`` was applied to, equivalently the
+        module first forwarded. Calling on a non-root module raises
+        ``RuntimeError``.
+        """
+        state = self._get_fsdp_state()
+        state._reset_iter_state()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """

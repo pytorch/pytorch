@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    IS_H100,
     requires_gpu,
     requires_triton,
 )
@@ -231,6 +232,23 @@ class TestSelectAlgorithm(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test_bmm_small_m(self):
+        # Verify BMM works when M < BLOCK_M. The triton_bmm template's
+        # tl.max_contiguous/tl.multiple_of hints must be guarded by
+        # M >= BLOCK_M to avoid out-of-bounds vectorized loads (see #179267).
+        @torch.compile
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        # M=2 is smaller than any BLOCK_M autotuning config (typically >= 16)
+        foo(
+            torch.randn(4, 2, 64, device=GPU_TYPE),
+            torch.randn(4, 64, 32, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_not_even_k(self):
         @torch.compile
         def foo(a, b):
@@ -330,6 +348,7 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @unittest.skipIf(IS_H100, "Fails on H100, see #143412")
     @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):

@@ -259,7 +259,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
-        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        # pyrefly: ignore [bad-argument-type, bad-return]
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -746,7 +746,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Needed for passing this type as an opaque object input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",
             {},
         )
 
@@ -1536,7 +1536,7 @@ class _MaskPartial(Partial):
         Needed for passing this type as an input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",
             {},
         )
 

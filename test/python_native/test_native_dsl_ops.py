@@ -44,6 +44,7 @@ class TestNativeDSLOps(TestCase):
 
     def setUp(self):
         """Clear all caches before each test to ensure test isolation."""
+        super().setUp()
         self._cache_functions_to_clear = [
             (
                 "torch._native.common_utils",
@@ -141,7 +142,7 @@ class TestNativeDSLOps(TestCase):
                 # runtime_version should return Version or None
                 ver = mod.runtime_version()
                 if ver is not None:
-                    from packaging.version import Version
+                    from torch._vendor.packaging.version import Version
 
                     self.assertIsInstance(ver, Version)
 
@@ -161,6 +162,35 @@ class TestNativeDSLOps(TestCase):
         """)
         result = _subprocess_lastline(script)
         self.assertEqual(result, "[]", f"DSL modules leaked on import torch: {result}")
+
+    def test_no_external_packaging_dependency(self):
+        """torch._native must not import the external `packaging` package.
+
+        It should use the vendored copy at torch._vendor.packaging instead.
+        This guards against ModuleNotFoundError in environments where the
+        external `packaging` is not installed (e.g. torchvision Windows CI).
+        """
+        script = textwrap.dedent("""\
+            import sys
+            # Remove external packaging from sys.modules if already loaded
+            for mod_name in list(sys.modules):
+                if mod_name == "packaging" or mod_name.startswith("packaging."):
+                    del sys.modules[mod_name]
+            # Block external packaging from being imported
+            import importlib.abc
+            import importlib.machinery
+            class BlockPackaging(importlib.abc.MetaPathFinder):
+                def find_module(self, fullname, path=None):
+                    if fullname == "packaging" or fullname.startswith("packaging."):
+                        return self
+                def load_module(self, fullname):
+                    raise ImportError(f"External {fullname} is blocked")
+            sys.meta_path.insert(0, BlockPackaging())
+            import torch
+            print("OK")
+        """)
+        result = _subprocess_lastline(script)
+        self.assertEqual(result, "OK")
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
     def test_check_native_jit_disabled_environment_variable(self, env_value, expected):
@@ -193,7 +223,7 @@ class TestNativeDSLOps(TestCase):
 
     def test_available_version_parsing(self):
         """Test _available_version parses various version formats and handles invalid ones."""
-        from packaging.version import Version
+        from torch._vendor.packaging.version import Version
 
         common_utils = _import_module_directly(
             "torch._native.common_utils", "common_utils.py"
@@ -223,7 +253,7 @@ class TestNativeDSLOps(TestCase):
                     )
 
     def test_registry_mechanics(self):
-        """_get_or_create_library caches Library instances per (lib, dispatch_key)."""
+        """_get_or_create_library caches Library instances per dispatch_key."""
         import torch._native.registry as registry
         import torch.library
 
@@ -236,23 +266,23 @@ class TestNativeDSLOps(TestCase):
         )
 
         try:
-            key = ("_test_native_dsl_registry", "CPU")
-            registry._libs.pop(key, None)
+            cpu_key = ("_native", "CPU")
+            cuda_key = ("_native", "CUDA")
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
 
-            lib1 = registry._get_or_create_library(*key)
+            lib1 = registry._get_or_create_library("CPU")
             self.assertIsInstance(lib1, torch.library.Library)
-            lib2 = registry._get_or_create_library(*key)
+            lib2 = registry._get_or_create_library("CPU")
             self.assertIs(lib1, lib2, "should return cached instance")
 
             # Different dispatch key -> different Library
-            key2 = ("_test_native_dsl_registry", "CUDA")
-            registry._libs.pop(key2, None)
-            lib3 = registry._get_or_create_library(*key2)
+            lib3 = registry._get_or_create_library("CUDA")
             self.assertIsNot(lib1, lib3)
 
             # cleanup
-            registry._libs.pop(key, None)
-            registry._libs.pop(key2, None)
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
         finally:
             # Restore original registry state
             registry._libs.clear()
@@ -332,17 +362,17 @@ class TestNativeDSLOps(TestCase):
                 # Use a unique operation name
                 unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
                 triton_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 cutedsl_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 # Should not call the registry function at all since JIT is disabled
                 self.assertEqual(registry_mock.call_count, 0)
 
     def test_version_skip_env_var_overrides(self):
         """TORCH_NATIVE_SKIP_VERSION_CHECK=1 allows non-blessed versions."""
-        from packaging.version import Version
+        from torch._vendor.packaging.version import Version
 
         fake_version = Version("99.99.99")
 
@@ -380,8 +410,12 @@ class TestNativeDSLOps(TestCase):
                 op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
 
                 # Call the register functions
-                triton_utils.register_op_override("aten", op_name, "CPU", lambda: None)
-                cutedsl_utils.register_op_override("aten", op_name, "CPU", lambda: None)
+                triton_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
+                cutedsl_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
 
                 # Verify both implementation functions were called
                 self.assertEqual(

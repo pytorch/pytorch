@@ -1,18 +1,44 @@
 # mypy: allow-untyped-defs
 import logging
+import os
+import shutil
+import subprocess
 
 from torch._inductor import config
+from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch
 from torch._inductor.utils import is_linux
 
 from ..cuda.compile_utils import _cutlass_include_paths
-from .xpu_env import get_xpu_arch
 
 
 log = logging.getLogger(__name__)
 
 
 def _sycl_compiler() -> str:
-    return "icpx"
+    # Search order:
+    # 0) which icpx
+    # 1) config.xpu.oneapi_root
+    # 2) ONEAPI_ROOT environment variable
+    # 3) default system search PATH.
+    if shutil.which("icpx"):
+        return "icpx"
+
+    if os.path.exists(config.xpu.oneapi_root or ""):
+        oneapi_root = config.xpu.oneapi_root
+    elif os.path.exists(os.getenv("ONEAPI_ROOT") or ""):
+        oneapi_root = os.getenv("ONEAPI_ROOT")
+    else:
+        oneapi_root = None
+
+    if oneapi_root:
+        oneapi_inclue = os.path.join(oneapi_root, "include")
+        if "CPLUS_INCLUDE_PATH" in os.environ:
+            os.environ["CPLUS_INCLUDE_PATH"] += ":" + oneapi_inclue
+        else:
+            os.environ["CPLUS_INCLUDE_PATH"] = oneapi_inclue
+        return os.path.realpath(os.path.join(oneapi_root, "bin/icpx"))
+    else:
+        raise RuntimeError("Can not find Intel compiler.")
 
 
 def _sycl_lib_options() -> list[str]:
@@ -54,7 +80,7 @@ def _sycl_compiler_options() -> list[str]:
         "-DCUTLASS_VERSIONS_GENERATED",
         "-O3",
         "-DNDEBUG",
-        "-std=c++17",
+        "-std=c++20",
         "-fPIC",
         "-fsycl",
         f"-fsycl-targets={_sycl_arch_as_compile_option()}",
@@ -63,7 +89,12 @@ def _sycl_compiler_options() -> list[str]:
         "-fno-sycl-instrument-device-code",
         "-DMKL_ILP64",
         "-MD",
-        "-MT",
+        "-Xs",
+        (
+            "-options \"-igc_opts 'VISAOptions=-perfmodel,VectorAliasBBThreshold=100000000000,"
+            "ExtraOCLOptions=-cl-intel-256-GRF-per-thread'\" "
+            "-options -ze-opt-large-register-file"
+        ),
     ]
     if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
@@ -82,24 +113,24 @@ def xpu_compile_command(
     sycl_lib_options = _sycl_lib_options()
     sycl_compiler_options = _sycl_compiler_options()
 
-    options = (
-        extra_args
+    # Build command as a list to preserve arguments with spaces
+    cmd_parts = (
+        [_sycl_compiler()]
+        + extra_args
         + ["-I" + path for path in include_paths]
         + ["-isystem", "/include"]
         + sycl_compiler_options
         + sycl_lib_options
     )
-    src_file = " ".join(src_files)
-    res = ""
     if dst_file_ext == "o":
-        res = f"{_sycl_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
+        cmd_parts.extend(["-c", "-o", dst_file] + src_files)
     elif dst_file_ext == "so":
-        options.append("-shared")
-        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+        cmd_parts.extend(["-shared", "-o", dst_file] + src_files)
     elif dst_file_ext == "exe":
-        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+        cmd_parts.extend(["-o", dst_file] + src_files)
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
 
+    res = subprocess.list2cmdline(cmd_parts)
     log.debug("XPU command: %s", res)
     return res

@@ -67,7 +67,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
             if type(tensor) is torch.Tensor:
                 plain_tensor_container.append(tensor)
                 return None, idx + 1
-            inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+            inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()
             new_idx = idx
             attr_to_meta: dict[str, SubclassCreationMeta | OpaqueMeta | None] = {}
             for attr in inner_tensors_attrnames:
@@ -124,7 +124,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     """
     for name, tensor in itertools.chain(
         list(module.named_parameters(recurse=False)),
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         list(module.named_buffers(recurse=False)),
     ):
         if is_traceable_wrapper_subclass(tensor):

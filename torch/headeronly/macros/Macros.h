@@ -364,9 +364,26 @@ TORCH_CUDA_CPP_API int warp_size();
 static __host__ inline int C10_WARP_SIZE_INTERNAL() {
   return at::cuda::warp_size();
 }
+// NOTE: __device__ C10_WARP_SIZE_INTERNAL
+// For __SPIRV__, we must use dynamic warpSize. When not targeting __SPIRV__,
+// we can use constexpr. This matches prior behavior. We preserve this for
+// backward compatibility instead of forcing old code to use dynamic warpSize
+// and losing constexpr. However, compiling for --offload-arch=amdgcnspirv
+// could expose where C10_WARP_SIZE was used incorrectly where the dynamic
+// warpSize is not allowed.
+#if defined(__SPIRV__)
 static __device__ inline int C10_WARP_SIZE_INTERNAL() {
   return warpSize;
 }
+#else // __SPIRV__
+static __device__ inline constexpr int C10_WARP_SIZE_INTERNAL() {
+#if defined(__GFX9__)
+  return 64;
+#else // __GFX9__
+  return 32;
+#endif // __GFX9__
+}
+#endif // __SPIRV__
 #if defined(__SPIRV__)
 #define C10_WARP_SIZE_LOWER_BOUND 32
 #define C10_WARP_SIZE_UPPER_BOUND 64

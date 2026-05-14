@@ -8,8 +8,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
+from torch._inductor.heuristics.template.params import DictKernelTemplateParams
 from torch._inductor.kernel_template_choice import KernelTemplateChoice
-from torch._inductor.template_heuristics.params import DictKernelTemplateParams
 
 
 log = logging.getLogger(__name__)
@@ -404,11 +404,14 @@ class LookupTableChoices(InductorChoices):
                 continue
 
             # For each lookup config, create a KTC with the override kwargs
+            # Start from base params (which include derived options like OUT_DTYPE)
+            # and let the lookup config override them
+            base_kwargs = base_ktc.params.to_kwargs()
             for c in configs:
+                merged = {**base_kwargs, **c}
                 lookup_ktc = KernelTemplateChoice(
                     template=base_ktc.template,
-                    # use the ones from the lookup table
-                    params=DictKernelTemplateParams(c),
+                    params=DictKernelTemplateParams(merged),
                     extra_kwargs=base_ktc.extra_kwargs,
                     layout=base_ktc.layout,
                     inputs=base_ktc.inputs,

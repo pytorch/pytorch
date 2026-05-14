@@ -232,7 +232,7 @@ namespace {
       auto half_precision_ut = [&](SignOpType op_type) {
         constexpr auto N = vec::size();
         CACHE_ALIGN RT x_fp[N];
-        CACHE_ALIGN VT x_hp[N];
+        CACHE_ALIGN VT x_hp[N] = {};
         auto seed = TestSeed();
         ValueGen<RT> generator(RT(-1), RT(1), seed);
         for (const auto i : c10::irange(N)) {
@@ -2201,7 +2201,7 @@ namespace {
 // In member function ‘virtual void {anonymous}::VecConvertBFloat16_ExhaustiveToFloat_Test::TestBody()’:
 // vec_test_all_types.cpp:2265:10: internal compiler error: Segmentation fault
 // 2265 |     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;

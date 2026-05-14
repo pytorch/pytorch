@@ -1520,6 +1520,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -1867,6 +1868,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         object.__setattr__(src2, "_hash", 67890)
 
         self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
+
+    def test_source_serialization_init_false_fields(self):
+        # Test that source serialization handles fields that are not initialized
+        from torch._dynamo.source import DefaultsSource, LocalSource
+
+        base = LocalSource("x")
+        source = DefaultsSource(base=base, idx_key=0, is_kw=False)
+
+        # Round-trip through pickle should work even with init=False fields
+        restored = pickle.loads(pickle.dumps(source))
+        self.assertEqual(source, restored)
 
 
 class SimpleModule(torch.nn.Module):

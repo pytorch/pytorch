@@ -16,7 +16,7 @@ from torch.utils._runtime_estimation import (
 
 
 if TYPE_CHECKING:
-    from .schemas import ViewAndMutationMeta  # noqa: TC004
+    from .schemas import ViewAndMutationMeta
 
 from .indexed_dict import IndexedDict
 
@@ -31,6 +31,7 @@ _SYNC_OPS = (
     torch.ops.streams.wait_event.default,
     torch.ops.streams.synchronize_event.default,
     torch.ops.streams.synchronize_device.default,
+    torch.ops.streams.synchronize_stream.default,
 )
 
 
@@ -488,9 +489,13 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
-                # synchronize_device has no event — it acts as a full
-                # barrier across all streams, same as synchronize_event.
-                if node.target is torch.ops.streams.synchronize_device.default:
+                # synchronize_device and synchronize_stream block the CPU,
+                # so all subsequent kernel launches are host-ordered after
+                # them. Treat both as full barriers across all streams.
+                if node.target in (
+                    torch.ops.streams.synchronize_device.default,
+                    torch.ops.streams.synchronize_stream.default,
+                ):
                     all_stream_deps: list[Node] = [
                         n for nodes in stream_to_nodes.values() for n in nodes
                     ]
@@ -501,7 +506,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     node = next_node
                     continue
 
-                event_index: int = node.args[0]  # type: ignore[assignment]
+                event_index: int = node.args[0]
 
                 # synchronize_event blocks the CPU thread, so it acts
                 # as a barrier across all streams. Collect deps from every
@@ -519,7 +524,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     else:
                         deps_before_sync = all_stream_deps
                 else:
-                    sync_stream = node.args[1]  # type: ignore[assignment]
+                    sync_stream = node.args[1]
                     deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))
                     # Nodes without explicit stream annotation (custom.stream=None)
                     # run on the current/default stream. Include them when the sync

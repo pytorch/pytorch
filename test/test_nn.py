@@ -2,6 +2,8 @@
 # ruff: noqa: F841
 
 import contextlib
+import ctypes
+import ctypes.util
 import math
 import random
 import unittest
@@ -34,8 +36,8 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, IS_ARM64, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
+    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -45,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipMPSIf, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 
@@ -4012,22 +4014,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hidden = torch.randn(correct_hidden_shape)
 
             # input and weights are not at the same device
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Input and parameter tensors are not at the same device"):
+            rnn_param_device_msg = (
+                r"(?:Input and parameter tensors are not at the same device|"
+                r"Expected all tensors to be on the same device)"
+            )
+            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
                 model(input.to('cuda:0'))
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Input and parameter tensors are not at the same device"):
+            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
                 model_cuda(input)
 
             # input and hiddens are not at the same device
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"Input and hidden tensors are not at the same device"):
+            rnn_hidden_device_msg = (
+                r"(?:Input and hidden tensors are not at the same device|"
+                r"Expected all tensors to be on the same device)"
+            )
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                 if mode == 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
                     model(input, (hidden.to('cuda:0')))
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"Input and hidden tensors are not at the same device"):
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                 if mode == 'LSTM':
                     model_cuda(input.to('cuda:0'), (hidden, hidden))
                 else:
@@ -4035,8 +4041,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             # hidden tensors are not at the same CUDA device
             if mode == 'LSTM':
-                with self.assertRaisesRegex(RuntimeError,
-                                            "Input and hidden tensors are not at the same device"):
+                with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -6735,6 +6740,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             groups = 2
             torch.native_channel_shuffle(input_tensor, groups)
 
+        # Regression test for #173500: the CompositeImplicitAutograd fallback
+        # (used by non-CPU backends like CUDA/MPS) used to skip validation and
+        # crash with a floating-point exception on groups=0. The meta device
+        # also routes through this fallback.
+        meta_tensor = torch.empty([1, 3, 2, 2], device="meta")
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups to divide channels in must be positive.*"):
+            torch.native_channel_shuffle(meta_tensor, 0)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of channels must be divisible by groups.*"):
+            torch.native_channel_shuffle(meta_tensor, 2)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "channel_shuffle expects input with > 2 dims,.*"):
+            torch.native_channel_shuffle(torch.empty([1, 2], device="meta"), 2)
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
@@ -6845,7 +6865,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
 
-    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
+    @unittest.skipIf(IS_WINDOWS and IS_ARM64, "Fails as 'Unexpected success' on Windows ARM64")
+    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE)
     # see https://github.com/pytorch/pytorch/issues/177250
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
@@ -6979,6 +7000,77 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for is_channels_last in (True, False):
                         helper(size, dtype, mode, device, is_channels_last)
 
+
+    @unittest.skipIf(IS_WINDOWS, "requires mmap/mprotect")
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_interpolate_uint8_overread(self):
+        # Regression test for vectorized resize overreads (NEON vld3_u8 and
+        # similar AVX2 paths). The vectorized block-of-4/8 loops may load
+        # more bytes than needed; on the last row this can read past the
+        # buffer. We detect this by placing tensor data right before an
+        # unmapped guard page so any overread triggers SIGBUS/SIGSEGV.
+
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        libc.mmap.restype = ctypes.c_void_p
+        libc.mmap.argtypes = [
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, ctypes.c_longlong,
+        ]
+        libc.mprotect.restype = ctypes.c_int
+        libc.mprotect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+        libc.munmap.restype = ctypes.c_int
+        libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+
+        MAP_PRIVATE = 0x02
+        MAP_ANON = 0x1000 if IS_MACOS else 0x20
+        PROT_RW = 0x01 | 0x02
+        PROT_NONE = 0x00
+
+        for num_channels in (3, 4):  # 3ch → NEON on aarch64, 4ch → AVX2 on x86
+            for mode in ("bilinear", "bicubic"):
+                for w_in in range(4, 60):
+                    for w_out in [1, 2, 3]:
+                        h_in = 1
+                        tensor_bytes = h_in * w_in * num_channels
+                        num_data_pages = (tensor_bytes + page_size - 1) // page_size
+                        total_pages = num_data_pages + 1
+                        total_size = total_pages * page_size
+
+                        addr = libc.mmap(0, total_size, PROT_RW,
+                                         MAP_PRIVATE | MAP_ANON, -1, 0)
+                        self.assertTrue(
+                            addr not in (0, 2**64 - 1, -1), "mmap failed"
+                        )
+
+                        guard_start = addr + num_data_pages * page_size
+                        libc.mprotect(guard_start, page_size, PROT_NONE)
+
+                        data_start = guard_start - tensor_bytes
+                        ArrayType = ctypes.c_uint8 * tensor_bytes
+                        c_arr = ArrayType.from_address(data_start)
+                        np_arr = np.frombuffer(c_arr, dtype=np.uint8)
+                        np_arr[:] = 128
+
+                        flat = torch.from_numpy(np_arr)
+                        # channels-last strides: (H*W*C, 1, W*C, C)
+                        t = flat.as_strided(
+                            size=[1, num_channels, h_in, w_in],
+                            stride=[
+                                h_in * w_in * num_channels,
+                                1,
+                                w_in * num_channels,
+                                num_channels,
+                            ],
+                        )
+
+                        # Overread past the guard page will SIGBUS/SIGSEGV
+                        F.interpolate(
+                            t, size=(h_in, w_out), mode=mode,
+                            antialias=True, align_corners=False,
+                        )
+
+                        libc.munmap(addr, total_size)
 
     @set_default_dtype(torch.double)
     def test_interpolate(self):
@@ -7208,32 +7300,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
-
-    def test_unfold_invalid_arg(self):
-        # input wrong dimension
-
-        unfold = nn.Unfold(kernel_size=(2, 3))
-
-        # calculated output shape is too small
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(2, 3))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
-            unfold(torch.randn(1, 2, 2, 3))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
-            tensor_data = torch.tensor([
-                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
-                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
-                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
-            ])
-            F.fold(tensor_data, 16, 7318349394477056)
 
     def test_softmin(self):
         x = torch.randn(2, 16)
@@ -7591,6 +7657,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
         # Check output to make sure it is correct.
         torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @largeTensorTest("20GB", device="cuda")
+    def test_layer_norm_32bit_overflow(self):
+        # test for https://github.com/pytorch/pytorch/issues/181555
+        N = 4096
+        M = (2**32 // N) + 2  # M*N just over 2^32
+        x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
+        gamma = torch.ones(N, dtype=torch.bfloat16, device="cuda")
+        beta = torch.zeros(N, dtype=torch.bfloat16, device="cuda")
+
+        y = torch.layer_norm(x, [N], gamma, beta)
+
+        # Rows past the 2^32 element boundary must not be zero
+        boundary_row = 2**32 // N
+        for row in [boundary_row, boundary_row + 1]:
+            ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
+            self.assertEqual(y[row], ref[0])
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
@@ -8838,7 +8922,7 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn(1, 2, 4, 4, device=device, dtype=torch.float32)
 
         # Extremely large kernel_size (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 100),  # INT64_MAX
@@ -8847,7 +8931,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Negative stride (invalid)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -8865,7 +8949,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large stride (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -8883,7 +8967,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large padding (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -8892,7 +8976,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Combined invalid parameters
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 5868783964474102731),
@@ -9099,6 +9183,26 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, re.escape("2D padding expected")):
             torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
                                      weight=torch.rand([1, 1]))
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_slow_conv3d_empty_stride(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/121095
+        inp = torch.rand([9], device=device, dtype=dtype)
+        weight = torch.rand([4], device=device, dtype=dtype)
+        bias = torch.rand([1, 1], device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "It is expected stride equals to 3"):
+            torch._C._nn.slow_conv3d(
+                inp, weight=weight, bias=bias,
+                kernel_size=[1, 1, 1], padding=[1, 1, 1], stride=[])
+        with self.assertRaisesRegex(RuntimeError, "It is expected kernel_size equals to 3"):
+            torch._C._nn.slow_conv3d(
+                inp, weight=weight, bias=bias,
+                kernel_size=[1], padding=[1, 1, 1], stride=[1, 1, 1])
+        with self.assertRaisesRegex(RuntimeError, "It is expected padding equals to 3"):
+            torch._C._nn.slow_conv3d(
+                inp, weight=weight, bias=bias,
+                kernel_size=[1, 1, 1], padding=[1], stride=[1, 1, 1])
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -9418,6 +9522,49 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_GroupNorm_backward_large_batch(self, device, dtype):
+        # Test GroupNorm backward with N > 128, which triggers
+        # GammaBetaBackwardCUDAKernel2. This kernel uses a (32, 16) block
+        # with WarpReduceSum after a shared memory transpose. On AMD
+        # wavefront-64, WarpReduceSum incorrectly summed across two tile
+        # columns, producing wrong dgamma/dbeta.
+        # bfloat16 tolerances are loose because the forward pass computes
+        # intermediate values (mean, var, x_norm) in bfloat16 vs float32 on CPU,
+        # causing accumulated differences in dgamma/dbeta.  The AMD wavefront-64
+        # bug this test targets produces ~100% error on all elements, so atol=1.0
+        # still catches it with wide margin.
+        rtol = 1.0 if dtype == torch.bfloat16 else 1e-3
+        atol = 1.0 if dtype == torch.bfloat16 else 1e-3
+        for N in [129, 256, 512]:
+            for C, G in [(32, 4), (64, 8), (128, 32)]:
+                x = torch.randn(N, C, 16, device=device, dtype=dtype, requires_grad=True)
+                gamma = torch.randn(C, device=device, dtype=dtype, requires_grad=True)
+                beta = torch.randn(C, device=device, dtype=dtype, requires_grad=True)
+
+                y = F.group_norm(x, G, gamma, beta)
+                grad = torch.randn_like(y)
+                y.backward(grad)
+                dgamma_gpu = gamma.grad.clone()
+                dbeta_gpu = beta.grad.clone()
+
+                # CPU reference in float32
+                x_cpu = x.detach().float().cpu().requires_grad_(True)
+                gamma_cpu = gamma.detach().float().cpu().requires_grad_(True)
+                beta_cpu = beta.detach().float().cpu().requires_grad_(True)
+                y_cpu = F.group_norm(x_cpu, G, gamma_cpu, beta_cpu)
+                y_cpu.backward(grad.float().cpu())
+
+                self.assertEqual(
+                    dgamma_gpu.float().cpu(), gamma_cpu.grad, atol=atol, rtol=rtol,
+                    msg=f"dgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
+                )
+                self.assertEqual(
+                    dbeta_gpu.float().cpu(), beta_cpu.grad, atol=atol, rtol=rtol,
+                    msg=f"dbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
+                )
+
     @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
@@ -9484,7 +9631,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -9858,7 +10004,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
-    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -9869,6 +10014,40 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 3, 4, device=device)
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
+
+    def test_unfold_invalid_arg(self, device):
+        # output shape components must be >= 1
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(2, 3))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
+            unfold(torch.randn(1, 2, 2, 3, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        # im2col_shape_check invariants
+        x = torch.randn(1, 3, 8, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"kernel size should be greater than zero"):
+            F.unfold(x, kernel_size=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"dilation should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), dilation=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"padding should be non-negative"):
+            F.unfold(x, kernel_size=(3, 3), padding=(-1, 0))
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
+
+        # Host-side overflow guard on kernel_size product.
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ], device=device)
+            F.fold(tensor_data, 16, 7318349394477056)
 
     @onlyCUDA
     @skipIfRocmArch(MI300_ARCH)
@@ -9970,11 +10149,7 @@ class TestNNDeviceType(NNTestCase):
     def test_one_hot(self, device):
         # cuda throws device assert for invalid data
         # xla & mps ignore out of bound indices
-        if (
-            self.device_type != 'cuda'
-            and self.device_type != 'xla'
-            and self.device_type != 'mps'
-        ):
+        if self.device_type == 'cpu':
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
@@ -11442,6 +11617,8 @@ class TestNNDeviceType(NNTestCase):
         issue_24823_2()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @skipMPSIf(MACOS_VERSION < 15.0, "macOS 14 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
@@ -11487,6 +11664,8 @@ class TestNNDeviceType(NNTestCase):
             large_view.grad.zero_()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)  # MPS doesn't support float64
+    @skipMPSIf(MACOS_VERSION < 15.0, "macOS 14 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +

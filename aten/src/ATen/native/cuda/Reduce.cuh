@@ -655,8 +655,7 @@ struct ReduceOp {
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    // TODO(PaulZhang12): AMD and internal
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    #if defined(USE_ROCM)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
@@ -836,9 +835,9 @@ struct ReduceOp {
           }
         }
       } else {
+#if defined(USE_ROCM) && ROCM_VERSION <= 71300
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
-#ifdef USE_ROCM // Prefetch loads to better hide their latency
         #define PRFCH 4
         for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
          arg_vec_t next[PRFCH];
@@ -855,6 +854,14 @@ struct ReduceOp {
          }
         }
 #else
+#if defined(USE_ROCM)
+        int input_offset = threadIdx.y;
+        int step = blockDim.y;
+        #pragma unroll
+#else
+        index_t input_offset = threadIdx.y;
+        index_t step = blockDim.y;
+#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -969,7 +976,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() {}
+  AccumulationBuffer() = default;
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
