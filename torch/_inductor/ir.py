@@ -5620,7 +5620,7 @@ class ChoiceCaller:
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(lambda: algo(*args))
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
+            return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
         return benchmarker.benchmark(algo, args, {"out": out}, device=None)
 
     def call_name(self) -> str:
@@ -8745,7 +8745,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(
-                    return_schema.real_type,
+                    return_schema.real_type,  # type: ignore[attr-defined]
                     output,
                 )
                 for return_schema, output in zip(returns, self.outputs)
@@ -9243,7 +9243,7 @@ class OpaqueMultiOutput(MultiOutput):
         super().__init__(layout, input, indices, skip_size_stride_alignment_checks=True)
         self.opaque_example_value = opaque_value
 
-    @property
+    @property  # type: ignore[override]
     def dtype(self) -> Never:
         raise AttributeError("OpaqueMultiOutput has no dtype")
 
@@ -9390,7 +9390,7 @@ class ExternKernelMultiOut(FallbackKernel):
         packed.outputs = outputs
 
         if isinstance(example_output, tuple):
-            return tuple(outputs)
+            return tuple(outputs)  # type: ignore[return-value]
         return list(outputs)
 
 
@@ -9813,13 +9813,13 @@ class InvokeSubgraph(ExternKernel):
                         offset=output.get_layout().offset,
                         is_pinned=output.get_layout().is_pinned,
                     ),
-                    invoke_subgraph,
+                    invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
                     skip_size_stride_alignment_checks=True,
                 )
 
         outs = [create_output(output, i) for i, output in enumerate(outputs)]
-        invoke_subgraph.outputs = outs
+        invoke_subgraph.outputs = outs  # type: ignore[assignment]
         return outs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -10017,7 +10017,7 @@ class Conditional(ExternKernel):
             )
         ]
 
-        conditional.outputs = outputs
+        conditional.outputs = outputs  # type: ignore[assignment]
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
@@ -10036,7 +10036,7 @@ class Conditional(ExternKernel):
 
         # Create MutationOutput for each mutated operand (for scheduler dependencies)
         conditional.mutation_outputs = [
-            MutationOutput(operands[idx].layout, operands[idx], conditional)
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)
         ]
 
@@ -10242,7 +10242,7 @@ class WhileLoop(ExternKernel):
                         assert len(subgraph.graph.graph_outputs) == len(
                             fake_carried_inputs
                         )
-                        subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs = _require_exact_strides(  # type: ignore[assignment]
                             subgraph.graph.graph_outputs,
                             fake_carried_inputs,
                         )
@@ -10335,7 +10335,7 @@ class WhileLoop(ExternKernel):
                 # Create MultiOutput for regular outputs
                 multi_out = MultiOutput(
                     FixedLayout(
-                        device=output.device,
+                        device=output.device,  # type: ignore[arg-type]
                         dtype=output.dtype,
                         size=[Conditional._maybe_expr(sz) for sz in output.size()],
                         stride=[Conditional._maybe_expr(st) for st in output.stride()],
@@ -10686,7 +10686,7 @@ class _CollectiveKernel(FallbackKernel):
                 if config.assume_unaligned_fallback_output or not tensor_is_aligned(
                     tensor
                 ):
-                    V.graph.unaligned_buffers.add(buf.name)
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
             return packed.outputs
         else:
             packed = cls(
