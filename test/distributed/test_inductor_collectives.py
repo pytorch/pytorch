@@ -25,6 +25,7 @@ from torch._inductor.comms import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.fx_passes.bucketing import (
+    _trace as bucketing_trace,
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
     is_all_to_all_tensor,
@@ -37,8 +38,10 @@ from torch._inductor.scheduler import (
     get_estimate_runtime_cache_key_from_snode,
 )
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._subclasses import FakeTensorMode
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -58,6 +61,22 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+class TestBucketingTrace(torch._dynamo.test_case.TestCase):
+    def test_trace_ignores_ambient_pending_unbacked_symbols(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        x = fake_mode.from_tensor(torch.randn(2, 2), static_shapes=True)
+        ambient = fake_mode.shape_env.create_unbacked_symint().node.expr
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+
+        gm = bucketing_trace(lambda x: x + 1, (x,))
+
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+        FileCheck().check("aten.add").run(gm.code)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
