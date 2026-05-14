@@ -300,7 +300,7 @@ class SetVariable(VariableTracker):
                 )
             # Choose an item at random and pop it
             try:
-                result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
+                result: VariableTracker = self.set_items.pop().vt
             except KeyError as e:
                 raise_observed_exception(KeyError, tx, args=list(e.args))
             self.should_reconstruct_all = True
@@ -537,7 +537,7 @@ class SetVariable(VariableTracker):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
             )
         elif name == "__len__":
             if args or kwargs:
