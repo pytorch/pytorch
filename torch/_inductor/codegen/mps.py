@@ -530,7 +530,7 @@ MetalOverrides._initialize_special_ops()
 class MetalKernel(SIMDKernel):
     """Implement Metal codegen based on the SIMDKernel abstraction"""
 
-    overrides = MetalOverrides  # type: ignore[assignment]
+    overrides = MetalOverrides
     suffix = ";"
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
@@ -820,7 +820,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = self.sexpr(index_expr)  # type: ignore[misc]
+        index_str = self.sexpr(index_expr)
 
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
@@ -1180,7 +1180,7 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
-    kernel_type = MetalKernel  # type: ignore[assignment]
+    kernel_type = MetalKernel
     _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:

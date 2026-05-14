@@ -36,6 +36,7 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
+from ..sizevars import stride_at_vec_range
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -387,90 +388,6 @@ def replace_cascade_sum_with_add(buffer: IndentedBuffer):
                 buffer._lines[i] = new_content
 
 
-@functools.lru_cache
-def stride_at(index: sympy.Expr, var: sympy.Symbol):
-    if not index.has(var):
-        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
-        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
-        # in this case, there is no dependencies between index and var.
-        return sympy.S.Zero
-    replacement = {var: var + 1}
-    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
-    return sympy.simplify(new_index - index)
-
-
-@functools.lru_cache
-def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
-    """
-    Simplifies the index expression within the range of a vectorized loop.
-    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
-    this function transforms the `index` into an equivalent form. It handles
-    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
-    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
-    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
-
-    NOTE:
-    The simplified index expression is intended for analysis purposes only, not
-    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
-    which are not dependent on the loop variable `var` in the vectorized range. Check
-    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
-
-    Examples:
-    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
-       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
-       when `div` is divisible by 16.
-    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
-       variable when `mod` is divisible by 16.
-    """
-
-    div_freevar_id = 0
-    mod_freevar_id = 0
-
-    def visit_indexing_div(divisor):
-        nonlocal div_freevar_id
-        result = FloorDiv(var, divisor)
-        if sympy.gcd(divisor, vec_length) == vec_length:
-            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
-            div_freevar_id += 1
-        return result
-
-    def visit_modular_indexing(divisor, modulus):
-        nonlocal mod_freevar_id
-        result = ModularIndexing(var, divisor, modulus)
-        if sympy.gcd(divisor, vec_length) == vec_length:
-            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
-            mod_freevar_id += 1
-        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
-            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
-            mod_freevar_id += 1
-        return result
-
-    original_index = index
-
-    div = sympy.Wild("divisor", integer=True)
-    if index.has(FloorDiv):
-        index = index.replace(FloorDiv(var, div), visit_indexing_div)
-
-    mod = sympy.Wild("modulus", integer=True)
-    if index.has(ModularIndexing):
-        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
-
-    index = sympy.simplify(index)
-    if index != original_index:
-        return simplify_index_in_vec_range(index, var, vec_length)
-
-    return index
-
-
-@functools.lru_cache
-def stride_at_vec_range(
-    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
-):
-    if vec_length:
-        index = simplify_index_in_vec_range(index, var, vec_length)
-    return stride_at(index, var)
-
-
 @dataclasses.dataclass
 class ParallelDepth:
     """
@@ -534,7 +451,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         for _node in self.outer_fused_nodes:
             assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
             flatten_snodes.extend(list(_node.get_nodes()))
-        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
+        super().__init__(scheduler, flatten_snodes)
 
     def get_outer_nodes(self):
         return self.outer_fused_nodes
@@ -1818,7 +1735,7 @@ class CppVecOverrides(CppOverrides):
                     overrides: type[CppOverrides | CppVecOverrides] = (
                         # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
-                    )  # type: ignore[has-type]
+                    )
                     code.writeline(
                         f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
@@ -2013,7 +1930,7 @@ class CppKernel(Kernel):
         num_threads: Number of threads for parallel execution
     """
 
-    overrides = CppOverrides  # type: ignore[assignment]
+    overrides = CppOverrides
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
@@ -2165,8 +2082,8 @@ class CppKernel(Kernel):
         return any(
             self.cse.varname_map[s.name].depends_on(itervar)  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name in self.cse.varname_map  # type: ignore[attr-defined]
-            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)  # type: ignore[attr-defined]
+            if s.name in self.cse.varname_map
+            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)
         )
 
     def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
@@ -2585,7 +2502,7 @@ class CppKernel(Kernel):
                 depth: int = 0,
                 in_reduction: bool = False,
             ):
-                if _loop_nest.loops is None or depth == len(_loop_nest.loops):  # type: ignore[arg-type]
+                if _loop_nest.loops is None or depth == len(_loop_nest.loops):
                     gen_kernel(_loop_nest)
                 else:
                     gen_loop_with_reduction(_loop_nest, depth, in_reduction)
@@ -2739,7 +2656,7 @@ class CppKernel(Kernel):
 
 
 class CppVecKernel(CppKernel):
-    overrides = CppVecOverrides  # type: ignore[assignment]
+    overrides = CppVecOverrides
 
     def __init__(
         self,
@@ -2762,7 +2679,7 @@ class CppVecKernel(CppKernel):
         if self.index_indirect_depends_on(index, itervar):
             return None
         for indirect_var in (
-            self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+            self.cse.varname_map[s.name]
             for s in index.free_symbols
             if symbol_is_type(s, SymT.TMP)
         ):
@@ -2922,7 +2839,7 @@ class CppVecKernel(CppKernel):
             )
             replacements = {}
             for indirect_var in (
-                self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+                self.cse.varname_map[s.name]
                 for s in index.free_symbols
                 if symbol_is_type(s, SymT.TMP)
             ):
@@ -2969,7 +2886,7 @@ class CppVecKernel(CppKernel):
                 else:
                     code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
             if not store_value:
-                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
+                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)
                 code.writeline(f"return {load_line};")
         code.writeline("()")
         if store_value:
@@ -2994,7 +2911,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -3664,7 +3581,7 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    overrides = CppTile2DOverrides  # type: ignore[assignment]
+    overrides = CppTile2DOverrides
 
     def __init__(
         self,
@@ -3781,7 +3698,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
-            line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
+            line = self._get_vec_load_line(loadbuf, 0, dtype)
             csevar = self.cse.generate(self.loads, line, dtype=dtype)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
@@ -4070,7 +3987,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4286,13 +4203,13 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, value, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, x, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
@@ -5537,9 +5454,9 @@ class CppScheduling(BaseScheduling):
         )
         with kernel:
             if not is_multi_outputs_template(template_node.node):
-                template_node.mark_run()  # type: ignore[attr-defined]
+                template_node.mark_run()
             for node in epilogue_nodes:
-                node.mark_run()  # type: ignore[attr-defined]
+                node.mark_run()
             src_code = render()
 
         with V.set_kernel_handler(kernel):
@@ -5632,7 +5549,7 @@ class CppScheduling(BaseScheduling):
                 V.graph.wrapper_code.write_kernel_context_guard_begin()
                 V.graph.wrapper_code.write_kernel_context_guard(
                     kernel_name,
-                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
+                    self.kernel_group.scheduled_nodes,
                 )
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
             if config.cpp.enable_kernel_profile:
@@ -5645,7 +5562,7 @@ class CppScheduling(BaseScheduling):
         # below add provenance tracing info for cpu CppKernel types
         wrapper = V.graph.wrapper_code
         debug_handle = set_kernel_post_grad_provenance_tracing(
-            node_schedule,  # type: ignore[arg-type]
+            node_schedule,
             # pyrefly: ignore [bad-argument-type]
             kernel_name,
         )

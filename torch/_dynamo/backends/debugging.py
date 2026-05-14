@@ -148,7 +148,7 @@ def eager_debug(
     return inner
 
 
-@register_backend(name="ts")  # type: ignore[misc]
+@register_backend(name="ts")
 def torchscript(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
 ) -> torch.jit.ScriptModule:
