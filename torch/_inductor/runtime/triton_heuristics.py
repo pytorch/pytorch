@@ -3599,7 +3599,9 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
         # Add a config that is guaranteed to compile
         example_config = configs[0]
         config_block_sizes = {**example_config.kwargs}
-        config_block_sizes.update(tma_min_block_sizes)
+        for block_type, min_block_value in tma_min_block_sizes.items():
+            existing = config_block_sizes.get(block_type, 1)
+            config_block_sizes[block_type] = max(existing, min_block_value)
         new_configs = [
             Config(
                 config_block_sizes,
