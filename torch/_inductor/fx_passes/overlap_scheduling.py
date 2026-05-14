@@ -483,6 +483,9 @@ class OverlapScheduler:
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
+        self._parent_lists: list[list[fx.Node]] = [
+            list(n._input_nodes) for n in self.nodes
+        ]
         self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
             self._collect_node_ancestors()
         )
@@ -715,9 +718,10 @@ class OverlapScheduler:
         For each node, returns the minimum index of target nodes it blocks/dominates.
         Returns sys.maxsize if the node doesn't block any target nodes.
         """
+        target_set = OrderedSet(target_nodes)
         target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if node in target_nodes:
+            if node in target_set:
                 target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
@@ -1411,7 +1415,10 @@ class OverlapScheduler:
         # Backward BFS from target; stops at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
-        stack = list(target._input_nodes)
+        parent_lists = self._parent_lists
+        node_idx = self.node_idx
+        target_idx = node_idx[target]
+        stack = parent_lists[target_idx][:]
         scheduled = self.scheduled
         while stack:
             n = stack.pop()
@@ -1419,7 +1426,7 @@ class OverlapScheduler:
                 continue
             seen.add(n)
             unscheduled_ancestors.add(n)
-            stack.extend(n._input_nodes)
+            stack.extend(parent_lists[node_idx[n]])
 
         # only schedule non distributed, non compute nodes
         for node in unscheduled_ancestors:
