@@ -6427,6 +6427,11 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        # print_readable may spell these equivalent tensor adds as method calls.
+        actual = actual.replace("sum_1.add(sum_2)", "sum_1 + sum_2").replace(
+            "add.add(_add_batch_dim_1)",
+            "add + _add_batch_dim_1",
+        )
         self.assertExpectedInline(
             actual,
             """\
