@@ -5155,7 +5155,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         try:
             yield
         finally:
-            tls.current_tx = prior
+            if prior is not None:
+                tls.current_tx = prior
+            elif hasattr(tls, "current_tx"):
+                del tls.current_tx
 
     def __init__(
         self,
