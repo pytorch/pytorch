@@ -32,24 +32,22 @@ install_ubuntu() {
         rm -rf /opt/rocm
       fi
 
-      # Determine theRock nightly index URL based on GPU architecture
+      # Install the multi-arch wheel set from staging. TheRock's promoted
+      # nightly index can be partial while per-target tests finish, but staging
+      # contains all device packages needed by the device-all extra.
       if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
-        if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/"
-        else
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/"
-        fi
+        THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/whl-staging-multi-arch/"
       fi
 
       echo "=============================================="
-      echo "ROCm Wheel Installation (TheRock nightly)"
+      echo "ROCm Multi-Arch Wheel Installation (TheRock nightly)"
       echo "=============================================="
       echo "Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
       echo "=============================================="
 
       python3 -m pip install \
         --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
-        "rocm[libraries,devel]"
+        "rocm[libraries,devel,device-all]"
 
       # Use the rocm-sdk CLI helper to discover install paths
       ROCM_HOME="$(rocm-sdk path --root)"
