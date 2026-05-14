@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -279,4 +280,4 @@ def _create_subgraph_for_node(
         if "val" in result.meta:
             out.meta["val"] = result.meta["val"]
 
-    return fx.GraphModule(owning_module, subgraph)
+    return _LazyGraphModule(owning_module, subgraph)
