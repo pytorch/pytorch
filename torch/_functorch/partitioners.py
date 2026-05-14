@@ -1364,6 +1364,8 @@ def default_partition(
             continue
         if node.target in (
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
             # Profiler record_function ops are technically impure (they set up
             # profiling spans), but they're safe to duplicate during AC recompute.
             # We skip both enter and exit to keep profiling spans balanced.
@@ -1505,7 +1507,10 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr" or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and len(node.target._schema.returns) == 0
+    ):
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -2783,17 +2788,17 @@ def visualize_min_cut_graph(
         return None, None
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
-    dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
+    dot_graph = pydot.graph_from_dot_data(dot_format)[0]
     for edge in dot_graph.get_edges():
         weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
         # Set edge label to weight
-        edge.set_label(str(weight))  # type: ignore[union-attr]
+        edge.set_label(str(weight))
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
-            edge.set_color("red")  # type: ignore[union-attr]
+            edge.set_color("red")
 
     # Generate SVG content
-    svg_content = dot_graph.create_svg().decode("utf-8")  # type: ignore[union-attr]
+    svg_content = dot_graph.create_svg().decode("utf-8")
 
     # Write to local file
     svg_path = _get_unique_path("min_cut_failed", ".svg")
@@ -3612,7 +3617,7 @@ def thread_graphsafe_rng_from_hops(
                     new_hop_node_with_fixed_args = module.graph.create_node(
                         "call_function",
                         torch.ops.higher_order.invoke_subgraph,
-                        (*hop_node.args, *new_rng_inputs),  # type: ignore[arg-type]
+                        (*hop_node.args, *new_rng_inputs),
                         {},
                     )
                     hop_node.replace_all_uses_with(
