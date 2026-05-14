@@ -93,6 +93,23 @@ def validate_triton_config(cfg: Config) -> None:
     )
 
 
+def assert_tensor_metadata_dtype(
+    tensor: torch.Tensor, expected_dtype: torch.dtype, op_name: str | None = None
+) -> None:
+    if tensor.dtype == expected_dtype:
+        return
+
+    op_msg = f"\nError in op: {op_name}" if op_name else ""
+    raise RuntimeError(
+        f"expected dtype {expected_dtype} but got {tensor.dtype}"
+        + op_msg
+        + "\nThis error most often comes from an incorrect fake (aka meta) "
+        "kernel for a custom op."
+        "\nUse torch.library.opcheck to test your custom op."
+        "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck"
+    )
+
+
 def create_bandwidth_info_str(
     ms: float,
     num_gb: float,

@@ -501,6 +501,28 @@ inline void assert_size_stride(
   }
 }
 
+inline void assert_dtype(
+    AtenTensorHandle tensor,
+    int32_t expected_dtype,
+    const char* expected_dtype_name,
+    const char* op_name = nullptr) {
+  int32_t dtype;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+  if (dtype == expected_dtype) {
+    return;
+  }
+
+  std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
+  AOTI_RUNTIME_CHECK(
+      false,
+      "expected dtype " + std::string(expected_dtype_name) +
+          " but got dtype code " + std::to_string(dtype) + op_msg +
+          "\nThis error most often comes from an incorrect fake (aka meta) "
+          "kernel for a custom op."
+          "\nUse torch.library.opcheck to test your custom op."
+          "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");
+}
+
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
   return constant.data_ptr();
 }

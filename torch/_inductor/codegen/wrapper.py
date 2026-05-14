@@ -1391,6 +1391,7 @@ class PythonWrapperCodegen(CodeGen):
                 from math import inf, nan
                 from cmath import nanj
                 from torch._inductor.hooks import run_intermediate_hooks
+                from torch._inductor.runtime.runtime_utils import assert_tensor_metadata_dtype
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
                 from torch import device, empty_strided
@@ -1704,6 +1705,9 @@ class PythonWrapperCodegen(CodeGen):
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
         self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+
+    def write_assert_dtype(self, name: str, dtype: torch.dtype, op_name: str) -> None:
+        self.writeline(f"assert_tensor_metadata_dtype({name}, {dtype}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
