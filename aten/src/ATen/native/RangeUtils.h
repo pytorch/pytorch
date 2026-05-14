@@ -38,15 +38,22 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // and the effective output size starts differing on CPU vs GPU because of precision issues, which
   // we dont want.
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
-  double size_d;
+  double size_d = 0.0;
+  bool fallback_to_double = true;
+
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-    int64_t sgn = (xstep > 0) - (xstep < 0);
-    size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
-  } else {
+    if (!start.isFloatingPoint() && !end.isFloatingPoint() && !step.isFloatingPoint()) {
+      using accscalar_t = at::acc_type<scalar_t, false>;
+      auto xstart = start.to<accscalar_t>();
+      auto xend = end.to<accscalar_t>();
+      auto xstep = step.to<accscalar_t>();
+      int64_t sgn = (xstep > 0) - (xstep < 0);
+      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+      fallback_to_double = false;
+    }
+  }
+
+  if (fallback_to_double) {
     size_d = std::ceil((end.to<double>() - start.to<double>())
                         / step.to<double>());
   }
