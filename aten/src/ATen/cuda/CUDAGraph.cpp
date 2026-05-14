@@ -120,6 +120,16 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
+#if defined(USE_ROCM)
+  // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
+  // Ensure the handle for the intended capture stream exists before
+  // capture begins, because hipblasLtCreate performs internal allocations
+  // that are not allowed once stream capture is active.
+  if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
+    (void)at::cuda::getCurrentCUDABlasLtHandle();
+  }
+#endif
+
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
     // But only one should be nonzero.
@@ -145,6 +155,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
   TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
@@ -172,6 +183,7 @@ void CUDAGraph::capture_end() {
   // Clear bookkeeping before propagating the return status so watchdog-side
   // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
+  c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
     TORCH_CHECK(
@@ -179,10 +191,10 @@ void CUDAGraph::capture_end() {
         "capture_end() called before capture_begin().");
     _currently_capturing_graphs.erase(capture_id_);
   }
-  AT_CUDA_CHECK(endCaptureErr);
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -475,6 +487,7 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
+  c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
   TORCH_INTERNAL_ASSERT(child_capture_id_opt.has_value(),
@@ -523,6 +536,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
   AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
+  c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
 

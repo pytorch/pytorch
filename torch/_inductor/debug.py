@@ -34,7 +34,7 @@ from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
-from . import config, ir  # noqa: F811, this is needed
+from . import config, ir
 from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
@@ -692,7 +692,7 @@ class DebugFormatter:
             try:
                 node_info["size"] = str(
                     V.graph.sizevars.optimization_hints(node.get_size())
-                )  # type: ignore[arg-type]
+                )
             except Exception:
                 pass
             try:

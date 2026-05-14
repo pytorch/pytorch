@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/core/Dict.h>
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -976,6 +977,60 @@ void Unpickler::rebuildTensor(bool quantized) {
     }
     bool requires_grad = elements.at(idx++).toBool();
     idx++; // backwards hooks is empty
+    // Validate size/stride/storage_offset against the storage extent before
+    // installing them via the unchecked TensorImpl setters below. The Python
+    // pickle path goes through Tensor.set_() which performs these checks; the
+    // C++ unpickler must apply the same validation to reject crafted pickles
+    // that would produce out-of-bounds tensor views.
+    TORCH_CHECK(
+        size.size() == stride.size(),
+        "Tensor: size and stride must have the same length, got ",
+        size.size(),
+        " and ",
+        stride.size());
+    TORCH_CHECK(
+        storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+    for (const auto i : c10::irange(size.size())) {
+      TORCH_CHECK(
+          size[i] >= 0, "Tensor: negative size ", size[i], " at dim ", i);
+      TORCH_CHECK(
+          stride[i] >= 0, "Tensor: negative stride ", stride[i], " at dim ", i);
+    }
+    const size_t itemsize = storage_tensor.dtype().itemsize();
+    const size_t storage_nbytes = storage_tensor.storage().nbytes();
+    // Bound storage_offset independently: computeStorageNbytes returns 0 when
+    // any dim is 0, so without this check a zero-numel tensor with a huge
+    // offset would slip past the combined check and later operations
+    // (reshape/resize_) could dereference out-of-bounds memory.
+    size_t offset_nbytes = 0;
+    TORCH_CHECK(
+        !c10::mul_overflows(
+            static_cast<size_t>(storage_offset), itemsize, &offset_nbytes) &&
+            offset_nbytes <= storage_nbytes,
+        "Tensor: storage offset ",
+        storage_offset,
+        " is out of bounds for storage of size ",
+        storage_nbytes,
+        " bytes (itemsize ",
+        itemsize,
+        ")");
+    const size_t required_nbytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, static_cast<size_t>(storage_offset));
+    TORCH_CHECK(
+        required_nbytes == 0 || required_nbytes <= storage_nbytes,
+        "Tensor: sizes ",
+        size,
+        ", strides ",
+        stride,
+        ", storage offset ",
+        storage_offset,
+        " and itemsize ",
+        itemsize,
+        " require a storage of at least ",
+        required_nbytes,
+        " bytes, but storage only has ",
+        storage_nbytes,
+        " bytes");
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);

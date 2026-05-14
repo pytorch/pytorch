@@ -4,7 +4,7 @@ import socket
 from typing import Literal, TYPE_CHECKING
 
 # import for registration side effect
-import torch.distributed.debug._handlers  # noqa: F401
+import torch.distributed.debug._handlers
 from torch._C._distributed_c10d import _WorkerServer
 from torch.distributed.debug._store import get_rank, tcpstore_client
 

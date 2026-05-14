@@ -210,7 +210,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 if key in ["_scale_", "_zero_point_"] and (
-                    not isinstance(value_or_node, (float, int))  # noqa: UP038
+                    not isinstance(value_or_node, (float, int))
                 ):
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
@@ -596,7 +596,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
         # we only replace the specific use since dequantize could be used by other nodes
         # as well
         node.replace_input_with(arg, quantize_node)
-    elif isinstance(arg, (list, tuple)):  # noqa: UP038
+    elif isinstance(arg, (list, tuple)):
         for arg_element in arg:
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     elif isinstance(arg, dict):
@@ -838,7 +838,7 @@ def convert_weighted_module(
                 "weight_hh": weight_qparams_hh,
             }
         )
-    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):  # noqa: UP038
+    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):
         # format for wq_or_wq_dict (flattened attributes):
         # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
         for wn in float_module._flat_weights_names:
@@ -1217,12 +1217,12 @@ def convert(
             return_node = node
             output = node.args[0]
             # outputs can be Node, list, tuple, dict, other cases are not supported yet
-            if isinstance(output, (list, tuple)):  # noqa: UP038
+            if isinstance(output, (list, tuple)):
                 for idx in output_quantized_idxs:
                     _maybe_recursive_remove_dequantize(
                         output[idx], return_node, model.graph
                     )
-            elif isinstance(output, (Node, dict)):  # noqa: UP038
+            elif isinstance(output, (Node, dict)):
                 # we treat dict as a single argument currently, but it can be extended
                 # to support {"key": dtype} after we change output_quantized_idxs to
                 # dict
