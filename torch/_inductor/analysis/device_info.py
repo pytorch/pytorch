@@ -10,29 +10,37 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class DeviceInfo:
     """
-    Theoretical Numbers from data sheet. If two numbers are given, Tensor/Matrix Core vs not,
-    then the higher number is reported. Sparsity is not considered.
+    Theoretical numbers from data sheet.  When a data sheet reports both
+    Tensor/Matrix-Core and non-Tensor-Core numbers, the higher (Tensor Core)
+    number is used.
 
+    NVIDIA data sheets since Hopper (H100) only publish Tensor-Core TFLOPS
+    with 2:4 structured sparsity (marked ``*With sparsity``).  For devices
+    whose ``tops`` include sparsity, set ``tops_sparsity_factor`` to 2 so
+    that callers can recover the dense (non-sparse) throughput used by
+    cuBLAS / cuDNN in normal (non-sparse) workloads.
 
-    Bandwidth numbers are tricky, because there are platform differences that may not show up in the profiler trace.
-    For example,
+    Bandwidth numbers are tricky, because there are platform differences
+    that may not show up in the profiler trace.
     """
 
     tops: dict[torch.dtype | str, float]
     dram_bw_gbs: float
     dram_gb: float
+    tops_sparsity_factor: int = 1
 
 
-# Indexing is based on `torch.cuda.get_device_name()`
+# Indexing is based on `torch.cuda.get_device_name()`, normalized to upper-case.
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
     # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
+    # Tensor Core values are *with sparsity* per the datasheet.
     "NVIDIA H100": DeviceInfo(
         tops={
             torch.float64: 67.0,
-            torch.float32: 67.5,
-            "torch.tf32": 156.0,
+            torch.float32: 67.0,
+            "torch.tf32": 989.0,
             torch.bfloat16: 1979.0,
             torch.float16: 1979.0,
             torch.float8_e8m0fnu: 3958.0,
@@ -45,6 +53,7 @@ _device_mapping: dict[str, DeviceInfo] = {
         },
         dram_bw_gbs=3350,
         dram_gb=80,
+        tops_sparsity_factor=2,
     ),
     # Source:
     # @lint-ignore https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/
@@ -176,6 +185,10 @@ _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
 
+# Enforce the upper-case-key invariant so entries cannot silently miss
+# `lookup_device_info` (which upper-cases the query before lookup).
+_device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
 
 def lookup_device_info(name: str) -> DeviceInfo | None:
     """
@@ -184,14 +197,19 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     to the recorded device. Therefore, _device_mapping statically contains the information for lots of devices.
     If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
       name (str): name of the device to lookup. Should map onto torch.cuda.get_device_name().
+      Will be upper-cased before lookup.
     """
-    return _device_mapping.get(name)
+    return _device_mapping.get(name.upper())
 
 
 def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     """
-    Get the theoretical TFLOPS of the device for a given dtype. This can throw an exception if the device
-    is not in the datasheet list above.
+    Get the theoretical *dense* TFLOPS of the device for a given dtype.
+
+    If the datasheet values include 2:4 structured sparsity
+    (``tops_sparsity_factor > 1``), they are divided by that factor so
+    callers always receive the throughput achievable by cuBLAS/cuDNN on
+    non-sparse data.
     """
     name: str | None = torch.cuda.get_device_name()
     if name is None:
@@ -210,6 +228,7 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
         )
         return None
 
-    return device_info.tops[
+    tops = device_info.tops[
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
+    return tops / device_info.tops_sparsity_factor

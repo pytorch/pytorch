@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
@@ -78,13 +78,10 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -122,9 +119,6 @@ jobs:
             ;;
           3.13)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
-            ;;
-          3.13t)
-            PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
             ;;
           3.14)
             PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
@@ -165,7 +159,7 @@ jobs:
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} --exclude libtriton.so //artifacts/*.whl"
           else
             docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
             docker exec -t "${container_name}"  bash -c "mv //artifacts/*.whl //artifacts/wheelhouse/"
@@ -189,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:
@@ -339,4 +333,4 @@ jobs:
         shell: bash
         run: |
           set -ex
-          bash .circleci/scripts/binary_upload.sh
+          bash .ci/pytorch/binary_upload.sh

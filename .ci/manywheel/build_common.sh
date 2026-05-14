@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # meant to be called only from the neighboring build.sh and build_cpu.sh scripts
+# NOTE: This script is only used for ROCm and s390x builds.
+#       CPU/CUDA x86 and aarch64 builds use build_wheel.sh + repair_wheel.sh.
 
 set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
@@ -27,7 +29,9 @@ PLATFORM=""
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
-    # Set platform based on architecture
+    # Set platform tag for the manylinux wheel rename below; ROCm/XPU/s390x
+    # builds still flow through this script, and pip won't accept a
+    # plain linux_* tag.
     case $ARCH in
         x86_64)
             PLATFORM="manylinux_2_28_x86_64"
@@ -91,11 +95,6 @@ export PYTORCH_BUILD_NUMBER=$build_number
 export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib:$CMAKE_LIBRARY_PATH"
 export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
 
-if [[ -e /opt/openssl ]]; then
-    export OPENSSL_ROOT_DIR=/opt/openssl
-    export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
-fi
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
@@ -118,6 +117,9 @@ retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
+  cp314*)
+    retry pip install -q --pre numpy==2.3.4
+    ;;
   cp31*)
     retry pip install -q --pre numpy==2.1.0
     ;;
@@ -362,7 +364,9 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
-    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
+    # Rewrite the WHEEL metadata's platform tag so the wheel advertises as
+    # manylinux_2_28 (the legacy ROCm/XPU/s390x path runs through here).
+    # Must happen before regenerating RECORD so the new tag's hash is captured.
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
         sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
@@ -411,7 +415,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # Rename wheel for Manylinux 2_28
+    # Rename the file to match the manylinux platform tag we just wrote
+    # into WHEEL above; otherwise the upload artifact stays linux_*.
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
         zip -rq $pkg_name $PREIX*

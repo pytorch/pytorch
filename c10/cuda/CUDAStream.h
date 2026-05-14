@@ -116,6 +116,13 @@ class C10_CUDA_API CUDAStream {
 
   void synchronize() const;
 
+  bool is_capturing() const {
+    DeviceGuard guard{stream_.device()};
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(stream(), &status));
+    return status != cudaStreamCaptureStatusNone;
+  }
+
   int priority() const {
     DeviceGuard guard{stream_.device()};
     int priority = 0;
@@ -192,10 +199,10 @@ class C10_CUDA_API CUDAStream {
  * isHighPriority to true, or a stream for a specific device by setting device
  * (defaulting to the current CUDA stream.)
  */
-C10_API CUDAStream
+C10_CUDA_API CUDAStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
 // no default priority to disambiguate overloads
-C10_API CUDAStream
+C10_CUDA_API CUDAStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
@@ -205,7 +212,7 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
  * want to operate on a non-torch allocated stream for data exchange or similar
  * purposes
  */
-C10_API CUDAStream
+C10_CUDA_API CUDAStream
 getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
 /**
@@ -214,7 +221,7 @@ getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
  * where most computation occurs when you aren't explicitly using
  * streams.
  */
-C10_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
+C10_CUDA_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
 
 /**
  * Get the current CUDA stream, for the passed CUDA device, or for the
@@ -223,7 +230,7 @@ C10_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
  * be different if someone called 'setCurrentCUDAStream' or used 'StreamGuard'
  * or 'CUDAStreamGuard'.
  */
-C10_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
+C10_CUDA_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
 
 /**
  * Set the current stream on the device of the passed in stream to be
@@ -235,9 +242,11 @@ C10_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
  * (which will switch both your current device and current stream in the way you
  * expect, and reset it back to its original state afterwards).
  */
-C10_API void setCurrentCUDAStream(CUDAStream stream);
+C10_CUDA_API void setCurrentCUDAStream(CUDAStream stream);
 
-C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
+C10_CUDA_API std::ostream& operator<<(
+    std::ostream& stream,
+    const CUDAStream& s);
 
 } // namespace c10::cuda
 
