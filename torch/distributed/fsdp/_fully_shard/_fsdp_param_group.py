@@ -98,10 +98,9 @@ class FSDPCommContext:
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = self.device_handle.Stream(priority=high_priority)
-        # Run data-parallel all-reduces concurrently with all-gather/reduce-
-        # scatter since collectives use different network resources and can
-        # overlap in the typical intra-node sharding / inter-node replication
-        # case.
+        # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
+        # since collectives use different network resources and can overlap
+        # in the typical intra-node sharding / inter-node replication case
         self.all_reduce_stream = self.device_handle.Stream()
         # All-gather/reduce-scatter states keep references to collective
         # tensors produced in one stream and used in another and accompanying
@@ -245,11 +244,11 @@ class FSDPParamGroup:
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
         self._post_forward_indices: list[int] = []
-        # Whether to reduce gradients at all (reduce-scatter or all-reduce)
+        # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
-        # Whether to all-reduce gradients when a native all-reduce group is
-        # configured; only used if `self.reduce_grads` is true, in which case
-        # setting this to false means reduce-scatter but no all-reduce.
+        # Whether to all-reduce gradients for HSDP; only used if
+        # `self.reduce_grads` is true, in which case setting this to false
+        # means reduce-scatter but no all-reduce
         self.all_reduce_grads: bool = True
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
@@ -284,8 +283,8 @@ class FSDPParamGroup:
         # different world size, which should be waited on in the next unshard
         self._reshard_after_forward_event: torch.Event | None = None
 
-        # If accumulating gradients without native all-reduce, save the partial
-        # reduce output (only reduce-scattered but not all-reduced).
+        # Only for HSDP, if accumulating gradients without all-reduce, save the
+        # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
         # Holds the all-reduce input buffer + completion event across layers
         # when reduce_dtype != orig_dtype (e.g., bf16 reduce + fp32 params).
@@ -682,8 +681,8 @@ class FSDPParamGroup:
             )
             all_reduce_stream: torch.cuda.Stream
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
-                # Native all-reduce is not enabled, but the user may still
-                # want to run a custom all-reduce hook on a separate stream.
+                # this means the native HSDP is not enabled,
+                # but user may want to have a custom HSDP setup
                 if self._all_reduce_hook is None:
                     raise AssertionError(
                         "all reduce hook stream is specified but hook itself is missing."

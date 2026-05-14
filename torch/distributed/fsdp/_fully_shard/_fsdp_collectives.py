@@ -529,10 +529,10 @@ def foreach_reduce(
     reduce_dtype: torch.dtype | None,
     device: torch.device,
     gradient_divide_factor: float | None,
-    all_reduce_group: dist.ProcessGroup | None,  # native all-reduce group, if any
+    all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
-    partial_reduce_output: torch.Tensor | None,  # when accumulating without AR
+    partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     prev_all_reduce_release_events: list[torch.Event] | None = None,
@@ -632,7 +632,7 @@ def foreach_reduce(
                 reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
-        if all_reduce_group is not None:  # native all-reduce (e.g. HSDP/replicate)
+        if all_reduce_group is not None:  # HSDP or DDP/replicate
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:
@@ -672,7 +672,7 @@ def foreach_reduce(
 
     if all_reduce_hook is not None:
         # Execute user-specified all reduce hook.
-        # If native all-reduce is used, this runs after that all-reduce.
+        # If native HSDP is used, this is executed after the HSDP all reduce.
         # If 1-d FSDP is used, this is executed post reduce-scatter.
         post_reduce_stream = all_reduce_stream
         all_reduce_stream.wait_stream(reduce_scatter_stream)
