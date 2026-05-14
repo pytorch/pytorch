@@ -448,7 +448,7 @@ def get_inductor_config_override_for_compile_id(
     return _get_override_for_compile_id(
         compile_id,
         config_str,
-        _create_inductor_config_router,  # type: ignore[arg-type]
+        _create_inductor_config_router,
         "inductor config",
     )
 
@@ -465,7 +465,7 @@ def get_dynamo_config_override_for_compile_id(
     return _get_override_for_compile_id(
         compile_id,
         config_str,
-        _create_dynamo_config_router,  # type: ignore[arg-type]
+        _create_dynamo_config_router,
         "dynamo config",
     )
 

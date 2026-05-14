@@ -1414,15 +1414,23 @@ class _ToDenseMkldnn(torch.autograd.Function):
         dtype: torch.dtype | None,
         masked_grad: bool | None,
     ) -> torch.Tensor:
+        ctx.set_materialize_grads(False)
         ctx.input_dtype = self.dtype
         return aten._to_dense.default(self, dtype, masked_grad)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def backward(ctx: Any, grad: torch.Tensor) -> tuple[torch.Tensor, None, None]:
+    def backward(
+        ctx: Any, grad: torch.Tensor | None
+    ) -> tuple[torch.Tensor | None, None, None]:
+        if grad is None:
+            return None, None, None
         return aten.to_mkldnn.default(grad, ctx.input_dtype), None, None
 
 
+# Fake MKLDNN tensors keep MKLDNN-ness in a side channel because the backing
+# meta tensor is strided.  The native composite reads TensorImpl::layout()
+# directly, so this Python composite consults FakeTensor.is_mkldnn instead.
 def to_dense_composite_impl(
     self: torch.Tensor,
     dtype: torch.dtype | None = None,
@@ -1448,12 +1456,11 @@ def to_dense_composite_impl(
     return self
 
 
+# Register through torch.library so direct aten.to_dense dispatch is intercepted
+# before the native composite sees a fake MKLDNN tensor as strided.
 _to_dense_composite_lib = torch.library.Library(
     "aten", "IMPL", "CompositeImplicitAutograd"
 )
-# Fake MKLDNN tensors keep MKLDNN-ness in a side channel because the backing
-# meta tensor is strided.  The native composite reads TensorImpl::layout()
-# directly, so mirror it in Python to consult FakeTensor.is_mkldnn.
 with warnings.catch_warnings():
     warnings.filterwarnings(
         "ignore",
@@ -1495,6 +1502,8 @@ def to_mkldnn(
         )
     shape = tuple(a.shape)
     with in_kernel_invocation_manager(fake_mode):
+        # Real MKLDNN tensors report opaque strides as (1, 0, ...); mirror that
+        # while carrying the layout bit through dispatch_keys.
         out = torch.empty_strided(
             shape,
             (1,) + (0,) * (len(shape) - 1),

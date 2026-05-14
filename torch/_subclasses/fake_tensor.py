@@ -419,7 +419,7 @@ class FakeTensorConverter:
 
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
-            if t.is_mkldnn:
+            if t.is_mkldnn and not maybe_memo.is_mkldnn:
                 maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
             return maybe_memo
         # not yet supported in metatensors
@@ -2852,6 +2852,8 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
         if func is torch.ops.aten.to_dense.default:
+            # The native composite sees a fake MKLDNN tensor's strided meta
+            # backing, so handle this before generic decomposition.
             dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
             masked_grad = kwargs.get("masked_grad")
             op_impl_out = maybe_to_dense_mkldnn(

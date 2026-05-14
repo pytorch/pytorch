@@ -641,13 +641,18 @@ class FunctionalTensorMode(TorchDispatchMode):
             and isinstance(args[0], FunctionalTensor)
         ):
             input_unwrapped = torch._from_functional_tensor(args[0].elem)
-            input_dispatch_keys = getattr(input_unwrapped, "dispatch_keys", None)
+            input_dispatch_keys = (
+                input_unwrapped.dispatch_keys
+                if isinstance(input_unwrapped, torch._subclasses.FakeTensor)
+                else None
+            )
 
             def preserve_dispatch_keys(out: object) -> None:
-                if isinstance(out, FunctionalTensor):
+                if input_dispatch_keys is not None and isinstance(
+                    out, FunctionalTensor
+                ):
                     unwrapped = torch._from_functional_tensor(out.elem)
-                    if hasattr(unwrapped, "dispatch_keys"):
-                        # pyrefly: ignore [missing-attribute]
+                    if isinstance(unwrapped, torch._subclasses.FakeTensor):
                         unwrapped.dispatch_keys = input_dispatch_keys
 
             pytree.tree_map_(preserve_dispatch_keys, outs_wrapped)

@@ -104,7 +104,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
-    MI200_ARCH,
     NAVI_ARCH,
     parametrize,
     serialTest,
@@ -12943,7 +12942,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
-    @skipIfRocmArch(MI200_ARCH)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -12969,11 +12967,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        self.common(
-            Model(),
-            (torch.randn(8, 256, 16, 16),),
-            check_lowp=not is_halide_backend(self.device),
-        )
+        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
+        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # https://github.com/pytorch/pytorch/issues/183581
+        with DeterministicGuard(True, warn_only=True):
+            self.common(
+                Model(),
+                (torch.randn(8, 256, 16, 16),),
+                check_lowp=not is_halide_backend(self.device),
+                atol=2e-3,
+                rtol=2e-3,
+            )
 
     def test_inplace_where_pointwise(self):
         # https://github.com/pytorch/pytorch/issues/96446

@@ -1154,49 +1154,6 @@ def unfold_backward(
     return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
 
 
-class _ToDenseMkldnn(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx: Any,
-        self: Tensor,
-        dtype: torch.dtype | None,
-        masked_grad: bool | None,
-    ) -> Tensor:
-        ctx.input_dtype = self.dtype
-        return aten._to_dense.default(self, dtype, masked_grad)
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def backward(ctx: Any, grad: Tensor) -> tuple[Tensor, None, None]:
-        return aten.to_mkldnn.default(grad, ctx.input_dtype), None, None
-
-
-@aten.to_dense.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-def to_dense(
-    self: Tensor,
-    dtype: torch.dtype | None = None,
-    *,
-    masked_grad: bool | None = None,
-) -> Tensor:
-    if self.is_mkldnn:
-        return _ToDenseMkldnn.apply(self, dtype, masked_grad)
-    if self.layout in {
-        torch.sparse_coo,
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }:
-        return aten._to_dense.default(self, dtype, masked_grad)
-    torch._check(
-        self.layout == torch.strided,
-        lambda: f"to_dense does not support layout {self.layout}",
-    )
-    if dtype is not None:
-        return self.to(dtype=dtype)
-    return self
-
-
 @register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
