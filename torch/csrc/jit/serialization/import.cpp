@@ -113,9 +113,11 @@ class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
-      std::shared_ptr<PyTorchStreamReader> reader)
+      std::shared_ptr<PyTorchStreamReader> reader,
+      std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
+        storage_context_(std::move(storage_context)),
         code_prefix_("code/"),
 
         source_importer_(
@@ -376,6 +378,21 @@ Module import_ir_module(
   auto [data, size] = get_stream_content(in);
   return _load_jit_module_from_bytes(
       data, size, cu, device, extra_files, restore_shapes);
+}
+
+// Load with pre-populated storage context (standard archive format).
+// When storages are pre-populated, the deserializer skips reading
+// tensor data from the archive for those storages.
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<PyTorchStreamReader> reader,
+    std::shared_ptr<DeserializationStorageContext> storage_context,
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  reader->setShouldLoadDebugSymbol(true);
+  ScriptModuleDeserializer deserializer(
+      std::move(cu), std::move(reader), std::move(storage_context));
+  return deserializer.deserialize(device, extra_files);
 }
 
 // For reading unified serialization format from torch.Package.

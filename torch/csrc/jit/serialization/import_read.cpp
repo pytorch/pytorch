@@ -42,13 +42,14 @@ IValue readArchiveAndTensors(
     return std::get<0>(stream_reader.getRecord(ss));
   };
 
+  const bool use_storage_context = storage_context != nullptr;
   Unpickler unpickler(
       reader,
       type_resolver ? std::move(*type_resolver) : nullptr,
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
       device,
-      false,
+      use_storage_context,
       type_parser,
       std::move(storage_context));
   unpickler.set_version(stream_reader.version());

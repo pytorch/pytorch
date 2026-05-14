@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <ostream>
+#include <unordered_set>
 
 namespace ONNX_NAMESPACE {
 class ModelProto;
@@ -73,11 +74,20 @@ class TORCH_API ScriptModuleSerializer {
       : writer_(export_writer) {}
 
   void writeFiles(const std::string& code_dir);
+  // skip_tensor_data_keys (when non-null) is a set of tensor archive keys
+  // (e.g. "0", "1", ... matching the order ScriptModuleSerializer assigns
+  // to tensors in the data archive) for which the serializer writes a
+  // 0-byte placeholder instead of the tensor blob. The caller is expected
+  // to substitute those tensors at load time via a
+  // DeserializationStorageContext. Keys not in the set are written
+  // normally so that __setstate__ on custom classes (e.g. fbgemm
+  // TensorQueue) can dereference their auxiliary tensors.
   void serialize(
       const Module& module,
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
-      bool save_mobile_debug_info);
+      bool save_mobile_debug_info,
+      const std::unordered_set<std::string>* skip_tensor_data_keys = nullptr);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
   SerializationStorageContext& storage_context();
 
@@ -94,7 +104,8 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_dir,
       const std::string& tensor_dir,
       bool use_storage_context = false,
-      bool skip_tensor_data = false);
+      bool skip_tensor_data = false,
+      const std::unordered_set<std::string>* skip_tensor_data_keys = nullptr);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;

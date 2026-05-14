@@ -449,20 +449,31 @@ void ScriptModuleSerializer::serialize(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info,
+    const std::unordered_set<std::string>* skip_tensor_data_keys) {
   C10_LOG_API_USAGE_ONCE("torch.jit.save");
   writeExtraFiles(module, extra_files);
-  // Serialize the model object
+  // Serialize the model object. The data archive holds parameter tensors
+  // and any custom-class state (e.g. fbgemm TensorQueue) reachable from
+  // the module's IValue tree. skip_tensor_data_keys identifies the subset
+  // of those tensors the caller will substitute via a
+  // DeserializationStorageContext at load time; everything else must keep
+  // its bytes so __setstate__ can dereference auxiliary tensors.
   writeArchive(
       module._ivalue(),
       /*archive_name=*/"data",
       /*archive_dir=*/"",
-      /*tensor_dir=*/"data/");
+      /*tensor_dir=*/"data/",
+      /*use_storage_context=*/false,
+      /*skip_tensor_data=*/false,
+      /*skip_tensor_data_keys=*/skip_tensor_data_keys);
   // Then we serialize all code info.
   convertTypes(module.type());
   writeFiles("code/");
   // The tensor constants from the code are written to a separate archive
-  // so loading the code does not depend on loading the data
+  // so loading the code does not depend on loading the data. These are
+  // graph-baked literals (e.g. torch.tensor([1.0]) inside compiled code),
+  // never weight-substituted; always write them in full.
   std::vector<IValue> ivalue_constants(
       constant_table_.begin(), constant_table_.end());
   if (bytecode_format) {
@@ -479,7 +490,8 @@ void ScriptModuleSerializer::serialize(
         c10::ivalue::Tuple::create(ivalue_constants),
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
-        /*tensor_dir=*/"constants/");
+        /*tensor_dir=*/"constants/",
+        /*use_storage_context=*/false);
   }
   if (!module.retrieve_traced_inputs().empty()) {
     writeArchive(
@@ -502,7 +514,8 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_dir,
     const std::string& tensor_dir,
     bool use_storage_context,
-    bool skip_tensor_data) {
+    bool skip_tensor_data,
+    const std::unordered_set<std::string>* skip_tensor_data_keys) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -548,7 +561,10 @@ void ScriptModuleSerializer::writeArchive(
 
   for (const auto& td : data_pickle.tensorData()) {
     const std::string& tensor_name = tensor_names[i++];
-    if (td.is_meta() || skip_tensor_data) {
+    bool skip_this_tensor = skip_tensor_data ||
+        (skip_tensor_data_keys != nullptr &&
+         skip_tensor_data_keys->count(tensor_name) > 0);
+    if (td.is_meta() || skip_this_tensor) {
       writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
       continue;
     }
