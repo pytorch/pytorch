@@ -1012,6 +1012,20 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(tensor_mps.to(device="cpu"), tensor_cpu)
         self.assertEqual(tensor.to(device="cpu"), tensor_0)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/183631:
+        # fill_ on a byte-dtype view with a non-4-byte-aligned storage offset
+        # used to drop one byte at the vec4 boundary and clobber the byte
+        # before the view. Exercise all four offset misalignments and
+        # head/tail combinations.
+        for offs_head in range(4):
+            for offs_tail in range(4):
+                expected = torch.zeros(64, dtype=torch.int8)
+                expected[offs_head:64 - offs_tail].fill_(7)
+                actual = torch.zeros(64, dtype=torch.int8, device="mps")
+                actual[offs_head:64 - offs_tail].fill_(7)
+                self.assertEqual(actual.cpu(), expected,
+                                 f"offs_head={offs_head} offs_tail={offs_tail}")
+
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(100, 10, device=device)
