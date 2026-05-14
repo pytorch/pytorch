@@ -3338,20 +3338,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         torch._dynamo.reset()
 
+        # Adjust quantization range for CPUs without VNNI support
+        reduce_range = should_reduce_range(torch.device("cpu"))
+        if reduce_range:
+            # Reduce int8 range to avoid overflow: [-64, 63] for both weights and activations
+            w_qmin, w_qmax = -64, 63
+            x_qmin, x_qmax = -64, 63
+            qmax = 63.0  # For dynamic quantization: x_scale = x_max / qmax
+        else:
+            w_qmin, w_qmax = -128, 127
+            x_qmin, x_qmax = -128, 127
+            qmax = 127.0
+
         class DynamicQLinearUnaryModule(torch.nn.Module):
-            def __init__(self, N, K):
+            def __init__(self, N, K, qmax, x_qmin, x_qmax):
                 super().__init__()
-                qw = torch.randint(-128, 127, (N, K), dtype=torch.int8)
+                qw = torch.randint(w_qmin, w_qmax, (N, K), dtype=torch.int8)
                 self.qw_packed = torch.ops.onednn.qlinear_prepack(qw, None)
                 self.w_scales = torch.full((N,), 0.05)
                 self.w_zps = torch.zeros(N, dtype=torch.int32)
                 self.bias = torch.randn(N, dtype=torch.float32)
                 self.output_scale = 1.0
                 self.output_zp = 0
+                self.qmax = qmax
+                self.x_qmin = x_qmin
+                self.x_qmax = x_qmax
 
             def forward(self, x):
                 x_max = torch.max(torch.abs(x.to(torch.float32)))
-                x_scale = x_max / 127.0
+                x_scale = x_max / self.qmax
                 x_scale = torch.clamp(x_scale, min=torch.finfo(torch.float32).eps)
                 x_scale = x_scale.reshape(1, 1)
 
@@ -3359,7 +3374,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
                 # Quantize input
                 x_clamped = torch.clamp(
-                    torch.round(x.to(torch.float32) / x_scale), -128, 127
+                    torch.round(x.to(torch.float32) / x_scale), self.x_qmin, self.x_qmax
                 )
                 qx = x_clamped.to(torch.int8)
 
@@ -3381,7 +3396,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         batch_size, in_features, out_features = 32, 64, 32
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
-        mod = DynamicQLinearUnaryModule(out_features, in_features).eval()
+        mod = DynamicQLinearUnaryModule(out_features, in_features, qmax, x_qmin, x_qmax).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
@@ -3413,20 +3428,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         torch._dynamo.reset()
 
+        # Adjust quantization range for CPUs without VNNI support
+        reduce_range = should_reduce_range(torch.device("cpu"))
+        if reduce_range:
+            # Reduce int8 range to avoid overflow: [-64, 63] for both weights and activations
+            w_qmin, w_qmax = -64, 63
+            x_qmin, x_qmax = -64, 63
+            qmax = 63.0  # For dynamic quantization: x_scale = x_max / qmax
+        else:
+            w_qmin, w_qmax = -128, 127
+            x_qmin, x_qmax = -128, 127
+            qmax = 127.0
+
         class DynamicQLinearBinaryModule(torch.nn.Module):
-            def __init__(self, N, K):
+            def __init__(self, N, K, qmax, x_qmin, x_qmax):
                 super().__init__()
-                qw = torch.randint(-128, 127, (N, K), dtype=torch.int8)
+                qw = torch.randint(w_qmin, w_qmax, (N, K), dtype=torch.int8)
                 self.qw_packed = torch.ops.onednn.qlinear_prepack(qw, None)
                 self.w_scales = torch.full((N,), 0.05)
                 self.w_zps = torch.zeros(N, dtype=torch.int32)
                 self.bias = torch.randn(N, dtype=torch.float32)
                 self.output_scale = 1.0
                 self.output_zp = 0
+                self.qmax = qmax
+                self.x_qmin = x_qmin
+                self.x_qmax = x_qmax
 
             def forward(self, x, other):
                 x_max = torch.max(torch.abs(x.to(torch.float32)))
-                x_scale = x_max / 127.0
+                x_scale = x_max / self.qmax
                 x_scale = torch.clamp(x_scale, min=torch.finfo(torch.float32).eps)
                 x_scale = x_scale.reshape(1, 1)
 
@@ -3434,7 +3464,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
                 # Quantize input
                 x_clamped = torch.clamp(
-                    torch.round(x.to(torch.float32) / x_scale), -128, 127
+                    torch.round(x.to(torch.float32) / x_scale), self.x_qmin, self.x_qmax
                 )
                 qx = x_clamped.to(torch.int8)
 
@@ -3462,7 +3492,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size, in_features, out_features = 32, 64, 32
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
         other = torch.randn(batch_size, out_features, dtype=torch.float32)
-        mod = DynamicQLinearBinaryModule(out_features, in_features).eval()
+        mod = DynamicQLinearBinaryModule(out_features, in_features, qmax, x_qmin, x_qmax).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
