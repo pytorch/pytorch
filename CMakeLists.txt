@@ -274,7 +274,7 @@ cmake_dependent_option(
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
-option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
+cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -705,8 +705,11 @@ endif(MSVC)
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 # Set linker max-page-size to 64KiB on AArch64 Linux
+# And stub group size to 32MiB to workaround R_AARCH64_CALL26
+# relocation errors
 if(LINUX AND CPU_AARCH64)
   add_link_options_if_supported("-z,max-page-size=0x10000")
+  add_link_options_if_supported("--stub-group-size=0x2000000")
 endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not

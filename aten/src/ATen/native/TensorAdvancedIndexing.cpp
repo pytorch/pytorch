@@ -413,6 +413,16 @@ static void index_func_meta_impl(
       self.sizes(),
       " source.shape = ",
       source.sizes());
+  TORCH_CHECK(
+      self.device() == source.device() && self.device() == index.device(),
+      func,
+      "_(): self, index and source expected to be in the same device, "
+      "but got (self) ",
+      self.device(),
+      ", (index) ",
+      index.device(),
+      ", and (source) ",
+      source.device());
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
