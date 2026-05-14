@@ -12,6 +12,7 @@
 
 namespace {
 
+// copied from fake_tensor.py _cpp_meta_supports_symint
 static bool cpp_meta_supports_symint(const c10::OperatorHandle& op) {
   static const std::unordered_set<std::string> allowlist = {
       "aten::empty.memory_format",
@@ -198,8 +199,8 @@ static at::Tensor real_tensor_to_fake(
   auto original_device = t.device();
   at::Tensor meta_t;
   {
-    c10::impl::ExcludeDispatchKeyGuard guard(
-        c10::DispatchKeySet(c10::DispatchKey::Fake));
+    c10::impl::ExcludeDispatchKeyGuard guard{
+        c10::DispatchKeySet(c10::DispatchKey::Fake)};
     meta_t = at::empty_strided(
         t.sizes(), t.strides(), t.options().device(c10::DeviceType::Meta));
   }
@@ -222,13 +223,11 @@ static bool can_generate_trivial_fake_impl(
 
 static bool can_run_unsafe_fallback(const c10::FunctionSchema& schema) {
   const auto& name = schema.name();
-  // Match Python FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
   return name.rfind("aten::", 0) == 0 || name.rfind("prims::", 0) == 0 ||
       name.rfind("quantized::", 0) == 0;
 }
 
 static constexpr int64_t CONSTANT_NUMEL_LIMIT = 1;
-
 static bool may_turn_const(const at::Tensor& t) {
   return t.numel() <= CONSTANT_NUMEL_LIMIT &&
       !t.is_sparse() &&
@@ -236,9 +235,10 @@ static bool may_turn_const(const at::Tensor& t) {
       t.device().type() != c10::DeviceType::Meta;
 }
 
-// Creates a zero-filled real tensor on the fake tensor's original device.
-// Temporarily exits FakeTensorMode TLS so the created tensor is genuinely
-// real (not stamped with the Fake dispatch key).
+// creates a zero-filled real tensor on the fake tensor's original device.
+// we need to temporarily exit FakeTensorMode TLS so the created tensor is
+// actually real
+// matches Python FakeTensor behaviour (with no_dispatch())
 static at::Tensor to_real_tensor(const at::Tensor& t) {
   auto device = t.device(); // returns fake device (e.g. CPU)
   auto saved_mode = c10::impl::FakeTensorModeTLS::get_state();
@@ -291,19 +291,27 @@ static void maybe_run_unsafe_fallback(
     torch::jit::Stack* stack,
     size_t arguments_begin,
     size_t num_arguments,
+    bool has_symints,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  // check if can generate trivial fake imp
-  //
-  // Convert fake inputs to zero-filled real tensors.
+  const auto& schema = op.schema();
+
+  if (can_generate_trivial_fake_impl(schema)) {
+    stack->resize(arguments_begin);
+    return;
+  }
+
+  TORCH_CHECK(
+      !has_symints && can_run_unsafe_fallback(schema),
+      "Unsupported operator for C++ FakeTensor: ",
+      op.operator_name());
+
   for_each_tensor(
       stack, arguments_begin, num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (t.defined() && t.is_fake())
-          return to_real_tensor(t); // should call back to python
+          return to_real_tensor(t);
         return std::nullopt;
       });
-
-  // Run the real kernel.
   {
     c10::impl::ExcludeDispatchKeyGuard guard(
         c10::DispatchKeySet(c10::DispatchKey::Fake) |
@@ -312,8 +320,6 @@ static void maybe_run_unsafe_fallback(
     op.callBoxed(stack);
   }
 
-  // Convert real outputs to fake tensors.
-  const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for_each_tensor(
@@ -346,27 +352,25 @@ void fakeFallback(
         return std::nullopt;
       });
 
-  // Skip constant prop for _to_copy when the input is already on meta device
+  // skip constant prop for _to_copy when the input is already on meta device
   // TODO: implement avoiding_device_init (requires avoid_device_init on C++ FakeTensorMode)
-  auto arguments = torch::jit::last(*stack, num_arguments);
+  // auto arguments = torch::jit::last(*stack, num_arguments);
 
-  bool device_conversion_skip_const_prop =
-      op.operator_name().name == "aten::_to_copy" &&
-      (num_arguments > 0 && arguments[0].isTensor()) &&
-      arguments[0].toTensor().device().is_meta(); // or avoiding_device_init
+  // bool device_conversion_skip_const_prop =
+  //     op.operator_name().name == "aten::_to_copy" &&
+  //     (num_arguments > 0 && arguments[0].isTensor()) &&
+  //     arguments[0].toTensor().device().is_meta(); // or avoiding_device_init
 
-  // Matches Python FakeTensorMode at fake_tensor.py:2521-2559.
+  // matches python FakeTensorMode
   // lift_fresh with no fake inputs (e.g. torch.tensor(())): run the real op
   // to produce a constant tensor, then convert to fake.
   if (is_lift_func(op) && flat_arg_fake_tensors.empty()) {
     /*
-      (TODO: should_allow_numbers_as_tensors &&
+      or (TODO: should_allow_numbers_as_tensors &&
        !has_symints &&
        flat_arg_fake_tensors.empty() &&
        !device_conversion_skip_const_prop)) {
     */
-    // // TODO: implement constant propagation
-    // TORCH_CHECK(false, "constant propagation not implemented in C++ faketensor");
     {
       c10::impl::ExcludeDispatchKeyGuard guard(
           c10::DispatchKeySet(c10::DispatchKey::Fake) |
@@ -383,7 +387,7 @@ void fakeFallback(
             return std::nullopt;
           auto fake = real_tensor_to_fake(t, mode);
           if (may_turn_const(t)) {
-            fake.unsafeGetTensorImpl()->set_fake_constant(
+            fake.unsafeGetTensorImpl()->set_constant(
                 std::make_shared<at::Tensor>(t.clone()));
           }
           return fake;
@@ -394,7 +398,6 @@ void fakeFallback(
   // lift_fresh with fake inputs: convert any non-fake inputs to fake.
   // lift_fresh is identity so the stack already holds the return value.
   if (is_lift_func(op)) {
-    // TORCH_CHECK(false, "lift_fresh not implemented in C++ faketensor");
     for_each_tensor(
         stack, arguments_begin, num_arguments,
         [&](const at::Tensor& t) -> std::optional<at::Tensor> {
@@ -411,16 +414,15 @@ void fakeFallback(
   flat_arg_fake_tensors =
       validate_and_convert_non_fake_tensors(stack, arguments_begin, num_arguments, mode);
 
-  // Constant propagation: if every fake-tensor argument carries a backing
-  // constant, run the real op on those constants.  Matches Python
-  // FakeTensorMode at fake_tensor.py:2578-2620.
+  // constant prop, if every fake-tensor argument carries a backing
+  // constant, run the real op on those constants
   {
     bool all_constant = !flat_arg_fake_tensors.empty() &&
         std::all_of(
             flat_arg_fake_tensors.begin(),
             flat_arg_fake_tensors.end(),
             [](const at::Tensor& t) {
-              return t.unsafeGetTensorImpl()->fake_constant() != nullptr;
+              return t.unsafeGetTensorImpl()->constant() != nullptr;
             });
 
     // isinstance(func, torch._ops.OpOverload) — always true in C++ fallback
@@ -432,24 +434,24 @@ void fakeFallback(
         !has_symints &&
         // TODO: avoiding_device_init
         schema.name() != "aten::_nested_tensor_from_tensor_list") {
-      // Save the original arguments so we can restore the stack if the
+      // save the original arguments so we can restore the stack if the
       // outputs are too large to keep as constants.
       auto orig_arguments = torch::jit::last(*stack, num_arguments).vec();
 
-      // Substitute fake tensors with their constants on the stack.
-      // Matches Python: a.constant if self.is_our_fake(a) else a
+      // sub fake tensors with their constants on the stack
+      // matches python logic a.constant if self.is_our_fake(a) else a
       for_each_tensor(
           stack, arguments_begin, num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (is_our_fake(t, mode)) {
-              auto constant = t.unsafeGetTensorImpl()->fake_constant();
+              auto constant = t.unsafeGetTensorImpl()->constant();
               if (constant)
                 return *constant;
             }
             return std::nullopt;
           });
 
-      // Run the real op.
+      // run real op
       {
         c10::impl::ExcludeDispatchKeyGuard guard(
             c10::DispatchKeySet(c10::DispatchKey::Fake) |
@@ -458,7 +460,7 @@ void fakeFallback(
         op.callBoxed(stack);
       }
 
-      // Check if all output tensors can be turned into constants.
+      // check if all output tensors can be turned into constants
       const auto num_returns = schema.returns().size();
       const auto returns_begin = stack->size() - num_returns;
       bool all_outputs_const = true;
@@ -471,27 +473,27 @@ void fakeFallback(
           });
 
       if (all_outputs_const) {
-        // Convert output tensors to fakes with constants attached.
+        // convert output tensors to fakes with constants attached
         for_each_tensor(
             stack, returns_begin, num_returns,
             [&](const at::Tensor& t) -> std::optional<at::Tensor> {
               if (may_turn_const(t)) {
                 auto constant = std::make_shared<at::Tensor>(t.clone());
                 auto fake = real_tensor_to_fake(t, mode);
-                fake.unsafeGetTensorImpl()->set_fake_constant(
+                fake.unsafeGetTensorImpl()->set_constant(
                     std::move(constant));
                 return fake;
               }
               return std::nullopt;
             });
-        // Non-tensor outputs (e.g. Scalar from .item()) are already on
+        // non-tensor output are already on
         // the stack and need no conversion.
         return;
       }
 
-      // Outputs too large to keep as constants — discard the results and
-      // restore the original fake arguments so the normal meta-kernel path
-      // below can re-run the op.
+      // outputs too large to keep as constants (determined by may_turn_const)
+
+      // we need to manually restore the stack now
       // TODO: invalidate_constant_aliases for output tensors
       stack->resize(arguments_begin);
       for (auto& arg : orig_arguments) {
@@ -533,17 +535,19 @@ void fakeFallback(
         });
   };
 
-  // For ops with symbolic sizes, try decompositions before the Meta kernel.
-  // Guard re-entry only for the specific op being decomposed (not all ops),
-  // since @register_decomposition registers the same function as both decomp
-  // and meta kernel, so re-entering the decomp for the SAME op would loop.
-  // Sub-ops are different ops and must be allowed to use their own decomps.
+  // for ops with symbolic sizes, try decompositions before the meta kernel
+  // THIS IS CALLING BACK TO PYTHON
+  // we need to re-entry only for the specific op being decomposed
+  // since @register_decomposition can register the same fn as both decomp
+  // and meta kernel, so re-entering the decomp for the same op will infinite loop
+
+  // but sub-ops are different ops so they need to be able to use their own decomps
   bool is_same_op_reentry = mode && mode->decomposing_op_ == &op;
   if (has_symints && !cpp_meta_supports_symint(op) && mode &&
       !is_same_op_reentry) {
     if (mode->decomp_fn_) {
       auto prev_decomposing = mode->decomposing_op_;
-      mode->decomposing_op_ = &op;
+      mode->decomposing_op_ = &op; // keep track of current op we are decomping
       bool found = false;
       try {
         found = mode->decomp_fn_(&op, stack);
@@ -558,10 +562,8 @@ void fakeFallback(
       }
     }
 
-    // 2. Try CompositeImplicitAutograd decomposition. Remove Fake from the
-    //    redispatch keyset so this op doesn't re-enter fakeFallback (which
-    //    would infinite-loop). Sub-ops compute fresh keysets from TLS where
-    //    Fake is still active, so they re-enter fakeFallback correctly.
+    // try CIA decomposition. remove Fake from the redispatch keyset so this op
+    // doesn't re-enter fakeFallback (which would infinite-loop)
     if (!op.hasKernelForDispatchKey(c10::DispatchKey::Meta) &&
         op.hasKernelForDispatchKey(
             c10::DispatchKey::CompositeImplicitAutograd)) {
@@ -575,17 +577,11 @@ void fakeFallback(
     }
   }
 
-  // Prims ops with Meta kernels: redispatch to the Meta kernel with Fake
-  // removed from the keyset (so this op doesn't re-enter fakeFallback) but
-  // Fake stays in TLS (so sub-ops like torch.empty_strided re-enter
-  // fakeFallback and get properly fakified). This matches Python
-  // FakeTensorMode's `with self: func.prim_meta_impl(...)` pattern.
-  // We must add Meta to the keyset because C++ fake tensors report
-  // device=cpu (their fake device), so Meta isn't in the tensor's keyset.
-  // BackendSelect must be removed because it has higher priority than Meta
-  // and some prims (e.g. iota) have BackendSelect kernels that call back
-  // to aten ops (torch.arange), which would re-enter the decomp table and
-  // infinite-loop.
+  // prim ops with Meta kernels: redispatch to the Meta kernel with Fake
+  // removed from the keyset (so this op doesn't re-enter fakeFallback)
+  // prims can already handle Fake so we just need to re dispatch
+  // sub ops need to enter though so we keep Fake in TLS
+  // this matches Python's `with self: func.prim_meta_impl(...)` pattern
   if (schema.name().rfind("prims::", 0) == 0 &&
       op.hasKernelForDispatchKey(c10::DispatchKey::Meta)) {
     // Python calls prim_meta_impl directly so scalar args stay as Python
@@ -596,7 +592,7 @@ void fakeFallback(
     // wrapping dtype (float64/int64) since those are likely wrapped scalars.
 
     // ed: there's like a correct way to do the IValue conversion here
-    //  fix this
+    // fix this later
     std::optional<c10::ScalarType> target_dtype;
     for_each_tensor(
         stack, arguments_begin, num_arguments,
@@ -639,7 +635,6 @@ void fakeFallback(
     ks = ks.remove(c10::DispatchKey::Fake);
     ks = ks.remove(c10::DispatchKey::Python);
     ks = ks.remove(c10::DispatchKey::PythonTLSSnapshot);
-    ks = ks.remove(c10::DispatchKey::BackendSelect);
     ks = ks | c10::DispatchKeySet(c10::DispatchKey::Meta);
     op.redispatchBoxed(ks, stack);
     wrap_meta_outputs_with_default_device_logic();
@@ -652,10 +647,11 @@ void fakeFallback(
 
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
-  // Handlers registered via register_op_impl (e.g. unique_consecutive,
-  // _local_scalar_dense). Try these first for ops that have no Meta kernel.
-  // For ops WITH Meta kernels, we try Meta first and fall back to op_impl_fn_
-  // if Meta raises (see below).
+  // Handlers registered via register_op_impl
+  // idk if this is right because im using a try catch pattern for this
+  // and i also made a wrapper to be able to pass in "FakeTensorMode" to the op impls
+  // this seemed like the least intrusive way to do it for now but idk
+  // probalby should revist
   bool has_meta_kernel = op.hasKernelForDispatchKey(c10::DispatchKey::Meta);
   if (!has_meta_kernel && mode && mode->op_impl_fn_) {
     if (mode->op_impl_fn_(&op, stack)) {
@@ -719,17 +715,12 @@ void fakeFallback(
     try {
       std::rethrow_exception(eptr);
     } catch (c10::NotImplementedError&) {
-      TORCH_CHECK(
-          !has_symints,
-          "Unsupported operator for C++ FakeTensor with symbolic sizes: ",
-          op.operator_name());
-
       stack->resize(arguments_begin);
       for (auto& arg : saved_args) {
         stack->push_back(std::move(arg));
       }
       maybe_run_unsafe_fallback(
-          op, stack, arguments_begin, num_arguments, mode);
+          op, stack, arguments_begin, num_arguments, has_symints, mode);
     }
   }
 }

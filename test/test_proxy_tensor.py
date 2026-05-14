@@ -1033,6 +1033,7 @@ class TestSymbolicTracing(TestCase):
         Also returns shape env
         """
         trace_inputs = [torch.randn(shape) for shape in trace_inputs]
+        traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
         for input in test_inputs:
             input = [torch.randn(shape) for shape in input]
             rx, ry = traced_f(*input), fn(*input)
@@ -2030,6 +2031,14 @@ L['a'].size()[1] <= 18""")
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
+
+
+make_fx_failures = {
+    # unknown
+    xfail('allclose'),
+    xfail('equal'),
+    # empty
+    skip('new_empty'),
     skip('empty_like'),
     skip('empty'),
     skip('empty_permuted'),

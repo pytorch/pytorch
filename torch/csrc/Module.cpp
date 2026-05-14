@@ -765,12 +765,11 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     try {
       at::IntArrayRef shape(
           prototype->shape, prototype->shape + prototype->ndim);
-      at::TensorOptions options = at::TensorOptions()
-                                      .dtype(at::toScalarType(prototype->dtype))
-                                      .device(
-                                          at::dlDeviceToTorchDevice(
-                                              prototype->device.device_type,
-                                              prototype->device.device_id));
+      at::TensorOptions options =
+          at::TensorOptions()
+              .dtype(at::toScalarType(prototype->dtype))
+              .device(at::dlDeviceToTorchDevice(
+                  prototype->device.device_type, prototype->device.device_id));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -1592,10 +1591,9 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
 
 static PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(
-      c10::DeviceTypeName(
-          dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
-          /*lower_case=*/true));
+  return THPUtils_packString(c10::DeviceTypeName(
+      dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
+      /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2771,23 +2769,22 @@ Call this whenever a new thread is created in order to propagate values from
   // Scaled Dot Product Attention utilities
   ////////////////////////////////////////////////////////////////////////////////
   py::class_<sdp::sdp_params>(py_module, "_SDPAParams")
-      .def(
-          py::init([](at::Tensor const& query,
-                      at::Tensor const& key,
-                      at::Tensor const& value,
-                      std::optional<at::Tensor> attn_mask,
-                      double dropout,
-                      bool is_causal,
-                      bool enable_gqa) {
-            return sdp::sdp_params{
-                query,
-                key,
-                value,
-                std::move(attn_mask),
-                dropout,
-                is_causal,
-                enable_gqa};
-          }))
+      .def(py::init([](at::Tensor const& query,
+                       at::Tensor const& key,
+                       at::Tensor const& value,
+                       std::optional<at::Tensor> attn_mask,
+                       double dropout,
+                       bool is_causal,
+                       bool enable_gqa) {
+        return sdp::sdp_params{
+            query,
+            key,
+            value,
+            std::move(attn_mask),
+            dropout,
+            is_causal,
+            enable_gqa};
+      }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)
       .def_readonly("value", &sdp::sdp_params::value)
@@ -2946,9 +2943,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::precision2str(
-            at::globalContext().float32Precision(
-                at::str2backend(backend), at::str2op(op)));
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -3134,10 +3130,9 @@ Call this whenever a new thread is created in order to propagate values from
 
     py::gil_scoped_acquire gil;
 
-    // A failed Meta kernel may have raised from Python, leaving the error
-    // indicator set (pybind11 translates it to C++ but doesn't clear
-    // the Python-side error). Clear it so our dict lookups don't hit
-    // "SystemError: ... returned a result with an exception set".
+    // if meta kernel failed
+    // this is bc this runs after try catch
+    // revisit later idk
     if (PyErr_Occurred()) {
       PyErr_Clear();
     }
@@ -3158,11 +3153,8 @@ Call this whenever a new thread is created in order to propagate values from
       return false;
     }
 
-    // Skip the Python handler for ops with CompositeExplicit/
-    // ImplicitAutograd decompositions — those are handled by the C++ fallback.
-    // Ops with Meta kernels are NOT skipped here: the Meta kernel may raise
-    // (e.g. _local_scalar_dense), and FakeFallbackKernel will call us as a
-    // fallback when that happens.
+    // skip the python handler for ops with CIA/CEA
+    // decompositions to avoid going down python faketensormode path
     if (op.hasKernelForDispatchKey(
             c10::DispatchKey::CompositeExplicitAutograd) ||
         op.hasKernelForDispatchKey(
@@ -3173,8 +3165,12 @@ Call this whenever a new thread is created in order to propagate values from
     auto mode = c10::impl::FakeTensorModeTLS::get_state();
     TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
 
-    // Build a lightweight shim that exposes .shape_env and
-    // .fake_tensor_converter for the @register_op_impl handlers.
+    // wrapper to expose .shape_env and
+    // .fake_tensor_converter for the @register_op_impl handlers
+
+    // rn we are falling back to python for these so i think this
+    // is the cleanest way/least intrusive
+    // but idk maybe need to revisit
     static py::object CppFakeModeShim =
         py::module::import("torch._subclasses.fake_impls")
             .attr("CppFakeModeShim");
@@ -3205,10 +3201,7 @@ Call this whenever a new thread is created in order to propagate values from
       return false;
     }
 
-    // Convert output tensors to C++ fake tensors.
-    // The handler runs with Fake excluded, so sub-ops like new_empty produce
-    // plain meta tensors. We need to stamp them as C++ fake tensors with the
-    // correct fake device. Python FakeTensors (if any) are also handled.
+    // Convert output tensors to C++ fake tensors
     auto common_device = c10::Device(c10::DeviceType::CPU);
     // Get fake device from one of the input tensors.
     for (const auto& arg : arguments) {
@@ -3274,9 +3267,6 @@ Call this whenever a new thread is created in order to propagate values from
 
         at::Tensor meta_tensor;
         {
-          // Exclude Fake key so the internal empty_strided(device="meta")
-          // inside to_meta_tensor goes directly to the Meta kernel, matching
-          // Python FakeTensorConverter which uses no_dispatch().
           c10::impl::ExcludeDispatchKeyGuard guard(
               c10::DispatchKeySet(c10::DispatchKey::Fake));
           auto meta_obj = converter.attr("to_meta_tensor")(
@@ -3298,22 +3288,6 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("source") = py::none(),
       py::arg("symbolic_context") = py::none());
 
-  py_module.def(
-      "_create_and_enter_fake_tensor_mode",
-      [](py::object converter, py::object shape_env) {
-        Py_INCREF(shape_env.ptr());
-        Py_INCREF(converter.ptr());
-        auto mode = std::make_shared<c10::FakeTensorMode>(
-            std::make_shared<c10::SafePyObject>(
-                shape_env.ptr(), getPyInterpreter()),
-            std::make_shared<c10::SafePyObject>(
-                converter.ptr(), getPyInterpreter()));
-        mode->decomp_fn_ = tryPythonDecomp;
-        mode->op_impl_fn_ = tryPythonOpImpl;
-        c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
-      },
-      py::arg("converter"),
-      py::arg("shape_env") = py::none());
   py_module.def(
       "_create_cpp_fake_tensor_mode",
       [](py::object converter, py::object shape_env) {

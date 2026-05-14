@@ -395,7 +395,7 @@ c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
 IntArrayRef TensorImpl::sizes_custom() const {
   // python faketensor path
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
   }
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     // if tensor is not c++ faketensor and Fake has not been
@@ -405,7 +405,7 @@ IntArrayRef TensorImpl::sizes_custom() const {
     // also not excluded != included since its different bits or smth
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->sizes(this);
       }
     }
@@ -414,6 +414,10 @@ IntArrayRef TensorImpl::sizes_custom() const {
       sym.materialized_sizes_.resize(sym.sizes_.size());
       for (size_t i = 0; i < sym.sizes_.size(); i++) {
         sym.materialized_sizes_[i] =
+            // this creates a "guard" for the SymInt
+            // basically saying this is the concrete integer associated
+            // to this SymInt
+            // Python FakeTensor also calls this
             sym.sizes_[i].guard_int(__FILE__, __LINE__);
       }
       sym.sizes_materialized_ = true;
@@ -465,12 +469,12 @@ c10::Device TensorImpl::device_custom() const {
 
 IntArrayRef TensorImpl::strides_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->strides(this);
+    return (*c10::impl::getGlobalPyInterpreter())->strides(this);
   }
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->strides(this);
       }
     }
@@ -499,15 +503,6 @@ int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return (*c10::impl::getGlobalPyInterpreter())->numel(this);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
-    if (!is_fake() &&
-        !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
-        return (*interp)->numel(this);
-      }
-    }
-    return symbolic_shape_meta().numel().guard_int(__FILE__, __LINE__);
-  }
   return numel_default();
 }
 
@@ -531,7 +526,7 @@ int64_t TensorImpl::storage_offset_custom() const {
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->sym_storage_offset(this).guard_int(
             __FILE__, __LINE__);
       }
@@ -1018,7 +1013,6 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   // Match set_sizes_and_strides: skip the concrete fast-path when symbolic
   // sizes are active, since set_sizes_contiguous rejects "customized tensors".
   if (int_sizes.has_value() && !has_symbolic_sizes_strides_) {
-    // if (int_sizes.has_value()) {
     set_sizes_contiguous(*int_sizes);
     return;
   }

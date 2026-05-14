@@ -2789,7 +2789,6 @@ class OutputGraph(OutputGraphCommon):
                 ),
             )
             self.call_cleanup_hooks()
-            # raise AssertionError("graph completed")
             old_fake_mode = self.tracing_context.fake_mode
             if old_fake_mode is None:
                 raise AssertionError("old_fake_mode must not be None")

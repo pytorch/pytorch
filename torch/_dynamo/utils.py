@@ -3761,7 +3761,7 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
-    if maybe_get_fake_mode(e) is not tx.fake_mode or cpp_fake_belongs_to_mode(e):
+    if maybe_get_fake_mode(e) is not tx.fake_mode and not cpp_fake_belongs_to_mode(e):
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
         )
