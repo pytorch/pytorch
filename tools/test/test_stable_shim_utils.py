@@ -16,6 +16,7 @@ from tools.linter.adapters._stable_shim_utils import (
     IdentifierMatcher,
     IdentifierUse,
     MatcherAccumulator,
+    arbitrary_identifier_matcher,
 )
 
 
@@ -187,6 +188,36 @@ class TestStableShimUtils(unittest.TestCase):
             res = matcher.identifiers_used()
             if res:
                 result[li] = res
+
+        self.assertEqual(result, expected)
+
+    def test_identifier_detection(self):
+        """
+        This unit tests verifies arbitrary_identifier_matcher, which is used
+        to generate matches for all the relevant function names and other
+        identifiers by stable_shim_usage_linter's check_file.
+        """
+        matcher = MatcherAccumulator(
+            [
+                arbitrary_identifier_matcher("primary_path"),
+                arbitrary_identifier_matcher("secondary_path"),
+            ]
+        )
+        expected_version = (2, 8)
+        matcher.set_scope_version(expected_version)
+
+        sample = """
+        // Simple version with just two function, checks that we don't
+        // lose the line after the first match.
+        AOTI_TORCH_EXPORT int primary_path(int arg);
+        AOTI_TORCH_EXPORT int secondary_path(int arg);
+        """
+
+        expected = {
+            4: ["primary_path"],
+            5: ["secondary_path"],
+        }
+        result = self._run_match_on_sample(sample, matcher, expected_version)
 
         self.assertEqual(result, expected)
 

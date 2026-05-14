@@ -63,7 +63,7 @@ class IdentifierMatcher(NamedTuple):
     end_pattern: str | re.Pattern
     # Handler is a function that takes:
     # - buffer: str -> This is the accumulated buffer between the start and end
-    #   pattern, possibly containing newlines.
+    #   pattern, unstripped and possibly containing newlines.
     # - version: tuple[int, int] | None -> Provides the version of the block this
     #   buffer is located in, None if outside of a versioning block.
     # It returns a list of IdentifierUse entries.
@@ -126,6 +126,28 @@ STRUCT_CLASS_IDENTIFIER_MATCHER = IdentifierMatcher(
     end_pattern=";",
     handler=extract_factory(r"(?:struct|class)\s+(\w+)"),
 )
+
+
+def arbitrary_identifier_matcher(pattern):
+    """
+    Create an arbitrary identifier matcher, this is what is used to find the
+    relevant identifiers in normal code.
+    """
+
+    def extractor(
+        buffer: str, current_version: tuple[int, int] | None
+    ) -> list[IdentifierUse]:
+        return [IdentifierUse(identifier=pattern, version=current_version)]
+
+    # Use word boundaries to avoid matching partial names
+    # if re.search(rf"\b{re.escape(func_name)}\b", line):
+    return IdentifierMatcher(
+        start_pattern=rf"\b{re.escape(pattern)}\b",
+        end_pattern=".",
+        handler=extractor,
+    )
+
+
 IDENTIFIER_MATCHERS = [
     FUNCTION_IDENTIFIER_MATCHER,
     TYPEDEF_IDENTIFIER_MATCHER,
@@ -238,7 +260,7 @@ class PreprocessorTracker:
     over multiple lines.
     """
 
-    def __init__(self):
+    def __init__(self, matchers):
         """Initialize the preprocessor tracker."""
         # Stack of (is_version_block, version_tuple) tuples
         # is_version_block: True if this is a TORCH_FEATURE_VERSION >= TORCH_VERSION_X_Y_0 block
@@ -256,7 +278,9 @@ class PreprocessorTracker:
             r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
         )
 
-    def process_line(self, line: str) -> bool:
+        self._identifier_accumulator = MatcherAccumulator(matchers)
+
+    def process_line(self, line: str) -> list[IdentifierUse]:
         """
         Process a line and update the preprocessor state.
 
@@ -264,8 +288,7 @@ class PreprocessorTracker:
             line: The line to process
 
         Returns:
-            True if the line was processed (is a preprocessor directive or comment),
-            False if it's a regular code line that should be further analyzed.
+            List of found identifiers for this line, or an accumulated buffer.
         """
         stripped = line.strip()
 
@@ -278,11 +301,11 @@ class PreprocessorTracker:
         if self.in_block_comment:
             if "*/" in line:
                 self.in_block_comment = False
-            return True  # Skip the line if we're in a block comment
+            return []  # Skip the line if we're in a block comment
 
         # Skip line comments - they're not active code
         if stripped.startswith("//"):
-            return True
+            return []
 
         # Track #if directives
         if stripped.startswith("#if"):
@@ -296,12 +319,12 @@ class PreprocessorTracker:
             else:
                 # Regular #if (not a version block)
                 self.preprocessor_stack.append((False, None))
-            return True
+            return []
 
         # Track #ifdef and #ifndef directives (not version blocks)
         if stripped.startswith(("#ifdef", "#ifndef")):
             self.preprocessor_stack.append((False, None))
-            return True
+            return []
 
         # Track #endif directives
         if stripped.startswith("#endif"):
@@ -314,7 +337,7 @@ class PreprocessorTracker:
                         if self.preprocessor_stack[i][0]:
                             self.version_of_block = self.preprocessor_stack[i][1]
                             break
-            return True
+            return []
 
         # Track #else directives
         # #else replaces the previous #if or #elif, so we pop and push
@@ -324,7 +347,7 @@ class PreprocessorTracker:
             # #else is never versioned, so push (False, None)
             self.preprocessor_stack.append((False, None))
             self.version_of_block = None
-            return True
+            return []
 
         # Track #elif directives
         # #elif replaces the previous #if or #elif, so we pop and push
@@ -345,18 +368,13 @@ class PreprocessorTracker:
             else:
                 # Not a version elif, treat as regular conditional
                 self.preprocessor_stack.append((False, None))
-            return True
+            return []
 
-        # Not a preprocessor directive or comment
-        return False
+        self._identifier_accumulator.set_scope_version(self.version_of_block)
+        self._identifier_accumulator.process_line(line)
 
-    def is_in_version_block(self) -> bool:
-        """Check if currently inside any version block."""
-        return self.version_of_block is not None
-
-    def get_version_of_block(self) -> tuple[int, int] | None:
-        """Get the current version requirement, or None if not in a version block."""
-        return self.version_of_block
+        res = self._identifier_accumulator.identifiers_used()
+        return res if res is not None else []
 
 
 def get_current_version() -> tuple[int, int, int]:
