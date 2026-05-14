@@ -9,8 +9,10 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -79,6 +81,75 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
