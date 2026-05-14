@@ -1961,7 +1961,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     result = compiled_f(cache.clone(), data)
 
                     self.assertEqual(result.dtype, torch.int32)
-                    self.assertTrue(torch.equal(result, result_eager))
+                    self.assertEqual(result, result_eager)
                     self.assertEqual(
                         counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
                     )
@@ -1995,10 +1995,90 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     compiled_f = torch.compile(func, fullgraph=True, backend="inductor")
                     result = compiled_f(*[a.clone() for a in args])
 
-                    self.assertTrue(torch.equal(result, result_eager_neg))
+                    self.assertEqual(result, result_eager_neg)
                     self.assertEqual(
                         counters["inductor"]["fix_auto_functionalized_dtype_views"], 0
                     )
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dtype_view_clone_elimination_shared_storage(self):
+        """
+        Two graph-input placeholders that share the same underlying storage
+        (e.g. per-layer slices of a single KV pool) collide in the pass's
+        ``storage_to_input`` map, which is keyed by
+        ``untyped_storage()._cdata`` alone. Verify the pass still produces
+        correct output for both mutations.
+
+        This case is realistic for paged-KV deployments where each layer holds
+        a slice of one big buffer with positive ``storage_offset``.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::mutate_inplace_pool",
+                "(Tensor(a!) x, Tensor y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::mutate_inplace_pool", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def mutate_inplace_pool_cpu(x, y):
+                x.copy_(y)
+
+            @torch.library.impl("mylib::mutate_inplace_pool", "Meta", lib=lib)
+            def mutate_inplace_pool_meta(x, y):
+                pass
+
+            def f_pool_slices(slice_a, slice_b, data_a, data_b):
+                a_view = slice_a.view(torch.float32)
+                b_view = slice_b.view(torch.float32)
+                torch.ops.mylib.mutate_inplace_pool(a_view, data_a)
+                torch.ops.mylib.mutate_inplace_pool(b_view, data_b)
+                return slice_a, slice_b
+
+            pool = torch.zeros((4, 10, 10), dtype=torch.int32)
+            # Two slices share `_cdata` but have different `storage_offset`.
+            slice_a = pool[1]
+            slice_b = pool[3]
+            self.assertEqual(
+                slice_a.untyped_storage()._cdata,
+                slice_b.untyped_storage()._cdata,
+            )
+            self.assertNotEqual(slice_a.storage_offset(), slice_b.storage_offset())
+
+            data_a = torch.randn((10, 10), dtype=torch.float32)
+            data_b = torch.randn((10, 10), dtype=torch.float32)
+
+            pool_eager = pool.clone()
+            sa_eager, sb_eager = f_pool_slices(
+                pool_eager[1], pool_eager[3], data_a, data_b
+            )
+
+            with torch.no_grad():
+                counters.clear()
+                torch._dynamo.reset()
+                compiled_f = torch.compile(
+                    f_pool_slices, fullgraph=True, backend="inductor"
+                )
+                pool_compiled = pool.clone()
+                sa, sb = compiled_f(
+                    pool_compiled[1], pool_compiled[3], data_a, data_b
+                )
+
+                # Outputs must match eager for BOTH slices, regardless of the
+                # pass's storage-collision identification order.
+                self.assertEqual(sa.dtype, torch.int32)
+                self.assertEqual(sb.dtype, torch.int32)
+                self.assertEqual(sa, sa_eager)
+                self.assertEqual(sb, sb_eager)
+                # The underlying pool must reflect both mutations through the
+                # shared storage.
+                self.assertEqual(pool_compiled, pool_eager)
+                # The pass must fire once per auto_functionalized_v2 node;
+                # we have two dtype-view mutations so the counter is 2.
+                self.assertEqual(
+                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
+                )
 
 
 if __name__ == "__main__":

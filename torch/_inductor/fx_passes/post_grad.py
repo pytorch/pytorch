@@ -1440,89 +1440,41 @@ def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
     This pass identifies such cases and updates the reinplace metadata to
     indicate no clone is needed.
     """
-    # Build a map of storage _cdata to graph inputs
     storage_to_input: dict[int, torch.fx.Node] = {}
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            try:
-                storage = node.meta.get("val")
-                if storage is not None and isinstance(storage, torch.Tensor):
-                    storage_cdata = storage.untyped_storage()._cdata
-                    storage_to_input[storage_cdata] = node
-            except (AttributeError, RuntimeError):
-                pass
+    for node in graph.find_nodes(op="placeholder"):
+        storage = get_node_storage(node)
+        if storage is not None:
+            storage_to_input[storage] = node
 
-    # Process all auto_functionalized_v2 nodes
-    for node in graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target == torch.ops.higher_order.auto_functionalized_v2
-        ):
-            # Get _all_bases from kwargs
-            all_bases = node.kwargs.get("_all_bases")
-            if all_bases is None or not isinstance(all_bases, (list, tuple)):
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        all_bases = node.kwargs.get("_all_bases")
+        only_clone_these = node.meta.get("only_clone_these_tensors")
+        if all_bases is None or only_clone_these is None:
+            continue
+
+        keep = []
+        for idx in only_clone_these:
+            if idx >= len(all_bases):
+                keep.append(idx)
                 continue
-
-            # Check if reinplace metadata exists (set by reinplace pass)
-            only_clone_these = node.meta.get("only_clone_these_tensors")
-            if only_clone_these is None:
+            base = all_bases[idx]
+            if not isinstance(base, torch.fx.Node):
+                keep.append(idx)
                 continue
+            base_storage = get_node_storage(base)
+            if base_storage is None or base_storage not in storage_to_input:
+                keep.append(idx)
+                continue
+            input_val = storage_to_input[base_storage].meta["val"]
+            if input_val.dtype == base.meta["val"].dtype:
+                keep.append(idx)
+                continue
+            counters["inductor"]["fix_auto_functionalized_dtype_views"] += 1
 
-            # Check each base in only_clone_these to see if it's a dtype view
-            # that aliases a graph input
-            new_only_clone_these = list(only_clone_these)
-            modified = False
-
-            for idx in list(only_clone_these):
-                if idx >= len(all_bases):
-                    continue
-
-                base = all_bases[idx]
-                if not isinstance(base, torch.fx.Node):
-                    continue
-
-                try:
-                    base_val = base.meta.get("val")
-                    if base_val is None or not isinstance(base_val, torch.Tensor):
-                        continue
-
-                    base_storage_cdata = base_val.untyped_storage()._cdata
-                    base_dtype = base_val.dtype
-
-                    # Check if this base shares storage with a graph input
-                    if base_storage_cdata in storage_to_input:
-                        actual_input = storage_to_input[base_storage_cdata]
-                        actual_input_val = actual_input.meta.get("val")
-
-                        if actual_input_val is not None and isinstance(
-                            actual_input_val, torch.Tensor
-                        ):
-                            # Check if this is a dtype view
-                            is_dtype_view = actual_input_val.dtype != base_dtype
-
-                            if is_dtype_view:
-                                # Dtype view of a graph input - no clone needed!
-                                log.debug(
-                                    "Removing clone requirement for dtype view: "
-                                    "base[%d] %s (dtype=%s) aliases %s (dtype=%s)",
-                                    idx,
-                                    base,
-                                    base_dtype,
-                                    actual_input,
-                                    actual_input_val.dtype,
-                                )
-                                new_only_clone_these.remove(idx)
-                                modified = True
-                                counters["inductor"][
-                                    "fix_auto_functionalized_dtype_views"
-                                ] += 1
-
-                except (AttributeError, RuntimeError, KeyError):
-                    continue
-
-            # Update the metadata if we made changes
-            if modified:
-                node.meta["only_clone_these_tensors"] = new_only_clone_these
+        if len(keep) != len(only_clone_these):
+            node.meta["only_clone_these_tensors"] = keep
 
 
 def decompose_auto_functionalized(graph):
