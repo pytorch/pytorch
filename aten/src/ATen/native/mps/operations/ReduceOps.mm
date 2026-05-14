@@ -13,7 +13,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
@@ -22,7 +21,6 @@
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
 #include <ATen/ops/count_nonzero_native.h>
-#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/median.h>
@@ -58,7 +56,6 @@ enum MPSReductionType {
   AMIN,
   PROD,
   MEAN,
-  TRACE,
 };
 
 static void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
@@ -250,12 +247,6 @@ static void reduction_out_mps(const Tensor& input_t,
         castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMIN) {
         castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
-      } else if (reduction_type == MPSReductionType::TRACE) {
-        MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
-                                                                 numLower:0
-                                                                 numUpper:0
-                                                                     name:nil];
-        castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -1107,22 +1098,7 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
 
 Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
-
-  Tensor output_t =
-      at::empty({}, get_dtype_from_self(self, std::nullopt, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  std::vector<int64_t> dims(self.dim());
-  std::iota(dims.begin(), dims.end(), 0);
-
-  reduction_out_mps(self,
-                    IntArrayRef(dims),
-                    false,
-                    std::nullopt,
-                    const_cast<Tensor&>(output_t),
-                    MPSReductionType::TRACE,
-                    "trace_mps");
-
-  return output_t;
+  return self.diagonal().sum();
 }
 
 TORCH_IMPL_FUNC(prod_out_mps)
@@ -1178,33 +1154,6 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
   auto iter =
       make_reduction("count_nonzero_mps", result, self, dims, /*keepdim=*/false, self.scalar_type(), ScalarType::Long);
   count_nonzero_kernel_mps(iter);
-  return result;
-}
-
-Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
-  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
-  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.size(-1) == x2.size(-1),
-              "X1 and X2 must have the same number of columns. X1: ",
-              x1.size(-1),
-              " X2: ",
-              x2.size(-1));
-  TORCH_CHECK(
-      at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
-  TORCH_CHECK(
-      at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
-  TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
-
-  int64_t mode = compute_mode.value_or(0);
-  TORCH_CHECK(mode >= 0 && mode <= 2, "possible modes: 0, 1, 2, but was: ", mode);
-
-  Tensor x1_ = x1.unsqueeze(-2);
-  Tensor x2_ = x2.unsqueeze(-3);
-  Tensor diff = x1_.sub(x2_);
-  IntArrayRef output_shape(diff.sizes().data(), diff.dim() - 1);
-  Tensor result = at::empty(output_shape, x1.options());
-  linalg_vector_norm_out(result, diff, p, makeArrayRef<int64_t>(-1), /*keepdim=*/false, /*dtype=*/std::nullopt);
-
   return result;
 }
 

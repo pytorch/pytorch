@@ -117,6 +117,8 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
@@ -134,6 +136,8 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -147,6 +151,8 @@ jobs:
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
       timeout-minutes: 720
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4

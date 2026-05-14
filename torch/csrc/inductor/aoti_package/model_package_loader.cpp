@@ -122,6 +122,14 @@ const char* extension_file_ext() {
 #endif
 }
 
+bool is_wrapper_library(const std::string& path) {
+#ifdef _WIN32
+  return c10::ends_with(path, ".wrapper.pyd");
+#else
+  return c10::ends_with(path, ".wrapper.so");
+#endif
+}
+
 const char* get_output_flags(bool compile_only) {
   if (compile_only) {
 #ifdef _WIN32
@@ -763,7 +771,18 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           cpp_filename = output_file_path;
         } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_file_path);
-        } else if (filename_extension == extension_file_ext()) {
+        } else if (is_wrapper_library(output_file_path)) {
+          // Triton CPU emits kernel.so + launcher.so alongside the
+          // wrapper; ignore the auxiliaries here (already extracted above).
+          TORCH_CHECK(
+              so_filename.empty(),
+              "Multiple wrapper libraries found for model '",
+              model_name,
+              "': '",
+              so_filename,
+              "' and '",
+              output_file_path,
+              "'");
           so_filename = output_file_path;
         } else if (filename_extension == ".blob") {
           weight_blob_filename = output_file_path;
