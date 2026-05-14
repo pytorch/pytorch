@@ -66,12 +66,16 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
   }
 
   // Single-byte dtypes (bool, uint8, int8) use vec4 kernels that fill
-  // 4 elements per thread; all others fill 1 element per thread.
+  // 4 elements per thread, but only when the buffer offset is 4-byte aligned;
+  // misaligned vec4 stores are undefined behavior on Metal.
   const bool is_byte_type = self.element_size() == 1;
   const uint32_t numel = static_cast<uint32_t>(iter.numel());
-  const int64_t threads = is_byte_type ? (numel + 3) / 4 : numel;
+  const bool use_vec4 = is_byte_type && (iter_tensor_offset(iter, 0) % 4 == 0);
+  const int64_t threads = use_vec4 ? (numel + 3) / 4 : numel;
 
-  auto fillPSO = lib.getPipelineStateForFunc(fmt::format("fill_scalar_dense_{}", type_str));
+  const auto kernel_name = (is_byte_type && !use_vec4) ? fmt::format("fill_scalar_dense_novec_{}", type_str)
+                                                       : fmt::format("fill_scalar_dense_{}", type_str);
+  auto fillPSO = lib.getPipelineStateForFunc(kernel_name);
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();

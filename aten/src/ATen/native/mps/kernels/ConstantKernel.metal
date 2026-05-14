@@ -54,6 +54,16 @@ REGISTER_FILL_BYTE_OP(char);
 REGISTER_FILL_BYTE_OP(uchar);
 REGISTER_FILL_BYTE_OP(bool);
 
+// Non-vectorized variant for byte types when the buffer offset isn't 4-byte
+// aligned (misaligned vec4 stores are undefined behavior on Metal).
+#define REGISTER_FILL_BYTE_NOVEC_OP(T)                              \
+  template [[host_name("fill_scalar_dense_novec_" #T)]] kernel void \
+  fill_scalar_dense<T>(device T*, constant T&, constant uint&, uint)
+
+REGISTER_FILL_BYTE_NOVEC_OP(char);
+REGISTER_FILL_BYTE_NOVEC_OP(uchar);
+REGISTER_FILL_BYTE_NOVEC_OP(bool);
+
 // 2D dispatch: tid.y = dim-0 index (no division), tid.x = linear index for
 // dims 1..ndim-1. For an N-dim tensor this requires N-1 divisions instead of N,
 // and consecutive threads in x access consecutive addresses in the innermost
