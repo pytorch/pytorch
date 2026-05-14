@@ -1333,12 +1333,50 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_has_torch_function(
             self, tx: "InstructionTranslatorBase", *args: VariableTracker
         ) -> ConstantVariable:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                tf_state.skip_next = False
+                return VariableTracker.build(tx, False)
             elems = (
                 args[0].unpack_var_sequence(tx)
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch._C._skip_one_hop_torch_function)
+        def handle_skip_one_hop_torch_function(
+            self,
+            tx: "InstructionTranslatorBase",
+            func: VariableTracker,
+            types: VariableTracker,
+            args: VariableTracker,
+            kwargs: VariableTracker,
+        ) -> VariableTracker:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                from torch._dynamo.exc import raise_observed_exception
+
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=[
+                        "you cannot skip two levels of __torch_function__, "
+                        "you need to run one level of __torch_function__ "
+                        "before being able to skip again."
+                    ],
+                )
+            tf_state.skip_next = True
+            tx.skip_one_hop_torch_function_depth += 1
+            try:
+                return func.call_function(
+                    tx,
+                    args.unpack_var_sequence(tx),
+                    kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
+                )
+            finally:
+                tx.skip_one_hop_torch_function_depth -= 1
+                tf_state.skip_next = False
 
         @register(
             *dict.fromkeys(  # remove duplicates
@@ -2108,14 +2146,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
+        @register(
+            torch.accelerator.current_stream,
+            torch.cuda.current_stream,
+            torch.xpu.current_stream,
+        )
         def handle_current_stream(
             self,
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
-            from .streams import CudaStreamVariable
+            from .streams import _get_stream_variable_cls
 
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
@@ -2135,10 +2177,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     device = None
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
-                if self.value is torch.cuda.current_stream and not isinstance(
-                    stream_var, CudaStreamVariable
+                stream_variable_cls = _get_stream_variable_cls(self.value)
+                if stream_variable_cls is not None and not isinstance(
+                    stream_var, stream_variable_cls
                 ):
-                    stream_var = CudaStreamVariable(
+                    stream_var = stream_variable_cls(
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,

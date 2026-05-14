@@ -160,7 +160,7 @@ class ConstantVariable(VariableTracker):
             from .object_protocol import validate_sequence_index
 
             container_name = "string" if isinstance(self.value, str) else "bytes"
-            arg = validate_sequence_index(tx, arg, container_name)  # type: ignore[arg-type]
+            arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
@@ -231,6 +231,21 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError
         return member
 
+    def sq_contains(self, tx: InstructionTranslatorBase, item: VariableTracker):
+        """Sequence contains for constants."""
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        return super().sq_contains(tx, item)
+
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         from .lists import ListIteratorVariable
 
@@ -253,7 +268,7 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx,
                 [self, *args],
-                kwargs,  # type: ignore[arg-type]
+                kwargs,
             )
         elif name == "join" and istype(self.value, str):
             if kwargs or len(args) != 1:
@@ -338,17 +353,6 @@ class ConstantVariable(VariableTracker):
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            if kwargs:
-                raise AssertionError(
-                    f"__contains__ does not accept keyword arguments, got {kwargs}"
-                )
-            search = args[0].as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -402,6 +406,9 @@ class ConstantVariable(VariableTracker):
             rest,
             tree_map_kwargs,
         )
+
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
 
     @override
     def call_obj_hasattr(
