@@ -395,9 +395,10 @@ class _StorageBase:
         if self.device.type in [
             "cuda",
             "xpu",
+            "hpu",
             torch._C._get_privateuse1_backend_name(),
         ]:
-            pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
+            pass  # CUDA/XPU/HPU/PrivateUse1 doesn't use POSIX shared memory
         elif get_sharing_strategy() == "file_system":
             self._share_filename_cpu_()
         else:
