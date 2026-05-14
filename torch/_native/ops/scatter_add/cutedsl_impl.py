@@ -1,7 +1,6 @@
-"""CuTeDSL override registrations for ``aten::scatter_add``.
+"""CuTeDSL override registrations for ``aten::scatter_add`` / ``aten::index_add``.
 
-Two kernels for the ``index.unsqueeze(-1).expand(-1, ...)`` expanded-1D
-pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
+Two kernels tried in order for both ops:
 
 1. **TMA** (``tma_kernel.py``, sm_90+): uses ``cp.reduce.async.bulk`` to
    offload the whole reduction to the TMA unit, 3-7x faster than aten on
@@ -11,14 +10,22 @@ pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
    pre-sm_90, and sm_90+ shapes where the TMA alignment constraint isn't
    met.
 
+``scatter_add`` dispatches on the ``index.unsqueeze(-1).expand(-1, ...)``
+expanded-1D pattern (dim=0, matching shape on self/src/index, contiguous).
+``index_add`` accepts a plain 1D index of length ``src.shape[0]`` and an
+optional scalar ``alpha``; the kernels multiply ``src`` by ``alpha`` via a
+cheap in-kernel scale (vec-scatter) or an smem scale pass followed by
+``fence_view_async_shared`` (TMA). Both kernels keep an alpha==1 fast
+path that skips the multiply entirely.
+
 Anything else (non-expanded index, dim != 0, non-contiguous inputs,
 deterministic mode) falls through to aten. Aten is competitive or better
 on those shapes, so we intentionally don't override them.
 
-In-place (``scatter_add_``) is registered explicitly; PyTorch's
-structured-delegate from ``scatter_add_`` to ``scatter_add.out`` happens
-below the dispatcher, so overriding the ``.out`` variant alone doesn't
-intercept the in-place method.
+In-place variants (``scatter_add_`` / ``index_add_``) are registered
+explicitly; PyTorch's structured-delegate from the in-place form to
+``.out`` happens below the dispatcher, so overriding ``.out`` alone
+doesn't intercept the in-place method.
 """
 
 import functools
@@ -216,6 +223,72 @@ def _is_vec_scatter_supported(
 
 
 # ---------------------------------------------------------------------------
+# index_add eligibility. Signature is
+# ``(self, dim, index, source, *, alpha=1, out=None)``: ``index`` is 1D of
+# length ``source.shape[dim]`` (not the expanded broadcast shape), and an
+# optional scalar ``alpha`` multiplies ``source`` before the reduction.
+# Same underlying operation as expanded-1D scatter_add, so the kernels
+# handle it with the alpha pass enabled when alpha != 1.
+# ---------------------------------------------------------------------------
+
+
+def _index_add_inner_size(
+    self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
+) -> int | None:
+    """Return ``prod(source.shape[1:])`` when index_add can take the
+    fast path, else ``None``. 1D sources are rejected (N would be 1,
+    which doesn't meet either kernel's alignment/divisibility
+    requirement) and fall through to aten.
+    """
+    if self.dtype not in _SUPPORTED_DTYPES or self.dtype != source.dtype:
+        return None
+    if index.dtype not in (torch.int64, torch.int32):
+        return None
+    if dim != 0:
+        return None
+    if self.ndim != source.ndim or self.ndim < 2:
+        return None
+    # Inner-dim stride 1 with packed inner axes; same relaxation as the
+    # scatter_add path. Slices like ``X[:, :K]`` work.
+    if not _inner_contiguous(self) or not _inner_contiguous(source):
+        return None
+    if index.ndim != 1 or index.shape[0] != source.shape[0]:
+        return None
+    if self.shape[1:] != source.shape[1:]:
+        return None
+    # shape[0] == 0 on self or source is already rejected by
+    # ``_inner_contiguous`` above.
+    N = math.prod(source.shape[1:])
+    if N == 0:
+        return None
+    return N
+
+
+def _is_tma_index_add_supported(
+    self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
+) -> bool:
+    if not _has_sm90_plus():
+        return False
+    N = _index_add_inner_size(self, dim, index, source)
+    if N is None:
+        return False
+    from .tma_kernel import min_d_divisor_for
+
+    return N % min_d_divisor_for(self.dtype) == 0
+
+
+def _is_vec_index_add_supported(
+    self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
+) -> bool:
+    N = _index_add_inner_size(self, dim, index, source)
+    if N is None:
+        return False
+    from .vec_scatter_kernel import vec_elems_for
+
+    return N % vec_elems_for(self.dtype) == 0
+
+
+# ---------------------------------------------------------------------------
 # Cond / impl factories. ``_make_cond`` wraps a support check in the shared
 # dispatch boilerplate; ``_make_impls`` produces the (functional, .out,
 # in-place) triple for a given kernel.
@@ -312,6 +385,83 @@ _vs_out_cond = _make_cond(_is_vec_scatter_supported, requires_out=True)
 
 
 # ---------------------------------------------------------------------------
+# index_add cond/impl factories. index_add's signature differs from
+# scatter_add (index is 1D, alpha scalar is threaded through), so the
+# shared factories above don't fit directly.
+# ---------------------------------------------------------------------------
+
+
+def _make_index_add_cond(support_check, *, requires_out: bool = False) -> _OpCondFn:
+    if requires_out:
+
+        def _cond(self, dim, index, source, *, alpha=1, out):
+            if not _base_cond_ok(self, index, source, out):
+                return False
+            if out.dtype != self.dtype or out.shape != self.shape:
+                return False
+            # Support_check below rejects source.ndim < 2 via
+            # _index_add_inner_size, so out is guaranteed >= 2D here.
+            # Inner dims must be packed (same relaxation as scatter_add);
+            # outer stride is free so slices like ``X[:, :K]`` work.
+            if not _inner_contiguous(out):
+                return False
+            return support_check(self, dim, index, source)
+
+        return _cond
+
+    def _cond(self, dim, index, source, *, alpha=1):
+        if not _base_cond_ok(self, index, source):
+            return False
+        return support_check(self, dim, index, source)
+
+    return _cond
+
+
+def _alpha_as_float(alpha) -> float:
+    if isinstance(alpha, torch.Tensor):
+        return float(alpha.item())
+    return float(alpha)
+
+
+def _make_index_add_impls(kernel_getter):
+    """Build (functional, out, in-place) impls for index_add. index is 1D
+    (length source.shape[0]); source is always >= 2D (the cond rejects
+    1D sources), so we flatten to (M, N) for the kernel."""
+
+    def _run(dst: torch.Tensor, source: torch.Tensor, index: torch.Tensor, alpha):
+        src_2d = _flatten_2d_view(source)
+        dst_2d = _flatten_2d_view(dst)
+        idx = index if index.dtype == torch.int64 else index.to(torch.int64)
+        if not idx.is_contiguous():
+            idx = idx.contiguous()
+        kernel_getter()(dst_2d, idx, src_2d, _alpha_as_float(alpha))
+        return dst
+
+    def impl(self, dim, index, source, *, alpha=1):
+        return _run(self.clone(), source, index, alpha)
+
+    def out_impl(self, dim, index, source, *, alpha=1, out):
+        _copy_if_distinct(out, self)
+        return _run(out, source, index, alpha)
+
+    def inplace_impl(self, dim, index, source, *, alpha=1):
+        return _run(self, source, index, alpha)
+
+    return impl, out_impl, inplace_impl
+
+
+_tma_ia_impl, _tma_ia_out_impl, _tma_ia_inplace_impl = _make_index_add_impls(
+    _tma_kernel
+)
+_vs_ia_impl, _vs_ia_out_impl, _vs_ia_inplace_impl = _make_index_add_impls(_vs_kernel)
+
+_tma_ia_cond = _make_index_add_cond(_is_tma_index_add_supported)
+_tma_ia_out_cond = _make_index_add_cond(_is_tma_index_add_supported, requires_out=True)
+_vs_ia_cond = _make_index_add_cond(_is_vec_index_add_supported)
+_vs_ia_out_cond = _make_index_add_cond(_is_vec_index_add_supported, requires_out=True)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -325,6 +475,17 @@ _PATHS = (
     (_vs_cond, _vs_impl, _vs_out_cond, _vs_out_impl, _vs_inplace_impl),
 )
 
+_INDEX_ADD_PATHS = (
+    (
+        _tma_ia_cond,
+        _tma_ia_impl,
+        _tma_ia_out_cond,
+        _tma_ia_out_impl,
+        _tma_ia_inplace_impl,
+    ),
+    (_vs_ia_cond, _vs_ia_impl, _vs_ia_out_cond, _vs_ia_out_impl, _vs_ia_inplace_impl),
+)
+
 
 def _register_path(
     dispatch_key: str,
@@ -333,14 +494,16 @@ def _register_path(
     out_cond: _OpCondFn,
     out_impl: _OpImplFn,
     inplace_impl: _OpImplFn,
+    *,
+    op_prefix: str,
 ) -> None:
-    # scatter_add_ has its own dispatcher entry separate from scatter_add
-    # and scatter_add.out; it's structured-delegated to .out below the
-    # dispatcher layer, so overriding .out alone doesn't catch it.
+    # The in-place variant has its own dispatcher entry separate from the
+    # functional and .out variants; it's structured-delegated to .out
+    # below the dispatcher layer, so overriding .out alone doesn't catch it.
     for op_symbol, cond_fn, impl_fn in (
-        ("scatter_add", cond, impl),
-        ("scatter_add.out", out_cond, out_impl),
-        ("scatter_add_", cond, inplace_impl),
+        (op_prefix, cond, impl),
+        (f"{op_prefix}.out", out_cond, out_impl),
+        (f"{op_prefix}_", cond, inplace_impl),
     ):
         cu.register_op_override(
             "aten",
@@ -356,4 +519,6 @@ def register_to_dispatch() -> None:
     if not _has_cutedsl():
         return
     for path in _PATHS:
-        _register_path("CUDA", *path)
+        _register_path("CUDA", *path, op_prefix="scatter_add")
+    for path in _INDEX_ADD_PATHS:
+        _register_path("CUDA", *path, op_prefix="index_add")
