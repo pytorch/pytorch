@@ -921,24 +921,14 @@ bool StaticCudaLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticCudaLauncherType);
-  if (PyModule_AddObject(
-          module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
-      0) {
-    Py_DECREF(&StaticCudaLauncherType);
+  if (PyModule_AddType(module, &StaticCudaLauncherType) < 0) {
     return false;
   }
   return true;
 }
 
 bool FastCudaLauncher_init(PyObject* module) {
-  if (PyType_Ready(&FastCudaLauncherType) < 0) {
-    return false;
-  }
-  Py_INCREF(&FastCudaLauncherType);
-  if (PyModule_AddObject(
-          module, "_FastCudaLauncher", (PyObject*)&FastCudaLauncherType) < 0) {
-    Py_DECREF(&FastCudaLauncherType);
+  if (PyModule_AddType(module, &FastCudaLauncherType) < 0) {
     return false;
   }
   return true;

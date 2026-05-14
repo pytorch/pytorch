@@ -311,6 +311,39 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalAOTAutogradCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self._clear_dynamo_and_codecache()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
