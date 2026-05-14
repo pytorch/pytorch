@@ -3374,6 +3374,15 @@ def native_group_norm(
 
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
+    weight_acc = (
+        _maybe_convert_to_dtype(weight, computation_dtype)
+        if weight is not None
+        else None
+    )
+    bias_acc = (
+        _maybe_convert_to_dtype(bias, computation_dtype) if bias is not None else None
+    )
+
     # num_channels / num_groups and flattened inner dimension are the reduction axes
     reduction_dims = (2, 3)
     input_reshaped = torch.reshape(
@@ -3386,18 +3395,18 @@ def native_group_norm(
     )
     rstd = torch.rsqrt(biased_var + eps)
 
-    if weight is not None:
+    if weight_acc is not None:
         weight_reshaped = torch.reshape(
-            weight, (1, num_groups, num_channels // num_groups, 1)
+            weight_acc, (1, num_groups, num_channels // num_groups, 1)
         )
         w = rstd * weight_reshaped
     else:
         w = rstd.broadcast_to((batch_size, num_groups, num_channels // num_groups, 1))
 
     b = -mean * w
-    if bias is not None:
+    if bias_acc is not None:
         bias_reshaped = torch.reshape(
-            bias, (1, num_groups, num_channels // num_groups, 1)
+            bias_acc, (1, num_groups, num_channels // num_groups, 1)
         )
         b = b + bias_reshaped
 

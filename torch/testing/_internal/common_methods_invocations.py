@@ -15888,10 +15888,17 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
             # native_group_norm expects contiguous inputs
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
             # composite compliance fails with "performing in-place operation add_"
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
+            # native_group_norm grad doesn't support expanded weights, although the
+            # forward pass does
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_mean"),
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_sum"),
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weights_per_sample_grad_input_no_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
         ),
@@ -25121,17 +25128,6 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_out=True,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
@@ -25330,17 +25326,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     #
     # Elementwise Binary Reference OpInfos
