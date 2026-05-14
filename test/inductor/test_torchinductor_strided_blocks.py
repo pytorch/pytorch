@@ -21,6 +21,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -1658,6 +1659,16 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         loss.backward()
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(w.grad)
+
+    @largeTensorTest("1GB", inductor=True)
+    def test_large_tensor_pointwise(self):
+        def fn(a):
+            return a + 4
+
+        t = torch.zeros(2**30 + 1, dtype=torch.int8, device=GPU_TYPE)
+        compiled_fn = torch.compile(fn)
+        actual = compiled_fn(t)
+        self.assertTrue((actual == 4).all())
 
 
 test_torchinductor.copy_tests(
