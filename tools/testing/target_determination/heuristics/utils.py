@@ -8,8 +8,8 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 from typing import cast, TYPE_CHECKING
+from urllib.parse import quote
 from urllib.request import Request, urlopen
-from warnings import warn
 
 
 if TYPE_CHECKING:
@@ -17,6 +17,75 @@ if TYPE_CHECKING:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _github_api_json(path: str) -> object:
+    github_repository = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
+    github_token = os.environ.get("GITHUB_TOKEN")
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+    }
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
+    url = f"https://api.github.com/repos/{github_repository}/{path}"
+    with urlopen(Request(url, headers=headers)) as conn:
+        return json.loads(conn.read().decode())
+
+
+def _git_merge_base(base: str) -> str:
+    return subprocess.check_output(["git", "merge-base", base, "HEAD"]).decode().strip()
+
+
+def _git_head() -> str:
+    return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+
+def _get_pr_info(pr_number: int) -> dict[str, object]:
+    return cast(dict[str, object], _github_api_json(f"pulls/{pr_number}"))
+
+
+def _get_pr_merge_base(pr_info: dict[str, object]) -> str:
+    base_info = cast(dict[str, object], pr_info["base"])
+    base_ref = cast(str, base_info["ref"])
+    base_sha = cast(str | None, base_info.get("sha"))
+    last_error: Exception | None = None
+
+    for base in (f"origin/{base_ref}", base_sha):
+        if not base:
+            continue
+        try:
+            return _git_merge_base(base)
+        except subprocess.CalledProcessError as e:
+            last_error = e
+
+    head = _git_head()
+    compare = cast(
+        dict[str, object],
+        _github_api_json(f"compare/{quote(base_ref, safe='')}...{head}"),
+    )
+    merge_base_commit = cast(dict[str, object], compare.get("merge_base_commit", {}))
+    merge_base = cast(str | None, merge_base_commit.get("sha"))
+    if merge_base:
+        return merge_base
+    if base_sha:
+        return base_sha
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Unable to determine merge base for PR base {base_ref}")
+
+
+def _query_changed_files_from_github(pr_number: int) -> list[str]:
+    changed_files: list[str] = []
+    page = 1
+    while True:
+        files = cast(
+            list[dict[str, object]],
+            _github_api_json(f"pulls/{pr_number}/files?per_page=100&page={page}"),
+        )
+        changed_files.extend(cast(str, file["filename"]) for file in files)
+        if len(files) < 100:
+            return changed_files
+        page += 1
 
 
 def python_test_file_to_test_name(tests: set[str]) -> set[str]:
@@ -43,29 +112,11 @@ def get_pr_number() -> int | None:
 def get_merge_base() -> str:
     pr_number = get_pr_number()
     if pr_number is not None:
-        github_token = os.environ.get("GITHUB_TOKEN")
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"token {github_token}",
-        }
-        url = f"https://api.github.com/repos/pytorch/pytorch/pulls/{pr_number}"
-        with urlopen(Request(url, headers=headers)) as conn:
-            pr_info = json.loads(conn.read().decode())
-            base = f"origin/{pr_info['base']['ref']}"
-        merge_base = (
-            subprocess.check_output(["git", "merge-base", base, "HEAD"])
-            .decode()
-            .strip()
-        )
-        return merge_base
+        return _get_pr_merge_base(_get_pr_info(pr_number))
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
-    merge_base = (
-        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
-        .decode()
-        .strip()
-    )
+    merge_base = _git_merge_base(default_branch)
 
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    head = _git_head()
 
     if merge_base == head:
         # We are on the default branch, so check for changes since the last commit
@@ -74,17 +125,25 @@ def get_merge_base() -> str:
 
 
 def query_changed_files() -> list[str]:
-    base_commit = get_merge_base()
+    pr_number = get_pr_number()
+    try:
+        base_commit = get_merge_base()
 
-    proc = subprocess.run(
-        ["git", "diff", "--name-only", base_commit, "HEAD"],
-        capture_output=True,
-        check=False,
-    )
-    print(f"base_commit: {base_commit}")
+        proc = subprocess.run(
+            ["git", "diff", "--name-only", base_commit, "HEAD"],
+            capture_output=True,
+            check=False,
+        )
+        print(f"base_commit: {base_commit}")
 
-    if proc.returncode != 0:
-        raise RuntimeError("Unable to get changed files")
+        if proc.returncode != 0:
+            raise RuntimeError("Unable to get changed files")
+    except (subprocess.CalledProcessError, RuntimeError):
+        if pr_number is None:
+            raise
+        lines = _query_changed_files_from_github(pr_number)
+        print(f"Changed files from GitHub: {lines}")
+        return lines
 
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
@@ -176,11 +235,7 @@ def get_ratings_for_tests(file: str | Path) -> dict[str, float]:
         return {}
     with open(path) as f:
         test_file_ratings = cast(dict[str, dict[str, float]], json.load(f))
-    try:
-        changed_files = query_changed_files()
-    except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
-        return {}
+    changed_files = query_changed_files()
     ratings: dict[str, float] = defaultdict(float)
     for file in changed_files:
         for test_file, score in test_file_ratings.get(file, {}).items():
