@@ -1677,12 +1677,11 @@ class OverlapScheduler:
         if not unscheduled_bits:
             return OrderedSet()
 
-        # Backward BFS from target, stopping at scheduled nodes.
+        # Backward BFS from target; stops at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
         parent_lists = self._parent_lists
         node_idx = self.node_idx
-        target_idx = node_idx[target]
         stack = parent_lists[target_idx][:]
         scheduled = self.scheduled
         while stack:
