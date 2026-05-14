@@ -1457,7 +1457,6 @@ class GetAttrVariable(VariableTracker):
     def richcompare_impl(
         self, tx: "InstructionTranslator", other: "VariableTracker", op: str
     ) -> "VariableTracker":
-        from .constant import ConstantVariable
         from .object_protocol import generic_richcompare
 
         try:
