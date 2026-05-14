@@ -44,15 +44,6 @@ class Mod(torch.nn.Module):
         return self.encoder(x)
 
 
-class RowwiseLinear(torch.nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-        self.proj = nn.Linear(dim, dim, bias=False, device=device_type)
-
-    def forward(self, x):
-        return self.proj(x).clone()
-
-
 class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -185,6 +176,14 @@ class TestFullyShardCompileCompute(FSDPTest):
             reduce_dtype=torch.float32,
             cast_forward_inputs=False,
         )
+
+        class RowwiseLinear(torch.nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.proj = nn.Linear(dim, dim, bias=False, device=device_type)
+
+            def forward(self, x):
+                return self.proj(x).clone()
 
         def shard_placement_fn(param: nn.Parameter) -> Shard:
             if isinstance(param, DTensor):
