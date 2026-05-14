@@ -289,7 +289,8 @@ class PreprocessorTracker:
             line: The line to process
 
         Returns:
-            List of found identifiers for this line, or an accumulated buffer.
+            True if the line was processed (is a preprocessor directive or comment),
+            False if it's a regular code line that should be further analyzed.
         """
         stripped = line.strip()
 
