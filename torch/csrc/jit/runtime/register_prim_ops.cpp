@@ -19,6 +19,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1702,7 +1703,8 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str"),
         [](Stack& stack) {
-          std::string chars = pop(stack).toStringRef();
+          auto charsIValue = pop(stack);
+          std::string_view chars = charsIValue.toStringRef();
           std::string string = pop(stack).toStringRef();
           auto rindex = string.find_last_not_of(chars);
           if (rindex != std::string::npos) {
@@ -1716,7 +1718,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           } else {
             string = "";
           }
-          push(stack, string);
+          push(stack, std::move(string));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
