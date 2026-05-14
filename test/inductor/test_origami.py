@@ -472,7 +472,7 @@ class TestOrigami(TestCase):
         snippet = (
             "import os, torch\n"
             "from torch._inductor import config\n"
-            "from torch._inductor.template_heuristics import triton as th\n"
+            "from torch._inductor.heuristics.template import triton as th\n"
             "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') != '1', 'env var leaked'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
