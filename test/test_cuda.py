@@ -4887,7 +4887,7 @@ class TestResizeStorageWithAddr(TestCase):
     )
     def test_resize_storage_with_size_zero_ignores_addr(self):
         t = torch.empty(4096, dtype=torch.uint8, device="cuda")
-        t.untyped_storage()._resize_with_addr_(0, 1)
+        t.untyped_storage()._resize_with_addr_(0, 0)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
     @unittest.skipIf(
