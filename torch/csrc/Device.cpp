@@ -283,13 +283,8 @@ PyTypeObject THPDeviceType = {
 };
 
 void THPDevice_init(PyObject* module) {
-  if (PyType_Ready(&THPDeviceType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPDeviceType);
   THPUpperModuleOfDevice = module;
-  if (PyModule_AddObject(
-          module, "device", reinterpret_cast<PyObject*>(&THPDeviceType)) != 0) {
+  if (PyModule_AddType(module, &THPDeviceType) < 0) {
     throw python_error();
   }
 }
