@@ -37,7 +37,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, NoReturn, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -99,13 +99,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    AttrMutationKind,
-    MutationType,
-    NO_SUCH_SUBOBJ,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
 from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
@@ -1422,24 +1416,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
-            if self.value.__new__ is object.__new__:
-                # Graph-break before inlining the class-instantiation polyfill
-                # for extension types where object.__new__ cannot allocate an
-                # example object. SideEffects keeps a matching backstop for
-                # direct construction paths. This allocates one temporary
-                # instance for classes that pass the check.
-                try:
-                    object.__new__(self.value)
-                except TypeError as exc:
-                    unimplemented(
-                        gb_type="Unsupported object.__new__ user-defined class construction",
-                        context=f"class={self.value}, error={exc}",
-                        explanation=(
-                            "Dynamo could not construct an example object for "
-                            "side-effect replay using object.__new__."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
             with do_not_convert_to_tracable_parameter():
                 result = tx.inline_user_function_return(
                     VariableTracker.build(
@@ -2252,6 +2228,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         name: VariableTracker,
         value: VariableTracker,
+        directly_update_dict: bool = False,
     ) -> VariableTracker:
         name_str = ""
         try:
@@ -2296,130 +2273,62 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
 
-        def raise_cannot_set_attr() -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{type(self.value).__name__}' object has no attribute '{name_str}'"
-                ],
-            )
+        if directly_update_dict:
+            self.get_dict_vt(tx).setitem(name_str, value)
+        else:
+            tmp = self.try_get_descritor_and_setter_py_func(name_str)
+            if tmp:
+                descriptor, setter = tmp
+                # Emulate
+                # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
+                desc_source = None
+                func_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(tx, name_str)
+                    # use `type(...)` to ignore instance attrs.
+                    func_source = AttrSource(TypeSource(desc_source), "__set__")
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                func_var = VariableTracker.build(tx, setter, func_source, realize=True)
+                if isinstance(descriptor, property):
+                    args = [self, value]  # property.fset(self, value)
+                else:
+                    args = [desc_var, self, value]  # __set__(desc, self, value)
+                return func_var.call_function(tx, args, {})
 
-        def raise_readonly_attr() -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{type(self.value).__name__}' object attribute '{name_str}' is read-only"
-                ],
-            )
-
-        def raise_property_error(action: str) -> NoReturn:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"property '{name_str}' of "
-                    f"'{type(self.value).__name__}' object has no {action}"
-                ],
-            )
-
-        descriptor = self.lookup_class_mro_attr(name_str)
-        if descriptor is not NO_SUCH_SUBOBJ and (
-            hasattr(type(descriptor), "__set__")
-            or hasattr(type(descriptor), "__delete__")
-        ):
-            desc_source = None
-            if self.cls_source:
-                desc_source = self.get_source_by_walking_mro(tx, name_str)
-
-            if isinstance(descriptor, property):
-                if isinstance(value, variables.DeletedVariable):
-                    if descriptor.fdel is None:
-                        raise_property_error("deleter")
-                    fdel_source = (
-                        AttrSource(desc_source, "fdel") if desc_source else None
+            # Handle Python property descriptors whose __set__ is a C slot
+            # wrapper (not a Python function), which the above check misses.
+            # Mirrors the property getter handling in var_getattr.
+            descriptor = inspect.getattr_static(type(self.value), name_str, None)
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    fset_source = AttrSource(
+                        self.get_source_by_walking_mro(tx, name_str), "fset"
                     )
-                    fdel_var = VariableTracker.build(
-                        tx, descriptor.fdel, source=fdel_source
-                    )
-                    return fdel_var.call_function(tx, [self], {})
-                if descriptor.fset is None:
-                    raise_property_error("setter")
-                fset_source = AttrSource(desc_source, "fset") if desc_source else None
                 fset_var = VariableTracker.build(
                     tx, descriptor.fset, source=fset_source
                 )
                 return fset_var.call_function(tx, [self, value], {})
 
-            if isinstance(descriptor, types.MemberDescriptorType):
-                tx.output.side_effects.store_attr(self, name_str, value)
-                return variables.ConstantVariable.create(None)
+            # NOTE: else we assume the descriptor (if any) has a
+            # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
-            if isinstance(descriptor, types.GetSetDescriptorType):
-                if name_str == "__dict__":
-                    self.dict_vt = None
-                # C get/set descriptors are applied by STORE_ATTR itself, so
-                # replay must stay descriptor-aware rather than using the
-                # descriptor-bypassing instance-dict or slot paths.
-                tx.output.side_effects.store_attr(self, name_str, value)
-                return variables.ConstantVariable.create(None)
-
-            setter = inspect.getattr_static(type(descriptor), "__set__", None)
-            deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
-            desc_var = VariableTracker.build(tx, descriptor, desc_source)
-            if isinstance(value, variables.DeletedVariable):
-                if isinstance(deleter, types.FunctionType):
-                    del_source = (
-                        AttrSource(TypeSource(desc_source), "__delete__")
-                        if desc_source
-                        else None
-                    )
-                    del_var = VariableTracker.build(
-                        tx, deleter, del_source, realize=True
-                    )
-                    return del_var.call_function(tx, [desc_var, self], {})
-                if deleter is not None:
-                    unimplemented(
-                        gb_type="C-level descriptor delete on user-defined object",
-                        context=f"object={self}, name={name_str}, descriptor={descriptor}",
-                        explanation=(
-                            "Dynamo does not yet model this C-level descriptor deleter "
-                            "for user-defined objects."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                raise_readonly_attr()
-            if isinstance(setter, types.FunctionType):
-                set_source = (
-                    AttrSource(TypeSource(desc_source), "__set__")
-                    if desc_source
-                    else None
+        # If the code reaches here, the attribute is either:
+        #  1) a slot descriptor
+        #  2) a plain attribute with no descriptor
+        # If the object has no __dict__, only slot descriptors (member_descriptor)
+        # allow mutation. Any other attribute assignment raises AttributeError.
+        if not hasattr(self.value, "__dict__"):
+            descriptor = self.lookup_class_mro_attr(name_str)
+            if not inspect.ismemberdescriptor(descriptor):
+                error_msg = VariableTracker.build(
+                    tx,
+                    f"'{type(self.value).__name__}' object has no attribute '{name_str}'",
                 )
-                set_var = VariableTracker.build(tx, setter, set_source, realize=True)
-                return set_var.call_function(tx, [desc_var, self, value], {})
+                raise_observed_exception(AttributeError, tx, args=[error_msg])
 
-            unimplemented(
-                gb_type="C-level descriptor setattr on user-defined object",
-                context=f"object={self}, name={name_str}, descriptor={descriptor}",
-                explanation=(
-                    "Dynamo does not yet model this C-level descriptor setter "
-                    "for user-defined objects."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-
-        if hasattr(self.value, "__dict__"):
-            dict_vt = self.get_dict_vt(tx)
-            if isinstance(value, variables.DeletedVariable):
-                if not dict_vt.contains(name_str):
-                    raise_cannot_set_attr()
-                dict_vt.delitem(name_str)
-            else:
-                dict_vt.setitem(name_str, value)
-            return variables.ConstantVariable.create(None)
-
-        raise_cannot_set_attr()
+        tx.output.side_effects.store_attr(self, name_str, value)
+        return variables.ConstantVariable.create(None)
 
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
@@ -2619,10 +2528,34 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._subobj_from_class[name] = result
         return result
 
+    def should_skip_descriptor_setter(self, attr_name: str) -> bool:
+        # Check if `attr_name` corresponds to a descriptor.
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if setter:
+            # Skip if `__set__` was traceable (no need to redo the side effect).
+            if inspect.isfunction(setter):
+                return True
+            # For untraceable `__set__` we should still skip if the attribute
+            # was mutated via instance `__dict__`.
+            elif self.dict_vt and self.dict_vt.contains(attr_name):
+                return True
+        return False
+
+    def try_get_descritor_and_setter_py_func(
+        self, attr_name: str
+    ) -> tuple[object, object] | None:
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        # Handle property descriptors with setters - call fset directly
+        if isinstance(descriptor, property) and descriptor.fset is not None:
+            return (descriptor, descriptor.fset)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if inspect.isfunction(setter):
+            return (descriptor, setter)
+        return None
+
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            self, key, AttrMutationKind.INSTANCE_DICT
-        ):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
@@ -2726,6 +2659,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if isinstance(result, variables.DeletedVariable):
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                    ],
+                )
+            return result
+
         if name == "__dict__":
             if not hasattr(self.value, "__dict__"):
                 raise_observed_exception(AttributeError, tx)
@@ -2770,32 +2715,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        skip_instance_dict = False
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            self,
-            name,
-            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-        ):
-            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-            if not isinstance(result, variables.DeletedVariable):
-                return result
-            # A deleted instance-dict entry can expose a class attribute,
-            # non-data descriptor, or __getattr__; only raise if those fail.
-            skip_instance_dict = True
-        elif tx.output.side_effects.has_pending_mutation_of_attr(
-            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-        ):
-            # obj.__dict__ = {...} replaces the lookup dict as a whole, unlike
-            # per-attribute mutations tracked by the branch above.
-            dict_vt = self.get_dict_vt(tx)
-            if dict_vt.contains(name):
-                return dict_vt.getitem(name)
-            skip_instance_dict = True
-        if (
-            not skip_instance_dict
-            and hasattr(self.value, "__dict__")
-            and name in self.value.__dict__
-        ):
+        # TODO(guilhermeleobas): step 3 should look into dict_vt and not self.value.__dict__
+        # as the object could have mutated an attribute via setattr
+        if hasattr(self.value, "__dict__") and name in self.value.__dict__:
             subobj = self.value.__dict__[name]
             source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
             return VariableTracker.build(tx, subobj, source)
@@ -2818,7 +2740,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #
         # Only safe when the class doesn't override __getattribute__,
         # otherwise we'd run arbitrary user code.
-        if not self._object_has_getattribute and not skip_instance_dict:
+        if not self._object_has_getattribute:
             try:
                 resolved = type(self.value).__getattribute__(self.value, name)
                 source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
@@ -2919,36 +2841,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, self, self.var_getattr(tx, "__class__")
             )
         if isinstance(type_attr, types.MemberDescriptorType):
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                self, name, AttrMutationKind.GENERIC_SETATTR
-            ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                if isinstance(result, variables.DeletedVariable):
-                    raise_observed_exception(
-                        AttributeError,
-                        tx,
-                        args=[
-                            f"'{type(self.value).__name__}' object has no attribute '{name}'"
-                        ],
-                    )
-                return result
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
             return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
         if isinstance(type_attr, types.GetSetDescriptorType):
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                self, name, AttrMutationKind.GENERIC_SETATTR
-            ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                if isinstance(result, variables.DeletedVariable):
-                    raise_observed_exception(
-                        AttributeError,
-                        tx,
-                        args=[
-                            f"'{type(self.value).__name__}' object has no attribute '{name}'"
-                        ],
-                    )
-                return result
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
             return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
@@ -4136,8 +4032,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
         new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
-        default_factory = new.default_factory  # type: ignore[missing-attribute]
-        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
+        tx.output.side_effects.store_attr(new, "default_factory", new.default_factory)  # type: ignore[missing-attribute]
         new.call_method(tx, "update", [right], {})
         return new
 
@@ -4625,11 +4520,13 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         name: VariableTracker,
         value: VariableTracker,
+        directly_update_dict: bool = False,
     ) -> VariableTracker:
         """Override to handle property setters on MutableMapping subclasses.
 
         This is needed because property.__set__ is a slot wrapper (C function),
-        but property.fset is a Python function we can trace.
+        not a Python function, so the base class's try_get_descritor_and_setter_py_func
+        returns None for properties. But property.fset IS a Python function we can trace.
 
         Without this, property setters on newly created MutableMapping objects fail
         when accessing nested objects (which haven't been initialized yet on the
@@ -4654,7 +4551,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
                 fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
                 return fset_vt.call_function(tx, [self, value], {})
 
-        return super().method_setattr_standard(tx, name, value)
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
