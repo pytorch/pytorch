@@ -257,8 +257,6 @@ class FSDPParamGroup:
         # block while this layer's AR is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
-        # Create a zero buffer for missing parameters
-        self._zero_buf: torch.Tensor | None = None
         # keep track of locally unused parameters indices for optimizer momentum and adaptive lrs
         self._locally_unused_params: set[int] = set()
 
@@ -269,11 +267,6 @@ class FSDPParamGroup:
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
-        if trainable_params:
-            grad_type = (
-                trainable_params[0].param_dtype or trainable_params[0].orig_dtype
-            )
-            self._zero_buf = torch.zeros(1, dtype=grad_type, device=self.device)
         orig_dtypes = {p.orig_dtype for p in trainable_params}
         reduce_dtypes = {p.reduce_dtype for p in trainable_params}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
@@ -609,7 +602,7 @@ class FSDPParamGroup:
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: list[FSDPParam | None] = []
+            fsdp_params_with_grad: list[FSDPParam] = []
             unsharded_grads: list[torch.Tensor] = []
             self._locally_unused_params.clear()
 
@@ -628,15 +621,11 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_param.grad = None
                 elif (
                     self.reduce_scatter_unused_params
-                    and fsdp_param.sharded_param.requires_grad
-                    and self._zero_buf is not None
+                    and fsdp_param.unsharded_param.requires_grad
                 ):
                     # Models like the Qwen3 with mixture of experts will trigger different experts in different ranks.
                     # This leads to different sets of missing parameters in different ranks,
                     # and thus leading `unsharded_grads` to be different across ranks.
-                    # Need a way to account for the "missing" grads that are not in `unsharded_grads` to ensure
-                    # reduce-scatter has the same input sizes across ranks.
-                    zero_grad = self._zero_buf.expand(fsdp_param._orig_size)
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
                     self._locally_unused_params.add(
@@ -774,7 +763,7 @@ class FSDPParamGroup:
                 i in self._locally_unused_params
                 and fsdp_param.sharded_param.grad is not None
                 and hasattr(fsdp_param.sharded_param.grad, "_local_tensor")
-                and not fsdp_param.sharded_param.grad._local_tensor.any()
+                and not fsdp_param.sharded_param.grad._local_tensor.any()  # This .any is a host to device sync. Defer to async?
             ):
                 fsdp_param.sharded_param.grad = None
 
