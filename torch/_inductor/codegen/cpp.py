@@ -11,7 +11,7 @@ import sys
 import warnings
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, cast, Optional
+from typing import Any, cast, ClassVar, Optional
 
 import sympy
 
@@ -3906,30 +3906,39 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
     return _lowp_fp_type, _use_fp32
 
 
+@dataclasses.dataclass
+class KernelOpStats:
+    """Op statistics collected during tiling selection."""
+
+    # Ratio of non-contiguous/mask ops to total ops above which vectorization
+    # is considered unprofitable (used both for disabling vectorization entirely
+    # and for deciding whether tail vectorization is worthwhile).
+    OVERHEAD_RATIO_THRESHOLD: ClassVar[float] = 0.12
+
+    op_counter: dict[str, int] = dataclasses.field(default_factory=dict)
+    non_contig_indexing_op_counter: dict[str, int] = dataclasses.field(
+        default_factory=dict
+    )
+    mask_op_count: int = 0
+
+
 class TilingSelect:
     """
     Implement the heuristic to select the tiling factors and tiling indices.
     In the future, we can implement advanced heuristic in a subclass.
     """
 
-    def __init__(self):
-        self.op_counter: dict[str, int] = {}
-        # ops may cause overhead with vectorization, like non-contiguous
-        # index_expr, load, store
-        self.non_contig_indexing_op_counter: dict[str, int] = {}
-        self.mask_op_count: int = 0
-
     def select_tiling(
         self,
         fn_list,
         var_sizes_list,
-    ) -> tuple[list[int], list[int]]:
+    ) -> tuple[list[int], list[int], KernelOpStats]:
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = _get_loop_body(fn_list)
         all_dtypes = _get_dtype_from_loopbodies(loop_bodies)
         assert all_dtypes
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
-            return [], []
+            return [], [], KernelOpStats()
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
@@ -3993,9 +4002,7 @@ class TilingSelect:
                     itervars[:reduction_depth],
                     itervars[reduction_depth:],
                 )
-                self.op_counter.clear()
-                self.non_contig_indexing_op_counter.clear()
-                self.mask_op_count = 0
+                stats = KernelOpStats()
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
@@ -4017,37 +4024,37 @@ class TilingSelect:
                                     ):
                                         _update_negative_op_count(
                                             _node.target,
-                                            self.non_contig_indexing_op_counter,
+                                            stats.non_contig_indexing_op_counter,
                                         )
                             if isinstance(_node.target, str):
-                                if _node.target.startswith(
-                                    "masked_subblock"
-                                ) or _node.target in ("where", "masked"):
-                                    self.mask_op_count += 1
+                                # Only count "where" and "masked" as mask ops —
+                                # they generate actual mask/blend instructions.
+                                if _node.target in ("where", "masked"):
+                                    stats.mask_op_count += 1
                                 if not (
                                     _node.target.startswith("masked_subblock")
                                     or _node.target
                                     in ["ops", "output", "constant", "get_index"]
                                 ):
-                                    if _node.target not in self.op_counter:
-                                        self.op_counter[_node.target] = 1
+                                    if _node.target not in stats.op_counter:
+                                        stats.op_counter[_node.target] = 1
                                     else:
-                                        self.op_counter[_node.target] += 1
+                                        stats.op_counter[_node.target] += 1
 
-                op_num = sum(self.op_counter.values())
+                op_num = sum(stats.op_counter.values())
                 non_contig_indexing_op_num = sum(
-                    self.non_contig_indexing_op_counter.values()
+                    stats.non_contig_indexing_op_counter.values()
                 )
-                ratio_threshold = 0.12
                 quantity_threshold = 35
                 if non_contig_indexing_op_num >= quantity_threshold or (
                     op_num > 0
-                    and non_contig_indexing_op_num / op_num >= ratio_threshold
+                    and non_contig_indexing_op_num / op_num
+                    >= stats.OVERHEAD_RATIO_THRESHOLD
                 ):
                     # Too many non-contiguous load/store/index_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
                     # the thresholds.
-                    return [], []
+                    return [], [], stats
 
                 if (
                     not reduction_group
@@ -4066,7 +4073,7 @@ class TilingSelect:
                     # not large(< 10), vectorization is not efficient.
                     # And found that `#pragma GCC ivdep` has better performance than
                     # `#pragma omp simd simdlen(8)` for these cases.
-                    return [], []
+                    return [], [], stats
 
             if dtype in DTYPE_LOWP_FP:
                 # For lower precision data type, if the call_range is not long enough,
@@ -4090,10 +4097,10 @@ class TilingSelect:
                         break
 
             if len(tiling_indices) == 1:
-                return [tiling_factor], tiling_indices
+                return [tiling_factor], tiling_indices, stats
             if len(tiling_indices) == 2:
-                return [tiling_factor, tiling_factor], tiling_indices
-        return [], []
+                return [tiling_factor, tiling_factor], tiling_indices, stats
+        return [], [], KernelOpStats()
 
     def _select_tiling_indices(
         self,
@@ -4439,16 +4446,6 @@ class CppKernelProxy(CppKernel):
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
-        """Generate scalar/vectorized C++ kernels for a fused function list.
-
-        This method emits one scalar kernel unconditionally, then optionally emits
-        vectorized/tiled variants based on ISA availability and tiling heuristics.
-
-        Args:
-            fn_list: Callable loop bodies to codegen.
-            var_sizes_list: Iteration/reduction size tuples corresponding to
-                each callable in ``fn_list``.
-        """
         assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
         group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
@@ -4502,27 +4499,25 @@ class CppKernelProxy(CppKernel):
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_select = TilingSelect()
-            tiling_factors, tiling_indices = tiling_select.select_tiling(
-                fn_list, var_sizes_list
+            tiling_factors, tiling_indices, tiling_stats = (
+                tiling_select.select_tiling(fn_list, var_sizes_list)
             )
 
             def _tail_vec_worthwhile(tail_size, tiling_factor) -> bool:
                 # Tail vectorization has non-trivial mask/cast/blend overhead.
                 # Only vectorize tail when it is large enough to amortize overhead.
-                op_num = sum(tiling_select.op_counter.values())
+                op_num = sum(tiling_stats.op_counter.values())
                 if (
                     op_num > 0
                     and (
-                        tiling_select.mask_op_count
-                        + sum(tiling_select.non_contig_indexing_op_counter.values())
+                        tiling_stats.mask_op_count
+                        + sum(tiling_stats.non_contig_indexing_op_counter.values())
                     )
                     / op_num
-                    > 0.12
+                    > tiling_stats.OVERHEAD_RATIO_THRESHOLD
                 ):
                     hint_tail_size = V.graph.sizevars.optimization_hint(tail_size)
-                    return V.graph.sizevars.guard_or_false(
-                        sympy.Gt(2 * hint_tail_size, tiling_factor)
-                    )
+                    return 2 * hint_tail_size > tiling_factor
                 return True
 
             assert len(tiling_factors) == len(tiling_indices)
