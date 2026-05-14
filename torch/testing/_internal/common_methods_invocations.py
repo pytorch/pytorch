@@ -15890,9 +15890,12 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
             # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
             # composite compliance fails with "performing in-place operation add_"
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
+            # not implemented for integer dtypes
+            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_match", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
             # native_group_norm grad doesn't support expanded weights, although the
             # forward pass does
             DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_mean"),
@@ -26370,6 +26373,8 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_meta", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
         ),
         torch_opinfo_name="native_group_norm",
     ),
