@@ -15,7 +15,7 @@ from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from ..kernel_inputs import KernelInputs, MMKernelInputs
+    from ...kernel_inputs import KernelInputs, MMKernelInputs
 
 
 log = logging.getLogger(__name__)
