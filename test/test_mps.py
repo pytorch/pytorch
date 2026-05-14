@@ -10194,6 +10194,44 @@ class TestMPS(TestCaseMPS):
         r_mps = emb_mps(torch.tensor([1, 2, 3], device="mps"), torch.tensor([0], device="mps"))
         r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
         self.assertEqual(r_mps.cpu(), r_cpu)
+    # https://github.com/pytorch/pytorch/issues/149325
+    def test_nonzero_baseline_small(self):
+        x = torch.tensor([[0, 1, 0], [2, 0, 3]], device="mps")
+        self.assertEqual(x.nonzero(), x.cpu().nonzero())
+
+    def test_nonzero_empty_input(self):
+        x = torch.zeros(0, 3, device="mps")
+        self.assertEqual(x.nonzero(), x.cpu().nonzero())
+
+    def test_nonzero_dtypes(self):
+        for dtype in (torch.bool, torch.int8, torch.int32, torch.int64, torch.float32, torch.float16):
+            x = torch.tensor([[0, 1, 0], [2, 0, 3], [0, 4, 0]], device="mps").to(dtype)
+            self.assertEqual(x.nonzero(), x.cpu().nonzero(), msg=f"dtype={dtype}")
+
+    def test_nonzero_3d(self):
+        x = (torch.randn(4, 5, 6, device="mps") > 0).to(torch.int)
+        self.assertEqual(x.nonzero(), x.cpu().nonzero())
+
+    @unittest.skipIf(torch.mps.recommended_max_memory() < 4 * 1024**3,
+                     "needs at least 4 GiB unified memory to allocate a >INT_MAX bool tensor")
+    def test_nonzero_large_64bit(self):
+        # >INT_MAX elements: previously raised; now must succeed and match CPU on a sparse pattern.
+        # Use ~2.2B bool elements (~2.2 GiB) with ~10 nonzero set positions so the comparison is fast.
+        n = (1 << 31) + 1024
+        x = torch.zeros(n, dtype=torch.bool, device="mps")
+        positions = torch.tensor([0, 7, 1023, (1 << 30), (1 << 31) - 1, n - 1], device="mps")
+        x[positions] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, positions.sort().values.to(torch.int64))
+
+    def test_nonzero_kernel_offsets_above_uint32(self):
+        # Non-large smoke test that the 64-bit `flat` accumulator in scatter_nonzero_indices is wired
+        # through end to end: the highest set position must be reported correctly even when the value
+        # would have wrapped under the old uint32 path on a sufficiently large tensor.
+        x = torch.zeros(1 << 20, dtype=torch.bool, device="mps")
+        x[(1 << 20) - 1] = True
+        out = x.nonzero().squeeze(-1)
+        self.assertEqual(out, torch.tensor([(1 << 20) - 1], device="mps"))
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two

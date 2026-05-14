@@ -347,9 +347,6 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
 static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
-              "nonzero is not supported for tensors with more than INT_MAX elements, "
-              "See https://github.com/pytorch/pytorch/issues/51871");
   TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
@@ -360,7 +357,11 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 
   Tensor input = self.contiguous();
   const int64_t nDim = self.dim();
-  const auto numel = static_cast<uint32_t>(input.numel());
+  const int64_t numel = input.numel();
+  if (numel == 0) {
+    at::native::resize_output(out_, {0, nDim});
+    return;
+  }
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
@@ -371,13 +372,16 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
                         "nonzero: step 1 and step 3 threadgroup sizes must match");
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
-  uint32_t num_blocks = (numel + threads_per_group - 1) / threads_per_group;
+  uint64_t num_blocks = (static_cast<uint64_t>(numel) + threads_per_group - 1) / threads_per_group;
+  TORCH_CHECK(num_blocks <= std::numeric_limits<uint32_t>::max(),
+              "nonzero: tensor too large for single-pass prefix sum (num_blocks exceeds uint32)");
+  uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
 
-  auto tmp = at::empty({input.numel() + 2 * num_blocks + 1}, input.options().dtype(kInt));
+  auto tmp = at::empty({numel + 2 * num_blocks_u32 + 1}, input.options().dtype(kInt));
   Tensor prefix_buf = tmp.slice(0, 0, numel);
-  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks);
-  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks, numel + 2 * num_blocks);
-  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks, numel + 2 * num_blocks + 1);
+  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks_u32);
+  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks_u32, numel + 2 * num_blocks_u32);
+  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks_u32, numel + 2 * num_blocks_u32 + 1);
 
   // Steps 1+2: compute prefix sums and block offsets entirely on GPU
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -389,8 +393,8 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       mtl_dispatch1DJob(computeEncoder, pso_step1, numel);
 
       [computeEncoder setComputePipelineState:pso_step2];
-      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks);
-      uint32_t tg_size_blocks = std::min(1024u, c10::metal::round_up(num_blocks, 32u));
+      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks_u32);
+      uint32_t tg_size_blocks = std::min(1024u, c10::metal::round_up(num_blocks_u32, 32u));
       [computeEncoder dispatchThreads:MTLSizeMake(tg_size_blocks, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(tg_size_blocks, 1, 1)];
     }

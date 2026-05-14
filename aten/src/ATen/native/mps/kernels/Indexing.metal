@@ -1140,12 +1140,12 @@ kernel void scatter_nonzero_indices(
   if (pos >= max_entries)
     return;
 
-  uint flat = tid;
+  uint64_t flat = tid;
   for (int d = ndim - 1; d >= 0; d--) {
     int64_t dim_size = sizes[d];
     output[pos * ndim + d] =
-        static_cast<int64_t>(flat % static_cast<uint>(dim_size));
-    flat /= static_cast<uint>(dim_size);
+        static_cast<int64_t>(flat % static_cast<uint64_t>(dim_size));
+    flat /= static_cast<uint64_t>(dim_size);
   }
 }
 
