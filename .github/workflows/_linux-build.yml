@@ -561,6 +561,11 @@ jobs:
         shell: bash
         run: |
           python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+          
+      - name: Debug OIDC env
+        run: |
+          echo "URL set: $([ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && echo yes || echo no)"
+          echo "TOKEN set: $([ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ] && echo yes || echo no)"
 
       - name: Configure AWS credentials
         id: aws-creds
