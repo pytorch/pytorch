@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import operator
 from collections import deque
 from typing import NamedTuple
@@ -73,7 +72,7 @@ class PartitionResult(NamedTuple):
 """Followings are some helper functions for partition manipulation"""
 
 
-def reset_partition_device(partitions):
+def reset_partition_device(partitions: list[Partition]) -> None:
     for partition in partitions:
         partition.logical_device_ids = []
 
@@ -214,14 +213,14 @@ def get_device_partition_stats(
 
 def get_device_to_partitions_mapping(
     partitions: list[Partition], devices: list[Device]
-):
+) -> bool:
     """Given a list of partitions and a list of devices,
     map each partition into a device.
     """
 
     def calculate_extra_mem_bytes_needed_for(
         partition: Partition, partitions: list[Partition]
-    ):
+    ) -> int:
         all_nodes: set[Node] = set()
         for p in partitions:
             all_nodes = all_nodes.union(p.nodes)
@@ -233,7 +232,7 @@ def get_device_to_partitions_mapping(
             extra_size_needed += get_extra_size_of(node, all_nodes)
         return extra_size_needed
 
-    def find_device_for(partition: Partition):
+    def find_device_for(partition: Partition) -> bool:
         """Given a partition, find a logical device for the partition
         The algorithm is to put the partition on the device
         that has just enough mem left for that partition.
@@ -269,7 +268,7 @@ def get_device_to_partitions_mapping(
     return found_device
 
 
-def check_dependency(partition):
+def check_dependency(partition: Partition) -> bool:
     """Given a partition,check if there is a circular dependency on
     this partition using bfs
     """
@@ -385,7 +384,7 @@ class Partitioner:
         return ret
 
     def find_single_partition(
-        self, total_size_of_graph, logical_device_id: int = 0
+        self, total_size_of_graph: int, logical_device_id: int = 0
     ) -> None:
         """Fit the whole fx module into one device"""
         partition_0 = self.create_partition()
@@ -416,7 +415,7 @@ class Partitioner:
         and then try to map those partitions into logical devices with enough mem left.
         """
 
-        def find_device_based_on_size(node) -> Device:
+        def find_device_based_on_size(node: Node) -> Device:
             """Given a node, this function is to find a logical device
             that could fit the node.
             """
@@ -610,7 +609,7 @@ class Partitioner:
         self.partitions.append(partition)
         return partition
 
-    def create_single_node_partition(self, node):
+    def create_single_node_partition(self, node: Node) -> None:
         """Create a partition for a single node"""
         partition = self.create_partition()
         partition.add_node(node)
@@ -664,7 +663,7 @@ class Partitioner:
                 )
             return
 
-        def calculate_mem_bytes_needed(p1, p2):
+        def calculate_mem_bytes_needed(p1: Partition, p2: Partition) -> int:
             """Given two partitions, calculate how many mem bytes
             are needed if two partitions are combined
             """
@@ -695,20 +694,23 @@ class Partitioner:
                         break
             return find_combination, partitions
 
-        def reset_partition_in_sparse_nn(partition, new_partition=True):
-            """If crossing the boundary between non-embedding nodes and
-            embedding nodes, create a new partition
-            """
+        def reset_partition_in_sparse_nn(partition: Partition) -> Partition:
+            """Finalize current partition and create a new one."""
             if in_embedding_region:
                 embedding_partitions.append(partition)
             else:
                 non_embedding_partitions.append(partition)
-            if new_partition:
-                partition = self.create_partition()
-                # pyrefly: ignore [missing-attribute]
-                partition.left_mem_bytes = available_mem_bytes
-                return partition
-            return None
+            partition = self.create_partition()
+            # pyrefly: ignore [missing-attribute]
+            partition.left_mem_bytes = available_mem_bytes
+            return partition
+
+        def finalize_partition(partition: Partition) -> None:
+            """Finalize current partition without creating a new one."""
+            if in_embedding_region:
+                embedding_partitions.append(partition)
+            else:
+                non_embedding_partitions.append(partition)
 
         def is_embedding_node(node: Node) -> bool:
             """Check if a node is an embedding node"""
@@ -752,7 +754,7 @@ class Partitioner:
                             node.target + "is too large to fit into a device"
                         )
                 partition.add_node(node)
-        reset_partition_in_sparse_nn(partition, new_partition=False)
+        finalize_partition(partition)
         # Set parents and children for partitions
         set_parents_and_children(self.partitions)
         # Combining non-embedding partitions
@@ -816,7 +818,9 @@ class Partitioner:
         #3. Repeat #2 until the cost cannot be reduced.
         """
 
-        def try_combining_partitions(p0_index, p1_index, partitions) -> float:
+        def try_combining_partitions(
+            p0_index: int, p1_index: int, partitions: list[Partition]
+        ) -> float:
             """Given two partitions and a list of partitions, combine these two partitions
             and see what is the cost of the modified partition list
             """
@@ -855,7 +859,8 @@ class Partitioner:
             return float("inf")
 
         def search_combination(
-            transfer_rate_bytes_per_sec, node_to_latency_mapping
+            transfer_rate_bytes_per_sec: float,
+            node_to_latency_mapping: dict[Node, NodeLatency],
         ) -> bool:
             """Given transfer rate between partitions and each node's latency,
             find two partitions to combine so the cost of the partitions can
@@ -940,7 +945,9 @@ class Partitioner:
         are tried.
         """
 
-        def swap_nodes(n0, n1, p0, p1):
+        def swap_nodes(
+            n0: Node | None, n1: Node | None, p0: Partition, p1: Partition
+        ) -> None:
             # Either n0 or n1 could be None
             # That means we simply move the node
             # to another partition
@@ -952,8 +959,13 @@ class Partitioner:
                 p1.remove_node(n1)
 
         def try_swap_nodes(
-            n0, n1, p0, p1, node_to_latency_mapping, transfer_rate_per_sec
-        ):
+            n0: Node | None,
+            n1: Node | None,
+            p0: Partition,
+            p1: Partition,
+            node_to_latency_mapping: dict[Node, NodeLatency],
+            transfer_rate_per_sec: float,
+        ) -> float:
             cost = float("inf")
             swap_nodes(n0, n1, p0, p1)
             # Reorganize partitions after swapping
@@ -984,8 +996,12 @@ class Partitioner:
             return cost
 
         def swap_node_to_partition(
-            node, p0, p1, node_to_latency_mapping, transfer_rate_per_sec
-        ):
+            node: Node,
+            p0: Partition,
+            p1: Partition,
+            node_to_latency_mapping: dict[Node, NodeLatency],
+            transfer_rate_per_sec: float,
+        ) -> tuple[float, list[Node]]:
             """This function helps to swap one node from partition p0
             with all the nodes in another partition p1
             """
@@ -1060,8 +1076,10 @@ class Partitioner:
         return
 
     def aot_based_partition(
-        self, node_to_partition_mapping, partition_to_logical_device_mapping
-    ):
+        self,
+        node_to_partition_mapping: dict[Node, int],
+        partition_to_logical_device_mapping: dict[int, list[int]],
+    ) -> None:
         """This function helps to rebuild the partitions given the nodes and its
         corresponding partition id
         """
