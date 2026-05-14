@@ -4428,8 +4428,19 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+
+    def test_bmm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(1, 2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(1, 3, 3)
+
+        msg = "expected scalar type .* but found .*|Expected arguments of same type but got"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t1, t2)
 
@@ -4450,12 +4461,10 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
@@ -8723,18 +8732,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
-        # MPS has correctness problem for transposed sort before MacOS15.
-        # Size is chosen above the single-block Metal path threshold so the
-        # MPSGraph fallback (where the pre-15 bug exists) is exercised.
-        ctx = (
-            contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
-            else self.assertRaises(AssertionError)
-        )
         inp = torch.randn(4097, 10).transpose(0, 1)
-        with ctx:
-            self.common(fn, (inp, False))
-            self.common(fn, (inp, True))
+        self.common(fn, (inp, False))
+        self.common(fn, (inp, True))
 
     def test_topk(self):
         def fn(a):
