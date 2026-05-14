@@ -1764,7 +1764,13 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: sorted(value) if isinstance(value, set) else value
+            key: (
+                sorted(value)
+                if isinstance(value, set)
+                else value.to_jsonable()
+                if hasattr(value, "to_jsonable")
+                else value
+            )
             for key, value in d.items()
             if key not in blocklist
         }
