@@ -624,7 +624,12 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             # TODO: better to change to a specific field of custom?
             custom = fwd_node.meta.get("custom")
             if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+                # Merge rather than overwrite so bw-only keys survive
+                # fw keys win on conflict.
+                node.meta["custom"] = {
+                    **node.meta.get("custom", {}),
+                    **copy.deepcopy(custom),
+                }
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:

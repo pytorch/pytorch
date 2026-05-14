@@ -23,6 +23,10 @@ inputs:
     description: Submodule checkout mode passed to checkout-pytorch (default "recursive", use "false" for test jobs).
     required: false
     default: 'recursive'
+  checkout-mode:
+    description: Checkout mode passed to checkout-pytorch (one of "normal", "blobless", "treeless").
+    required: false
+    default: 'treeless'
   github-token:
     description: GITHUB_TOKEN, needed to retrieve the workflow job id.
     required: false
@@ -69,7 +73,7 @@ runs:
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
       with:
         no-sudo: true
-        checkout-mode: treeless
+        checkout-mode: ${{ inputs.checkout-mode }}
         submodules: ${{ inputs.submodules }}
 
     - name: Parse ref

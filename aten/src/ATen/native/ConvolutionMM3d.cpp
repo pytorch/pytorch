@@ -587,6 +587,21 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+      kernel_size.size() == 3,
+      "It is expected kernel_size equals to 3, but got size ",
+      kernel_size.size());
+
+  TORCH_CHECK(
+      padding.size() == 3,
+      "It is expected padding equals to 3, but got size ",
+      padding.size());
+
+  TORCH_CHECK(
+      stride.size() == 3,
+      "It is expected stride equals to 3, but got size ",
+      stride.size());
+
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -722,6 +737,21 @@ static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const 
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {
+  TORCH_CHECK(
+      kernel_size.size() == 3,
+      "It is expected kernel_size equals to 3, but got size ",
+      kernel_size.size());
+
+  TORCH_CHECK(
+      padding.size() == 3,
+      "It is expected padding equals to 3, but got size ",
+      padding.size());
+
+  TORCH_CHECK(
+      stride.size() == 3,
+      "It is expected stride equals to 3, but got size ",
+      stride.size());
+
   // TODO: hacky way of determine the group size
   int64_t groups = self.size(1) / weight.size(1);
   if (grad_input.defined()) {

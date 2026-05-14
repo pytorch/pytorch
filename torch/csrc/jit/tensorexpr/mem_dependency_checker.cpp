@@ -963,7 +963,7 @@ void MemDependencyChecker::visit(const CondPtr& v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
-  // Merge the enclosing scope into it's parent.
+  // Merge the enclosing scope into its parent.
   mergeScope(enclosingScope, enclosingScope->parent, false);
 
   currentScope_ = enclosingScope;
