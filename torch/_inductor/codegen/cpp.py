@@ -1056,6 +1056,10 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr, dtype):
+        return CppOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
 
@@ -1867,6 +1871,10 @@ class CppVecOverrides(CppOverrides):
         return csevar
 
     @staticmethod
+    def value_expr(expr, dtype):
+        return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
@@ -2001,6 +2009,10 @@ class CppTile2DOverrides(CppVecOverrides):
         assert isinstance(V.kernel, CppTile2DKernel)
         expr = V.kernel.transform_indexing(expr)
         return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        return CppTile2DOverrides.index_expr(expr, dtype)
 
 
 class CppKernel(Kernel):

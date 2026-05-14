@@ -12,6 +12,7 @@ import logging
 import math
 import operator
 import os
+import re
 import textwrap
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
@@ -205,6 +206,75 @@ def _materialize_trunc_to_float_expr(
         return node.func(*new_args)
 
     return rewrite_float_subexpr(expr)
+
+
+def _val_expressible_in_32_bits(val: Any) -> bool:
+    if getattr(val, "is_Boolean", False):
+        return True
+
+    if isinstance(val, sympy.Expr):
+        if not val.is_number:
+            return False
+        if val.is_Integer or val.is_Boolean:
+            val = int(val)
+        else:
+            val = float(val)
+
+    if isinstance(val, float):
+        return -(2**24) <= val <= 2**24
+
+    if isinstance(val, int):
+        iinfo = torch.iinfo(torch.int32)
+        return iinfo.min <= val <= iinfo.max
+
+    return False
+
+
+def _range_expressible_in_32_bits(bounds: ValueRanges[Any]) -> bool:
+    return _val_expressible_in_32_bits(
+        bounds.lower
+    ) and _val_expressible_in_32_bits(bounds.upper)
+
+
+def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
+    if expr.is_integer:
+        bounds = get_bounds_index_expr(expr)
+        if not (
+            getattr(bounds.lower, "is_infinite", False)
+            or getattr(bounds.upper, "is_infinite", False)
+        ) and not _range_expressible_in_32_bits(bounds):
+            return True
+
+        if expr.is_Integer:
+            return not _val_expressible_in_32_bits(expr)
+
+    if getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False):
+        return any(
+            isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
+            for arg in expr.args
+        )
+
+    return any(
+        isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
+        for arg in expr.args
+    )
+
+
+_VALUE_EXPR_REQUIRES_INT64 = "value_expr_requires_int64"
+
+
+def _value_expr_requires_int64(expr: sympy.Expr) -> bool:
+    """
+    Prefer the pre-codegen analysis result when available. The fallback covers
+    direct value_expr callsites and preserves the conservative behavior if a
+    graph reaches codegen without the annotation pass.
+    """
+    node = getattr(V.interpreter, "current_node", None)
+    meta = getattr(node, "meta", None)
+    if isinstance(meta, dict) and _VALUE_EXPR_REQUIRES_INT64 in meta:
+        return bool(meta[_VALUE_EXPR_REQUIRES_INT64])
+
+    return _integer_expr_requires_int64(expr)
 
 
 class OpDtypeSupport:
@@ -1700,6 +1770,10 @@ class TritonOverrides(OpOverrides):
     def index_expr(cls, expr, dtype):
         raise NotImplementedError("ops.index_expr not implemented outside a kernel")
 
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        raise NotImplementedError("ops.value_expr not implemented outside a kernel")
+
     @staticmethod
     def masked(mask, body, other):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
@@ -2199,6 +2273,113 @@ class TritonKernelOverrides(TritonOverrides):
 
         var.mask_vars = indexing.mask_vars
         return var
+
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        """
+        Like :meth:`index_expr`, but honors ``dtype``. This is the right op when
+        the user explicitly requested ``dtype`` (e.g. ``arange(int64)``
+        whose result participates in tensor computation).
+
+        Integer expressions may be computed at the kernel indexing dtype when
+        value-range metadata proves that doing so preserves the final value.
+        Otherwise we cast block indices before evaluating the expression, so
+        ``2147483648 * p0`` cannot overflow the kernel's int32 indexing dtype.
+        The returned IR value is still cast to ``dtype`` when needed.
+        """
+        expr = _materialize_trunc_to_float_expr(expr, dtype)
+        indexing = V.kernel.indexing(
+            expr, block_ptr=False, tma_compatibility_checker=None
+        )
+        assert isinstance(indexing, IndexingOptions)
+
+        shape: BlockShapeType
+        if indexing.expand_shape:
+            shape = indexing.expand_shape
+        else:
+            shape = TritonSymbols.get_block_shape(indexing.index)
+
+        is_predicate = bool(
+            getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False)
+        )
+        requires_int64 = _value_expr_requires_int64(expr)
+        operand_dtype = dtype
+        compute_dtype = dtype
+        if is_predicate:
+            operand_dtype = (
+                torch.int64
+                if requires_int64
+                else V.kernel.get_index_dtype_as_torch_dtype()
+            )
+            compute_dtype = torch.bool
+        elif dtype not in (torch.int32, torch.int64) and expr.is_integer:
+            operand_dtype = (
+                torch.int64
+                if requires_int64
+                else V.kernel.get_index_dtype_as_torch_dtype()
+            )
+            compute_dtype = operand_dtype
+
+        index_str = cls._cast_block_vars_to(
+            indexing.index, indexing.index_str, operand_dtype
+        )
+
+        orig = config.test_configs.runtime_triton_dtype_assert
+        try:
+            config.test_configs.runtime_triton_dtype_assert = False
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                index_str,
+                bounds=get_bounds_index_expr(expr),
+                dtype=compute_dtype,
+                shape=shape,
+            )
+        finally:
+            config.test_configs.runtime_triton_dtype_assert = orig
+
+        if compute_dtype != dtype:
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                cls.to_dtype(var, dtype),
+                dtype=upcast_compute_type(dtype),
+                shape=var.shape,
+            )
+
+        var.mask_vars = indexing.mask_vars
+        return var
+
+    @classmethod
+    def _cast_block_vars_to(
+        cls, index: sympy.Expr, index_str: str, dtype: torch.dtype
+    ) -> str:
+        """
+        Emit CSE'd casts to ``dtype`` of each block index variable referenced
+        by ``index`` and return ``index_str`` rewritten to use them.
+
+        Casting at least one operand forces Triton to perform the surrounding
+        arithmetic at ``dtype``'s width, which is what callers want when the
+        expression participates in value computation rather than indexing.
+        """
+        replacements: dict[str, str] = {}
+        triton_dtype = triton_type(dtype)
+        for sym in sorted(index.free_symbols, key=operator.attrgetter("name")):
+            if not isinstance(sym, sympy.Symbol):
+                continue
+            if not symbol_is_type(sym, TritonSymbols.block_types):
+                continue
+            cast_var = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"{sym.name}.to({triton_dtype})",
+                dtype=dtype,
+                shape=TritonSymbols.get_block_shape(sym),
+            )
+            replacements[sym.name] = str(cast_var)
+        if not replacements:
+            return index_str
+        pattern = re.compile(
+            r"\b(" + "|".join(re.escape(k) for k in replacements) + r")\b"
+        )
+        return pattern.sub(lambda m: replacements[m.group(0)], index_str)
 
     @staticmethod
     def masked(mask, body, other):

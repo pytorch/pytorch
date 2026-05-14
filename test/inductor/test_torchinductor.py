@@ -3220,6 +3220,36 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(5, dtype=torch.int64),), check_lowp=False)
 
+    def test_arange8(self):
+        # int64 arange used to produce values whose intermediate
+        # arithmetic exceeds INT32_MAX. Triton must compute in int64.
+        def fn(x):
+            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
+            large_val = torch.tensor(2147483648, dtype=torch.int64, device=x.device)
+            return idx * large_val + x
+
+        self.common(fn, (torch.zeros(2, device=self.device),))
+
+    def test_arange9(self):
+        # int64 arange used inside a reduction: reduction must accumulate
+        # at int64 precision even though each per-element value fits int32.
+        def fn(x):
+            idx = torch.arange(0, 100, device=x.device, dtype=torch.int64)
+            return (idx * int(1e7)).sum()
+
+        self.common(fn, (torch.zeros(1, device=self.device),))
+
+    def test_arange10(self):
+        # The same arange may be used both as an index and as a value. The
+        # index path should keep index_expr narrowing, while the value path
+        # must be split to value_expr so large int arithmetic does not
+        # overflow int32 before the final float cast.
+        def fn(x):
+            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
+            return x[idx] + idx * 2147483648
+
+        self.common(fn, (torch.ones(2, device=self.device),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
@@ -16813,6 +16843,178 @@ if RUN_GPU:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_index_expr_pure_indexing_no_int64(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(0, 128, device=GPU_TYPE, dtype=torch.int64)
+                return x[(idx * 2) % 128]
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.randn(128, device=GPU_TYPE)]
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_searchsorted_boundary_index_no_int64_cast(self):
+            def fn(boundaries: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
+                return torch.searchsorted(boundaries, values, out_int32=False)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [
+                torch.tensor(
+                    [[0.0, 1.0, 2.0], [0.0, 1.0, 2.0]], device=GPU_TYPE
+                ),
+                torch.tensor([[0.1, 0.5], [1.5, 2.5]], device=GPU_TYPE),
+            ]
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        @staticmethod
+        def _make_fake_loop_body_for_index_expr_pass(
+            graph, bounds, indexing_exprs, replacement_vals
+        ):
+            class FakeBounds:
+                def __init__(self):
+                    self.replacement_vals = replacement_vals
+
+                def get_bounds(self):
+                    return bounds
+
+            class FakeRootBlock:
+                def __init__(self):
+                    self.graph = graph
+
+            class FakeLoopBody:
+                indirect_vars = []
+
+                def __init__(self):
+                    self.root_block = FakeRootBlock()
+                    self.indexing_exprs = indexing_exprs
+                    self._bounds = FakeBounds()
+
+                def bounds(self):
+                    return self._bounds
+
+            return FakeLoopBody()
+
+        def test_index_expr_mixed_use_clones_value_path(self):
+            import sympy
+            from torch._inductor.optimize_indexing import (
+                _VALUE_EXPR_REQUIRES_INT64,
+                convert_index_expr_to_value_expr,
+            )
+            from torch.fx import Graph
+            from torch.utils._sympy.value_ranges import ValueRanges
+
+            graph = Graph()
+            ops = graph.placeholder("ops")
+            get_index = graph.call_module("get_index", ("i0",))
+            index_expr = graph.call_method(
+                "index_expr", (ops, get_index, torch.int64)
+            )
+            load = graph.call_method("load", (ops, "arg0", index_expr))
+            add = graph.call_method("add", (ops, load, index_expr))
+            store_index = graph.call_module("get_index", ("i0",))
+            store = graph.call_method("store", (ops, "buf0", store_index, add, None))
+            graph.output(store)
+
+            i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+            loop_body = self._make_fake_loop_body_for_index_expr_pass(
+                graph,
+                {
+                    index_expr: ValueRanges(0, 1),
+                    load: ValueRanges(0, 1),
+                    add: ValueRanges(0, 2**40),
+                },
+                {"i0": i0},
+                {i0: ValueRanges(0, 1)},
+            )
+
+            convert_index_expr_to_value_expr(loop_body)
+
+            value_exprs = [n for n in graph.nodes if n.target == "value_expr"]
+            self.assertEqual(len(value_exprs), 1)
+            value_expr = value_exprs[0]
+            self.assertEqual(index_expr.target, "index_expr")
+            self.assertEqual(load.args[2], index_expr)
+            self.assertEqual(add.args[2], value_expr)
+            self.assertTrue(value_expr.meta[_VALUE_EXPR_REQUIRES_INT64])
+
+        def test_index_expr_unknown_value_use_stays_indexing(self):
+            import sympy
+            from torch._inductor.optimize_indexing import (
+                convert_index_expr_to_value_expr,
+            )
+            from torch.fx import Graph
+            from torch.utils._sympy.value_ranges import ValueRanges
+
+            graph = Graph()
+            ops = graph.placeholder("ops")
+            get_index = graph.call_module("get_index", ("i0",))
+            index_expr = graph.call_method(
+                "index_expr", (ops, get_index, torch.int64)
+            )
+            unknown = graph.call_method("unknown_value_op", (ops, index_expr))
+            store_index = graph.call_module("get_index", ("i0",))
+            store = graph.call_method(
+                "store", (ops, "buf0", store_index, unknown, None)
+            )
+            graph.output(store)
+
+            i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+            loop_body = self._make_fake_loop_body_for_index_expr_pass(
+                graph,
+                {
+                    index_expr: ValueRanges(0, 2**40),
+                    unknown: ValueRanges(0, 2**40),
+                },
+                {"i0": i0},
+                {i0: ValueRanges(0, 1)},
+            )
+
+            convert_index_expr_to_value_expr(loop_body)
+
+            self.assertEqual(index_expr.target, "index_expr")
+            self.assertEqual(unknown.args[1], index_expr)
+            self.assertEqual([], [n for n in graph.nodes if n.target == "value_expr"])
+
+        def test_index_expr_value_use_updates_safe_int64_to_int32(self):
+            import sympy
+            from torch._inductor.optimize_indexing import (
+                convert_index_expr_to_value_expr,
+            )
+            from torch.fx import Graph
+            from torch.utils._sympy.value_ranges import ValueRanges
+
+            graph = Graph()
+            ops = graph.placeholder("ops")
+            get_index = graph.call_module("get_index", ("i0",))
+            index_expr = graph.call_method(
+                "index_expr", (ops, get_index, torch.int64)
+            )
+            store_index = graph.call_module("get_index", ("i0",))
+            store = graph.call_method(
+                "store", (ops, "buf0", store_index, index_expr, None)
+            )
+            graph.output(store)
+
+            i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+            loop_body = self._make_fake_loop_body_for_index_expr_pass(
+                graph,
+                {
+                    index_expr: ValueRanges(0, 1),
+                },
+                {"i0": i0},
+                {i0: ValueRanges(0, 1)},
+            )
+
+            convert_index_expr_to_value_expr(loop_body)
+
+            self.assertEqual(index_expr.target, "value_expr")
+            self.assertEqual(index_expr.args[2], torch.int32)
 
         @config.patch({"fx_graph_remote_cache": False})
         def test_optimize_indexing_dtype_with_constraint(self):
