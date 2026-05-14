@@ -1173,7 +1173,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 raise AssertionError(
                     "fake_mode must not be None when functionalize_rng_ops is True"
                 )
-            # Detect device type once and store on metadata
+
             device_type = _detect_rng_device_type(flat_args)
             seed, offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
                 fake_mode, device_type=device_type
