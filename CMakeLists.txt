@@ -38,6 +38,12 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 # unconditionally.
 include(cmake/EnvVarForwarding.cmake)
 
+# Pre-build steps: submodule init, NCCL checkout.
+# When built via setup.py, these are handled by build_deps() in setup.py;
+# the module checks for existing state, so it is safe to include
+# unconditionally.
+include(cmake/PreBuildSteps.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -243,6 +249,7 @@ option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
                        ON "BUILD_TEST" OFF)
+option(USE_RELATIVE_PATHS "Use relative paths in generated files for ccache friendliness" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
@@ -257,7 +264,8 @@ else()
   set(_USE_CUDA_EXPLICITLY_SET FALSE)
 endif()
 
-option(USE_CUDA "Use CUDA" ON)
+# CUDA is incompatible with TSAN
+cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
@@ -266,7 +274,7 @@ cmake_dependent_option(
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
-option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
+cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -882,7 +890,7 @@ if(NOT IOS
   # CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed
   # the cmake compiler check for cross-compiling
   set(protoc_build_command
-      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1"
+      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1 -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
   )
   # We write to a temp scriptfile because CMake COMMAND dislikes double quotes
   # in commands
@@ -1472,6 +1480,20 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# File mirroring: copy source files into torchgen/packaged/, vendored
+# inductor templates, and symlink-replacement copies.  Previously handled
+# by setup.py; now consolidated here for both scikit-build-core and
+# setuptools builds.
+include(cmake/FileMirroring.cmake)
+
+# Package data: install non-Python data files (type stubs, templates,
+# headers, etc.) into the torch package.  Previously declared via
+# setup.py package_data; now consolidated here for both scikit-build-core
+# and setuptools builds.
+include(cmake/PackageData.cmake)
+
+include(cmake/PostBuildSteps.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()

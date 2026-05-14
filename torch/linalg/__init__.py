@@ -921,7 +921,7 @@ Computes a compact representation of the LDL factorization of a Hermitian or sym
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
 or symmetric (:attr:`hermitian`\ `= False`).
 
-The factorization is of the form the form :math:`A = L D L^T`.
+The factorization is of the form :math:`A = L D L^T`.
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
 :math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``LD``.

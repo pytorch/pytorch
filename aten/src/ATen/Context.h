@@ -47,12 +47,19 @@ enum class CuBLASReductionOption : uint8_t {
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
-enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
+// DEFAULT is an internal-only sentinel meaning "use legacy backend default
+// unless a parent setting overrides it". NONE means "explicitly set to
+// inherit/no-op".
+enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16, DEFAULT };
+
+enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 
 TORCH_API Float32Backend str2backend(const std::string& name);
 TORCH_API Float32Op str2op(const std::string& name);
 TORCH_API Float32Precision str2precision(const std::string& name);
 TORCH_API std::string precision2str(Float32Precision prec);
+TORCH_API CuDNNDepthwiseKernel str2cudnn_depthwise(const std::string& name);
+TORCH_API std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k);
 
 class TORCH_API Context {
  public:
@@ -251,6 +258,9 @@ class TORCH_API Context {
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
+  CuDNNDepthwiseKernel cudnnDepthwiseKernel() const;
+  void setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k);
+
   // Note [Disabling Fused SDP Kernels]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Flash and Memory Efficient SDP kernels are enabled by default.
@@ -289,6 +299,7 @@ class TORCH_API Context {
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend /*b*/);
 
+  at::BlasBackend blasDefaultBackend();
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend /*b*/);
 
@@ -422,6 +433,9 @@ class TORCH_API Context {
   void setWarnOnAccumulateGradStreamMismatch(bool enabled);
   bool warnOnAccumulateGradStreamMismatch() const;
 
+  void setOverrideStaleCaptureStream(bool enabled);
+  bool overrideStaleCaptureStream() const;
+
   bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
@@ -493,6 +507,7 @@ class TORCH_API Context {
   bool enabled_mkldnn = true;
   bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
+  CuDNNDepthwiseKernel depthwise_kernel_cudnn = CuDNNDepthwiseKernel::AUTO;
   at::LinalgBackend linalg_preferred_backend =
       (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||
        c10::utils::check_env("TORCH_LINALG_PREFER_HIPSOLVER") == true) // alias
@@ -518,6 +533,7 @@ class TORCH_API Context {
 #endif
   bool display_vmap_fallback_warnings_ = false;
   bool warn_on_accumulate_grad_stream_mismatch_ = true;
+  bool override_stale_capture_stream_ = false;
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
@@ -530,8 +546,8 @@ class TORCH_API Context {
       {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
       {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
-      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
-      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::DEFAULT},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::DEFAULT},
       {{Float32Backend::CUDA, Float32Op::MATMUL},
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE

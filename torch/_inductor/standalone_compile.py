@@ -10,6 +10,9 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 
+
+DynamicShapesType = Literal["from_example_inputs", "from_tracing_context", "from_graph"]
+
 import torch.fx
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.utils import dynamo_timed
@@ -19,8 +22,13 @@ from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
 from . import config
+from ._functionalize_collectives import (
+    _functionalize_inplace_collectives,
+    _unbox_process_group_torchbinds,
+)
 
 
 if TYPE_CHECKING:
@@ -372,13 +380,15 @@ class AOTCompiledArtifact(CompiledArtifact):
             return AOTCompiledArtifact.deserialize(artifact)
 
 
-def _resolve_ignore_shape_env(dynamic_shapes: Any):
+def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
     # tells compile_fx to ignore the shape_envs on the ambient context
     # and the graph_module.
     return dynamic_shapes == "from_example_inputs"
 
 
-def _resolve_fake_mode(gm: GraphModule, dynamic_shapes: Any) -> FakeTensorMode:
+def _resolve_fake_mode(
+    gm: GraphModule, dynamic_shapes: DynamicShapesType
+) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
         return FakeTensorMode(shape_env=ShapeEnv())
     elif dynamic_shapes == "from_tracing_context":
@@ -421,7 +431,7 @@ def _resolve_fake_mode(gm: GraphModule, dynamic_shapes: Any) -> FakeTensorMode:
 
 
 @contextlib.contextmanager
-def _standalone_context(gm: GraphModule, dynamic_shapes: Any, aot: bool):
+def _standalone_context(gm: GraphModule, dynamic_shapes: DynamicShapesType, aot: bool):
     from torch.compiler._cache import CacheArtifactManager
 
     fake_mode = _resolve_fake_mode(gm, dynamic_shapes)
@@ -439,7 +449,7 @@ def standalone_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
     *,
-    dynamic_shapes: Any,
+    dynamic_shapes: DynamicShapesType,
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
@@ -452,8 +462,22 @@ def standalone_compile(
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
     with _standalone_context(gm, dynamic_shapes, aot):
         # compile_fx takes ownership of gm and may mutate it on cache miss.
+        # Deepcopy first so the rewrites below land on the owned copy rather
+        # than the caller's gm. The gm may carry a non-pickleable torchbind
+        # ProcessGroup (or, after a previous unbox, a Python
+        # ``dist.ProcessGroup``); smuggle it through deepcopy as a shared
+        # reference instead of crashing.
         if not donate_graph_module:
-            gm = copy.deepcopy(gm)
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm = copy.deepcopy(gm)
+        # ``make_fx`` traces ``dist.*`` collectives as opaque ``c10d.{op}_``
+        # calls. Inductor's collective machinery only recognizes the
+        # ``_c10d_functional.{op}`` + ``wait_tensor`` form, so rewrite here
+        # before compile_fx runs. Also unbox any torchbind ProcessGroup
+        # attrs into Python ``dist.ProcessGroup`` so the runtime collective
+        # op accepts them (raw torchbind is rejected).
+        gm = _functionalize_inplace_collectives(gm)
+        gm = _unbox_process_group_torchbinds(gm)
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
@@ -477,7 +501,7 @@ def standalone_compile(
 def autograd_cache_key(
     graph,
     example_inputs,
-    dynamic_shapes: Any,
+    dynamic_shapes: DynamicShapesType,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
 ):
     from . import compile_fx
