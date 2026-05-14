@@ -1465,10 +1465,9 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            # If the object is a python constant, resolve the attr directly.
             if self.obj.is_python_constant():
                 val = getattr(self.obj.as_python_constant(), self.name)
-                resolved = ConstantVariable.create(val)
+                resolved = VariableTracker.build(tx, val)
             else:
                 unimplemented(
                     gb_type="Unresolved GetAttrVariable comparison",
