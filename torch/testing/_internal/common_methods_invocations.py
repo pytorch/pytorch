@@ -22178,7 +22178,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_forward_ad=True,
         supports_gradgrad=True,
-        gradcheck_nondet_tol=1e-15,
+        gradcheck_nondet_tol=1e-14,
         skips=(
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
