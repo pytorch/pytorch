@@ -35,6 +35,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -2409,8 +2410,8 @@ class DeviceCachingAllocator {
         ". Please set within [0, 1].");
     allowed_memory_maximum = std::nullopt;
     if (fraction < 1.0) {
-      allowed_memory_maximum = static_cast<size_t>(
-          fraction * static_cast<double>(device_prop.totalGlobalMem));
+      allowed_memory_maximum = static_cast<size_t>(std::round(
+          fraction * static_cast<double>(device_prop.totalGlobalMem)));
     }
   }
 
