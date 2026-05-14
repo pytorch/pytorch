@@ -69,7 +69,7 @@ class CUTLASSScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 cast(CUTLASSTemplateBuffer, node1.node),
                 [],
-                node2,  # type: ignore[arg-type]
+                node2,
             )
         elif self.is_cutlass_fused_template(node1) and isinstance(
             node2, BaseSchedulerNode
@@ -80,7 +80,7 @@ class CUTLASSScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 fnode1.get_template_node(),  # type: ignore[arg-type]
                 self._unwrap_epilogue_nodes(fnode1),
-                node2,  # type: ignore[arg-type]
+                node2,
             )
 
         return False
@@ -230,11 +230,11 @@ class CUTLASSScheduling(BaseScheduling):
             elif not isinstance(node.data, Pointwise):
                 why(f"{node} is not a Pointwise op")
                 return False
-            elif not node.get_computed_buffer_name():  # type: ignore[attr-defined]
+            elif not node.get_computed_buffer_name():
                 why(f"{node} does not have a computed buffer name")
                 return False
 
-            name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
+            name = node.get_computed_buffer_name()
             # dtype can differ, and strides can differ as long as they are broadcastable
             if node.get_size() != cutlass_template_buffer.get_size():
                 why(
@@ -282,13 +282,13 @@ size: {cutlass_template_buffer.get_size()}"
                 not_implemented_op = not_implemented_op[4:]
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}, \
-likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+likely due to unsupported operation: {not_implemented_op}"
                 )
                 return False
             else:  # Likely due to unsupported dtype.
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
-Reason: {not_implemented_op}"  # noqa: G004, B950
+Reason: {not_implemented_op}"
                 )
                 return False
 

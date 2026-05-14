@@ -16,6 +16,7 @@
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/sigmoid_native.h>
 #endif
+#include <ATen/native/Gelu.h>
 #include <ATen/native/mps/kernels/Activation.h>
 #include <fmt/format.h>
 
@@ -33,7 +34,7 @@ Tensor relu_mps(const Tensor& self) {
   if (output.numel() == 0)
     return output;
   auto iter = at::TensorIteratorConfig().add_output(output).add_input(self).build();
-  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "relu");
   return output;
 }
 
@@ -42,7 +43,7 @@ Tensor& relu_mps_(Tensor& self) {
   if (self.numel() == 0)
     return self;
   auto iter = at::TensorIteratorConfig().add_output(self).add_input(self).set_check_mem_overlap(false).build();
-  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "relu");
   return self;
 }
 
@@ -105,7 +106,7 @@ static void silu_kernel(TensorIteratorBase& iter) {
     at::mul_out(out, self, at::sigmoid(self));
     return;
   }
-  lib.exec_unary_kernel(iter, "silu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "silu");
 }
 
 static void silu_backward_kernel(TensorIteratorBase& iter) {
@@ -130,6 +131,16 @@ static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& n
   lib.exec_binary_kernel(iter, "leaky_relu_backward", negative_slope);
 }
 
+static void gelu_kernel(TensorIteratorBase& iter, GeluType approximate) {
+  const char* name = (approximate == GeluType::Tanh) ? "gelu_tanh" : "gelu";
+  lib.exec_unary_kernel(iter, name);
+}
+
+static void gelu_backward_kernel(TensorIteratorBase& iter, GeluType approximate) {
+  const char* name = (approximate == GeluType::Tanh) ? "gelu_tanh_backward" : "gelu_backward";
+  lib.exec_binary_kernel(iter, name);
+}
+
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);
@@ -143,5 +154,7 @@ REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
+REGISTER_DISPATCH(GeluKernel, gelu_kernel);
+REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
 
 } // namespace at::native

@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from .triton_compat import (  # noqa: F401
+from .triton_compat import (
     _log2,
     builtins_use_semantic_kwarg,
     JITFunction,
@@ -798,7 +798,7 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
             kwargs["_builder"] = _semantic
             return f(*args, **kwargs)
     else:
-        wrapper = f  # type: ignore[assignment]
+        wrapper = f
 
     wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
     return wrapper
