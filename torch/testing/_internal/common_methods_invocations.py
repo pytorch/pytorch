@@ -25062,17 +25062,6 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_out=True,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
