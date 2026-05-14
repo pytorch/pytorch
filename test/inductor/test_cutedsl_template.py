@@ -523,6 +523,43 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             self.assertNotIn(".shape", body)
             self.assertNotIn(".dtype", body)
 
+    def test_missing_vector_load_config_is_not_lane_uniform(self):
+        import sympy
+
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            ModificationWrapperCuteDSL,
+        )
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_missing_vector_load_config",
+                input_nodes=[],
+                output_node=None,
+            )
+            handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
+            self.assertEqual(
+                handler._analyze_index_fragment(sympy.Symbol("idx", integer=True)),
+                (False, False, None),
+            )
+
+            scalar_handler = ModificationWrapperCuteDSL(
+                kernel,
+                0,
+                {
+                    "vector_load_vec_size": 1,
+                    "vector_load_index": "idx",
+                    "vector_load_dim": -1,
+                },
+                None,
+            )
+            self.assertEqual(
+                scalar_handler._analyze_index_fragment(
+                    sympy.Symbol("idx", integer=True)
+                ),
+                (True, False, None),
+            )
+
     def test_neg_on_loaded_tensor_cse_uses_tensor_ssa(self):
         import sympy
 

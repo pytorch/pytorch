@@ -875,7 +875,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _analyze_index_fragment(
         self, semantic_expr: sympy.Expr
     ) -> tuple[bool, bool, int | None]:
-        if self.vector_load_config is None or self.vector_load_config.vec_size <= 1:
+        if self.vector_load_config is None:
+            return False, False, None
+        if self.vector_load_config.vec_size <= 1:
             return True, False, None
 
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(

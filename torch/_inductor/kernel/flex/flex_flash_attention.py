@@ -78,9 +78,10 @@ def _select_aux_score_mod_vec_size(
     """Choose a safe score_mod vector width for captured tensor loads.
 
     Flex score_mod vectorization is only enabled when every captured tensor
-    index load can be emitted as a direct contiguous vector load. If any load
-    needs scalar gather semantics, force vec_size=1 so the generated score_mod
-    matches scalar-lane lowering.
+    index load can be emitted without per-lane gather semantics: either as a
+    direct contiguous vector load or as a lane-uniform scalar load broadcast to
+    all lanes. If any load needs scalar gather semantics, force vec_size=1 so
+    the generated score_mod matches scalar-lane lowering.
     """
     if graph_module is None:
         return 1
@@ -135,6 +136,8 @@ def _max_direct_aux_load_vec_size(
     if last_expr is None:
         return None
     if kv_idx not in last_expr.free_symbols:
+        # All score_mod vector lanes read the same element, so the load can use
+        # the uniform-broadcast path even though it is not a direct vector copy.
         return 8
 
     sizes = buffer.get_size()
