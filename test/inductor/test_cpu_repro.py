@@ -5268,6 +5268,19 @@ class CPUReproTests(TestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @requires_vectorization
+    def test_vertical_reduction_tail_vec_non_contiguous_store(self):
+        # https://github.com/pytorch/pytorch/issues/181690
+        def fn(x):
+            t = F.instance_norm(x)
+            t = torch.repeat_interleave(t, 2, dim=2)
+            return torch.mean(t, dim=0)
+
+        x = torch.randn((16, 2, 3, 12)).contiguous(memory_format=torch.channels_last)
+
+        with config.patch({"cpp.enable_loop_tail_vec": True}):
+            self.common(fn, (x,))
+
     def test_uint64_pointwise_vec(self):
         def fn(x):
             return x * x
