@@ -219,15 +219,13 @@ def _split_tensor(
         local_tensor = tensor.to_local()
         local_chunks = torch.tensor_split(local_tensor, num_chunks, spec.split_dim)
         # Compute the correct global chunk sizes along split_dim.
-        # torch.tensor_split(N, S) produces chunks of size
-        # N // S + (1 if i < N % S else 0).
         global_split_size = tensor.shape[spec.split_dim]
-        base, rem = divmod(global_split_size, num_chunks)
+        quotient, remainder = divmod(global_split_size, num_chunks)
         global_stride = tensor.stride()
         chunk_tensors_list: list[torch.Tensor] = []
         for i, local_chunk in enumerate(local_chunks):
             chunk_shape = list(tensor.shape)
-            chunk_shape[spec.split_dim] = base + (1 if i < rem else 0)
+            chunk_shape[spec.split_dim] = quotient + (1 if i < remainder else 0)
             chunk_tensors_list.append(
                 DTensor.from_local(
                     local_chunk,
