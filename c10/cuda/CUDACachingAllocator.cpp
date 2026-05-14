@@ -34,6 +34,7 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -140,7 +141,7 @@ namespace Native {
  */
 
 // counter to track order for Mempool Registration
-thread_local int32_t registration_counter_global = -1;
+std::atomic<int32_t> registration_counter_global{-1};
 
 static char SHAREABLE_HANDLE_VERSION = 3;
 enum ShareableHandleType : char {
@@ -165,12 +166,12 @@ void decrease_stat_array(
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorSize(const Block* a, const Block* b);
+static bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
+      : blocks(BlockComparatorSizeCounterAddress),
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
@@ -232,15 +233,14 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {
-    registration_counter = ++registration_counter_global;
-  }
+        ptr(ptr) {}
 
   // constructor for search key
+  // Use the default value for registration_counter and not modify
+  // registration_counter_global, because the search key is just a
+  // dummy placeholder.
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {
-    registration_counter = ++registration_counter_global;
-  }
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -1079,15 +1079,19 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
   if (a->size != b->size) {
     return a->size < b->size;
   }
+  if (a->registration_counter != b->registration_counter) {
+    return a->registration_counter < b->registration_counter;
+  }
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
+
 bool BlockComparatorAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
@@ -1948,6 +1952,7 @@ class DeviceCachingAllocator {
 
       block = new Block(device, stream, size, pool, block->ptr);
       block->expandable_segment_ = remaining->expandable_segment_;
+      block->registration_counter = remaining->registration_counter;
       block->prev = remaining->prev;
       if (block->prev) {
         block->prev->next = block;
@@ -3214,6 +3219,8 @@ class DeviceCachingAllocator {
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment_ = es;
+    candidate->registration_counter =
+        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
     pool->unmapped.insert(candidate);
     return candidate;
   }
@@ -3249,6 +3256,7 @@ class DeviceCachingAllocator {
           static_cast<char*>(to_map->ptr) + mapped_range.size);
       remaining->mapped = false;
       remaining->expandable_segment_ = to_map->expandable_segment_;
+      remaining->registration_counter = to_map->registration_counter;
       remaining->splice(to_map, to_map->next);
       pool.unmapped.insert(remaining);
       to_map->size = mapped_range.size;
@@ -3753,6 +3761,8 @@ class DeviceCachingAllocator {
     total_allocated_memory += size;
     p.block = new Block(
         p.device(), p.stream(), size, p.pool, static_cast<char*>(ptr));
+    p.block->registration_counter =
+        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
@@ -3964,6 +3974,7 @@ class DeviceCachingAllocator {
       Block* before_free = new Block(
           block->device, block->stream, before_size, block->pool, block->ptr);
       before_free->expandable_segment_ = block->expandable_segment_;
+      before_free->registration_counter = block->registration_counter;
       before_free->splice(block->prev, block);
       block->pool->insert_into_blocks(before_free);
     }
@@ -3978,6 +3989,7 @@ class DeviceCachingAllocator {
           block->pool,
           unmapped.ptr + unmapped.size);
       after_free->expandable_segment_ = block->expandable_segment_;
+      after_free->registration_counter = block->registration_counter;
       after_free->splice(block, block->next);
       block->pool->insert_into_blocks(after_free);
     }
