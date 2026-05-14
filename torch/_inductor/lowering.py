@@ -7822,49 +7822,6 @@ def _flatten_control_deps(deps, dep_names):
             dep_names.append(dep.get_name())
 
 
-def _add_passthrough_barriers(output, args, subgraph_ops):
-    """Create identity Pointwise barriers for pass-through outputs.
-
-    When a subgraph returns an input unchanged (pass-through), downstream
-    consumers see the original buffer and have no scheduling dependency on
-    the subgraph operations (e.g. wait_event).  Wrapping each pass-through
-    in an identity Pointwise that is realized creates a new buffer name.
-    Adding additional_buffer_deps from the barrier to the subgraph ops
-    forces the barrier (and therefore its consumers) after the subgraph.
-    """
-    input_ids = {id(a) for a in args}
-
-    subgraph_buf_names = [
-        op.get_name()
-        for op in subgraph_ops
-        if isinstance(op, ir.OperationBuffer)
-    ]
-    if not subgraph_buf_names:
-        return output
-
-    def maybe_barrier(val):
-        if id(val) not in input_ids or not hasattr(val, "make_loader"):
-            return val
-        barrier = Pointwise.create(
-            device=val.get_device(),
-            dtype=val.get_dtype(),
-            inner_fn=val.make_loader(),
-            ranges=list(val.get_size()),
-        )
-        op_count = len(V.graph.operations)
-        barrier.realize()
-        for barrier_op in V.graph.operations[op_count:]:
-            for buf_name in subgraph_buf_names:
-                V.graph.additional_buffer_deps[barrier_op.operation_name].add(
-                    buf_name
-                )
-        return barrier
-
-    if isinstance(output, (list, tuple)):
-        return type(output)(maybe_barrier(v) for v in output)
-    return maybe_barrier(output)
-
-
 @register_lowering(control_deps, type_promotion_kind=None)
 def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     """
@@ -7905,10 +7862,32 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             V.graph.additional_buffer_deps[op_name].add(dep_name)
 
     # Pass-through outputs are the same IR nodes as inputs, so downstream
-    # consumers would have no scheduling dependency on the subgraph ops
-    # (e.g. wait_event).  Interpose identity barriers to fix ordering.
-    if subgraph_ops:
-        output = _add_passthrough_barriers(output, args, subgraph_ops)
+    # consumers see the original buffer and have no scheduling dependency on
+    # the subgraph ops (e.g. record_event, wait_event).  Declare the subgraph
+    # ops as mutating the pass-through buffers so the scheduler's mutation
+    # rename chain forces readers after the subgraph boundary.
+    input_ids = {id(a) for a in args}
+    for op in subgraph_ops:
+        if not isinstance(op, ir.OperationBuffer):
+            continue
+
+        def _add_passthrough_mutations(val):
+            if id(val) not in input_ids or not isinstance(val, IRNode):
+                return
+            val.realize()
+            op.mutation_outputs.append(
+                ir.MutationOutput(
+                    ir.NoneLayout(device=val.get_device()),
+                    val,
+                    op,
+                )
+            )
+
+        if isinstance(output, (list, tuple)):
+            for v in output:
+                _add_passthrough_mutations(v)
+        else:
+            _add_passthrough_mutations(output)
 
     return output
 
