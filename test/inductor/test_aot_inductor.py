@@ -5506,7 +5506,15 @@ class AOTInductorTestsTemplate:
                 return torch.linalg.qr(x)[0]
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
-        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
         FileCheck().check(
             "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
         ).run(code)
