@@ -13,8 +13,14 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .heuristics.template import get_template_heuristic
-from .heuristics.template.triton import (
+from .kernel_inputs import KernelInputs  # noqa: TC001
+from .kernel_template_choice import make_ktc_generator
+from .metrics import get_metric_table, is_metric_table_enabled
+from .runtime.hints import DeviceProperties, ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
+from .template_heuristics import get_template_heuristic
+from .template_heuristics.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
@@ -24,12 +30,6 @@ from .heuristics.template.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
-from .kernel_inputs import KernelInputs  # noqa: TC001
-from .kernel_template_choice import make_ktc_generator
-from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
 
