@@ -89,7 +89,10 @@ set(TORCH_PYTHON_LINK_LIBRARIES
 if(USE_ASAN AND TARGET Sanitizer::address)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
 endif()
-if(USE_ASAN AND TARGET Sanitizer::undefined)
+# Skip UBSan on ROCm: see comment in cmake/Dependencies.cmake (UBSan + ASAN
+# on ROCm Clang produces misaligned ASAN global metadata that aborts at
+# startup).
+if(USE_ASAN AND TARGET Sanitizer::undefined AND NOT USE_ROCM)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
 endif()
 if(USE_LSAN AND TARGET Sanitizer::leak)
