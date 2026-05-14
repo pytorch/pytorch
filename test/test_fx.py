@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -5475,6 +5476,9 @@ class TestVisionTracing(JitTestCase):
             )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
+            model_test = unittest.skipIf(
+                TEST_WITH_ROCM, "Skipped on ROCm"
+            )(model_test)
             setattr(cls, test_name, model_test)
 
     @classmethod
