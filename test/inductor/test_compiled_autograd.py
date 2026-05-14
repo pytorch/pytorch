@@ -5126,12 +5126,10 @@ def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        stack = contextlib.ExitStack()
-        for ctx in ctxs:
-            stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
-        return out
+        with contextlib.ExitStack() as stack:
+            for ctx in ctxs:
+                stack.enter_context(ctx)
+            return fn(self)
 
     return wrapped
 
@@ -5153,8 +5151,10 @@ def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
-        if not callable(fn) or name in skipped_tests:
+        if not callable(fn):
             continue
+        elif name in skipped_tests:
+            dct[name] = unittest.skip("skipped with compiled autograd")(fn)
         elif (
             xfail_re.match(name)
             or name in xfail_by_backend["ca_eager"]
@@ -5201,6 +5201,45 @@ class WrapTestClassTests(TestCase):
         test.setUp()
         test.tearDown()
         self.assertTrue(getattr(test, "super_called", False))
+
+    def test_wrap_closes_contexts_on_error(self):
+        exited = False
+
+        @contextlib.contextmanager
+        def ctx():
+            nonlocal exited
+            try:
+                yield
+            finally:
+                exited = True
+
+        class DummyTest(unittest.TestCase):
+            def test_raises(self):
+                raise RuntimeError("fail")
+
+        wrapped = make_wrapped(DummyTest.test_raises, [ctx()])
+        test = DummyTest("test_raises")
+        with self.assertRaisesRegex(RuntimeError, "fail"):
+            wrapped(test)
+        self.assertTrue(exited)
+
+    def test_wrap_marks_skipped_tests_skipped(self):
+        class DummyTest(unittest.TestCase):
+            def test_skip_me(self):
+                raise AssertionError("should not run")
+
+        skipped_tests.add("test_skip_me")
+        try:
+            wrapped = wrap_test_class(DummyTest)
+        finally:
+            skipped_tests.remove("test_skip_me")
+
+        test = wrapped.__dict__["test_skip_me"]
+        self.assertTrue(getattr(test, "__unittest_skip__", False))
+        self.assertEqual(
+            getattr(test, "__unittest_skip_why__", None),
+            "skipped with compiled autograd",
+        )
 
 
 known_graph_breaks_tests = {
