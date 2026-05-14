@@ -49,7 +49,6 @@ from torch.utils.checkpoint import (
 )
 from torch.utils.data import DataLoader
 
-
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
@@ -60,7 +59,6 @@ device_type = (
 TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase
-
 
 # mypy: disable-error-code="name-defined"
 
@@ -784,16 +782,14 @@ class TestStandaloneCPPJIT(TestCase):
         build_dir = tempfile.mkdtemp()
         try:
             src_path = os.path.join(build_dir, "main.cpp")
-            src = textwrap.dedent(
-                """\
+            src = textwrap.dedent("""\
                 #include <iostream>
                 #include <torch/torch.h>
                 int main() {
                     auto x = torch::eye(3);
                     std::cout << x << std::endl;
                 }
-            """
-            )
+            """)
             with open(src_path, "w") as f:
                 f.write(src)
 
@@ -813,6 +809,7 @@ class TestStandaloneCPPJIT(TestCase):
             for shell in [True, False]:
                 r = subprocess.run(
                     [exec_path],
+                    check=False,
                     shell=shell,
                     stdout=subprocess.PIPE,
                 )
@@ -820,14 +817,12 @@ class TestStandaloneCPPJIT(TestCase):
                 self.assertEqual(
                     # Windows prints "\r\n" for newlines.
                     textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
-                    textwrap.dedent(
-                        """\
+                    textwrap.dedent("""\
                      1  0  0
                      0  1  0
                      0  0  1
                     [ CPUFloatType{3,3} ]
-                    """
-                    ),
+                    """),
                 )
 
         finally:

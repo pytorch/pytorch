@@ -17,7 +17,6 @@ import time
 from enum import Enum
 from typing import NamedTuple
 
-
 LINTER_CODE = "SHELLCHECK"
 
 
@@ -48,6 +47,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:

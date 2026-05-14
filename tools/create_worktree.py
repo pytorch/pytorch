@@ -72,6 +72,7 @@ def get_submodule_commit(parent_repo: Path, submodule_path: str) -> str | None:
     """Get the commit hash a parent repo expects for a submodule."""
     result = subprocess.run(
         ["git", "ls-tree", "HEAD", submodule_path],
+        check=False,
         capture_output=True,
         text=True,
         cwd=parent_repo,
@@ -165,6 +166,7 @@ def clone_submodule_recursive(
     # `git submodule status --recursive` recognizes them.
     subprocess.run(
         ["git", "submodule", "init"],
+        check=False,
         cwd=worktree_sub,
         capture_output=True,
         text=True,

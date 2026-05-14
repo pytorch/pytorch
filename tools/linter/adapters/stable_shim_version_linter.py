@@ -14,7 +14,6 @@ import re
 import sys
 from pathlib import Path
 
-
 # Add repo root to sys.path so we can import from tools.setup_helpers
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
@@ -25,7 +24,6 @@ from tools.linter.adapters._stable_shim_utils import (
     LintSeverity,
     PreprocessorTracker,
 )
-
 
 LINTER_CODE = "STABLE_SHIM_VERSION"
 
@@ -68,6 +66,7 @@ def get_added_lines(filename: str) -> set[int]:
         # Check uncommitted changes (working directory vs HEAD)
         result = subprocess.run(
             ["git", "diff", "HEAD", filename],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
@@ -78,6 +77,7 @@ def get_added_lines(filename: str) -> set[int]:
         # Get merge-base with origin/main to check all PR commits
         result = subprocess.run(
             ["git", "fetch", "origin", "main"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=600,
@@ -89,6 +89,7 @@ def get_added_lines(filename: str) -> set[int]:
 
         result = subprocess.run(
             ["git", "merge-base", "HEAD", "origin/main"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
@@ -103,6 +104,7 @@ def get_added_lines(filename: str) -> set[int]:
         merge_base = result.stdout.strip()
         result = subprocess.run(
             ["git", "diff", f"{merge_base}..HEAD", filename],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
@@ -285,11 +287,11 @@ if __name__ == "__main__":
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET
-        if args.verbose
-        else logging.DEBUG
-        if len(args.filenames) < 1000
-        else logging.INFO,
+        level=(
+            logging.NOTSET
+            if args.verbose
+            else logging.DEBUG if len(args.filenames) < 1000 else logging.INFO
+        ),
         stream=sys.stderr,
     )
 

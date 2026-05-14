@@ -4599,6 +4599,7 @@ torch.testing.assert_close(out_export, out_orig)
 """
         result = subprocess.run(
             [sys.executable, "-c", code],
+            check=False,
             env=env,
             capture_output=True,
             text=True,

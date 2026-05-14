@@ -12,7 +12,6 @@ import time
 from enum import Enum
 from typing import NamedTuple
 
-
 LINTER_CODE = "ACTIONLINT"
 
 
@@ -35,8 +34,7 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-RESULTS_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+RESULTS_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
@@ -44,8 +42,7 @@ RESULTS_RE: re.Pattern[str] = re.compile(
     \s(?P<message>.*)
     \s(?P<code>\[.*\])
     $
-    """
-)
+    """)
 
 
 def run_command(
@@ -56,6 +53,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:

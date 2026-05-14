@@ -60,8 +60,7 @@ class LintMessage(NamedTuple):
 
 
 # Note: This regex pattern is kept for reference but not used for pyrefly JSON parsing
-RESULTS_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+RESULTS_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
@@ -70,20 +69,17 @@ RESULTS_RE: re.Pattern[str] = re.compile(
     \s(?P<message>.*)
     \s(?P<code>\[.*\])
     $
-    """
-)
+    """)
 
 # torch/_dynamo/variables/tensor.py:363: error: INTERNAL ERROR
-INTERNAL_ERROR_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+INTERNAL_ERROR_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
     \s(?P<severity>\S+?):?
     \s(?P<message>INTERNAL\sERROR.*)
     $
-    """
-)
+    """)
 
 
 def run_command(
@@ -97,6 +93,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:
@@ -209,9 +206,11 @@ def check_files(
                 line=error["line"],
                 char=error["column"],
                 code=code,
-                severity=LintSeverity.ADVICE
-                if error["name"] == "deprecated"
-                else LintSeverity.ERROR,
+                severity=(
+                    LintSeverity.ADVICE
+                    if error["name"] == "deprecated"
+                    else LintSeverity.ERROR
+                ),
                 original=None,
                 replacement=None,
             )

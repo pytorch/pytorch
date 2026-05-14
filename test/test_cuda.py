@@ -102,7 +102,6 @@ from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
 
-
 requiresCppContext = unittest.skipUnless(
     (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
 )
@@ -456,7 +455,9 @@ torch.cuda.memory._set_allocator_settings(
 t = torch.ones(1024 * 1024, pin_memory=True)
 print(t.is_pinned())
 """
-        proc = subprocess.run([sys.executable, "-c", script], capture_output=True)
+        proc = subprocess.run(
+            [sys.executable, "-c", script], check=False, capture_output=True
+        )
         self.assertEqual(proc.returncode, 0)
 
     def test_cudart_register(self):
@@ -3014,7 +3015,7 @@ exit(2)
     @serialTest()
     @blas_library_context("cublas")
     def test_repeat_graph_capture_cublas_workspace_memory(self):
-        (x, y, z) = 1024, 512, 64
+        x, y, z = 1024, 512, 64
         a = torch.rand((x, y), device="cuda")
         b = torch.rand((y, z), device="cuda")
 
@@ -6700,9 +6701,11 @@ class TestMemPool(TestCase):
         dummy_allocator_libname = "dummy_allocator"
         dummy_allocator = load_inline(
             name=dummy_allocator_libname,
-            cpp_sources=dummy_allocator_source_vars
-            if check_vars
-            else dummy_allocator_source_no_vars,
+            cpp_sources=(
+                dummy_allocator_source_vars
+                if check_vars
+                else dummy_allocator_source_no_vars
+            ),
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
@@ -8225,9 +8228,11 @@ class TestCudaOptims(TestCase):
                             tracker.pop_check_set(
                                 actual,
                                 self,
-                                assert_eq_kwargs
-                                if k == "exp_avg_sq" or k == "max_exp_avg_sq"
-                                else {},
+                                (
+                                    assert_eq_kwargs
+                                    if k == "exp_avg_sq" or k == "max_exp_avg_sq"
+                                    else {}
+                                ),
                             )
 
     @onlyCUDA

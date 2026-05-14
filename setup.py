@@ -247,7 +247,6 @@ from __future__ import annotations
 import os
 import sys
 
-
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
         "32-bit Windows Python runtime is not supported. "
@@ -257,7 +256,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-
 
 # Also update `project.requires-python` in pyproject.toml when changing this
 python_min_version = (3, 10, 0)
@@ -288,7 +286,6 @@ import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
-
 
 CWD = Path(__file__).absolute().parent
 
@@ -426,6 +423,7 @@ for i, arg in enumerate(sys.argv):
                     "-v",
                     "--no-build-isolation",
                 ],
+                check=False,
                 env={**os.environ},
             )
             sys.exit(result.returncode)
@@ -533,7 +531,9 @@ def get_nightly_git_hash(version: str) -> str:
             torch_version_spec,
         ]
 
-        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            download_cmd, check=False, capture_output=True, text=True
+        )
         if result.returncode != 0:
             raise RuntimeError(
                 f"Failed to download {version} wheel for git hash extraction: {result.stderr}"
@@ -679,7 +679,9 @@ def download_and_extract_nightly_wheel(version: str) -> None:
         ]
 
         report("-- Downloading nightly PyTorch wheel...")
-        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            download_cmd, check=False, capture_output=True, text=True
+        )
         if result.returncode != 0:
             # Try to get the latest nightly version for the same variant to help the user
             variant = extract_variant_from_version(version)

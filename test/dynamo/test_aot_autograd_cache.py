@@ -1217,7 +1217,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             # 3. Use the wrapped result with capture_triton
             kernel_fn = inner_kernel  # Direct assignment from global
             wrapped_kernel = identity_wrapper(kernel_fn)  # Wrapper call
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            grid = lambda meta: (
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )  # noqa: E731
             capture_triton(wrapped_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
             return y
 
@@ -1332,7 +1334,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         def helper_that_calls_kernel(y, n_elements):
             """Helper function that contains the triton kernel call."""
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            grid = lambda meta: (
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )  # noqa: E731
             capture_triton(nested_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
 
         @torch._library.triton_op("test::recursive_func_triton_op", mutates_args=())
@@ -1394,7 +1398,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             y = x.clone()
             n_elements = y.numel()
             kernel = get_kernel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            grid = lambda meta: (
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )  # noqa: E731
             capture_triton(kernel)[grid](y, n_elements, BLOCK_SIZE=256)
             return y
 
@@ -1462,7 +1468,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             y = x.clone()
             n_elements = y.numel()
             kernel = get_cached_kernel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            grid = lambda meta: (
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )  # noqa: E731
             capture_triton(kernel)[grid](y, n_elements, BLOCK_SIZE=256)
             return y
 
@@ -2014,7 +2022,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             z = x * y
             return (torch.cat((x, x), dim=0), z)
 
-        (x1, y1) = torch.randn(5, requires_grad=True), torch.randn(5)
+        x1, y1 = torch.randn(5, requires_grad=True), torch.randn(5)
         compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
         x_compiled, _ = compiled_fn(x1, y1)
         x_compiled.sum().backward()
@@ -2025,7 +2033,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self._clear_dynamo_and_codecache()
 
         # Run a second time and see it cache hit instead of erroring
-        (x2, y2) = torch.randn(5, requires_grad=True), torch.randn(5)
+        x2, y2 = torch.randn(5, requires_grad=True), torch.randn(5)
         x_compiled, _ = compiled_fn(x2, y2)
         x_compiled.sum().backward()
 
@@ -3024,8 +3032,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         import textwrap
 
         with tempfile.TemporaryDirectory() as cache_dir:
-            script_template = textwrap.dedent(
-                """
+            script_template = textwrap.dedent("""
                 import json
                 import operator
                 import torch
@@ -3069,8 +3076,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 compiled_fn(x, y)
 
                 print(json.dumps(dict(counters["aot_autograd"])))
-                """
-            )
+                """)
 
             env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
 
@@ -3081,6 +3087,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 )
                 result = subprocess.run(
                     [sys.executable, "-c", script],
+                    check=False,
                     env=env,
                     capture_output=True,
                     text=True,

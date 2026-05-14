@@ -11,7 +11,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 
-
 try:
     from tqdm import tqdm
 
@@ -116,6 +115,7 @@ def run_fuzzer_with_seed(
 
         result = subprocess.run(
             cmd,
+            check=False,
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout per seed
@@ -275,6 +275,7 @@ def run_multi_process_fuzzer(
                 def write_func(msg):
                     # pyrefly: ignore [missing-attribute]
                     pbar.write(msg)
+
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
                 pbar = None
@@ -570,6 +571,7 @@ def run_until_failure(
                     def write_func(msg):
                         # pyrefly: ignore [missing-attribute]
                         pbar.write(msg)
+
                 else:
                     pbar = None
 

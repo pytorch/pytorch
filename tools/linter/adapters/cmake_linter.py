@@ -17,7 +17,6 @@ import time
 from enum import Enum
 from typing import NamedTuple
 
-
 LINTER_CODE = "CMAKE"
 
 
@@ -41,16 +40,14 @@ class LintMessage(NamedTuple):
 
 
 # CMakeLists.txt:901: Lines should be <= 80 characters long [linelength]
-RESULTS_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+RESULTS_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
     \s(?P<message>.*)
     \s(?P<code>\[.*\])
     $
-    """
-)
+    """)
 
 
 def run_command(
@@ -61,6 +58,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:

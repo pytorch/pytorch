@@ -23,7 +23,6 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -686,6 +685,7 @@ def run_coverxygen(xml_dir: Path) -> str:
                 "--exclude",
                 ".*/stable/library\\.h",
             ],
+            check=False,
             capture_output=True,
             text=True,
             timeout=120,

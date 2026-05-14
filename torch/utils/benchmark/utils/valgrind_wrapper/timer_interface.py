@@ -612,6 +612,7 @@ class _ValgrindWrapper:
                     args,
                     stdout=f_stdout_stderr,
                     stderr=subprocess.STDOUT,
+                    check=False,
                     **kwargs,
                 )
                 with open(stdout_stderr_log) as f:

@@ -14,7 +14,6 @@ import time
 from enum import Enum
 from typing import NamedTuple
 
-
 IS_WINDOWS: bool = os.name == "nt"
 MAX_FILE_SIZE: int = 1024 * 1024 * 1024  # 1GB in bytes
 MAX_MATCHES_PER_FILE: int = 100  # Maximum number of matches to report per file
@@ -58,6 +57,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:
@@ -321,11 +321,11 @@ def main() -> None:
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET
-        if args.verbose
-        else logging.DEBUG
-        if len(args.filenames) < 1000
-        else logging.INFO,
+        level=(
+            logging.NOTSET
+            if args.verbose
+            else logging.DEBUG if len(args.filenames) < 1000 else logging.INFO
+        ),
         stream=sys.stderr,
     )
 

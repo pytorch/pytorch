@@ -30,7 +30,6 @@ from datetime import datetime
 from math import exp, log
 from pathlib import Path
 
-
 WORKFLOWS = {
     "a100": {
         "name": "inductor-A100-perf-nightly",
@@ -109,7 +108,7 @@ SUITE_ALIASES = {
 
 def gh(*args: str, json_output: bool = False) -> str | dict | list:
     cmd = ["gh"] + list(args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"gh error: {result.stderr.strip()}", file=sys.stderr)
         sys.exit(1)
@@ -119,7 +118,9 @@ def gh(*args: str, json_output: bool = False) -> str | dict | list:
 
 
 def git(*args: str) -> str:
-    result = subprocess.run(["git"] + list(args), capture_output=True, text=True)
+    result = subprocess.run(
+        ["git"] + list(args), check=False, capture_output=True, text=True
+    )
     return result.stdout.strip()
 
 

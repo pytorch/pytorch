@@ -33,8 +33,7 @@ class LintMessage(NamedTuple):
 
 
 # tools/linter/flake8_linter.py:15:13: error: Incompatibl...int")  [assignment]
-RESULTS_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+RESULTS_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
@@ -43,20 +42,17 @@ RESULTS_RE: re.Pattern[str] = re.compile(
     \s(?P<message>.*)
     \s(?P<code>\[.*\])
     $
-    """
-)
+    """)
 
 # torch/_dynamo/variables/tensor.py:363: error: INTERNAL ERROR
-INTERNAL_ERROR_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
+INTERNAL_ERROR_RE: re.Pattern[str] = re.compile(r"""(?mx)
     ^
     (?P<file>.*?):
     (?P<line>\d+):
     \s(?P<severity>\S+?):?
     \s(?P<message>INTERNAL\sERROR.*)
     $
-    """
-)
+    """)
 
 
 def run_command(
@@ -70,6 +66,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
+            check=False,
             capture_output=True,
         )
     finally:
@@ -166,9 +163,11 @@ def check_files(
             name=match["code"],
             description=match["message"],
             line=int(match["line"]),
-            char=int(match["column"])
-            if match["column"] is not None and not match["column"].startswith("-")
-            else None,
+            char=(
+                int(match["column"])
+                if match["column"] is not None and not match["column"].startswith("-")
+                else None
+            ),
             code=code,
             severity=severities.get(match["severity"], LintSeverity.ERROR),
             original=None,
@@ -227,11 +226,11 @@ def main() -> None:
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET
-        if args.verbose
-        else logging.DEBUG
-        if len(args.filenames) < 1000
-        else logging.INFO,
+        level=(
+            logging.NOTSET
+            if args.verbose
+            else logging.DEBUG if len(args.filenames) < 1000 else logging.INFO
+        ),
         stream=sys.stderr,
     )
 

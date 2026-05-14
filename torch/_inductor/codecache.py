@@ -140,7 +140,6 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
 from .virtualized import V
 
-
 T = TypeVar("T")
 
 if TYPE_CHECKING:
@@ -460,9 +459,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(content, (str, bytes)), (
-        "Only strings and byte arrays can be saved in the cache"
-    )
+    assert isinstance(
+        content, (str, bytes)
+    ), "Only strings and byte arrays can be saved in the cache"
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1800,8 +1799,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1887,9 +1887,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(compiled_graph, CompiledFxGraph), (
-            f"serialization for {type(compiled_graph)} NYI"
-        )
+        assert isinstance(
+            compiled_graph, CompiledFxGraph
+        ), f"serialization for {type(compiled_graph)} NYI"
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -2024,8 +2024,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -2054,8 +2055,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                     time_saved_ns // 1000,
                 )
                 if (
-                    ephemeral_increase
-                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
+                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                        time_saved_ns
+                    )
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
@@ -2110,9 +2112,9 @@ class CudaKernelParamCache:
     ) -> None:
         basename = None
         if config.aot_inductor.package_cpp_only:
-            assert config.triton.unique_kernel_names, (
-                "package_cpp_only requires triton kernel names to be unique"
-            )
+            assert (
+                config.triton.unique_kernel_names
+            ), "package_cpp_only requires triton kernel names to be unique"
             assert params["mangled_name"], "Missing kernel name"
             basename = params["mangled_name"]
 
@@ -2134,9 +2136,9 @@ class CudaKernelParamCache:
                 XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
-            assert bin_type in bin_type_to_ext, (
-                "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
-            )
+            assert (
+                bin_type in bin_type_to_ext
+            ), "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             base_path, _ = os.path.splitext(bin_path)
             bin_path = base_path + bin_type_to_ext[bin_type]
 
@@ -2617,9 +2619,9 @@ end
                 )
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(v, (str)), (
-                    "Metadata must only contain strings"
-                )
+                assert isinstance(k, str) and isinstance(
+                    v, (str)
+                ), "Metadata must only contain strings"
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
@@ -2859,7 +2861,9 @@ end
             # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
             # user model code.
 
-            qual_name_to_id = {}  # Map from constant name to its name in constants folder
+            qual_name_to_id = (
+                {}
+            )  # Map from constant name to its name in constants folder
             for custom_obj_idx, (name, constant) in enumerate(
                 graph.torchbind_constants.items()
             ):
@@ -2901,9 +2905,9 @@ end
             gpu_codecache.aot_kernels_o.clear()
 
             if gpu_kernels_o:
-                assert not config.aot_inductor.emit_multi_arch_kernel, (
-                    "TODO: add emit_multi_arch_kernel support for cutlass kernels"
-                )
+                assert (
+                    not config.aot_inductor.emit_multi_arch_kernel
+                ), "TODO: add emit_multi_arch_kernel support for cutlass kernels"
 
             cubins_o = []
             asm_files = []
@@ -3261,9 +3265,9 @@ def _precompile_header(
     hashable_cmd_line: str,
     **compile_command: Any,
 ) -> str:
-    assert not _IS_WINDOWS, (
-        "CppBuilder does not currently support precompiling on Windows!"
-    )
+    assert (
+        not _IS_WINDOWS
+    ), "CppBuilder does not currently support precompiling on Windows!"
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
@@ -3286,7 +3290,10 @@ def _precompile_header(
             but calling a fast hashing utility in a subprocess is cheap."""
             # If Windows support needs to be added here, use certutil -hashfile.
             cmd_output = subprocess.run(
-                ("openssl", "sha512", filename), capture_output=True, text=True
+                ("openssl", "sha512", filename),
+                check=False,
+                capture_output=True,
+                text=True,
             )
             return cmd_output.stdout.split()[-1]
 
@@ -3575,8 +3582,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     entry_function = "kernel"
     call_entry_function = "kernel({}); Py_RETURN_NONE;"
     extra_parse_arg = ""
-    suffix_template = textwrap.dedent(
-        """
+    suffix_template = textwrap.dedent("""
         // Python bindings to call {entry_func}():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
@@ -3661,8 +3667,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             #endif
             return module;
         }}
-        """
-    )
+        """)
 
     @classmethod
     # pyrefly: ignore [bad-override]
@@ -3760,8 +3765,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     }
     entry_function = "inductor_entry_cpp"
     call_entry_function = "return inductor_entry_cpp({});"
-    extra_parse_arg = textwrap.dedent(
-        """
+    extra_parse_arg = textwrap.dedent("""
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
         static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {{
@@ -3811,8 +3815,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 return nullptr;
             }}
         }}
-        """
-    )
+        """)
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
@@ -3824,8 +3827,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], ModuleType | CDLL]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: str | None = None
-    prefix = textwrap.dedent(
-        """
+    prefix = textwrap.dedent("""
         #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
@@ -3841,19 +3843,15 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 return a / b;
             }}
         }}
-        """
-    )
-    glue_template_cpp = prefix + textwrap.dedent(
-        """
+        """)
+    glue_template_cpp = prefix + textwrap.dedent("""
         void kernel({argdefs}) {{
             {buffers}
             int err = halide_kernel({buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
-        """
-    )
-    glue_template_cuda = prefix + textwrap.dedent(
-        """
+        """)
+    glue_template_cuda = prefix + textwrap.dedent("""
         #include <cuda.h>
         static const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
 
@@ -3862,10 +3860,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             int err = halide_kernel(reinterpret_cast<void*>(stream), {buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
-        """
-    )
-    standalone_runtime_cuda_init = textwrap.dedent(
-        """
+        """)
+    standalone_runtime_cuda_init = textwrap.dedent("""
         #include "{}"
         #include <cuda.h>
 
@@ -3894,8 +3890,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         }}
 
         int inductor_register_halide_hooks_result = register_halide_hooks();
-        """
-    )
+        """)
 
     @classmethod
     def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> list[str]:
@@ -3920,9 +3915,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
-            if len(dims) > 0
-            else f"halide_dimension_t * {name}_dims = nullptr;",
+            (
+                f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+                if len(dims) > 0
+                else f"halide_dimension_t * {name}_dims = nullptr;"
+            ),
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
@@ -4205,14 +4202,12 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                 # pyrefly: ignore [unsupported-operation]
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
-                    textwrap.dedent(
-                        f"""\
+                    textwrap.dedent(f"""\
                         import sys, tempfile
                         with tempfile.TemporaryDirectory() as out:
                             sys.argv = {["repro.py", *cmd]!r}
                             hl.main()
-                        """
-                    ),
+                        """),
                     "    ",
                 )
                 code = code.replace(main, repl)

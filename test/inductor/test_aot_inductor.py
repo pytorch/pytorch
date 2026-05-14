@@ -105,7 +105,6 @@ from torch.utils._triton import (
     has_triton_tensor_descriptor_host_tma,
 )
 
-
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 
 
@@ -8396,7 +8395,9 @@ class AOTInductorTestsTemplate:
             r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
         ).check("wrap_with_raii_handle_if_needed(buf0_handle);").check(
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
-        ).run(code)
+        ).run(
+            code
+        )
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -8661,7 +8662,10 @@ import torch
 torch._inductor.aoti_load_package("{model_path}")
 """
             result = subprocess.run(
-                [sys.executable, "-c", script], capture_output=True, text=True
+                [sys.executable, "-c", script],
+                check=False,
+                capture_output=True,
+                text=True,
             )
             self.assertEqual(
                 result.returncode,

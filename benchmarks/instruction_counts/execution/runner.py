@@ -13,7 +13,6 @@ from worker.main import WorkerFailure, WorkerOutput
 
 from execution.work import InProgress, PYTHON_CMD, SHELL, WorkOrder
 
-
 CPU_COUNT: int = multiprocessing.cpu_count()
 
 
@@ -218,17 +217,12 @@ class Runner:
             job.proc.interrupt()
 
         if verbose and self._currently_processed is not None:
-            print(
-                textwrap.dedent(
-                    f"""
+            print(textwrap.dedent(f"""
                 Failed when processing the following Job:
                   Label:      {self._currently_processed.label}
                   AutoLabels: {self._currently_processed.autolabels}
                   Source cmd: {self._currently_processed.source_cmd}
-            """
-                ).strip()
-                + "\n"
-            )
+            """).strip() + "\n")
 
         if self._active_jobs:
             time.sleep(0.5)
@@ -266,6 +260,7 @@ class Runner:
             cmd = f'{source_cmd}{PYTHON_CMD} -c "import torch"'
             proc = subprocess.run(
                 cmd,
+                check=False,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

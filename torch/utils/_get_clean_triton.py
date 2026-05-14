@@ -109,6 +109,7 @@ def process_file(
 
             result = subprocess.run(
                 [sys.executable, input_filename],
+                check=False,
                 env=env,
                 capture_output=True,
                 text=True,

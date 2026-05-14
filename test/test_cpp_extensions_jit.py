@@ -30,7 +30,6 @@ from torch.utils.cpp_extension import (
     ROCM_HOME,
 )
 
-
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
@@ -157,7 +156,9 @@ class TestCppExtensionJIT(common.TestCase):
             if IS_WINDOWS:
                 # rmtree returns permission error: [WinError 5] Access is denied
                 # on Windows, this is a workaround
-                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
+                subprocess.run(
+                    ["rd", "/s", "/q", temp_dir], check=False, stdout=subprocess.PIPE
+                )
             else:
                 shutil.rmtree(temp_dir)
 
@@ -305,7 +306,9 @@ class TestCppExtensionJIT(common.TestCase):
             if IS_WINDOWS:
                 # rmtree returns permission error: [WinError 5] Access is denied
                 # on Windows, this is a word-around
-                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
+                subprocess.run(
+                    ["rm", "-rf", temp_dir], check=False, stdout=subprocess.PIPE
+                )
             else:
                 shutil.rmtree(temp_dir)
 
@@ -1528,6 +1531,7 @@ except RuntimeError as e:
 
                 result = subprocess.run(
                     [sys.executable, "-c", test_script],
+                    check=False,
                     capture_output=True,
                     text=True,
                     env=env,
