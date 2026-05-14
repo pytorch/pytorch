@@ -34,7 +34,13 @@ from functools import lru_cache, partial
 from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
-from types import ModuleType
+from types import (
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    FunctionType,
+    MethodType,
+    ModuleType,
+)
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -128,7 +134,7 @@ from .cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from .output_code import CompiledFxGraph
-from .remote_cache import create_cache
+from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
@@ -190,18 +196,29 @@ def get_device_information(device_type: str) -> dict[str, str]:
     return metadata
 
 
+from torch.utils._functools import prefetchable_cache as torch_key_cache
+
+
+@torch_key_cache
+def triton_key() -> str | None:
+    from torch._inductor.runtime.triton_compat import (
+        HAS_TRITON,
+        triton_key as _triton_key_impl,
+    )
+
+    # Use triton_key instead of triton.__version__ as the version
+    # is not updated with each code change
+    if HAS_TRITON:
+        return _triton_key_impl()
+    return None
+
+
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
-
-        if HAS_TRITON:
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
+        with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
-        else:
-            triton_version = None
 
         try:
             system: dict[str, Any] = {
@@ -481,6 +498,13 @@ def _ident(x: T) -> T:
     return x
 
 
+def _unpicklable_error(key: str) -> NoReturn:
+    raise RuntimeError(
+        f"Attempted to unpickle an object that was pickled only for cache-key "
+        f"hashing and cannot be reconstructed (key={key!r})"
+    )
+
+
 def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
@@ -493,6 +517,48 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+# Types that pickle handles natively via GLOBAL/INST opcodes even though their
+# __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
+# reducer_override to avoid infinite recursion.
+# We use a tuple for isinstance() checks so subclasses are also matched
+# (e.g. ABCMeta is a subclass of type).
+_PICKLE_NATIVE_TYPES_TUPLE = (
+    FunctionType,
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    MethodType,
+    type,
+)
+
+
+def _get_stable_obj_key(obj: object) -> str | None:
+    """Produce a deterministic string key for an otherwise-unpicklable object.
+
+    Used by FxGraphCachePickler.reducer_override as a fallback for objects
+    whose types don't support default pickling (e.g. pybind11 enums).
+
+    The key is derived from the object's fully-qualified type name plus
+    values obtained via known accessor patterns (pybind11 enum, Python enum,
+    etc.).  Returns ``None`` if no accessor succeeds, letting the caller
+    decide how to handle the failure.
+    """
+    t = type(obj)
+    type_id = f"{t.__module__}.{t.__qualname__}"
+    parts = []
+    for accessor in (
+        lambda o: o.type.name,  # pybind11 enum pattern
+        lambda o: o.name,  # Python enum / named constant pattern
+        lambda o: o.value,  # value-based pattern
+    ):
+        try:
+            parts.append(str(accessor(obj)))
+        except Exception:
+            continue
+    if parts:
+        return f"{type_id}:{repr(parts)}"
+    return None
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -500,6 +566,11 @@ class FxGraphCachePickler(pickle.Pickler):
     objects that don't pickle and/or vary between runs, and we want to capture the
     data that allow us to compute a stable, but safe hash.
     """
+
+    # Cache probe results so we only call __reduce_ex__ once per type.
+    # Maps type -> True (pickleable) or False (unpickleable).
+    # Class-level because a type's picklability doesn't change at runtime.
+    _pickleable_type_cache: dict[type, bool] = {}
 
     def __init__(
         self,
@@ -543,6 +614,52 @@ class FxGraphCachePickler(pickle.Pickler):
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        """Fallback reducer for objects not registered in dispatch_table.
+
+        This handles extension types (e.g. pybind11 enums) that don't support
+        default pickling.  Instead of bypassing the FX graph cache entirely,
+        we serialize a deterministic string representation of the object which
+        is sufficient for cache-key hashing.
+        """
+        t = type(obj)
+        # Types already registered or handled by default pickle.
+        # Use isinstance for _PICKLE_NATIVE_TYPES to cover subclasses
+        # (e.g. ABCMeta is a subclass of type, and pickle handles all
+        # type/class objects natively via GLOBAL opcode).
+        if t in self.dispatch_table or isinstance(obj, _PICKLE_NATIVE_TYPES_TUPLE):
+            return NotImplemented
+        # Fast path: type already probed.
+        if (pickleable := self._pickleable_type_cache.get(t)) is not None:
+            if not pickleable:
+                return self._reduce_unpicklable(obj)
+            return NotImplemented
+        # First encounter: probe whether the default reduce protocol works.
+        try:
+            result = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+        except (TypeError, AttributeError, pickle.PicklingError):
+            self._pickleable_type_cache[t] = False
+            return self._reduce_unpicklable(obj)
+        except RuntimeError as e:
+            if "is not pickleable" in str(e):
+                self._pickleable_type_cache[t] = False
+                return self._reduce_unpicklable(obj)
+            raise
+        # Default pickling works – let pickle handle it.
+        self._pickleable_type_cache[t] = True
+        return result
+
+    @staticmethod
+    def _reduce_unpicklable(obj: Any) -> Any:
+        key = _get_stable_obj_key(obj)
+        if key is None:
+            raise BypassFxGraphCache(
+                f"Cannot produce stable cache key for unpicklable type "
+                f"{type(obj).__qualname__}"
+            )
+        return _unpicklable_error, (key,)
 
     def _reduce_fake_tensor(
         self, t: Tensor
@@ -742,31 +859,6 @@ def build_code_hash(
         if lib.ispkg:
             # need to also hash submodules
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
-
-
-def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
-    """
-    This function is a reimplementation of functools.lru_cache with a
-    set function that allows prepopulating the cache.
-    """
-    # Use list for reference semantics
-    _cache: list[bytes] = []
-
-    def wrapper() -> bytes:
-        if len(_cache) == 0:
-            _cache.append(func())
-        return _cache[0]
-
-    def set_val(val: bytes) -> None:
-        assert len(_cache) == 0
-        _cache.append(val)
-
-    def clear() -> None:
-        _cache.clear()
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    return wrapper
 
 
 @torch_key_cache
@@ -1002,12 +1094,16 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
         and isinstance(custom_pass, CustomGraphPass)
         and custom_pass.uuid() is not None
     )
+    pass_name = (
+        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+        if custom_pass is not None
+        else "<none>"
+    )
 
     if timing == "default":
         supports_late = custom_pass is None or has_uuid
         timing = "late" if supports_late else "early"
         if timing == "early" and custom_pass:
-            pass_name = type(custom_pass).__qualname__
             if pass_name not in _warned_pre_grad_pass_missing_uuid:
                 _warned_pre_grad_pass_missing_uuid.add(pass_name)
                 log.warning(
@@ -1024,7 +1120,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(
-            "pre_grad_custom_pass must implement uuid() to run late "
+            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
@@ -1183,7 +1279,9 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        self.inductor_config = config.save_config_portable(ignore_private_configs=False)
+        self.inductor_config = config.save_config_portable(
+            ignore_private_configs=False, readonly_values=True
+        )
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
@@ -1218,7 +1316,9 @@ class FxGraphHashDetails:
 
         # Save custom inductor codegen configs
         self.custom_backend_codegen_configs = {
-            device: custom_config.save_config_portable(ignore_private_configs=False)
+            device: custom_config.save_config_portable(
+                ignore_private_configs=False, readonly_values=True
+            )
             for device, custom_config in custom_backend_codegen_configs.items()
             if custom_config is not None
         }
@@ -1558,6 +1658,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_hit_count",
@@ -1573,6 +1674,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 key,
             )
         if local_miss:
+            cache_stats.miss("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_miss_count",
@@ -1824,6 +1926,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
+                cache_stats.put("LocalFxGraphCache")
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)

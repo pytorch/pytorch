@@ -1426,10 +1426,11 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
-IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_ARM64 = platform.machine() in ('arm64', 'aarch64', 'ARM64')
 IS_S390X = platform.machine() == "s390x"
 IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
 IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
+IS_CPU_CAPABILITY_SVE = torch._C._get_cpu_capability() in ("SVE128", "SVE256")
 IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
@@ -1516,6 +1517,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
@@ -1814,6 +1816,9 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+
+requires_mkl = unittest.skipUnless(TEST_MKL, "Test requires MKL")
+requires_onednn = unittest.skipUnless(TEST_ONEDNN, "Test requires OneDNN/MKLDNN")
 
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
@@ -2195,6 +2200,22 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
     decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
+def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    """Old skipIfRocm that silently drops classes from discovery. Migrate to skipIfRocm."""
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
 def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
 
@@ -2245,6 +2266,22 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
     return decorator(func) if func is not None else decorator
 
+def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
+    """Old skipIfXpu that silently drops classes from discovery. Migrate to skipIfXpu."""
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
 def skipIfMPS(fn):
     reason = "test doesn't currently work with MPS"
     # Class-level skip falls back to the global TEST_MPS check; the wrapper
@@ -2285,6 +2322,16 @@ def skipIfMPS(fn):
 
 def skipIfHpu(fn):
     return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+
+def skipIfHpu_BUGGY(fn):
+    """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def getRocmVersion() -> tuple[int, int]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
@@ -2369,6 +2416,15 @@ def setBlasBackendsToDefaultFinally(fn):
                 torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
+def setSdpaBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_rocm_fa_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(_preferred_backend)
+    return _fn
 
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
@@ -3272,6 +3328,9 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    _prev_torch_function_mode_stack_len: int = 0
+    _prev_torch_function_state = torch._C._TorchFunctionState.ENABLED
+
     # Always use difflib to print diffs on multi line equality.
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
@@ -3684,6 +3743,8 @@ class TestCase(expecttest.TestCase):
 
         # attempt to reset some global state at the end of the test
         self._prev_grad_state = torch.is_grad_enabled()
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -3705,6 +3766,25 @@ class TestCase(expecttest.TestCase):
         # attribute may not be defined, per above
         if hasattr(self, '_prev_grad_state'):
             torch.set_grad_enabled(self._prev_grad_state)
+
+        # torch.set_default_device pushes a DeviceContext onto the torch
+        # function mode stack, so this check also catches leaked default devices.
+        after = torch._C._len_torch_function_stack()
+        if after != self._prev_torch_function_mode_stack_len:
+            for _ in range(after - self._prev_torch_function_mode_stack_len):
+                torch._C._pop_torch_function_stack()
+            raise AssertionError(
+                f"torch function mode stack was leaked: "
+                f"length changed from {self._prev_torch_function_mode_stack_len} to {after}"
+            )
+
+        tf_state = torch._C._get_torch_function_state()
+        if tf_state != self._prev_torch_function_state:
+            torch._C._set_torch_function_state(self._prev_torch_function_state)
+            raise AssertionError(
+                f"torch function state was leaked: "
+                f"changed from {self._prev_torch_function_state} to {tf_state}"
+            )
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -5949,7 +6029,7 @@ class NestedTensorTestCase(TestCase):
             nested_tensor_module._tensor_symint_registry = original_tensor_symint_registry
 
 
-def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0, strip_carets=True, strip_stack_attribution=True):
     from torch._dynamo.trace_rules import _as_posix_path
 
     if file is None:
@@ -5970,7 +6050,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(
-        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)*',
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]* *\n)?)*',
         repl_frame,
         s,
     )
@@ -5993,6 +6073,19 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
+    if strip_stack_attribution:
+        # Strip the contents of "Stack variable source attribution" blocks but
+        # keep the header, since the entries depend on whether specific bytecodes
+        # have position info which varies across Python point releases.
+        s = re.sub(
+            r"(\nStack variable source attribution:)\n(?:.*\n)*?\n",
+            r"\1\n\n",
+            s,
+        )
+    if strip_carets:
+        # Remove caret/tilde indicator lines (e.g. "    ~~~^^^^") since their
+        # presence and alignment vary across Python versions.
+        s = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", s)
     return s
 
 

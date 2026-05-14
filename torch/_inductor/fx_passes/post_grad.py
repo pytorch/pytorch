@@ -285,6 +285,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
 
+    if config.dedup_reduce_scatters:
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
+            dedup_fsdp_reduce_scatter
+        )
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
@@ -375,16 +382,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
         overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
-        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
 
-        # by default, insert overlap deps and enable fusion regions within inductor
+        # by default, insert overlap deps within inductor
         with config.patch(
             {
                 "aten_distributed_optimizations.insert_overlap_deps": (
                     True if overlap_deps is None else overlap_deps
-                ),
-                "aten_distributed_optimizations.enable_fusion_regions": (
-                    True if fusion_regions is None else fusion_regions
                 ),
             }
         ):
@@ -1904,6 +1907,12 @@ class ConstructorMoverPass:
                 continue
 
             if node.kwargs.get("device") != torch.device("cpu"):
+                continue
+
+            if (
+                torch._inductor.config.fallback_random
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
                 continue
 
             constructors.append(node)

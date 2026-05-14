@@ -26,7 +26,12 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
-from torch.testing._internal.common_utils import parametrize, skipIfXpu, xfailIf
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+    xfailIf,
+)
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
     _quantize_rowwise,
@@ -434,6 +439,7 @@ class TestFP8Types(TestCase):
 
 class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
     @onlyCUDA
     def test_functional_scaled_mm_fullgraph(self, device):
         M, N, K = 128, 128, 128
