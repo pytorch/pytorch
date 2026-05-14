@@ -537,6 +537,9 @@ std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
+    TORCH_CHECK(
+        t.numel() > 0,
+        "_foreach_max cannot compute the maximum of an empty tensor; max over zero elements is undefined.");
     result.emplace_back(at::max(t));
   }
   return result;

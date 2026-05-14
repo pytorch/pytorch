@@ -368,7 +368,7 @@ def make_tensor_mismatch_msg(
     )
 
 
-class UnsupportedInputs(Exception):  # noqa: B903
+class UnsupportedInputs(Exception):
     """Exception to be raised during the construction of a :class:`Pair` in case it doesn't support the inputs."""
 
 
@@ -1319,7 +1319,7 @@ def not_close_error_metas(
         )
     except ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
-        raise error_meta.to_error() from None  # noqa: RSE102
+        raise error_meta.to_error() from None
 
     error_metas: list[ErrorMeta] = []
     for pair in pairs:

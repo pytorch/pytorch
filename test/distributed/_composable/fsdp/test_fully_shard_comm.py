@@ -1399,23 +1399,30 @@ class TestFullyShardPrefetch(FSDPTest):
                 self.assertEqual(events, expected_events)
                 events.clear()
                 loss.sum().backward()
+                # `_force_complete_incomplete_states` completes post-forward
+                # for the incomplete groups (both `model[0]` and `model[1]`
+                # have `unused_lin` that never ran forward), reshards, and
+                # registers pre-backward hooks on the root output; those
+                # hooks fire at backward start (unshard events). Only
+                # group1's post_backward fires via autograd (model[1]'s
+                # input requires grad); root and group0's post_backwards
+                # fire in the final callback in all-states pre-order.
                 expected_events = [
-                    # Since both `model[0]` and `model[1]` have unused modules
-                    # that never ran forward, they do not reshard after forward
-                    # despite setting it to `True`. Check that there are no
-                    # unshards in backward.
+                    ("unshard", "1.unused_lin, 1.lin", TrainingState.PRE_BACKWARD),
+                    ("unshard", "0.unused_lin, 0.lin", TrainingState.PRE_BACKWARD),
                     (
                         "post_backward",
                         "1.unused_lin, 1.lin",
                         TrainingState.POST_BACKWARD,
                     ),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
                     (
                         "post_backward",
                         "0.unused_lin, 0.lin",
                         TrainingState.POST_BACKWARD,
                     ),
-                    ("post_backward", "", TrainingState.POST_BACKWARD),
                 ]
+                self.assertEqual(events, expected_events)
                 events.clear()
                 optim.step()
                 optim.zero_grad()

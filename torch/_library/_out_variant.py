@@ -110,7 +110,7 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
         candidate = getattr(torch_packet, overload_name)
 
         # pyrefly: ignore [missing-attribute]
-        if torch.Tag.out_variant not in candidate.tags:
+        if torch.Tag.out not in candidate.tags:
             continue
 
         candidate_schema = candidate._schema
@@ -149,11 +149,11 @@ def check_out_variant(
         tagged_info = _get_out_variants_info(functional_op)
         raise AssertionError(
             f"We did not find an out variant for {functional_op}. Some common mistakes include:\n"
-            "  1. The out variant is missing the torch.Tag.out_variant tag.\n"
+            "  1. The out variant is missing the torch.Tag.out tag.\n"
             "  2. The out variant is not an overload of the original op (e.g., 'op.out' or 'op.overload_out') \n"
             "  3. The out variant's input arguments does not match the functional op's signature (excluding the mutable args).\n"
             "  4. The original operator is not functional.\n"
-            f"Overloads tagged with out_variant:\n"
+            f"Overloads tagged with out:\n"
             f"{tagged_info or '  (none)'}"
         )
     if out_op != expected_out_op:
@@ -165,7 +165,7 @@ def check_out_variant(
 
 
 def _get_out_variants_info(functional_op) -> str:
-    """Collect information about overloads tagged with out_variant for debugging."""
+    """Collect information about overloads tagged with out for debugging."""
     namespace = functional_op.namespace
     op_name = functional_op._schema.name.split("::")[1]
     torch_packet = getattr(getattr(torch.ops, namespace), op_name)
@@ -174,7 +174,7 @@ def _get_out_variants_info(functional_op) -> str:
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
         # pyrefly: ignore [missing-attribute]
-        if torch.Tag.out_variant in candidate.tags:
+        if torch.Tag.out in candidate.tags:
             overloads_info.append(f"  - {overload_name}: {candidate._schema}")
 
     return "\n".join(overloads_info)
