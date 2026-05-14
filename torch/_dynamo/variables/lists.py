@@ -1868,18 +1868,18 @@ class ListIteratorVariable(IteratorVariable):
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
+        )
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
             # pyrefly: ignore [implicit-any]
             remaining_items = []
         codegen.foreach(remaining_items)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(remaining_items)),
-                create_instruction("GET_ITER"),
-            ]
-        )
+        codegen.append_output(create_build_tuple(len(remaining_items)))
+        codegen.extend_output(create_call_function(1, False))
 
 
 class TupleIteratorVariable(ListIteratorVariable):
@@ -1926,6 +1926,10 @@ class RangeIteratorVariable(IteratorVariable):
         return range_iterator
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
+        )
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(range))  # type: ignore[arg-type]
         )
@@ -1933,4 +1937,4 @@ class RangeIteratorVariable(IteratorVariable):
         codegen.append_output(codegen.create_load_const(self.stop))
         codegen.append_output(codegen.create_load_const(self.step))
         codegen.extend_output(create_call_function(3, False))
-        codegen.append_output(create_instruction("GET_ITER"))
+        codegen.extend_output(create_call_function(1, False))
