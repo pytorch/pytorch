@@ -62,7 +62,13 @@ class _ExperimentalConfig:
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
+        adjust_profiler_step: bool = ...,
+        disable_external_correlation: bool = ...,
         profile_all_threads: bool = ...,
+        capture_overload_names: bool = ...,
+        record_python_gc_info: bool = ...,
+        expose_kineto_event_metadata: bool = ...,
+        custom_profiler_config: str = ...,
     ) -> None: ...
 
 class ProfilerConfig:
@@ -108,6 +114,8 @@ class _ProfilerEvent:
     ): ...
     @property
     def name(self) -> str: ...
+    @property
+    def overload_name(self) -> str: ...
     @property
     def tag(self) -> _EventType: ...
     @property

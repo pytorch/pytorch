@@ -71,6 +71,8 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 // index of a XPU device in the framework.
 int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   initXPUContextVectors();
+  if (device == -1)
+    device = c10::xpu::current_device();
   check_device_index(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];

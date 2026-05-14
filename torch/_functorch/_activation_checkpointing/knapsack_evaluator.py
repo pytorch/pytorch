@@ -40,9 +40,9 @@ class KnapsackEvaluator:
                 If full graph is defined then will sort the full graph and only process the subset
                 of nodes in the node_graph.
             3. Iterate through the sorted graph nodes.
-                If the node is saved then just drop it's memory from current memory.
-                If the node is not saved then add it's memory to current memory and then traverse it's
-                predecessors to simulate recomuptation chain. Will check if new peak memory after all
+                If the node is saved then just drop its memory from current memory.
+                If the node is not saved then add its memory to current memory and then traverse its
+                predecessors to simulate recomputation chain. Will check if new peak memory after all
                 predecessors are processed.
 
         Args:
