@@ -130,6 +130,18 @@ def _grouped_mm_offsets(tmi_flat: tuple[Any, ...]) -> torch.Tensor:
     return local_experts_start[1:].to(torch.int32)
 
 
+def _token_end_from_tmi(tmi_flat: tuple[Any, ...]) -> torch.Tensor:
+    if len(tmi_flat) != TMI_FLAT_LEN:
+        raise RuntimeError(
+            f"flex_ep expected {TMI_FLAT_LEN} TokenMappingInfo values, "
+            f"got {len(tmi_flat)}"
+        )
+    local_experts_start = tmi_flat[LOCAL_EXPERTS_START_INDEX]
+    if not isinstance(local_experts_start, torch.Tensor):
+        raise RuntimeError("flex_ep local_experts_start must be a tensor")
+    return local_experts_start[-1:].to(torch.int64)
+
+
 def _split_tmi_and_router_operands(
     tmi_and_router_operands: tuple[Any, ...],
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
@@ -163,6 +175,13 @@ def _swiglu(y1: torch.Tensor) -> torch.Tensor:
     return torch.ops._flex_ep.swiglu_forward(y1)
 
 
+def _swiglu_with_offsets(
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops._flex_ep.swiglu_forward_with_offsets(y1, token_end)
+
+
 def _swiglu_backward(
     dy2: torch.Tensor,
     y1: torch.Tensor,
@@ -170,14 +189,30 @@ def _swiglu_backward(
     return torch.ops._flex_ep.swiglu_backward(dy2, y1)
 
 
+def _swiglu_backward_with_offsets(
+    dy2: torch.Tensor,
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops._flex_ep.swiglu_backward_with_offsets(dy2, y1, token_end)
+
+
+def _clone_valid_prefix(
+    input: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops._flex_ep.clone_valid_prefix(input, token_end)
+
+
 def _moe_block_forward_bf16(
     recv_x: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     y1 = torch._grouped_mm(recv_x, w13.transpose(-2, -1), offs=offs)
-    y2 = _swiglu(y1)
+    y2 = _swiglu_with_offsets(y1, token_end)
     y3 = torch._grouped_mm(y2, w2.transpose(-2, -1), offs=offs)
     return y3, y1, y2
 
@@ -190,10 +225,11 @@ def _moe_block_backward_bf16(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dy2 = torch._grouped_mm(dy3, w2, offs=offs)
     dw2_t = torch._grouped_mm(y2.transpose(-2, -1), dy3, offs=offs)
-    dy1 = _swiglu_backward(dy2, y1)
+    dy1 = _swiglu_backward_with_offsets(dy2, y1, token_end)
     dx_recv = torch._grouped_mm(dy1, w13, offs=offs)
     dw13_t = torch._grouped_mm(recv_x.transpose(-2, -1), dy1, offs=offs)
     return dx_recv, dw13_t.transpose(-2, -1), dw2_t.transpose(-2, -1)
@@ -237,7 +273,8 @@ def _flex_ep_forward(
         raise RuntimeError("flex_ep dispatch_fn first return must be recv_x tensor")
     tmi_flat = tuple(dispatch_out[1:])
     offs = _grouped_mm_offsets(tmi_flat)
-    y3, y1, y2 = _moe_block_forward_bf16(recv_x, w13, w2, offs)
+    token_end = _token_end_from_tmi(tmi_flat)
+    y3, y1, y2 = _moe_block_forward_bf16(recv_x, w13, w2, offs, token_end)
     y = _call_flat_fn(
         combine_fn,
         (y3, *tmi_flat, *router_operands),
@@ -256,6 +293,7 @@ def _flex_ep_backward_impl(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     *tmi_and_router_operands: Any,
@@ -279,6 +317,7 @@ def _flex_ep_backward_impl(
         w13,
         w2,
         offs,
+        token_end,
     )
     dxpn = _call_flat_fn(
         dispatch_bwd_fn,
@@ -328,13 +367,22 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
         ctx.tmi_flat = tmi_flat
         ctx.combine_bwd_lifted_args = combine_bwd_lifted_args
         ctx.dispatch_bwd_lifted_args = dispatch_bwd_lifted_args
-        ctx.save_for_backward(recv_x.clone(), y1, y2, w13, w2, offs)
+        token_end = _token_end_from_tmi(tmi_flat)
+        ctx.save_for_backward(
+            _clone_valid_prefix(recv_x, token_end),
+            y1,
+            y2,
+            w13,
+            w2,
+            offs,
+            token_end,
+        )
         return y
 
     @staticmethod
     def backward(ctx, *grad_outputs: Any) -> Any:
         (dy,) = grad_outputs
-        recv_x, y1, y2, w13, w2, offs = ctx.saved_tensors
+        recv_x, y1, y2, w13, w2, offs, token_end = ctx.saved_tensors
         tmi_flat = ctx.tmi_flat
         router_operands = ctx.router_operands
         dx, dw13, dw2 = flex_ep_backward(
@@ -345,6 +393,7 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
             w13,
             w2,
             offs,
+            token_end,
             ctx.combine_bwd_fn,
             ctx.dispatch_bwd_fn,
             *tmi_flat,
@@ -423,6 +472,55 @@ def _flex_ep_impl(
 
 
 class FlexEpHOP(HigherOrderOperator):
+    """Autograd-aware BF16 expert-parallel MoE block.
+
+    This higher order operator expands each local token across its selected
+    experts, dispatches those token/expert pairs with ``dispatch_fn``, evaluates
+    the local expert MLP with grouped matmuls and fused SwiGLU, then combines the
+    expert outputs with ``combine_fn``. TorchTitan's FlexEP backend returns
+    unweighted expert outputs of shape ``[num_tokens, topk, hidden]``; callers
+    apply the top-k weights outside this HOP.
+
+    Args:
+        x: Local token activations with shape ``[num_tokens, hidden]`` and BF16
+            dtype.
+        topk_idx: Global expert id for each selected expert, with shape
+            ``[num_tokens, topk]``.
+        w13: Local expert gate/up projection weights with shape
+            ``[num_local_experts, 2 * intermediate, hidden]`` and BF16 dtype.
+        w2: Local expert down projection weights with shape
+            ``[num_local_experts, hidden, intermediate]`` and BF16 dtype.
+        dispatch_fn: Router subgraph called as
+            ``dispatch_fn(x_expanded, topk_idx, *router_operands,
+            *_dispatch_lifted_args)``. It must return ``(recv_x, *tmi_flat)``,
+            where ``tmi_flat`` has ``TMI_FLAT_LEN`` TokenMappingInfo entries.
+        combine_fn: Router subgraph called as
+            ``combine_fn(y3, *tmi_flat, *router_operands,
+            *_combine_lifted_args)``. It must return the HOP output tensor.
+        combine_bwd_fn: Backward router subgraph called as
+            ``combine_bwd_fn(dy, *tmi_flat, *router_operands,
+            *_combine_bwd_lifted_args)``. It must return the gradient for the
+            local expert output ``y3``.
+        dispatch_bwd_fn: Backward router subgraph called as
+            ``dispatch_bwd_fn(dx_recv, *tmi_flat, *router_operands,
+            *_dispatch_bwd_lifted_args)``. It must return expanded input
+            gradients with shape ``[num_tokens, topk, hidden]``.
+        router_operands: Flat tensor/int operands captured by the router
+            subgraphs, such as workspace tensors, offsets, and EP rank metadata.
+        num_experts: Total number of global experts.
+        ep_rank: This rank within the expert-parallel group.
+        ep_size: Number of ranks in the expert-parallel group.
+        max_tokens: Maximum local token count used for router buffer sizing.
+        topk: Number of selected experts per token.
+        num_ctas: CTA count used by backend router kernels.
+        _dispatch_lifted_args: Extra operands appended to ``dispatch_fn`` after
+            ``router_operands`` when graph transforms lift closed-over values.
+        _combine_lifted_args: Extra operands appended to ``combine_fn``.
+        _combine_bwd_lifted_args: Extra operands appended to ``combine_bwd_fn``.
+        _dispatch_bwd_lifted_args: Extra operands appended to
+            ``dispatch_bwd_fn``.
+    """
+
     def __init__(self) -> None:
         super().__init__("flex_ep", cacheable=True)
         self.subgraph_indexes = [4, 5, 6, 7]
@@ -478,7 +576,7 @@ flex_ep = FlexEpHOP()
 class FlexEpBackwardHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_ep_backward", cacheable=True)
-        self.subgraph_indexes = [7, 8]
+        self.subgraph_indexes = [8, 9]
 
     def __call__(
         self,
@@ -489,6 +587,7 @@ class FlexEpBackwardHOP(HigherOrderOperator):
         w13: torch.Tensor,
         w2: torch.Tensor,
         offs: torch.Tensor,
+        token_end: torch.Tensor,
         combine_bwd_fn: Callable[..., Any],
         dispatch_bwd_fn: Callable[..., Any],
         *tmi_and_router_operands: Any,
@@ -503,6 +602,7 @@ class FlexEpBackwardHOP(HigherOrderOperator):
             w13,
             w2,
             offs,
+            token_end,
             combine_bwd_fn,
             dispatch_bwd_fn,
             *tmi_and_router_operands,
@@ -523,6 +623,7 @@ def flex_ep_backward_dense(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     *tmi_and_router_operands: Any,
@@ -537,6 +638,7 @@ def flex_ep_backward_dense(
         w13,
         w2,
         offs,
+        token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
         *tmi_and_router_operands,
@@ -554,6 +656,7 @@ def _trace_flex_ep_backward_proxy(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     tmi_and_router_operands: tuple[Any, ...],
@@ -582,6 +685,7 @@ def _trace_flex_ep_backward_proxy(
         w13,
         w2,
         offs,
+        token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
         *tmi_and_router_operands,
@@ -606,6 +710,7 @@ def _trace_flex_ep_backward_proxy(
         w13,
         w2,
         offs,
+        token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
         *tmi_and_router_operands,
@@ -637,6 +742,7 @@ def flex_ep_backward_proxy_torch_dispatch_mode(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     *tmi_and_router_operands: Any,
@@ -652,6 +758,7 @@ def flex_ep_backward_proxy_torch_dispatch_mode(
         w13,
         w2,
         offs,
+        token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
         tmi_and_router_operands,
@@ -672,6 +779,7 @@ def flex_ep_backward_fake_tensor_mode(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     *tmi_and_router_operands: Any,
@@ -687,6 +795,7 @@ def flex_ep_backward_fake_tensor_mode(
             w13,
             w2,
             offs,
+            token_end,
             combine_bwd_fn,
             dispatch_bwd_fn,
             *tmi_and_router_operands,
@@ -705,6 +814,7 @@ def flex_ep_backward_functionalize(
     w13: torch.Tensor,
     w2: torch.Tensor,
     offs: torch.Tensor,
+    token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
     *tmi_and_router_operands: Any,
@@ -722,6 +832,7 @@ def flex_ep_backward_functionalize(
             w13,
             w2,
             offs,
+            token_end,
             tmi_and_router_operands,
             _combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args,
@@ -735,6 +846,7 @@ def flex_ep_backward_functionalize(
         w13,
         w2,
         offs,
+        token_end,
         tmi_and_router_operands,
         combine_bwd_lifted_args,
         dispatch_bwd_lifted_args,
@@ -751,6 +863,7 @@ def flex_ep_backward_functionalize(
             w13,
             w2,
             offs,
+            token_end,
             functional_combine_bwd_fn,
             functional_dispatch_bwd_fn,
             *tmi_and_router_operands,
@@ -1149,6 +1262,13 @@ _flex_ep_lib.define(
 _flex_ep_lib.define("swiglu_forward(Tensor y1) -> Tensor")
 _flex_ep_lib.define("swiglu_backward(Tensor dy2, Tensor y1) -> Tensor")
 _flex_ep_lib.define(
+    "swiglu_forward_with_offsets(Tensor y1, Tensor token_end) -> Tensor"
+)
+_flex_ep_lib.define(
+    "swiglu_backward_with_offsets(Tensor dy2, Tensor y1, Tensor token_end) -> Tensor"
+)
+_flex_ep_lib.define("clone_valid_prefix(Tensor input, Tensor token_end) -> Tensor")
+_flex_ep_lib.define(
     "zfill_ranges_inplace(Tensor input, Tensor begin_ofs, Tensor end_ofs, "
     "int max_values_per_batch) -> Tensor"
 )
@@ -1186,6 +1306,9 @@ _INDUCTOR_ROUTER_OP_NAMES = {
     "barrier_wait": "flex_ep_barrier_wait",
     "swiglu_forward": "flex_ep_swiglu_forward",
     "swiglu_backward": "flex_ep_swiglu_backward",
+    "swiglu_forward_with_offsets": "flex_ep_swiglu_forward_with_offsets",
+    "swiglu_backward_with_offsets": "flex_ep_swiglu_backward_with_offsets",
+    "clone_valid_prefix": "flex_ep_clone_valid_prefix",
     "zfill_ranges_inplace": "flex_ep_zfill_ranges_inplace",
 }
 
@@ -1688,6 +1811,98 @@ def _swiglu_backward_impl(dy2: torch.Tensor, y1: torch.Tensor) -> torch.Tensor:
 @torch.library.register_fake("_flex_ep::swiglu_backward")
 def _swiglu_backward_fake(dy2: torch.Tensor, y1: torch.Tensor) -> torch.Tensor:
     return _swiglu_backward_reference(dy2, y1)
+
+
+@torch.library.impl(
+    _flex_ep_lib, "swiglu_forward_with_offsets", "CompositeExplicitAutograd"
+)
+def _swiglu_forward_with_offsets_impl(
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    op = _inductor_router_op("swiglu_forward_with_offsets")
+    if (
+        op is not None
+        and y1.is_cuda
+        and token_end.is_cuda
+        and y1.dtype == torch.bfloat16
+        and token_end.dtype == torch.int64
+        and token_end.numel() == 1
+        and y1.is_contiguous()
+    ):
+        return op(y1, token_end)
+    return _swiglu_reference(y1)
+
+
+@torch.library.register_fake("_flex_ep::swiglu_forward_with_offsets")
+def _swiglu_forward_with_offsets_fake(
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    del token_end
+    return _swiglu_reference(y1)
+
+
+@torch.library.impl(
+    _flex_ep_lib, "swiglu_backward_with_offsets", "CompositeExplicitAutograd"
+)
+def _swiglu_backward_with_offsets_impl(
+    dy2: torch.Tensor,
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    op = _inductor_router_op("swiglu_backward_with_offsets")
+    if (
+        op is not None
+        and dy2.is_cuda
+        and y1.is_cuda
+        and token_end.is_cuda
+        and dy2.dtype == torch.bfloat16
+        and y1.dtype == torch.bfloat16
+        and token_end.dtype == torch.int64
+        and token_end.numel() == 1
+        and dy2.is_contiguous()
+        and y1.is_contiguous()
+    ):
+        return op(dy2, y1, token_end)
+    return _swiglu_backward_reference(dy2, y1)
+
+
+@torch.library.register_fake("_flex_ep::swiglu_backward_with_offsets")
+def _swiglu_backward_with_offsets_fake(
+    dy2: torch.Tensor,
+    y1: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    del token_end
+    return _swiglu_backward_reference(dy2, y1)
+
+
+@torch.library.impl(_flex_ep_lib, "clone_valid_prefix", "CompositeExplicitAutograd")
+def _clone_valid_prefix_impl(
+    input: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    op = _inductor_router_op("clone_valid_prefix")
+    if (
+        op is not None
+        and input.is_cuda
+        and token_end.is_cuda
+        and token_end.dtype == torch.int64
+        and token_end.numel() == 1
+        and input.is_contiguous()
+    ):
+        return op(input, token_end)
+    return input.clone()
+
+
+@torch.library.register_fake("_flex_ep::clone_valid_prefix")
+def _clone_valid_prefix_fake(
+    input: torch.Tensor,
+    token_end: torch.Tensor,
+) -> torch.Tensor:
+    del token_end
+    return torch.empty_like(input)
 
 
 @torch.library.impl(_flex_ep_lib, "zfill_ranges_inplace", "CompositeExplicitAutograd")
