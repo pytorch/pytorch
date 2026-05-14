@@ -31,49 +31,88 @@ permissions:
   actions: read
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
+
   x86-opbenchmark-build:
     if: github.repository_owner == 'pytorch'
     name: x86-opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "cpu_operator_benchmark_${{ inputs.test_mode || 'short' }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: cpu
     secrets: inherit
 
   x86-opbenchmark-test:
     name: x86-opbenchmark-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: x86-opbenchmark-build
+    needs:
+      - x86-opbenchmark-build
+      - get-label-type
     with:
       build-environment: ${{ needs.x86-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.x86-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.x86-opbenchmark-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.x86-opbenchmark-build.outputs.test-matrix-osdc }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: cpu
     secrets: inherit
 
   aarch64-opbenchmark-build:
     if: github.repository_owner == 'pytorch'
     name: aarch64-opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-aarch64-py3.10
       runner: linux.arm64.m7g.4xlarge
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.arm64.m8g.4xlarge" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
+      cuda-version: cpu
     secrets: inherit
 
   aarch64-opbenchmark-test:
     name: aarch64-opbenchmark-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: aarch64-opbenchmark-build
+    needs:
+      - aarch64-opbenchmark-build
+      - get-label-type
     with:
       build-environment: ${{ needs.aarch64-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.aarch64-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix-osdc }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
+      cuda-version: cpu
     secrets: inherit
