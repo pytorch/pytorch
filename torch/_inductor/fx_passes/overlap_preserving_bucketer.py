@@ -1,3 +1,4 @@
+import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ from torch._inductor.fx_passes.bucketing import (
 )
 from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather
 from torch._inductor.fx_passes.overlap_scheduling import (
-    BitsetAncestors,
     CollBucket,
     CollectiveInfo,
     get_group_name,
@@ -167,17 +167,29 @@ class OverlapPreservingBucketer:
         self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
-    def _compute_node_ancestors(self) -> BitsetAncestors:
-        """Compute ancestor sets including hiding interval deps using bitsets."""
-        extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+    def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """
+        Compute ancestor sets for all nodes including:
+        1. Original graph edges
+        2. Hiding interval deps: collective_start -> hiding_node -> wait
+        """
+        augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start, info in self.collective_info.items():
             if info.is_exposed:
                 continue
             for hiding_node in info.hiding_nodes:
-                extra_inputs[hiding_node].add(start)
-                extra_inputs[info.wait_node].add(hiding_node)
+                augmented_inputs[hiding_node].add(start)
+                augmented_inputs[info.wait_node].add(hiding_node)
 
-        return BitsetAncestors(list(self.scheduled), extra_inputs=extra_inputs)
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in self.scheduled:
+            for input_node in itertools.chain(
+                augmented_inputs[node], node.all_input_nodes
+            ):
+                node_ancestors[node].add(input_node)
+                node_ancestors[node] |= node_ancestors[input_node]
+
+        return node_ancestors
 
     def build_timelines(self) -> dict[str, PGEvent | None]:
         "Construct each process groups ordered series of event"
