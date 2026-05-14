@@ -916,17 +916,6 @@ coverage_ignore_functions = [
     "validate_cuda_device",
     "validate_hpu_device",
     # torch.signal.windows.windows
-    "bartlett",
-    "blackman",
-    "cosine",
-    "exponential",
-    "gaussian",
-    "general_cosine",
-    "general_hamming",
-    "hamming",
-    "hann",
-    "kaiser",
-    "nuttall",
     # torch.utils.benchmark.examples.op_benchmark
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",

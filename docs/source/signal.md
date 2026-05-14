@@ -19,6 +19,54 @@ The `torch.signal` module, modeled after SciPy's [signal](https://docs.scipy.org
 ```
 
 ```{eval-rst}
+.. currentmodule:: torch.signal.windows.windows
+```
+
+```{eval-rst}
+.. autofunction:: bartlett
+```
+
+```{eval-rst}
+.. autofunction:: blackman
+```
+
+```{eval-rst}
+.. autofunction:: cosine
+```
+
+```{eval-rst}
+.. autofunction:: exponential
+```
+
+```{eval-rst}
+.. autofunction:: gaussian
+```
+
+```{eval-rst}
+.. autofunction:: general_cosine
+```
+
+```{eval-rst}
+.. autofunction:: general_hamming
+```
+
+```{eval-rst}
+.. autofunction:: hamming
+```
+
+```{eval-rst}
+.. autofunction:: hann
+```
+
+```{eval-rst}
+.. autofunction:: kaiser
+```
+
+```{eval-rst}
+.. autofunction:: nuttall
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
