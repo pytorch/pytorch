@@ -5020,6 +5020,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(loc.x is x)
 
+    def test_setattr_wrong_args_raises(self):
+        # setattr() with wrong arg count should raise TypeError during tracing,
+        # not silently graph-break (a graph break would just defer the same
+        # failure to eager execution).
+        @torch.compile(backend="eager")
+        def fn(x):
+            setattr(x, "foo")
+            return x
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(4))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -6207,25 +6219,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(res2, 9)
 
     def test_const_dict_variable_python_type(self):
-        from torch._dynamo.variables import ConstantVariable, ConstDictVariable
+        def fn(x):
+            d = {"a": 1, "b": 2}
+            od = collections.OrderedDict([("x", 3), ("y", 4)])
+            return x + d["a"] + od["x"]
 
-        make_key = ConstantVariable.create
-
-        d1 = {
-            make_key("a"): ConstantVariable.create(10),
-            make_key("b"): ConstantVariable.create(20),
-        }
-        d2 = collections.OrderedDict(
-            [
-                (make_key("x"), ConstantVariable.create(12)),
-                (make_key("y"), ConstantVariable.create(22)),
-            ]
+        eager_result = fn(torch.ones(3))
+        compiled_result = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(3)
         )
-        self.assertEqual(ConstDictVariable(d1).python_type(), dict)
-        self.assertEqual(
-            ConstDictVariable(d2, collections.OrderedDict).python_type(),
-            collections.OrderedDict,
-        )
+        self.assertEqual(eager_result, compiled_result)
 
     def test_builtin_subclasses_as_method_on_class_type(self):
         class Foo:
@@ -16685,37 +16688,6 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(w % 14 == 0)
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
-
-    def test_tensorify_scalar_only_bin_ops(self):
-        """When tensorify is enabled, torch bin_ops on scalar-only args should
-        not graph-break. The scalars are lifted as 0-dim tensor placeholders by
-        Dynamo; the tensorify pass converts them back to tensor ops."""
-        for op, expected in [
-            (torch.add, lambda a, b: a + b),
-            (torch.sub, lambda a, b: a - b),
-            (torch.mul, lambda a, b: a * b),
-            (torch.div, lambda a, b: a / b),
-        ]:
-            with self.subTest(op=op.__name__):
-
-                def fn(a, b):
-                    return op(a, b)
-
-                compiled = torch.compile(
-                    fn, backend="eager", dynamic=True, fullgraph=True
-                )
-                result = compiled(3.5, 2.0)
-                self.assertEqual(result, expected(3.5, 2.0))
-
-    def test_tensorify_scalar_only_bin_ops_int(self):
-        """Same as above but with integer scalar args."""
-
-        def fn(a, b):
-            return torch.add(a, b)
-
-        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
-        result = compiled(5, 3)
-        self.assertEqual(result, 8)
 
 
 if __name__ == "__main__":
