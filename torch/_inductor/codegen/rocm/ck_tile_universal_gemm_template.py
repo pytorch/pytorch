@@ -2,6 +2,7 @@
 import functools
 import logging
 import random
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -265,9 +266,18 @@ class CKTileGemmTemplate(CKTileTemplate):
             return 0;
         }
 
+        const ck_tile::index_t k_grain     = kBatch * TileK;
+        const ck_tile::index_t K_split     = (K + k_grain - 1) / k_grain * TileK;
+        const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
         // run the kernel
-        const auto dispatch = [&](const auto has_hot_loop_, const auto tail_number_) constexpr {
-            using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_.value, tail_number_.value>;
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
+            constexpr bool has_hot_loop_v = has_hot_loop_.value;
+            constexpr auto tail_number_v = tail_number_.value;
+
+            using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_v, tail_number_v>;
 
             if (!Kernel::IsSupportedArgument(kargs)) {
                 // we do our best to statically avoid this case in `filter_op`
@@ -275,20 +285,14 @@ class CKTileGemmTemplate(CKTileTemplate):
             }
             auto stream_config = ck_tile::stream_config{stream};
             auto grid_size = Kernel::GridSize(M, N, kBatch);
-            constexpr auto block_size = Kernel::BlockSize();
+            auto block_size = Kernel::BlockSize();
             constexpr auto lds_bytes = 0;
             constexpr auto kBlockPerCU = 1;
-            auto gemm = ck_tile::make_kernel<block_size.x, kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
-            float elapsed_time = ck_tile::launch_kernel(stream_config, gemm);
+            auto gemm = ck_tile::make_kernel<kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
+            ck_tile::launch_kernel(stream_config, gemm);
         };
 
-        const ck_tile::index_t k_grain     = kBatch * TileK;
-        const ck_tile::index_t K_split     = (K + k_grain - 1) / k_grain * TileK;
-        const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-
-        {{rendered_dispatch}}
+        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
 
         return 0;
     } // kernel definition
@@ -326,70 +330,6 @@ class CKTileGemmTemplate(CKTileTemplate):
 
                 using Row = ck_tile::tensor_layout::gemm::RowMajor;
                 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
-
-                template <ck_tile::index_t PrefetchStages, typename Dispatcher>
-                void dispatch_memory_pipeline_hot_loop(const ck_tile::TailNumber tail_num, Dispatcher dispatch)
-                {
-                    if(tail_num == ck_tile::TailNumber::One)
-                    {
-                        dispatch(ck_tile::bool_constant<true>{},
-                            ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::One>{});
-                    }
-                    else if(tail_num == ck_tile::TailNumber::Full)
-                    {
-                        dispatch(ck_tile::bool_constant<true>{},
-                            ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Full>{});
-                    }
-
-                    if constexpr(PrefetchStages > 2)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Two)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Two>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 3)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Three)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Three>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 4)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Four)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Four>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 5)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Five)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Five>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 6)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Six)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Six>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 7)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Seven)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Seven>{});
-                        }
-                    }
-                }
             """
         )
         return res
@@ -677,11 +617,20 @@ class CKTileGemmTemplate(CKTileTemplate):
         def render_epilogue(epilogue_type):
             if epilogue_type == "Default":
                 return r"""
+            using DsDataType = ck_tile::tuple<>;
+            using DsLayout = ck_tile::tuple<>;
+            using CDElementwise = ck_tile::element_wise::PassThrough;
+
             using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
                                                                           BDataType,
+                                                                          DsDataType,
                                                                           AccDataType,
                                                                           CDataType,
+                                                                          DsLayout,
                                                                           CLayout,
+                                                                          CDElementwise,
+                                                                          TileM,
+                                                                          TileN,
                                                                           kPadM,
                                                                           kPadN,
                                                                           WarpTileM,
@@ -692,7 +641,6 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
             elif epilogue_type == "CShuffle":
                 return r"""
-            constexpr auto kMemoryOperation = ck_tile::memory_operation_enum::set;
             using DsDataType = ck_tile::tuple<>; // no bias terms for vanilla GEMM
             using DsLayout = ck_tile::tuple<>;
             constexpr auto ELayout = CLayout;
@@ -705,7 +653,6 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                                      DsLayout,
                                                                      ELayout,
                                                                      CDEElementWise,
-                                                                     GemmPipelineProblem::kBlockSize,
                                                                      TileM,
                                                                      TileN,
                                                                      WarpM,
@@ -713,8 +660,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                                      WarpTileM,
                                                                      WarpTileN,
                                                                      WarpTileK,
-                                                                     TransposeC,
-                                                                     kMemoryOperation>;
+                                                                     TransposeC>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
         """
@@ -772,80 +718,6 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
-        def render_dispatch(pipeline_type, op_name):
-            switch_tailnum_template = r"""
-            switch (tail_num) {
-                {% for tail_num in valid_tailnums %}
-                case ck_tile::TailNumber::{{tail_num}}:
-                    dispatch({{has_hot_loop}},
-                             ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::{{tail_num}}>{});
-                    break;
-                {% endfor %}
-                default:
-                    std::ostringstream err;
-                    err << "Unsupported dispatch: "
-                        << "Pipeline: " << "{{pipeline}}"
-                        << "Prefetch stages: " << kPrefetchStages
-                        << "Tail num: " << tail_num;
-                    throw std::runtime_error(err.str());
-            } // switch tail_num
-            """
-            dispatch_template = r"""
-        if (has_hot_loop) {
-            {{rendered_with_hot_loop}}
-        }
-        else { // has_hot_loop == false
-            {{rendered_without_hot_loop}}
-        } // if has_hot_loop
-        """
-            if pipeline_type == "CompV3":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, true>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            elif pipeline_type == "Mem":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop="dispatch_memory_pipeline_hot_loop<kPrefetchStages>(tail_num, dispatch);",
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            elif pipeline_type == "CompV4":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, true>{}",
-                        valid_tailnums=("Two", "Three"),
-                        pipeline=pipeline_type,
-                    ),
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            else:
-                raise AssertionError(f"Pipeline {pipeline_type} is not supported")
-
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
             globals=self.globals().getvalue(),
@@ -860,7 +732,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             ),
             instance_namespace=op.name(),
             version_comment=version_comment,
-            rendered_dispatch=render_dispatch(op.pipeline, op.name()),
         )
 
     def gen_ops(self):
@@ -879,16 +750,42 @@ class CKTileGemmTemplate(CKTileTemplate):
             )
         filtered_instances = list(filter(self.filter_op, instances))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
-        # which are very similar to each other. Randomizing the choice seems to solve this.
-        random.seed(-11)
-        chosen_instances = (
-            random.sample(
-                filtered_instances,
-                min(len(filtered_instances), config.rocm.ck_tile_max_profiling_configs),
-            )
-            if config.rocm.ck_tile_max_profiling_configs
-            else filtered_instances
-        )
+        # which are very similar to each other. Stratified sampling ensures coverage of
+        # different pipeline/epilogue combinations while still randomizing within each stratum.
+        # Use a local Random instance so we don't mutate the global RNG state shared with
+        # other inductor code paths.
+        rng = random.Random(-11)
+        max_configs = config.rocm.ck_tile_max_profiling_configs
+        if max_configs:
+            strata: dict[tuple[str, str], list] = defaultdict(list)
+            for inst in filtered_instances:
+                strata[(inst.pipeline, inst.epilogue)].append(inst)
+            # Shuffle stratum keys so that when len(strata) > max_configs, the strata that
+            # get represented are not biased by filter/insertion order.
+            stratum_keys = list(strata.keys())
+            rng.shuffle(stratum_keys)
+            # Distribute the budget across strata as evenly as possible. The first
+            # `remainder` strata get one extra slot.
+            per_stratum, remainder = divmod(max_configs, len(stratum_keys))
+            chosen_instances: list = []
+            for i, key in enumerate(stratum_keys):
+                quota = per_stratum + (1 if i < remainder else 0)
+                if quota == 0:
+                    break
+                group = strata[key]
+                chosen_instances.extend(rng.sample(group, min(len(group), quota)))
+            # If some strata were smaller than their quota, fill the slack from the global
+            # remainder so we still hit max_configs when possible.
+            shortfall = max_configs - len(chosen_instances)
+            if shortfall > 0:
+                chosen_ids = OrderedSet(id(x) for x in chosen_instances)
+                remaining = [x for x in filtered_instances if id(x) not in chosen_ids]
+                if remaining:
+                    chosen_instances.extend(
+                        rng.sample(remaining, min(len(remaining), shortfall))
+                    )
+        else:
+            chosen_instances = filtered_instances
         log.debug(
             "generated %d ck instances after sample: %s",
             len(chosen_instances),
