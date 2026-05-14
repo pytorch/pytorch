@@ -244,18 +244,17 @@ if(USE_FLASH_ATTENTION)
         -fhip-new-launch-api
         -fgnuc-version=4.2.1
         -fno-implicit-modules
-        -fskip-odr-check-in-gmf
         -fcxx-exceptions
         -fexceptions
         -fcolor-diagnostics
         -faddrsig
         -fno-rounding-math
-        -mconstructor-aliases
         -mllvm=-amdgpu-internalize-symbols
         -fvisibility=hidden
         -Wno-float-equal
         -fgpu-flush-denormals-to-zero
-        -Wno-unused-parameter)
+        -Wno-unused-parameter
+        -Wno-unknown-warning-option)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
