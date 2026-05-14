@@ -142,6 +142,8 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
@@ -166,6 +168,8 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -189,4 +193,6 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
