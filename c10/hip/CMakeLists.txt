@@ -15,8 +15,8 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/hip_cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/hip/impl/hip_cmake_macros.h)
 
-# NB: All previous cu files are renamed into cc files.  This isn't tested at the
-# moment.
+# c10/hip is host-only: it calls into the HIP runtime via hip::host but contains
+# no device kernels. All sources compile as CXX with HIP_CXX_FLAGS defines.
 file(GLOB C10_HIP_SRCS CONFIGURE_DEPENDS
         *.cpp
         *.cc
@@ -24,15 +24,11 @@ file(GLOB C10_HIP_SRCS CONFIGURE_DEPENDS
         impl/*.cc
         )
 
-# Mark the cc files as HIP files, so we call the compiler.  (They have to be
-# suffixed with cc, because the hcc compiler won't accept them otherwise.)
-file(GLOB __c10_hip_srcs_cpp CONFIGURE_DEPENDS *.cc impl/*.cc)
-set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
 file(GLOB_RECURSE C10_HIP_HEADERS CONFIGURE_DEPENDS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
-  hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
+  add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
+  set_target_properties(c10_hip PROPERTIES LINKER_LANGUAGE CXX)
   torch_compile_options(c10_hip)
 
   # Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
@@ -49,7 +45,7 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_hip
-  target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::amdhip64)
+  target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::host)
 
   target_include_directories(
       c10_hip PUBLIC

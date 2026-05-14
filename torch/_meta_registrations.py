@@ -2149,7 +2149,15 @@ def _pad2d_common(input, padding, *, is_reflection):
     if input.ndim == 3:
         return input.new_empty((nplane, output_h, output_w))
     else:
-        return input.new_empty((nbatch, nplane, output_h, output_w))
+        output = input.new_empty((nbatch, nplane, output_h, output_w))
+        # CPU kernels preserve channels_last via suggest_memory_format(),
+        # but CUDA kernels always produce contiguous output.
+        if (
+            device_hint(input) != "cuda"
+            and utils.suggest_memory_format(input) == torch.channels_last
+        ):
+            output = output.to(memory_format=torch.channels_last)
+        return output
 
 
 @register_meta(aten.reflection_pad2d)
@@ -2457,6 +2465,11 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            a.dtype == b.dtype,
+            lambda: f"expected mat1 and mat2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
+        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -4762,7 +4775,8 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    # Python // is floor division, matching C++ at::divide_floor_integer.
+    # Python // already floors toward negative infinity, so the
+    # remainder-sign adjustment from the original C++ port is unnecessary.
     return x // y
 
 
@@ -6065,11 +6079,14 @@ def alloc_with_matching_layout(
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
         )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+        strides = [0] * len(dim_order)
+        stride = 1
+        for idx in reversed(dim_order):
+            strides[idx] = stride
+            stride *= res_shape[idx]
+        res = torch.empty_strided(
+            res_shape, strides, dtype=query.dtype, device=query.device
+        )
 
     return res
 
@@ -7976,12 +7993,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
