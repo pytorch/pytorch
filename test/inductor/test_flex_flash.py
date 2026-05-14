@@ -999,6 +999,8 @@ class TestFlexFlash(InductorTestCase):
         )
         compiled_fn = torch.compile(flex_attention)
 
+        from torch._inductor.exc import InductorError
+
         with DeterministicGuard(True):
             out = compiled_fn(
                 q,
@@ -1007,7 +1009,57 @@ class TestFlexFlash(InductorTestCase):
                 block_mask=block_mask,
                 kernel_options={"BACKEND": "FLASH"},
             )
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(
+                InductorError,
+                "create_block_mask\\(\\.\\.\\., compute_dq_write_order=True\\)",
+            ):
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_without_scheduler_order_raises(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=(
+                _DEFAULT_SPARSE_BLOCK_SIZE * 2,
+                _DEFAULT_SPARSE_BLOCK_SIZE,
+            ),
+            compute_dq_write_order=True,
+        )
+        block_mask.dq_kv_order_spt = None
+        compiled_fn = torch.compile(flex_attention)
+
+        from torch._inductor.exc import InductorError
+
+        with DeterministicGuard(True):
+            out = compiled_fn(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            with self.assertRaisesRegex(
+                InductorError,
+                "requires dQ KV scheduler-order metadata",
+            ):
                 out.sum().backward()
 
     @dtypes(torch.bfloat16)
@@ -1045,9 +1097,9 @@ class TestFlexFlash(InductorTestCase):
                 out.sum().backward()
 
     @dtypes(torch.bfloat16)
-    @parametrize("dq_write_order_spt", [False, True])
+    @parametrize("dq_kv_order", [False, True])
     def test_flash_attention_backward_deterministic_block_mask_with_write_order(
-        self, device, dtype, dq_write_order_spt
+        self, device, dtype, dq_kv_order
     ):
         major, _ = torch.cuda.get_device_capability()
         if major < 10:
@@ -1072,10 +1124,10 @@ class TestFlexFlash(InductorTestCase):
                 _DEFAULT_SPARSE_BLOCK_SIZE,
             ),
             compute_dq_write_order=True,
-            dq_write_order_spt=dq_write_order_spt,
+            dq_kv_order=dq_kv_order,
         )
         self.assertIsNotNone(block_mask.dq_write_order)
-        self.assertEqual(block_mask.dq_write_order_spt, dq_write_order_spt)
+        self.assertEqual(block_mask._dq_kv_order(), dq_kv_order)
 
         with DeterministicGuard(True):
             flash_vs_triton(q, k, v, block_mask=block_mask)
@@ -1522,9 +1574,9 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @dtypes(torch.bfloat16)
-    @parametrize("dq_write_order_spt", [False, True])
+    @parametrize("dq_kv_order", [False, True])
     def test_flash_attention_backward_wires_write_order_codegen(
-        self, device, dtype, dq_write_order_spt
+        self, device, dtype, dq_kv_order
     ):
         major, _ = torch.cuda.get_device_capability()
         if major < 10:
@@ -1548,9 +1600,9 @@ class TestFlexFlash(InductorTestCase):
                 _DEFAULT_SPARSE_BLOCK_SIZE,
             ),
             compute_dq_write_order=True,
-            dq_write_order_spt=dq_write_order_spt,
+            dq_kv_order=dq_kv_order,
         )
-        self.assertEqual(block_mask.dq_write_order_spt, dq_write_order_spt)
+        self.assertEqual(block_mask._dq_kv_order(), dq_kv_order)
         opposite_spt_block_mask = create_block_mask(
             _causal_mask,
             2,
@@ -1563,7 +1615,7 @@ class TestFlexFlash(InductorTestCase):
                 _DEFAULT_SPARSE_BLOCK_SIZE,
             ),
             compute_dq_write_order=True,
-            dq_write_order_spt=not dq_write_order_spt,
+            dq_kv_order=not dq_kv_order,
         )
         self.assertIsNotNone(block_mask.dq_write_order)
         self.assertIsNotNone(opposite_spt_block_mask.dq_write_order)
@@ -1586,11 +1638,15 @@ class TestFlexFlash(InductorTestCase):
 
         _, code = run_fw_bw_and_get_code(run_for_code)
         code_str = "\n".join(code)
-        self.assertIn("dq_write_order=", code_str)
+        self.assertIn('block_sparse_kwargs["dq_write_order"]', code_str)
+        self.assertTrue(
+            f'block_sparse_kwargs["spt"] = {dq_kv_order}' in code_str
+            or f'block_sparse_kwargs["dq_kv_order"] = {dq_kv_order}' in code_str
+        )
         if block_mask.dq_write_order_full is not None:
-            self.assertIn("dq_write_order_full=", code_str)
+            self.assertIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
         else:
-            self.assertNotIn("dq_write_order_full=", code_str)
+            self.assertNotIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)

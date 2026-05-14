@@ -163,7 +163,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # full_q_indices,
         _,  # dq_write_order
         _,  # dq_write_order_full
-        _,  # dq_write_order_spt
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,

@@ -159,7 +159,8 @@ def flex_attention(
         full_q_indices,
         _,  # dq_write_order (backward-only)
         _,  # dq_write_order_full (backward-only)
-        _,  # dq_write_order_spt (backward-only)
+        _,  # dq_kv_order (backward-only)
+        _,  # dq_kv_order_spt (backward-only)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -660,7 +661,8 @@ def flex_attention_backward(*args, **kwargs):
         full_q_indices,
         dq_write_order,
         dq_write_order_full,
-        dq_write_order_spt,
+        dq_kv_order,
+        dq_kv_order_spt,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -682,6 +684,7 @@ def flex_attention_backward(*args, **kwargs):
         full_q_indices,
         dq_write_order,
         dq_write_order_full,
+        dq_kv_order,
     ) = maybe_realize(
         [
             query,
@@ -699,6 +702,7 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
             dq_write_order,
             dq_write_order_full,
+            dq_kv_order,
         ]
     )
 
@@ -836,7 +840,8 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices=full_q_indices if needs_block_mask else None,
             dq_write_order=dq_write_order if needs_block_mask else None,
             dq_write_order_full=dq_write_order_full if needs_block_mask else None,
-            dq_write_order_spt=dq_write_order_spt,
+            dq_kv_order=dq_kv_order if needs_block_mask else None,
+            dq_kv_order_spt=dq_kv_order_spt,
         )
 
     # Construct layout with stride order matching K
