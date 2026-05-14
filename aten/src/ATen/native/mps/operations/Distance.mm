@@ -7,7 +7,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/where.h>
 #endif
@@ -24,32 +23,19 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Distance_metallib.h>
 #endif
 
-Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
-  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
-  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.size(-1) == x2.size(-1),
-              "X1 and X2 must have the same number of columns. X1: ",
-              x1.size(-1),
-              " X2: ",
-              x2.size(-1));
-  TORCH_CHECK(
-      at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
-  TORCH_CHECK(
-      at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
-  TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
-
-  const int64_t mode = compute_mode.value_or(0);
-  TORCH_CHECK(mode >= 0 && mode <= 2, "possible modes: 0, 1, 2, but was: ", mode);
-
+static void cdist_kernel_mps(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
   // Promote fp16/bf16 to fp32 internally so the max-norm argmax selection
   // matches what the CPU reference does (which falls back to fp32 for
   // these dtypes anyway).
-  const auto out_dtype = x1.scalar_type();
+  const auto out_dtype = result.scalar_type();
   const bool promote = at::isReducedFloatingType(out_dtype);
   const auto compute_dtype = promote ? at::kFloat : out_dtype;
   auto diff = x1.to(compute_dtype).unsqueeze(-2).sub(x2.to(compute_dtype).unsqueeze(-3));
-  auto result = at::linalg_vector_norm(diff, p, makeArrayRef<int64_t>(-1), /*keepdim=*/false, /*dtype=*/std::nullopt);
-  return promote ? result.to(out_dtype) : result;
+  auto out = at::linalg_vector_norm(diff, p, makeArrayRef<int64_t>(-1), /*keepdim=*/false, /*dtype=*/std::nullopt);
+  if (promote) {
+    out = out.to(out_dtype);
+  }
+  result.copy_(out.reshape(result.sizes()));
 }
 
 static void cdist_backward_kernel_mps(Tensor& result,
@@ -121,6 +107,7 @@ static void cdist_backward_kernel_mps(Tensor& result,
   }
 }
 
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_mps)
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_mps)
 
 } // namespace at::native
