@@ -140,7 +140,7 @@ runs:
         fi
 
     - name: Install uv (EC2)
-      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      uses: astral-sh/setup-uv@v8.1.0
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
         python-version: "3.12"
