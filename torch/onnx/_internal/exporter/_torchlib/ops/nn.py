@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
+from onnxscript import INT64
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+    opset18 as op18,
     opset20 as op20,
     opset21 as op21,
     opset23 as op23,
@@ -23,6 +25,94 @@ if TYPE_CHECKING:
     from onnxscript.values import Opset
 
 aten = torch.ops.aten
+
+
+def _upsample_coordinate_transformation_mode(align_corners: bool) -> str:
+    return "align_corners" if align_corners else "half_pixel"
+
+
+def _upsample_output_size(
+    input: TReal,
+    output_size: INT64,
+    *,
+    coordinate_transformation_mode: str,
+) -> TReal:
+    output_size = op18.Cast(output_size, to=INT64.dtype)
+    output_size = op18.Concat(op18.Shape(input, start=0, end=2), output_size, axis=0)
+    return op18.Resize(
+        input,
+        None,
+        None,
+        output_size,
+        mode="linear",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        cubic_coeff_a=-0.75,
+        nearest_mode="floor",
+    )
+
+
+def _upsample_scales(
+    input: TReal,
+    scale_factors: Sequence[float],
+    *,
+    coordinate_transformation_mode: str,
+) -> TReal:
+    return op18.Resize(
+        input,
+        None,
+        op18.Constant(value_floats=[1.0, 1.0, *scale_factors]),
+        None,
+        mode="linear",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        cubic_coeff_a=-0.75,
+        nearest_mode="floor",
+    )
+
+
+@onnx_impl(aten.upsample_bilinear2d.default, trace_only=True)
+def aten_upsample_bilinear2d(
+    input: TReal,
+    output_size: INT64,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> TReal:
+    """upsample_bilinear2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    return _upsample_output_size(
+        input,
+        output_size,
+        coordinate_transformation_mode=_upsample_coordinate_transformation_mode(
+            align_corners
+        ),
+    )
+
+
+@onnx_impl(aten.upsample_bilinear2d.vec, trace_only=True)
+def aten_upsample_bilinear2d_vec(
+    input: TReal,
+    output_size: INT64 | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> TReal:
+    """upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor"""
+
+    coordinate_transformation_mode = _upsample_coordinate_transformation_mode(
+        align_corners
+    )
+    if scale_factors is not None:
+        return _upsample_scales(
+            input,
+            scale_factors,
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    if output_size is None:
+        raise AssertionError("output_size is required when scale_factors is None")
+    return _upsample_output_size(
+        input,
+        output_size,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+    )
 
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)

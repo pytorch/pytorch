@@ -829,6 +829,26 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(ComplexInitModel(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_interpolate_bilinear_size_one_uses_half_pixel(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.interpolate(
+                    x, size=(1, 1), mode="bilinear", align_corners=False
+                )
+
+        x = torch.rand(1, 3, 10, 10)
+        onnx_program = self.export(Model(), (x,), opset_version=18, optimize=False)
+        onnx_testing.assert_onnx_program(onnx_program, args=(x,))
+
+        resize_nodes = [
+            node for node in onnx_program.model.graph if node.op_type == "Resize"
+        ]
+        self.assertEqual(len(resize_nodes), 1)
+        self.assertEqual(
+            resize_nodes[0].attributes["coordinate_transformation_mode"].value,
+            "half_pixel",
+        )
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
