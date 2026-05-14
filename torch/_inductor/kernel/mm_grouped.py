@@ -7,8 +7,8 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.codegen.gluon.gluon_template import GluonTemplate
-from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -131,7 +131,7 @@ def gluon_grouped_mm_configs(
     dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None, a_is_2d=None, b_is_2d=None
 ):
     import torch._inductor.config as config
-    from torch._inductor.heuristics.template.gluon import get_grouped_mm_configs
+    from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
     exhaustive = config.max_autotune_gemm_search_space == "EXHAUSTIVE"
 
