@@ -241,9 +241,9 @@ def register_comm_lowerings():
         # _AllReduce_Kernel instead of _AllReduceKernel.
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,  # type: ignore[arg-type]
+            inp,
             reduce_op,
-            group_name,  # type: ignore[arg-type]
+            group_name,
         )
         return inp  # type: ignore[return-value]
 
@@ -266,9 +266,9 @@ def register_comm_lowerings():
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
-            inp,  # type: ignore[arg-type]
+            inp,
             reduce_op,
-            group_name,  # type: ignore[arg-type]
+            group_name,
         )
         return inp  # type: ignore[return-value]
 
@@ -403,12 +403,12 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
-    @register_comm_lowering(c10d.isend)  # type: ignore[misc]
+    @register_comm_lowering(c10d.isend)
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         return _create_out_of_place(c10d.isend.default, inp, dst, tag, group_name)
 
-    @register_comm_lowering(c10d.irecv)  # type: ignore[misc]
+    @register_comm_lowering(c10d.irecv)
     def _irecv(inp, src, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
@@ -416,7 +416,7 @@ def register_comm_lowerings():
         )
         return inp
 
-    @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
+    @register_comm_lowering(c10d.batch_p2p_ops)
     def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
@@ -519,7 +519,7 @@ def register_symm_mem_lowerings():
 
     def _maybe_realize_symm_mem(
         inp: ir.TensorBox,
-        group_name: str,  # type: ignore[arg-type]
+        group_name: str,
     ) -> ir.TensorBox:
         """
         Ensure inp is in P2P memory for a symm_mem collective.

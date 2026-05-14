@@ -14,12 +14,12 @@ from typing_extensions import ParamSpec, TypeVar
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch._C._functorch import (
-    _assert_wrapped_functional,  # type: ignore[attr-defined]
-    _func_decrement_nesting,  # type: ignore[attr-defined]
-    _func_increment_nesting,  # type: ignore[attr-defined]
+    _assert_wrapped_functional,
+    _func_decrement_nesting,
+    _func_increment_nesting,
     _grad_decrement_nesting,
     _grad_increment_nesting,
-    _propagate_functional_input_mutation,  # type: ignore[attr-defined]
+    _propagate_functional_input_mutation,
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -477,7 +477,7 @@ def _vjp_with_argnums(
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
-        return results, wrapper, aux  # type: ignore[possibly-unbound]
+        return results, wrapper, aux
     else:
         return results, wrapper
 
@@ -765,10 +765,10 @@ def jacrev(
                         )
                     return flat_results
 
-                for r, sr in zip(flat_results, stacked_results):  # type: ignore[possibly-unbound]
+                for r, sr in zip(flat_results, stacked_results):
                     sr[idx * chunk_size : (idx + 1) * chunk_size].copy_(r)
 
-            return stacked_results  # type: ignore[possibly-unbound]
+            return stacked_results
 
         if _preallocate_and_copy:
             flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
@@ -810,7 +810,7 @@ def jacrev(
             )
         output_input = tree_unflatten(flat_output_input, output_spec)
         if has_aux:
-            return output_input, aux  # type: ignore[possibly-unbound]
+            return output_input, aux
         return output_input
 
     return wrapper_fn
@@ -1234,7 +1234,7 @@ def _jvp_with_argnums(
                 primals_out_unflatten = tree_unflatten(primals_out, spec)
                 tangents_out_unflatten = tree_unflatten(tangents_out, spec)
                 if has_aux:
-                    return primals_out_unflatten, tangents_out_unflatten, aux  # type: ignore[possibly-unbound]
+                    return primals_out_unflatten, tangents_out_unflatten, aux
 
                 return primals_out_unflatten, tangents_out_unflatten
 
@@ -1417,7 +1417,7 @@ def jacfwd(
         if isinstance(argnums, int):
             jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
         if has_aux:
-            return tree_unflatten(jac_outs_ins, spec), aux  # type: ignore[possibly-unbound]
+            return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
 
     return wrapper_fn
@@ -1927,7 +1927,7 @@ def linearize(
                 f"the same argspec as the primals {primals_argspec}"
             )
 
-        forward_ad_checks(flat_tangents)  # type: ignore[arg-type]
+        forward_ad_checks(flat_tangents)
 
         flat_output = const_folded_jvp_graph(*flat_tangents)
         # const folded graph can return flat output,

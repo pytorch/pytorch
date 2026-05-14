@@ -129,5 +129,5 @@ def callable_iterator(fn, sentinel, /):
 
 
 @substitute_in_graph(typing.cast, can_constant_fold_through=True)
-def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
+def cast(typ: type, val: _T) -> _T:
     return val

@@ -85,10 +85,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
+            return variables.SetVariable(items, **kwargs)
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
+            return variables.FrozensetVariable(items, **kwargs)
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)

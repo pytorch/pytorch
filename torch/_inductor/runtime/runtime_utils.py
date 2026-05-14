@@ -116,7 +116,7 @@ try:
     HAS_COLORAMA = True
 except ModuleNotFoundError:
     HAS_COLORAMA = False
-    colorama = None  # type: ignore[assignment]
+    colorama = None
 
 
 if HAS_COLORAMA:

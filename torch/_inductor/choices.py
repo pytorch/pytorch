@@ -443,7 +443,7 @@ class InductorChoices:
 
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
-        )  # type: ignore[arg-types]
+        )
 
     @staticmethod
     def reduction_split_factor(
