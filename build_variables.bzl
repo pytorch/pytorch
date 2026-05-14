@@ -496,6 +496,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/shim_common.cpp",
+    "torch/csrc/shim_exception_state.cpp",
 ]
 
 libtorch_core_sources = sorted(
