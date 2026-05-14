@@ -41,6 +41,12 @@ class TestAcLogging(TestCase):
         self.normalized_memories_banned_nodes: list[float] = [0.10344827586206896]
         self.runtimes_banned_nodes: list[int] = [10]
         self.min_cut_saved_values: list[Node] = [self.node1]
+        self.memory_budget: float = 0.5
+        self.min_act_size: float = 0.001
+        self.max_act_size: float = 0.01
+        self.saved_values_act_size: float = 0.005
+        self.more_aggressive_saved_values_mem_ratio: float = 0.9
+        self.aggressive_recomputation_saved_values_mem_ratio: float = 0.8
 
     def test_create_joint_graph_node_information(self) -> None:
         recomputable_node_info: dict[str, int] = {"node1": 0}
@@ -99,6 +105,12 @@ class TestAcLogging(TestCase):
             "Absolute Memories": self.memories_banned_nodes,
             "Knapsack Input Runtimes": self.runtimes_banned_nodes,
             "Min Cut Solution Saved Values": ["node1"],
+            "Memory Budget": self.memory_budget,
+            "Min Activation Size (GB)": self.min_act_size,
+            "Max Activation Size (GB)": self.max_act_size,
+            "Saved Values Activation Size (GB)": self.saved_values_act_size,
+            "More Aggressive Saved Values Mem Ratio": self.more_aggressive_saved_values_mem_ratio,
+            "Aggressive Recomputation Saved Values Mem Ratio": self.aggressive_recomputation_saved_values_mem_ratio,
         }
         result = create_activation_checkpointing_logging_structure_payload(
             joint_graph=self.graph,
@@ -112,6 +124,12 @@ class TestAcLogging(TestCase):
             normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
             runtimes_banned_nodes=self.runtimes_banned_nodes,
             min_cut_saved_values=self.min_cut_saved_values,
+            memory_budget=self.memory_budget,
+            min_act_size=self.min_act_size,
+            max_act_size=self.max_act_size,
+            saved_values_act_size=self.saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=self.more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=self.aggressive_recomputation_saved_values_mem_ratio,
         )
         self.assertEqual(result, expected_payload)
 
@@ -132,6 +150,12 @@ class TestAcLogging(TestCase):
             normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
             runtimes_banned_nodes=self.runtimes_banned_nodes,
             min_cut_saved_values=self.min_cut_saved_values,
+            memory_budget=self.memory_budget,
+            min_act_size=self.min_act_size,
+            max_act_size=self.max_act_size,
+            saved_values_act_size=self.saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=self.more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=self.aggressive_recomputation_saved_values_mem_ratio,
         )
 
         self.assertEqual(mock_trace_structured.call_count, 1)

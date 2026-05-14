@@ -13,7 +13,7 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 class TestArgumentHandler(TestCase):

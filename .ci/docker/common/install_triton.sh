@@ -17,6 +17,8 @@ get_pip_version() {
 if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
+  # XPU believes new ninja is bad, see https://github.com/intel/intel-xpu-backend-for-triton/commit/fe21682167b831e48bba2544712012abe2f74bb1
+  pip_install ninja==1.11.1.4
 elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"

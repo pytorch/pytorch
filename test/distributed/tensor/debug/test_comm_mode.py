@@ -176,7 +176,7 @@ class TestCommMode(TestCase):
         self.checksAssert(comm_mode, c10d_ops.allgather_, 1, 1)
 
         # tests c10d allgather_coalesced_ tracing
-        output_list = [[inp.new_empty(inp.shape) for _ in range(self.world_size)]]
+        output_list = [[inp.new_empty(inp.shape)] for _ in range(self.world_size)]
 
         with comm_mode:
             dist.all_gather_coalesced(output_list, [inp], None)
@@ -209,7 +209,10 @@ class TestCommMode(TestCase):
 
         # tests c10d alltoall_
         with comm_mode:
-            dist.all_to_all([inp], [inp])
+            dist.all_to_all(
+                [torch.empty_like(inp) for _ in range(self.world_size)],
+                [inp.clone() for _ in range(self.world_size)],
+            )
 
         self.checksAssert(comm_mode, c10d_ops.alltoall_, 1, 1)
 

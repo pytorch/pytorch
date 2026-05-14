@@ -1,12 +1,8 @@
 {
-  "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, and PR-only labels.",
+  "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, PR-only labels, and labels requiring human decision.",
   "repo": "pytorch/pytorch",
-  "count": 304,
+  "count": 285,
   "labels": [
-    {
-      "name": "actionable",
-      "description": "Clear what needs to be done to fix this issue"
-    },
     {
       "name": "better-on-discuss-forum",
       "description": ""
