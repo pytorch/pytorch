@@ -250,6 +250,13 @@ class Benchmarker:
             # - else -> GPU benchmark path (legacy behavior retained for non-CPU)
             if inferred_device == torch.device("cpu"):
                 return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
+
+            if use_experimental_benchmarker:
+                kwargs.setdefault("estimation_iters", inductor_config.inductor_experimental_benchmarker_estimation_iters)
+                kwargs.setdefault("memory_warmup_iters", inductor_config.inductor_experimental_benchmarker_memory_warmup_iters)
+                kwargs.setdefault("benchmark_iters", inductor_config.inductor_experimental_benchmarker_benchmark_iters)
+                kwargs.setdefault("max_benchmark_duration", inductor_config.inductor_experimental_benchmarker_max_duration)
+
             return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
     @time_and_count
