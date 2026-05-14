@@ -16,7 +16,7 @@ import pickle
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -284,7 +284,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):  # noqa: B902
+    def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
@@ -460,7 +460,7 @@ if _enabled:
             _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
                 calls are forwarded.
             _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
-                exposed on this wrppaer.
+                exposed on this wrapper.
         """
 
         def __init__(self, cpp_class):
@@ -1136,7 +1136,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ):
     global type_trace_db
 
@@ -1275,7 +1275,7 @@ def script(
     optimize: None = None,
     _frames_up: int = 0,
     _rcb: Callable[[str], Any] | None = None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Any:
     r"""Script the function.
 

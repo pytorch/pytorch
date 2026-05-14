@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -50,6 +52,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     std::string group_name;
     std::string group_desc;
     std::vector<uint64_t> global_ranks_in_group;
+
+    // When true, symmetric memory rendezvous exchanges metadata via this
+    // PG's allgather instead of TCPStore, which gets overloaded at large
+    // rank counts. This will lazily create the backend communicator if it
+    // doesn't already exist. If this PG is only used for symmetric memory
+    // (no regular collectives), consider calling abort() after rendezvous
+    // to release the communicator.
+    bool use_pg_for_symm_mem_rendezvous = false;
   };
 
   explicit Backend(int rank, int size);
@@ -67,6 +77,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // with its collectives.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  bool getUsePgForSymmMemRendezvous() const {
+    return use_pg_for_symm_mem_rendezvous_;
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    use_pg_for_symm_mem_rendezvous_ = value;
   }
 
   virtual bool supportsSplitting() const {
@@ -509,6 +527,26 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // normal shutdown.
   virtual void shutdown() {}
 
+  // APIs related to memory offload
+  virtual void suspend() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support suspend"));
+  }
+
+  virtual void resume() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support resume"));
+  }
+
+  virtual std::unordered_map<std::string, uint64_t> getMemoryStats() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support getMemoryStats"));
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -527,6 +565,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 
   std::optional<at::Device> bound_device_id_;
+
+  bool use_pg_for_symm_mem_rendezvous_ = false;
 };
 
 } // namespace c10d

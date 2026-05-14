@@ -14,7 +14,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_128x64_k128_seqaligned_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-#if __CUDA_ARCH__ < 750
+#if __CUDA_ARCH__ <= 740
   if (!p.advance_to_block()) {
     return;
   }
@@ -23,7 +23,7 @@ fmha_cutlassB_f16_aligned_128x64_k128_seqaligned_sm70(typename AttentionBackward
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_seqaligned_sm70` is for sm70-sm75, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_seqaligned_sm70` is for sm70-sm74, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -33,7 +33,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_128x128_k128_seqaligned_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ <= 1200
+#if __CUDA_ARCH__ <= 1210
   if (!p.advance_to_block()) {
     return;
   }
@@ -42,7 +42,7 @@ fmha_cutlassB_f16_aligned_128x128_k128_seqaligned_sm80(typename AttentionBackwar
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x128_k128_seqaligned_sm80` is for sm80-sm100, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x128_k128_seqaligned_sm80` is for sm80-sm121, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -52,7 +52,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_128x64_k128_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-#if __CUDA_ARCH__ < 750
+#if __CUDA_ARCH__ <= 740
   if (!p.advance_to_block()) {
     return;
   }
@@ -61,7 +61,7 @@ fmha_cutlassB_f16_aligned_128x64_k128_sm70(typename AttentionBackwardKernel<cutl
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_sm70` is for sm70-sm75, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_sm70` is for sm70-sm74, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -71,7 +71,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_128x64_k128_sm75(typename AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, true, false, false, 128, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 750
-#if __CUDA_ARCH__ < 800
+#if __CUDA_ARCH__ <= 790
   if (!p.advance_to_block()) {
     return;
   }
@@ -80,7 +80,7 @@ fmha_cutlassB_f16_aligned_128x64_k128_sm75(typename AttentionBackwardKernel<cutl
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_sm75` is for sm75-sm80, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x64_k128_sm75` is for sm75-sm79, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -90,7 +90,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_128x128_k128_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ <= 1200
+#if __CUDA_ARCH__ <= 1210
   if (!p.advance_to_block()) {
     return;
   }
@@ -99,7 +99,7 @@ fmha_cutlassB_f16_aligned_128x128_k128_sm80(typename AttentionBackwardKernel<cut
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x128_k128_sm80` is for sm80-sm100, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_128x128_k128_sm80` is for sm80-sm121, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -109,7 +109,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-#if __CUDA_ARCH__ < 750
+#if __CUDA_ARCH__ <= 740
   if (!p.advance_to_block()) {
     return;
   }
@@ -118,7 +118,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm70(typename AttentionBackwardK
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm70` is for sm70-sm75, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm70` is for sm70-sm74, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -128,7 +128,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128, true>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ <= 1200
+#if __CUDA_ARCH__ <= 1210
   if (!p.advance_to_block()) {
     return;
   }
@@ -137,7 +137,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm80(typename AttentionBackwardK
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm80` is for sm80-sm100, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_seqaligned_sm80` is for sm80-sm121, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -147,7 +147,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_sm50(typename AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 500
-#if __CUDA_ARCH__ < 700
+#if __CUDA_ARCH__ <= 690
   if (!p.advance_to_block()) {
     return;
   }
@@ -156,7 +156,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_sm50(typename AttentionBackwardKernel<cutla
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm50` is for sm50-sm70, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm50` is for sm50-sm69, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -166,7 +166,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-#if __CUDA_ARCH__ < 750
+#if __CUDA_ARCH__ <= 740
   if (!p.advance_to_block()) {
     return;
   }
@@ -175,7 +175,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_sm70(typename AttentionBackwardKernel<cutla
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm70` is for sm70-sm75, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm70` is for sm70-sm74, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -185,7 +185,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_sm75(typename AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, true, false, false, 64, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 750
-#if __CUDA_ARCH__ < 800
+#if __CUDA_ARCH__ <= 790
   if (!p.advance_to_block()) {
     return;
   }
@@ -194,7 +194,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_sm75(typename AttentionBackwardKernel<cutla
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm75` is for sm75-sm80, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm75` is for sm75-sm79, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }
@@ -204,7 +204,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f16_aligned_64x64_k128_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ <= 1200
+#if __CUDA_ARCH__ <= 1210
   if (!p.advance_to_block()) {
     return;
   }
@@ -213,7 +213,7 @@ fmha_cutlassB_f16_aligned_64x64_k128_sm80(typename AttentionBackwardKernel<cutla
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm80` is for sm80-sm100, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f16_aligned_64x64_k128_sm80` is for sm80-sm121, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }

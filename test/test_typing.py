@@ -8,7 +8,7 @@ import shutil
 import unittest
 from collections import defaultdict
 from threading import Lock
-from typing import IO, Optional
+from typing import IO
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -52,7 +52,7 @@ def _strip_filename(msg: str) -> str:
 def _run_mypy() -> dict[str, list[str]]:
     """Clears the cache and run mypy before running any of the typing tests."""
     if os.path.isdir(CACHE_DIR):
-        shutil.rmtree(CACHE_DIR)
+        shutil.rmtree(CACHE_DIR, ignore_errors=True)
 
     rc: dict[str, list[str]] = {}
     for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
@@ -97,9 +97,7 @@ Observed error: {!r}
 """
 
 
-def _test_fail(
-    path: str, error: str, expected_error: Optional[str], lineno: int
-) -> None:
+def _test_fail(path: str, error: str, expected_error: str | None, lineno: int) -> None:
     if expected_error is None:
         raise AssertionError(_FAIL_MSG1.format(lineno, error))
     elif error not in expected_error:
@@ -161,7 +159,7 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
 @unittest.skipIf(NO_MYPY, reason="Mypy is not installed")
 class TestTyping(TestCase):
     _lock = Lock()
-    _cached_output: Optional[dict[str, list[str]]] = None
+    _cached_output: dict[str, list[str]] | None = None
 
     @classmethod
     def get_mypy_output(cls) -> dict[str, list[str]]:
@@ -188,7 +186,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=FAIL_DIR),
     )
     def test_fail(self, path):
-        __tracebackhide__ = True  # noqa: F841
+        __tracebackhide__ = True
 
         with open(path) as fin:
             lines = fin.readlines()
@@ -227,7 +225,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=REVEAL_DIR),
     )
     def test_reveal(self, path):
-        __tracebackhide__ = True  # noqa: F841
+        __tracebackhide__ = True
 
         with open(path) as fin:
             lines = _parse_reveals(fin)

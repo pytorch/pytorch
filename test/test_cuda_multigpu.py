@@ -11,7 +11,7 @@ import tempfile
 import threading
 import unittest
 from itertools import chain, repeat
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import torch
 import torch.cuda.comm as comm
@@ -42,7 +42,7 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 class TestCudaMultiGPU(TestCase):
@@ -1006,7 +1006,7 @@ class TestCudaMultiGPU(TestCase):
 
     # Verifies that mem_get_info works, including when called for a different device
     def test_mem_get_info(self):
-        def _test(device: Union[str, int, torch.device]):
+        def _test(device: str | int | torch.device):
             # Prevent PyTorch from reusing the allocated memory
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
