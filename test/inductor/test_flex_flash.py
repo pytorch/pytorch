@@ -232,6 +232,14 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
             )
             self.assertIsNone(
                 _max_direct_aux_load_vec_size(
+                    [q_idx, kv_idx],
+                    FakeAuxBuffer((128, 128), (9, 1)),
+                    q_idx,
+                    kv_idx,
+                )
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size(
                     [kv_idx], FakeAuxBuffer((128,), (1,), offset=1), q_idx, kv_idx
                 )
             )

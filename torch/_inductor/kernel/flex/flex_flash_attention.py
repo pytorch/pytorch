@@ -153,6 +153,10 @@ def _max_direct_aux_load_vec_size(
         if not (
             V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
             and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
+            and all(
+                V.graph.sizevars.statically_known_multiple_of(stride, vec_size)
+                for stride in strides[:-1]
+            )
         ):
             continue
         if (

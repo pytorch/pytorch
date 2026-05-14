@@ -737,12 +737,18 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         is_offset_aligned = V.graph.sizevars.statically_known_multiple_of(
             buffer.get_layout().offset, vector_size
         )
+        are_non_vector_strides_aligned = all(
+            V.graph.sizevars.statically_known_multiple_of(stride, vector_size)
+            for dim, stride in enumerate(strides)
+            if dim != vector_dim
+        )
         return (
             has_vector_width
             and has_unit_stride
             and has_full_width_contiguity
             and is_size_aligned
             and is_offset_aligned
+            and are_non_vector_strides_aligned
         )
 
     def _emit_contiguous_dim_load(

@@ -319,6 +319,8 @@ class CuteDSLOpOverrides(OpOverrides):
             dtype=dtype,
         )
         result.is_scalar_expr = True
+        if isinstance(result, CuteDSLCSEVariable):
+            result.index_expr = V.graph.sizevars.simplify(expr)
         return result
 
     @staticmethod
@@ -351,9 +353,9 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(
-            a, b, "({a} % {b})", lambda a_expr, b_expr: a_expr % b_expr
-        )
+        # Inductor ops.mod is C-style; SymPy/Python % is Python-style for
+        # negative values, so don't attach index_expr metadata here.
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
     def remainder(a, b):
