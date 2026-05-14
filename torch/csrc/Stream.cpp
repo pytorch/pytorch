@@ -117,10 +117,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_dealloc(THPStream* self) {
+void THPStream_dealloc_common(THPStream* self) {
   PyObject_ClearWeakRefs((PyObject*)self);
   Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+}
+
+static void THPStream_dealloc(THPStream* self) {
+  THPStream_dealloc_common(self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {

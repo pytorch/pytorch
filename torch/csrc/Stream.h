@@ -18,6 +18,7 @@ struct THPStream {
 extern TORCH_API PyTypeObject* THPStreamClass;
 
 void THPStream_init(PyObject* module);
+TORCH_API void THPStream_dealloc_common(THPStream* self);
 
 inline bool THPStream_Check(PyObject* obj) {
   return THPStreamClass && PyObject_IsInstance(obj, (PyObject*)THPStreamClass);
