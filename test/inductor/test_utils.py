@@ -6,8 +6,14 @@ import unittest
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
-from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
+from torch._inductor.utils import (
+    _extract_triton_kernel_sources,
+    get_device_tflops,
+    sympy_str,
+    sympy_subs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -22,6 +28,40 @@ from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    @inductor_config.patch({"cpp_wrapper": False})
+    def test_extract_triton_kernel_sources_python_wrapper(self):
+        code = """
+            triton_kernel_0 = async_compile.triton('triton_kernel_0', '''kernel 0''')
+            triton_kernel_1 = async_compile.triton('triton_kernel_1', '''kernel 1''')
+        """
+
+        self.assertEqual(
+            _extract_triton_kernel_sources(code, remove_quote=True),
+            ["kernel 0", "kernel 1"],
+        )
+        self.assertEqual(
+            _extract_triton_kernel_sources(code),
+            ["'''kernel 0'''", "'''kernel 1'''"],
+        )
+
+    @inductor_config.patch(
+        {"cpp_wrapper": True, "triton.autotune_at_compile_time": False}
+    )
+    def test_extract_triton_kernel_sources_cpp_wrapper(self):
+        code = """
+            auto triton_kernel_0 = R"TRITON(kernel 0)TRITON";
+            auto triton_kernel_1 = R"TRITON(kernel 1)TRITON";
+        """
+
+        self.assertEqual(
+            _extract_triton_kernel_sources(code, remove_quote=True),
+            ["kernel 0", "kernel 1"],
+        )
+        self.assertEqual(
+            _extract_triton_kernel_sources(code, remove_quote=False),
+            ["kernel 0", "kernel 1"],
+        )
+
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
             pass

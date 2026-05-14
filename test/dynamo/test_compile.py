@@ -4,11 +4,13 @@ import inspect
 import io
 import os
 import tempfile
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class ToyModel(torch.nn.Module):
@@ -306,6 +308,119 @@ class PublicTorchCompilerTests(TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
+
+    def test_generate_kernel_returns_single_kernel(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = object()
+        with (
+            patch("torch.compile", return_value=compiled_fn) as compile_mock,
+            patch(
+                "torch._inductor.utils.run_and_get_kernels",
+                return_value=(None, ["triton kernel"]),
+            ) as get_kernels_mock,
+        ):
+            self.assertEqual(
+                torch.compiler.generate_kernel(
+                    fn, ("x", "y"), fullgraph=True, dynamic=False
+                ),
+                "triton kernel",
+            )
+
+        compile_mock.assert_called_once_with(fn, fullgraph=True, dynamic=False)
+        get_kernels_mock.assert_called_once_with(
+            compiled_fn, "x", "y", remove_quote=True
+        )
+
+    def test_generate_kernel_accepts_list_example_inputs(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = object()
+        with (
+            patch("torch.compile", return_value=compiled_fn),
+            patch(
+                "torch._inductor.utils.run_and_get_kernels",
+                return_value=(None, ["triton kernel"]),
+            ) as get_kernels_mock,
+        ):
+            torch.compiler.generate_kernel(fn, ["x", "y"])
+
+        get_kernels_mock.assert_called_once_with(
+            compiled_fn, "x", "y", remove_quote=True
+        )
+
+    def test_generate_kernel_preserves_namedtuple_input(self):
+        class Inputs(NamedTuple):
+            x: object
+            y: object
+
+        def fn(inputs):
+            return inputs.x + inputs.y
+
+        compiled_fn = object()
+        inputs = Inputs(object(), object())
+        with (
+            patch("torch.compile", return_value=compiled_fn),
+            patch(
+                "torch._inductor.utils.run_and_get_kernels",
+                return_value=(None, ["triton kernel"]),
+            ) as get_kernels_mock,
+        ):
+            torch.compiler.generate_kernel(fn, inputs)
+
+        get_kernels_mock.assert_called_once_with(compiled_fn, inputs, remove_quote=True)
+
+    def test_generate_kernel_wraps_single_example_input(self):
+        def fn(x):
+            return x + 1
+
+        compiled_fn = object()
+        input_arg = object()
+        with (
+            patch("torch.compile", return_value=compiled_fn),
+            patch(
+                "torch._inductor.utils.run_and_get_kernels",
+                return_value=(None, ["triton kernel"]),
+            ) as get_kernels_mock,
+        ):
+            torch.compiler.generate_kernel(fn, input_arg)
+
+        get_kernels_mock.assert_called_once_with(
+            compiled_fn, input_arg, remove_quote=True
+        )
+
+    def test_generate_kernel_rejects_zero_or_multiple_kernels(self):
+        def fn(x):
+            return x + 1
+
+        for kernels in ([], ["kernel 0", "kernel 1"]):
+            with (
+                patch("torch.compile", return_value=object()),
+                patch(
+                    "torch._inductor.utils.run_and_get_kernels",
+                    return_value=(None, kernels),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"expected exactly one Triton kernel.*generated {len(kernels)}",
+                ):
+                    torch.compiler.generate_kernel(fn, ("x",))
+
+    @requires_cuda_and_triton
+    def test_generate_kernel_cuda_integration(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+
+        kernel = torch.compiler.generate_kernel(fn, (x, y), fullgraph=True)
+
+        self.assertIn("def triton_", kernel)
+        self.assertIn("tl.load", kernel)
 
 
 class FullgraphTests(TestCase):

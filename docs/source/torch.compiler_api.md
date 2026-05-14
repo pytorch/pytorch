@@ -14,6 +14,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
     :nosignatures:
 
      compile
+     generate_kernel
      reset
      allow_in_graph
      substitute_in_graph
