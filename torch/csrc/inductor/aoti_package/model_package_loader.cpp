@@ -101,10 +101,6 @@ bool path_starts_with_directory(
       c10::starts_with(normalized_path, normalized_directory_with_sep);
 }
 
-bool is_zip_file(const std::string& path) {
-  return c10::ends_with(path, ".pt2") || c10::ends_with(path, ".zip");
-}
-
 void list_files_recursive(
     const std::string& root,
     std::vector<std::string>& out) {
@@ -120,7 +116,7 @@ std::string create_temp_dir() {
   // Transfer ownership of the temp directory path to the caller explicitly.
   // TempDir's destructor calls rmdir()/RemoveDirectory(); clearing the name
   // disables that RAII cleanup and lets callers manage lifecycle via
-  // recursive_rmdir().
+  // fs::remove_all().
   std::string path = temp_dir.name;
   temp_dir.name.clear();
   return path;
@@ -377,18 +373,6 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   return std::make_tuple(cmd, target_file);
 }
 
-bool recursive_mkdir(const std::string& dir) {
-  std::error_code ec;
-  fs::create_directories(dir, ec);
-  return !ec;
-}
-
-bool recursive_rmdir(const std::string& path) {
-  std::error_code ec;
-  fs::remove_all(path, ec);
-  return !ec;
-}
-
 std::string compile_so(
     const std::string& cpp_filename,
     std::vector<std::string>& obj_filenames) {
@@ -573,8 +557,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
         const std::string& model_package_path,
         const std::string& model_name) {
   const std::string metadata_suffix = "wrapper_metadata.json";
-  const bool is_directory_mode =
-      fs::is_directory(model_package_path) && !is_zip_file(model_package_path);
+  const bool is_directory_mode = fs::is_directory(model_package_path);
 
   std::vector<std::string> found_filenames;
   std::string metadata_path;
@@ -651,11 +634,13 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
           parent_path_idx != std::string::npos,
           "Failed to find parent path in " + output_path_str);
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      std::error_code mkdir_ec;
       TORCH_CHECK(
-          recursive_mkdir(parent_path),
-          "Failed to create directory " + parent_path,
+          fs::create_directories(parent_path, mkdir_ec) || !mkdir_ec,
+          "Failed to create directory ",
+          parent_path,
           ": ",
-          c10::utils::str_error(errno));
+          mkdir_ec.message());
 
       LOG(INFO) << "Extract file: " << metadata_filename << " to "
                 << output_path_str;
@@ -668,7 +653,12 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
       for (auto& item : metadata_json_obj.items()) {
         metadata[item.key()] = item.value().get<std::string>();
       }
-      recursive_rmdir(temp_dir);
+      std::error_code remove_ec;
+      fs::remove_all(temp_dir, remove_ec);
+      if (remove_ec) {
+        LOG(WARNING) << "Failed to remove temporary directory " << temp_dir
+                     << ": " << remove_ec.message();
+      }
       return metadata;
     }
   }
@@ -733,9 +723,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::vector<std::string> found_filenames;
   std::string model_directory;
 
-  if (fs::is_directory(model_package_path) &&
-      !is_zip_file(model_package_path)) {
-    shared_mode_ = true;
+  if (fs::is_directory(model_package_path)) {
+    is_directory_ = true;
     temp_dir_ =
         strip_trailing_separator(normalize_path_separator(model_package_path));
 
@@ -793,7 +782,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   } else {
     // Extract all files within the zipfile to a temporary directory
-    shared_mode_ = false;
+    is_directory_ = false;
     RAIIMinizArchive zip_archive{model_package_path};
     auto zip_filenames = zip_archive.get_filenames();
     TORCH_CHECK(!zip_filenames.empty(), "No files found in zip archive.");
@@ -855,11 +844,13 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             "Failed to find parent path in " + output_file_path);
 
         std::string parent_path = output_file_path.substr(0, parent_path_idx);
+        std::error_code mkdir_ec;
         TORCH_CHECK(
-            recursive_mkdir(parent_path),
-            "Failed to create directory " + parent_path,
+            fs::create_directories(parent_path, mkdir_ec) || !mkdir_ec,
+            "Failed to create directory ",
+            parent_path,
             ": ",
-            c10::utils::str_error(errno));
+            mkdir_ec.message());
 
         // Extracts file to the temp directory
         zip_archive.extract_file(zip_filename_str, output_path_str);
@@ -892,7 +883,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         "Failed to find a generated cpp file or so file for model '",
         model_name,
         "' in the ",
-        (shared_mode_ ? "directory" : "zip archive"),
+        (is_directory_ ? "directory" : "zip archive"),
         ".\n\nAvailable models:\n",
         model_names_str,
         "\n\nTo load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n",
@@ -934,8 +925,13 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
   // Clean up the temporary directory
-  if (!temp_dir_.empty() && !shared_mode_) {
-    recursive_rmdir(temp_dir_);
+  if (!temp_dir_.empty() && !is_directory_) {
+    std::error_code remove_ec;
+    fs::remove_all(temp_dir_, remove_ec);
+    if (remove_ec) {
+      LOG(WARNING) << "Failed to remove temporary directory " << temp_dir_
+                   << ": " << remove_ec.message();
+    }
   }
 }
 
