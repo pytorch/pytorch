@@ -152,6 +152,22 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK_1", 128))
         self.assertTrue(tuner.value_too_large("R0_BLOCK_1", 256))
 
+    def test_value_limits_from_inductor_meta(self):
+        tuner = CoordescTuner(
+            size_hints={"x": 1024, "r0_": 1024},
+            inductor_meta={
+                "min_xblock": 16,
+                "min_rblock": 64,
+            },
+        )
+
+        self.assertTrue(tuner.value_too_small("XBLOCK", 8))
+        self.assertFalse(tuner.value_too_small("XBLOCK", 16))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK", 32))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK", 64))
+        self.assertEqual(tuner.get_neighbour_values("XBLOCK", 16), [32])
+        self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
+
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
         def make_configs(xblock, yblock):
             return [

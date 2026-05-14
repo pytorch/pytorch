@@ -137,7 +137,7 @@ class TimerServer(abc.ABC):
     def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         """
         Processes the incoming timer requests and registers them with the server.
-        The timer request can either be a acquire-timer or release-timer request.
+        The timer request can either be an acquire-timer or release-timer request.
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
         """
