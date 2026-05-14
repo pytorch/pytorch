@@ -891,11 +891,12 @@ void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
 {
   auto preferred = at::globalContext().blasPreferredBackend();
 #ifdef USE_ROCM
-  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl, so a
-  // backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
+  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
   // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
   // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
   if (preferred == BlasBackend::Cublaslt &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"}) &&
       at::ROCmBackwardPassGuard::is_backward_pass()) {
     preferred = BlasBackend::Cublas;
   }
@@ -1432,11 +1433,12 @@ void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
 {
   auto preferred = at::globalContext().blasPreferredBackend();
 #ifdef USE_ROCM
-  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl, so a
-  // backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
+  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
   // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
   // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
   if (preferred == BlasBackend::Cublaslt &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"}) &&
       at::ROCmBackwardPassGuard::is_backward_pass()) {
     preferred = BlasBackend::Cublas;
   }
