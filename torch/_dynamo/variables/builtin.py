@@ -3250,12 +3250,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                         hints=[],
                     )
 
-        # UDOV pending mutations may target slots, descriptors, or the instance
-        # dict. Route them through var_getattr so descriptor precedence matches
-        # CPython instead of returning a pending value too early.
-        if tx.output.side_effects.has_pending_mutation_of_attr(
-            obj, name
-        ) and not isinstance(obj, variables.UserDefinedObjectVariable):
+        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
             return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:

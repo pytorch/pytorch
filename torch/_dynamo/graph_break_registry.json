@@ -2235,16 +2235,6 @@
       ]
     }
   ],
-  "GB7637": [
-    {
-      "Gb_type": "non-string key in object __dict__",
-      "Context": "key={key_value}",
-      "Explanation": "Dynamo expects object __dict__ keys to be strings.",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",
@@ -3662,26 +3652,6 @@
       ]
     }
   ],
-  "GB5849": [
-    {
-      "Gb_type": "non-constant key in object __dict__",
-      "Context": "key={key.vt}",
-      "Explanation": "Dynamo expects object __dict__ replacement keys to be constants.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB3241": [
-    {
-      "Gb_type": "C-level descriptor delete on user-defined object",
-      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
-      "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
@@ -4833,36 +4803,6 @@
       "Explanation": "strict_mode higher order op expects flat inputs (list/tuple/dict)",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB7502": [
-    {
-      "Gb_type": "Unsupported user-defined object construction during side-effect tracking",
-      "Context": "class={user_cls}, base={base_cls}, error={exc}",
-      "Explanation": "Dynamo could not construct an example object for side-effect replay using the class __new__ method.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB3697": [
-    {
-      "Gb_type": "C-level descriptor setattr on user-defined object",
-      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
-      "Explanation": "Dynamo does not yet model this C-level descriptor setter for user-defined objects.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB2404": [
-    {
-      "Gb_type": "Unsupported object.__new__ user-defined class construction",
-      "Context": "class={self.value}, error={exc}",
-      "Explanation": "Dynamo could not construct an example object for side-effect replay using object.__new__.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
