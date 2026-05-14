@@ -212,8 +212,6 @@ def _split_tensor(
         # Shard(split_dim) to Replicate) and avoid local_map (whose
         # from_local call assumes even sharding and computes wrong global
         # sizes when local shards differ across ranks).
-        # Use to_local() (not ._local_tensor) so the autograd graph is
-        # preserved for backward.
         placements = tensor.placements
         mesh = tensor.device_mesh
         local_tensor = tensor.to_local()
