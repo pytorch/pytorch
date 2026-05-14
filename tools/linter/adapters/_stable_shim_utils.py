@@ -13,7 +13,8 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +47,7 @@ class LintMessage(NamedTuple):
 
 class IdentifierUse(NamedTuple):
     """
-    An identifier (name of function, typedef, class etc) that at a particular verion.
+    An identifier (name of function, typedef, class etc) that at a particular version.
     """
 
     identifier: str
@@ -204,7 +205,7 @@ class MatcherAccumulator:
         line: str,
     ) -> bool:
         """
-        Processess a single line, searches for start and end token and strips out single-line comments.
+        Processes a single line, searches for start and end token and strips out single-line comments.
 
         Returns whether this line is part of an actively being parsed matcher.
         """

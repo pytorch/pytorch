@@ -14,24 +14,26 @@ import logging
 import sys
 from pathlib import Path
 
+
 # Add repo root to sys.path so we can import from tools
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    arbitrary_identifier_matcher,
     IDENTIFIER_MATCHERS,
     LintMessage,
     LintSeverity,
     PreprocessorTracker,
-    arbitrary_identifier_matcher,
 )
+
 
 LINTER_CODE = "STABLE_SHIM_USAGE"
 
 
 def get_shim_functions(
     shim_files: list[Path | str] | None = None,
-) -> dict[str, tuple[int, int] | None]:
+) -> dict[str, tuple[int, int]]:
     """
     Extract function names from shim header files and their required version.
     Returns a dict mapping function name to (major, minor) version tuple.
@@ -66,7 +68,7 @@ def get_shim_functions(
             "Ensure all shim header files exist in the repository."
         )
 
-    identifiers: dict[str, tuple[int, int] | None] = {}
+    identifiers: dict[str, tuple[int, int]] = {}
 
     for shim_file in shim_files_to_check:
         with open(shim_file) as f:

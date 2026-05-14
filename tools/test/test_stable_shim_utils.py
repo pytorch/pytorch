@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
@@ -9,14 +10,14 @@ sys.path.append(str(REPO_ROOT))
 import re
 
 from tools.linter.adapters._stable_shim_utils import (
+    arbitrary_identifier_matcher,
     FUNCTION_IDENTIFIER_MATCHER,
-    STRUCT_CLASS_IDENTIFIER_MATCHER,
-    TYPEDEF_IDENTIFIER_MATCHER,
-    USING_IDENTIFIER_MATCHER,
     IdentifierMatcher,
     IdentifierUse,
     MatcherAccumulator,
-    arbitrary_identifier_matcher,
+    STRUCT_CLASS_IDENTIFIER_MATCHER,
+    TYPEDEF_IDENTIFIER_MATCHER,
+    USING_IDENTIFIER_MATCHER,
 )
 
 
