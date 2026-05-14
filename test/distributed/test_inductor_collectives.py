@@ -1853,6 +1853,45 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dedup_reduce_scatter(self):
+        def func(rs_0, rs_1, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0, "avg", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1, "avg", group_size, group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops._c10d_functional.wait_tensor(rs_1_out)
+            return rs_0_out + rs_1_out
+
+        rs_0 = torch.ones(4, 128, device="cuda")
+        rs_1 = torch.ones(4, 128, device="cuda")
+        inputs = [rs_0, rs_1]
+
+        with torch._inductor.config.patch(
+            {
+                "dedup_reduce_scatters": True,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        FileCheck().check_count(
+            "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+            count=1,
+            exactly=True,
+        ).run(code)
+
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     @parametrize(
         "bucket_mode", ["all"]
@@ -3430,6 +3469,264 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
         )
         ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
         self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+
+
+def _build_graph_with_duplicate_rs(
+    n_duplicates: int,
+) -> torch.fx.GraphModule:
+    fake_mode = torch._subclasses.FakeTensorMode()
+    graph = torch.fx.Graph()
+
+    placeholders = []
+    for i in range(n_duplicates):
+        ph = graph.placeholder(f"input_{i}")
+        ph.meta["val"] = fake_mode.from_tensor(torch.randn(10, 128))
+        placeholders.append(ph)
+
+    rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+    wait_target = torch.ops._c10d_functional.wait_tensor.default
+    add_target = torch.ops.aten.add.Tensor
+
+    waits = []
+    for ph in placeholders:
+        rs = graph.call_function(rs_target, args=(ph, "avg", 2, "0"))
+        rs.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        wait = graph.call_function(wait_target, args=(rs,))
+        wait.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        waits.append(wait)
+
+    result = waits[0]
+    for wait in waits[1:]:
+        add_node = graph.call_function(add_target, args=(result, wait))
+        add_node.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        result = add_node
+
+    graph.output(result)
+
+    return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+
+class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        if not c10d.is_initialized():
+            store = c10d.HashStore()
+            c10d.init_process_group(backend="fake", store=store, rank=0, world_size=2)
+
+    def tearDown(self):
+        super().tearDown()
+        if c10d.is_initialized():
+            c10d.destroy_process_group()
+
+    def _count_ops(self, gm, target):
+        return sum(
+            1 for n in gm.graph.nodes if n.op == "call_function" and n.target is target
+        )
+
+    def test_two_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(2)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+        self.assertEqual(self._count_ops(gm, wait_target), 2)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        # 2 placeholders + 3 call_function (add, rs, wait) + 1 output
+        self.assertEqual(len(list(gm.graph.nodes)), 6)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIs(fn_nodes[0].target, add_target)
+        self.assertIs(fn_nodes[1].target, rs_target)
+        self.assertIs(fn_nodes[2].target, wait_target)
+
+        # The add operates on pre-scatter inputs (10, 128), not
+        # post-scatter outputs (5, 128).
+        self.assertEqual(fn_nodes[0].meta["val"].shape, (10, 128))
+        self.assertEqual(fn_nodes[1].meta["val"].shape, (5, 128))
+        self.assertEqual(fn_nodes[2].meta["val"].shape, (5, 128))
+
+    def test_four_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(4)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 4)
+        self.assertEqual(self._count_ops(gm, wait_target), 4)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        for n in fn_nodes[:3]:
+            self.assertIs(n.target, add_target)
+        self.assertIs(fn_nodes[3].target, rs_target)
+        self.assertIs(fn_nodes[4].target, wait_target)
+
+    def test_no_fusion_different_rs_args(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        # Different group name "1" vs "0" above — can't fuse across groups
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "1"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_nonlinear_reduce_op(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        # "max" is non-linear — RS(a) + RS(b) != RS(a + b) for max
+        rs_a = graph.call_function(rs_target, args=(ph_a, "max", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "max", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_wait_has_other_users(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+        neg_target = torch.ops.aten.neg.default
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        # wait_b has 2 users (neg + add) — can't fuse since the RS result is needed independently
+        other_use = graph.call_function(neg_target, args=(wait_b,))
+        other_use.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+
+        graph.output((add_node, other_use))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_different_dtypes(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128, dtype=torch.float32)
+        ph_b = graph.placeholder("input_b")
+        # Different dtype: bf16 vs f32
+        ph_b.meta["val"] = torch.randn(10, 128, dtype=torch.bfloat16)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
 
 
 if __name__ == "__main__":

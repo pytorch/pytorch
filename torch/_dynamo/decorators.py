@@ -114,7 +114,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
         return wrap(fn)
 
 
-_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
+_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__
 skip_code(_nonrecursive_disable_wrapper_code)
 
 
@@ -178,7 +178,7 @@ class set_stance(_DecoratorContextManager):
 
 
 def assume_constant_result(fn):  # type: ignore[no-untyped-def]
-    fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
+    fn._dynamo_marked_constant = True
     return fn
 
 
@@ -523,34 +523,33 @@ def leaf_function(
 
         **register_multi_grad_hook (optional)**:
         You can register a backward hook via ``@fn.register_multi_grad_hook``
-        to run code when gradients have been computed
-        for all requires_grad tensor inputs during backward. The hook fires exactly once
-        per backward pass. The hook function has the same signature as the leaf function;
-        each requires_grad tensor argument receives the corresponding gradient instead
-        of the original tensor. Non-tensor arguments and tensors without requires_grad
-        are passed through unchanged. The hook must return ``None``. The hook is called
-        as a leaf function itself, so it is also opaque to the compiler.
+        to run code when gradients have been computed for all requires_grad
+        tensor inputs during backward. The hook fires exactly once per
+        backward pass. The hook receives only the gradients of the leaf
+        function's requires_grad tensor inputs, in the order they appeared;
+        non-tensor arguments and tensors without ``requires_grad`` are not
+        forwarded to the hook. The hook must return ``None``. The hook is
+        called as a leaf function itself, so it is also opaque to the
+        compiler.
 
         Example::
 
             >>> @leaf_function
-            ... def debug_log(t, tag):
-            ...     print(f"[{tag}][fwd] norm={t.norm().item()}")
+            ... def debug_log(t):
             ...     return None
             ...
             >>> @debug_log.register_fake
-            ... def debug_log_fake(t, tag):
+            ... def debug_log_fake(t):
             ...     return None
             ...
             >>> @debug_log.register_multi_grad_hook
-            ... def debug_log_hook(t_grad, tag):
-            ...     print(f"[{tag}][bwd] norm={t_grad.norm().item()}")
+            ... def debug_log_hook(t_grad):
+            ...     print(f"[bwd] norm={t_grad.norm().item()}")
             ...
             >>> x = torch.randn(4, requires_grad=True)
-            >>> debug_log(x, "intermediate")  # no assignment needed
-            [intermediate][fwd] norm=...
+            >>> debug_log(x)  # no assignment needed
             >>> (x * 2).sum().backward()
-            [intermediate][bwd] norm=...
+            [bwd] norm=...
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
@@ -755,13 +754,13 @@ def leaf_function(
             mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
             hook_fn=inner._torchdynamo_leaf_hook_fn,  # type: ignore[attr-defined]
             hook_fake_fn=inner._torchdynamo_leaf_hook_fake_fn,  # type: ignore[attr-defined]
-        )  # type: ignore[attr-defined]
+        )
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
         frozenset(mutates_args) if mutates_args else frozenset()
-    )  # type: ignore[attr-defined]
+    )
     inner._torchdynamo_leaf_hook_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
@@ -1074,7 +1073,7 @@ def substitute_in_graph(
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
-        return wrapped  # type: ignore[return-value]
+        return wrapped
 
     return wrapper
 
@@ -1175,7 +1174,7 @@ def mark_unbacked(
                 t._dynamo_strict_unbacked_indices = set()
 
             t._dynamo_strict_unbacked_indices.add(index)
-            t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
+            t._has_dynamo_dim_marking = True
             return
 
         if not hasattr(t, "_specialized_on"):
@@ -1211,7 +1210,7 @@ def mark_unbacked(
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
         t._dynamo_unbacked_indices.add(index)
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
+        t._has_dynamo_dim_marking = True
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1300,7 +1299,7 @@ def mark_dynamic(
 
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
+        t._has_dynamo_dim_marking = True
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -1335,7 +1334,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
+        t._has_dynamo_dim_marking = True
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1479,7 +1478,7 @@ def _allow_in_graph_einops() -> None:
         # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
-        _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
+        _patch_einops_symint_compat(einops.einops)
         allow_in_graph(einops.rearrange)
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):
@@ -1800,3 +1799,52 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+def allow_c_hash(tp: type) -> type:
+    """Register a C extension type's ``__hash__`` as safe to call at trace time.
+
+    By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
+    on a C extension type with a custom ``tp_hash`` slot (e.g., types defined
+    in C extension modules).  This function tells Dynamo that the type's
+    ``__hash__`` is safe to evaluate during tracing, avoiding the graph break.
+
+    The hash function must satisfy these requirements:
+
+    - **Pure**: depends only on the object's value, with no observable side
+      effects (no I/O, no mutation of global state).
+    - **Deterministic**: returns the same result for the same object across
+      calls within a process.
+    - **Immutable objects**: the object's hash-relevant state must not change
+      after construction — if the object is mutated in a way that changes its
+      hash, Dynamo's cached hash value will be stale.
+
+    Builtin types (``int``, ``str``, etc.) and Python-level ``__hash__``
+    methods are already handled and do not need registration.  This API is
+    only needed for C extension types whose ``tp_hash`` slot Dynamo cannot
+    trace into.
+
+    Args:
+        tp: The C extension type whose ``__hash__`` should be allowed.
+
+    Returns:
+        The type, unchanged (so it can be used as a decorator).
+
+    Example::
+
+        import torch._dynamo
+        from my_extension import MyType
+
+        torch._dynamo.allow_c_hash(MyType)
+    """
+    from .variables.user_defined import _safe_c_tp_hash_funcs
+
+    if not isinstance(tp, type):
+        raise TypeError(f"allow_c_hash expects a type, got {type(tp).__name__}")
+    hash_fn = tp.__hash__
+    if hash_fn is object.__hash__:
+        raise ValueError(
+            f"{tp.__name__} uses the default object.__hash__ and does not need registration"
+        )
+    _safe_c_tp_hash_funcs().add(hash_fn)
+    return tp

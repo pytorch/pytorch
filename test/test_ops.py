@@ -478,8 +478,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
-            or "cpu" in device
+            and ("cpu" in device or "cuda" in device or "xpu" in device)
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 

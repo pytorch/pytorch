@@ -851,7 +851,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
             kernel_definition=kernel.def_kernel(
-                inputs=[X, W],  # type: ignore[list-item]
+                inputs=[X, W],
                 outputs=[Y],
                 names_str="X, W, Y",
                 size_args=[

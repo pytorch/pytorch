@@ -398,7 +398,7 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
-// The current graph task's exec_info is being used to trim unnecessary edegs
+// The current graph task's exec_info is being used to trim unnecessary edges
 // during node evaluation, see `Node.task_should_compute_output()` function.
 const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info() {
@@ -1318,7 +1318,7 @@ auto Engine::execute(
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
-  TORCH_CHECK_VALUE(
+  TORCH_INTERNAL_ASSERT(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");
 
   // A fresh first time Engine::execute call should start on the CPU device,

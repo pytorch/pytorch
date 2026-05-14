@@ -340,7 +340,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a jvp
     # call from eager that calls the compiled function, as the jvp levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
     def create(
@@ -425,7 +425,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 class DualLevelContextManager(ContextWrappingVariable):
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
 
     @staticmethod
     def create(tx: "InstructionTranslator", **kwargs: Any) -> "DualLevelContextManager":
@@ -473,7 +473,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a grad
     # call from eager that calls the compiled function, as the grad levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
     def create(
@@ -565,7 +565,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a vmap
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
     def create(
@@ -616,7 +616,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
     def create(
@@ -856,10 +856,38 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
         return torch.accelerator.device_index
 
 
+_device_context_manager_map: dict[type, type[GenericDeviceVariable]] = {
+    torch.cuda.device: CUDADeviceVariable,
+    torch.xpu.device: XPUDeviceVariable,
+    torch.accelerator.device_index: AcceleratorDeviceIndexVariable,
+}
+
+
+def register_device_context_manager(
+    device_context: type, variable_cls: type[GenericDeviceVariable]
+) -> None:
+    """Register a Dynamo variable class for a device context manager type.
+
+    Raises ``ValueError`` if ``device_context`` is already registered.
+    """
+    if device_context in _device_context_manager_map:
+        raise ValueError(
+            f"Device context {device_context} already has a registered context manager"
+        )
+    _device_context_manager_map[device_context] = variable_cls
+
+
+def get_device_context_manager(
+    device_context: type,
+) -> type[GenericDeviceVariable] | None:
+    """Return the Dynamo variable class for ``device_context``, or ``None`` if not registered."""
+    return _device_context_manager_map.get(device_context)
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
 
     @staticmethod
     def create(
@@ -1348,7 +1376,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
 
 class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)  # type: ignore[arg-type]
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
 
     @staticmethod
     def create(

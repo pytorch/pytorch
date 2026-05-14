@@ -270,7 +270,6 @@ def _package_aoti_files(
     ] = {}  # model_name -> (weight_name -> (filename, shape, stride, offset))
 
     for model_name, files in aoti_files.items():
-        num_so_files = 0
         weights_configs[model_name] = {}
 
         for file in files:
@@ -281,14 +280,8 @@ def _package_aoti_files(
                 all_weights[model_name] = file
                 continue
 
-            if file.endswith(".so"):
-                num_so_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
+            # Note: Previously we rejected multiple .so cases. But Triton CPU AOTI
+            # has multiple .so files per model (wrapper, launcher, kernel).
 
             filename = os.path.basename(file)
             if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
@@ -745,6 +738,7 @@ class AOTICompiledModel:
         *,
         check_full_update: bool,
         user_managed: bool = False,
+        allow_h2d_copy: bool = False,
     ) -> None:
         """
         Given a mapping of constant fqns to tensors, load the constants into the model.
@@ -755,9 +749,14 @@ class AOTICompiledModel:
             constants_map: A mapping of constant fqns to tensors.
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
+            user_managed: If True, the loader stores the tensor pointers
+            directly; the caller must keep them alive.
+            allow_h2d_copy: If True, CPU tensors are silently copied to the
+            model's device. Useful for loading a CPU ``state_dict()`` into a
+            non-CPU model. Incompatible with ``user_managed``.
         """
         self.loader.load_constants(
-            constants_map, False, check_full_update, user_managed
+            constants_map, False, check_full_update, user_managed, allow_h2d_copy
         )
 
     def get_constant_fqns(self) -> list[str]:
