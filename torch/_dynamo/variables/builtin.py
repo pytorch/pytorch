@@ -80,7 +80,13 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttrMutationKind,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -121,7 +127,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    is_data_descriptor,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -3251,7 +3261,17 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
 
         if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            return tx.output.side_effects.load_attr(obj, name)
+            if not isinstance(obj, variables.UserDefinedObjectVariable):
+                return tx.output.side_effects.load_attr(obj, name)
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                obj, name, AttrMutationKind.INSTANCE_DICT
+            ):
+                value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
+                type_attr = obj.lookup_class_mro_attr(name)
+                if not isinstance(value, variables.DeletedVariable) and (
+                    type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr)
+                ):
+                    return value
 
         if default is not None:
             hasattr_var = obj.call_obj_hasattr(tx, name)
