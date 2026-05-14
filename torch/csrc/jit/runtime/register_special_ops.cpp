@@ -324,6 +324,16 @@ RegisterOperators reg({
           push(stack, at::infer_size(a.toDimVector(), b.toDimVector()));
         },
         aliasAnalysisFromSchema()),
+    // Not gated by TORCH_SELECTIVE_SCHEMA because selective build
+    // allowlists won't include this op until models are re-traced.
+    Operator(
+        "aten::broadcast_shapes(int[] a, int[] b) -> int[]",
+        [](Stack& stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, at::infer_size(a.toDimVector(), b.toDimVector()));
+        },
+        aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor"),

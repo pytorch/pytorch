@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 if _TYPE_CHECKING:
     from types import ModuleType
 
-    from torch.ao.nn import (  # noqa: TC004
+    from torch.ao.nn import (
         intrinsic as intrinsic,
         qat as qat,
         quantizable as quantizable,

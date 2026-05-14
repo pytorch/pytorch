@@ -2,6 +2,7 @@
 #include <c10/metal/common.h>
 
 #define MAX_THREADGROUP_SIZE static_cast<uint32_t>(1024)
+C10_METAL_CONSTEXPR uint32_t SUM_NCHAINS = 8;
 
 template <unsigned N = c10::metal::max_ndim>
 struct NormParams {

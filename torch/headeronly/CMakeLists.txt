@@ -18,7 +18,7 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h)
 
-file(GLOB HEADERONLY_HEADERS
+file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     *.h
     core/**/*.h
     cpu/**/*.h
@@ -30,6 +30,8 @@ add_library(headeronly INTERFACE ${HEADERONLY_HEADERS})
 
 install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h
         DESTINATION include/torch/headeronly/macros)
+install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h
+        DESTINATION include/torch/headeronly/core)
 
 if(NOT BUILD_LIBTORCHLESS)
   # ---[ Installation copied from c10/CMakeLists.txt
