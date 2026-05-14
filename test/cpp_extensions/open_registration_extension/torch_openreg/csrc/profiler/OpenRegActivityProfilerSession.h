@@ -10,15 +10,15 @@
 
 #include <IActivityProfiler.h>
 #include <libkineto.h>
-
-#include "profiler/OpenRegTracer.h"
+#include <csrc/tracer.h>
 
 namespace openreg::profiler {
 
 class OpenRegActivityProfilerSession
     : public libkineto::IActivityProfilerSession {
  public:
-  OpenRegActivityProfilerSession() = default;
+  explicit OpenRegActivityProfilerSession(int32_t deviceIndex = 0)
+      : deviceIndex_(deviceIndex) {}
   ~OpenRegActivityProfilerSession() override = default;
 
   void start() override;
@@ -39,24 +39,12 @@ class OpenRegActivityProfilerSession
   void pushCorrelationId(uint64_t id) override;
   void popCorrelationId() override;
 
- private:
-  static libkineto::ActivityType toActivityType(ActivityKind kind);
-
-  void convertRecords(
-      const std::vector<TraceRecord>& records,
-      libkineto::ActivityLogger& logger);
-
   int64_t startTs_{0};   // µs, set in start()
   int64_t endTs_{0};     // µs, set in stop()
 
-  // Populated by the windowed processTrace overload before delegating.
-  int64_t captureWindowStartTime_{0};  // µs
-  int64_t captureWindowEndTime_{0};    // µs
-  libkineto::getLinkedActivityCallback cpuActivity_;
-
   libkineto::CpuTraceBuffer traceBuffer_;
-  std::vector<std::pair<int32_t, int32_t>> resources_;
   std::vector<std::string> errors_;
+  int32_t deviceIndex_{0};
 };
 
 } // namespace openreg::profiler

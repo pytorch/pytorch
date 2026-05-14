@@ -24,7 +24,7 @@ OpenRegActivityProfiler::configure(
     const libkineto::Config& /*config*/) {
   // Real vendor: pass activity_types and config into your session constructor
   // to arm the device tracing API.
-  return std::make_unique<OpenRegActivityProfilerSession>();
+  return std::make_unique<OpenRegActivityProfilerSession>(/*deviceIndex=*/0);
 }
 
 std::unique_ptr<libkineto::IActivityProfilerSession>

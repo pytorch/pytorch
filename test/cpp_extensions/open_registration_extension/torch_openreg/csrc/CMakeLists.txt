@@ -5,6 +5,7 @@ file(GLOB_RECURSE SOURCE_FILES
 )
 
 add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
+set_target_properties(${LIBRARY_NAME} PROPERTIES CXX_VISIBILITY_PRESET default)
 
 target_link_libraries(${LIBRARY_NAME} PRIVATE torch_cpu_library openreg)
 target_include_directories(${LIBRARY_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -17,24 +18,24 @@ if(KINETO_LIBRARY)
     target_include_directories(${LIBRARY_NAME} PRIVATE ${KINETO_INCLUDE_DIR})
     target_compile_definitions(${LIBRARY_NAME} PRIVATE USE_KINETO)
     message(STATUS "torch_openreg: Kineto found at ${KINETO_LIBRARY}, USE_KINETO enabled")
+else()
+    message(STATUS "torch_openreg: Kineto not found, profiler/OpenRegActivityProfiler.cpp compiled as no-op")
+endif()
 
-    if(USE_TEST)
+if(USE_TEST)
+    if(KINETO_LIBRARY)
         set(PROFILER_TEST_TARGET openreg_profiler_tests)
         add_executable(${PROFILER_TEST_TARGET}
-            ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_activity_profiler.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegActivityProfiler.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegActivityProfilerSession.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegTracer.cpp)
+            ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_activity_profiler.cpp)
         target_link_libraries(${PROFILER_TEST_TARGET}
-            PRIVATE torch_cpu_library gtest gtest_main)
+            PRIVATE torch_openreg torch_cpu_library ${KINETO_LIBRARY} openreg gtest gtest_main)
         target_include_directories(${PROFILER_TEST_TARGET} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
-            ${KINETO_INCLUDE_DIR})
+            ${KINETO_INCLUDE_DIR}
+            ${PYTORCH_INSTALL_DIR}/include)
         target_compile_definitions(${PROFILER_TEST_TARGET} PRIVATE USE_KINETO KINETO_NAMESPACE=libkineto)
         add_test(NAME ${PROFILER_TEST_TARGET} COMMAND ${PROFILER_TEST_TARGET})
     endif()
-else()
-    message(STATUS "torch_openreg: Kineto not found, profiler/OpenRegActivityProfiler.cpp compiled as no-op")
 endif()
 
 install(TARGETS ${LIBRARY_NAME}
