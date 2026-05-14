@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import cast
+
 import torch
 import torch.utils._pytree as pytree
 from torch import _prims
@@ -64,18 +66,17 @@ def philox_rand_offset(
     numel_scalar = 1
     for dim_size in shape:
         numel_scalar *= dim_size
-
     if device.type == "cuda":
+        numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
         block_size = 256
         unroll = 4
         curand4_engine_calls = 4
         device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
-        max_threads_per_processor = device_property.max_threads_per_multi_processor
-        processor_count = device_property.multi_processor_count
-        blocks_per_sm = max_threads_per_processor // block_size
-        grid_size = (numel_scalar + block_size - 1) // block_size
-        grid_size = min(grid_size, processor_count * blocks_per_sm)
-        result = ((numel_scalar - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+        blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
+        num = cast(int, numel)
+        grid_size = (num + block_size - 1) // block_size
+        grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
+        return ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
     elif device.type == "xpu":
         unroll = 4  # rand4_engine_calls are equal to unroll in XPU DistributionTemplates.h
         device_property = torch.xpu.get_device_properties(torch.xpu.current_device())

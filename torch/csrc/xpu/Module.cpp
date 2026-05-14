@@ -378,6 +378,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
                    << "-bit, gpu_eu_count=" << prop.gpu_eu_count
+                   << ", gpu_eu_count_per_subslice=" << prop.gpu_eu_count_per_subslice
+                   << ", gpu_hw_threads_per_eu=" << prop.gpu_hw_threads_per_eu
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
