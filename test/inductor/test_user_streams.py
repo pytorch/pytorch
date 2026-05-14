@@ -21,6 +21,7 @@ from torch._inductor.codegen.wrapper import (
     EnterDeviceContextManagerWithStreamInfoLine,
     ExitCudaStreamContextLine,
     ExitDeviceContextManagerWithStreamInfoLine,
+    SubgraphPythonWrapperCodegen,
 )
 from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.stream_constants import (
@@ -191,6 +192,7 @@ class TestStreamCodegen(InductorTestCase):
     def test_stream_codegen_uses_device_ops(self):
         cases = [
             (
+                "cuda",
                 CUDADeviceOpOverrides(),
                 """\
 with torch.cuda._DeviceGuard(0):
@@ -201,6 +203,7 @@ with torch.cuda._DeviceGuard(0):
 """,
             ),
             (
+                "xpu",
                 XPUDeviceOpOverrides(),
                 """\
 with torch.xpu._DeviceGuard(0):
@@ -212,23 +215,50 @@ with torch.xpu._DeviceGuard(0):
             ),
         ]
 
-        for device_ops, expected in cases:
-            graph = SimpleNamespace(
-                cpp_wrapper=False,
-                device_ops=device_ops,
-            )
+        for device, device_ops, expected in cases:
+            with self.subTest(device=device):
+                graph = SimpleNamespace(
+                    cpp_wrapper=False,
+                    device_ops=device_ops,
+                )
 
-            code = IndentedBuffer()
-            with V.set_graph_handler(graph):
-                EnterDeviceContextManagerWithStreamInfoLine(
-                    device_idx=0,
-                    last_seen_device_guard_index=None,
-                    num_streams=2,
-                    stream_idx_to_user_obj_idx={1: 3},
-                ).codegen(code)
-                EnterCudaStreamContextLine(stream_idx=1).codegen(code)
+                code = IndentedBuffer()
+                with V.set_graph_handler(graph):
+                    EnterDeviceContextManagerWithStreamInfoLine(
+                        device_idx=0,
+                        last_seen_device_guard_index=None,
+                        num_streams=2,
+                        stream_idx_to_user_obj_idx={1: 3},
+                    ).codegen(code)
+                    EnterCudaStreamContextLine(stream_idx=1).codegen(code)
 
-            self.assertEqual(code.getvalue(), expected)
+                self.assertEqual(code.getvalue(), expected)
+
+    def test_subgraph_raw_stream_uses_device_ops_stream_handle(self):
+        cases = [
+            ("cuda", CUDADeviceOpOverrides(), "stream1_raw = stream1.cuda_stream\n"),
+            ("xpu", XPUDeviceOpOverrides(), "stream1_raw = stream1.native_handle\n"),
+        ]
+
+        for device, device_ops, expected in cases:
+            with self.subTest(device=device):
+                code = IndentedBuffer()
+                graph = SimpleNamespace(
+                    device_ops=device_ops,
+                    scheduler=SimpleNamespace(current_stream_name="stream1"),
+                )
+                wrapper = SimpleNamespace(
+                    write_triton_header_once=lambda: None,
+                    writeline=code.writeline,
+                )
+
+                with V.set_graph_handler(graph):
+                    name = SubgraphPythonWrapperCodegen._write_get_raw_stream(
+                        wrapper, device_idx=0
+                    )
+
+                self.assertEqual(name, "stream1_raw")
+                self.assertEqual(code.getvalue(), expected)
 
     def test_exit_cuda_stream_context_codegen(self):
         """Test code generation for exiting a CUDA stream context."""

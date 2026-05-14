@@ -816,7 +816,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
 @dataclasses.dataclass
 class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
-    """Exit a CUDA device context.
+    """Exit a device context.
 
     Attributes:
         num_streams: Number of streams that were allocated (must match Enter).
@@ -835,7 +835,7 @@ class EnterCudaStreamContextLine(WrapperLine):
     """Enter a context executed by the respective device stream.
 
     Attributes:
-        stream_idx: The index number corresponds to the entering CUDA Stream context.
+        stream_idx: The index number for the entering device stream context.
     """
 
     stream_idx: int
