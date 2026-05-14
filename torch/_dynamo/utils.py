@@ -1259,7 +1259,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
+        isinstance(value, (types.UnionType, typing._Final))
         or value is typing.Generic
         or value is typing.Union
     )
@@ -4154,7 +4154,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -4962,7 +4962,7 @@ def is_tensor_base_attr_getter(value: Any) -> bool:
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
         and hasattr(value.__self__, "__objclass__")
-        and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
+        and value.__self__.__objclass__ is torch._C._TensorBase
     )
 
 
@@ -4972,6 +4972,19 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return type(attr) is types.GetSetDescriptorType
     except AttributeError:
         return False
+
+
+def is_torch_class(cls: type) -> bool:
+    """Check if cls is defined in torch or a torch submodule.
+
+    Torch-internal C-level descriptors (e.g. torch.Tensor.unsqueeze_) need
+    to go through VariableTracker.build / trace_rules so they get the right
+    VT (TorchInGraphFunctionVariable), which has guards like
+    inplace-view-on-input-tensor detection. This helper identifies classes
+    whose descriptors should take that path instead of descriptor VTs.
+    """
+    module = getattr(cls, "__module__", None)
+    return module is not None and (module == "torch" or module.startswith("torch."))
 
 
 def is_torch_function_object(value: Any) -> bool:
@@ -5487,27 +5500,6 @@ def is_pybind11_enum_member(value: Any) -> bool:
         return False
     name = getattr(value, "name", None)
     return name is not None and members.get(name) is value
-
-
-def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
-    from . import graph_break_hints
-    from .exc import unimplemented
-
-    is_overridden = type(obj).__dict__.get("__hash__", False)
-
-    if is_overridden and is_pybind11_enum_member(obj):
-        return
-
-    if is_overridden:
-        unimplemented(
-            gb_type="User-defined object with overridden __hash__",
-            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
-            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
-            hints=[
-                "Dynamo does not support hashing user-defined objects with overridden __hash__",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
 
 def _make_inlined(
