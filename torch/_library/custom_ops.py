@@ -894,9 +894,7 @@ class CustomOpDef:
 
         need_register = self._autocast_dtype is None
         self._autocast_dtype = cast_inputs
-        autocast_key = (
-            "Autocast" + torch._C._dispatch_key_for_device(device_type).upper()
-        )
+        autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
         autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
 
         def kernel(_, *args, **kwargs):

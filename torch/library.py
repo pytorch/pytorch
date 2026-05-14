@@ -1106,7 +1106,7 @@ def register_autocast(
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     use_lib = _library_for_registration(namespace, lib)
 
-    autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type).upper()
+    autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
     autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
 
     def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
