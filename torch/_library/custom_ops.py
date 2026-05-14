@@ -21,22 +21,6 @@ from .effects import EffectType
 device_types_t = str | Sequence[str] | None
 log = logging.getLogger(__name__)
 
-_FAST_PATH_FALLBACK = object()
-
-_DEVICE_KEYSETS: dict[str, "_C.DispatchKeySet"] = {}
-
-_fast_dispatch_tls_fn = threading.local()
-
-
-def _keyset_for_device(device_type: str) -> "_C.DispatchKeySet":
-    ks = _DEVICE_KEYSETS.get(device_type)
-    if ks is not None:
-        return ks
-    key_name = _C._dispatch_key_for_device(device_type)
-    ks = _C.DispatchKeySet(getattr(_C.DispatchKey, key_name))
-    _DEVICE_KEYSETS[device_type] = ks
-    return ks
-
 
 @overload
 def custom_op(
@@ -221,6 +205,10 @@ def custom_op(
     return inner(fn)
 
 
+# Sentinel returned by fast_call when it can't handle the call.
+_FAST_CALL_FALLBACK = object()
+
+
 class CustomOpDef:
     """CustomOpDef is a wrapper around a function that turns it into a custom op.
 
@@ -230,6 +218,9 @@ class CustomOpDef:
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
     """
+
+    # Per-thread slot holding the backend function that backend_dispatch calls
+    _fast_dispatch_tls = threading.local()
 
     def __init__(
         self,
@@ -753,7 +744,7 @@ class CustomOpDef:
         - The TLS dispatch include set is a subset of the normal eager set
           (covers ``inference_mode``; excludes Functionalize, Vmap, etc.).
         - The schema has no tensor-list args and is not a view op.
-        When any condition fails, ``fast_call`` returns ``_FAST_PATH_FALLBACK``
+        When any condition fails, ``fast_call`` returns ``_FAST_CALL_FALLBACK``
         and the call falls through to the C++ dispatcher.
 
         Uses a chain-based dispatch: fast_call → autograd_impl → [adinplaceorview_impl →]
@@ -781,9 +772,11 @@ class CustomOpDef:
         op_name = self._name
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
+        fast_tls = CustomOpDef._fast_dispatch_tls
+        keyset_cache: dict[str, _C.DispatchKeySet] = {}
 
         def backend_dispatch(keyset, *args, **kwargs):
-            fn = _fast_dispatch_tls_fn.fn
+            fn = fast_tls.fn
             result = fn(*args, **kwargs)
             utils._c_check_aliasing_constraint(op_name, args, kwargs, result)
             return result
@@ -809,34 +802,38 @@ class CustomOpDef:
         def fast_call(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
             if torch.compiler.is_compiling():
-                return _FAST_PATH_FALLBACK
+                return _FAST_CALL_FALLBACK
             # kwargs / no-positional-arg calls need schema-level handling
             if not args or kwargs:
-                return _FAST_PATH_FALLBACK
+                return _FAST_CALL_FALLBACK
 
             # Returns (device_type,) or None; rejects subclasses, modes,
             # autocast, multi-device, nested/sparse/quantized, tensor lists
             check = _C._custom_op_fast_path_check(args)  # pyrefly: ignore[missing-attribute]
             if check is None:
-                return _FAST_PATH_FALLBACK
+                return _FAST_CALL_FALLBACK
 
             device_type = check[0]
 
             # meta tensors and disabled kernels need C++ fallback logic
             if device_type == "meta" or device_type in disabled_kernel:
-                return _FAST_PATH_FALLBACK
+                return _FAST_CALL_FALLBACK
             # No registered kernel for this device
             fn = raw_fns.get(device_type) or raw_fns.get(None)
             if fn is None:
-                return _FAST_PATH_FALLBACK
+                return _FAST_CALL_FALLBACK
 
-            keyset = _keyset_for_device(device_type)
-            _fast_dispatch_tls_fn.fn = fn
+            keyset = keyset_cache.get(device_type)
+            if keyset is None:
+                key_name = _C._dispatch_key_for_device(device_type)
+                keyset = _C.DispatchKeySet(getattr(_C.DispatchKey, key_name))
+                keyset_cache[device_type] = keyset
+            fast_tls.fn = fn
             try:
                 with _ops._enable_fast_dispatch(op, chain):
                     return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
             finally:
-                _fast_dispatch_tls_fn.fn = None
+                fast_tls.fn = None
 
         self._fast_call = fast_call
 
@@ -855,7 +852,7 @@ class CustomOpDef:
         def make_fast_op(target):
             def fast_op(*args, **kwargs):
                 result = fast_call(*args, **kwargs)
-                if result is not _FAST_PATH_FALLBACK:
+                if result is not _FAST_CALL_FALLBACK:
                     return result
                 return target._orig_op(
                     *args, **kwargs
@@ -890,7 +887,7 @@ class CustomOpDef:
     def __call__(self, *args, **kwargs):
         if self._fast_call is not None:
             result = self._fast_call(*args, **kwargs)
-            if result is not _FAST_PATH_FALLBACK:
+            if result is not _FAST_CALL_FALLBACK:
                 return result
         return self._opoverload(*args, **kwargs)
 
