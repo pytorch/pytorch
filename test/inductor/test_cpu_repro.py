@@ -4073,6 +4073,39 @@ class CPUReproTests(TestCase):
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
 
+    @requires_vectorization
+    def test_vertical_reduction_tail_store_uses_tail_width(self):
+        def fn(x, y, z, residual, weight, bias):
+            x = F.leaky_relu(x * y + z)
+            x = x.permute(1, 0).unsqueeze(1)
+            return F.layer_norm(x + residual, (14,), weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(14, 2)
+        y = torch.randn(14, 2)
+        z = torch.randn(14, 2)
+        residual = torch.randn(2, 2, 14)
+        weight = torch.randn(14)
+        bias = torch.randn(14)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        actual, code = run_and_get_cpp_code(opt_fn, x, y, z, residual, weight, bias)
+
+        self.assertTrue(same(fn(x, y, z, residual, weight, bias), actual))
+        self.assertIn("sum_masked_reduce", code)
+        self.assertIn(
+            "tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>(2L));",
+            code,
+        )
+        self.assertIn(
+            "out_ptr0[static_cast<int64_t>(x1 + 2L*x0 + 2L*x0_inner)] = tmpbuf[x0_inner];",
+            code,
+        )
+        self.assertNotIn(
+            ".store(tmpbuf.data(), static_cast<int64_t>(16));",
+            code,
+        )
+
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
             b = a[[0]]
