@@ -788,9 +788,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
-        if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
-            arg_val.dtype, dtype1
-        ):
+        if not _is_lossless_fp_widening_cast(arg_val.dtype, dtype1):
             return
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

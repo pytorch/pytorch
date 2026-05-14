@@ -4881,6 +4881,34 @@ class CPUReproTests(TestCase):
                 self.assertEqual(actual[0], expected[0])
                 self.assertEqual(actual[1], expected[1])
 
+    def test_explicit_fp16_cast_mul_overflow(self):
+        def fn(x):
+            y = x.to(torch.float16)
+            return (y * y).to(torch.float32)
+
+        def promoted_consumer(x):
+            y = x.to(torch.float16)
+            return (y * y) + x
+
+        for size in (1, 32):
+            x = torch.full((size,), 5000.0)
+            for test_fn in (fn, promoted_consumer):
+                expected = test_fn(x)
+
+                torch._dynamo.reset()
+                actual = torch.compile(test_fn, backend="inductor", fullgraph=True)(x)
+                self.assertEqual(actual, expected)
+
+        def cast_chain(x):
+            return x.to(torch.float16).to(torch.float32)
+
+        x = torch.tensor([70000.0])
+        expected = cast_chain(x)
+
+        torch._dynamo.reset()
+        actual = torch.compile(cast_chain, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
