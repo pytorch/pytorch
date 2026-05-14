@@ -500,7 +500,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(utils.compilation_time_metrics),
             filter_expected(
                 """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -554,7 +555,8 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
                 if _IS_WINDOWS
                 else """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
