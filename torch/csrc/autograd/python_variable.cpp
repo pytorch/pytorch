@@ -2259,37 +2259,6 @@ static bool contains_any_symint(const py::tuple& tup) {
   return false;
 }
 
-static bool ivalue_has_symbolic_symint(const c10::IValue& value) {
-  if (value.isSymInt()) {
-    return value.toSymInt().is_symbolic();
-  }
-  if (value.isSymIntList()) {
-    const auto symints = value.toSymIntList();
-    for (const auto idx : c10::irange(symints.size())) {
-      if (symints.get(idx).is_symbolic()) {
-        return true;
-      }
-    }
-    return false;
-  }
-  if (value.isTuple()) {
-    for (const auto& item : value.toTupleRef().elements()) {
-      if (ivalue_has_symbolic_symint(item)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  if (value.isList()) {
-    for (const auto& item : value.toList()) {
-      if (ivalue_has_symbolic_symint(item)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 static bool dtensor_spec_has_symints(py::handle spec) {
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
   if (tensor_meta.is_none()) {
@@ -2340,10 +2309,18 @@ create_native_op_schema(
     bool is_none_or_undefined =
         arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
     if (idx >= native_info.static_argnum || is_none_or_undefined) {
-      if (ivalue_has_symbolic_symint(arg)) {
+      if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
         // Symbolic SymInts are scoped to a single tracing/capture context,
         // so cached sharding results containing them cannot be reused.
         return true;
+      }
+      if (arg.isSymIntList()) {
+        const auto symints = arg.toSymIntList();
+        for (const auto sym_idx : c10::irange(symints.size())) {
+          if (symints.get(sym_idx).is_symbolic()) {
+            return true;
+          }
+        }
       }
       if (arg.isList()) {
         const auto& list = arg.toList();
@@ -2383,10 +2360,18 @@ create_native_op_schema(
     // We coerce undefined Tensor to None, just as we do when
     // converting IValues to PyObject. (same behaviour as
     // handle_non_dtensor_arg)
-    if (ivalue_has_symbolic_symint(arg)) {
+    if (arg.isSymInt() && arg.toSymInt().is_symbolic()) {
       // Symbolic SymInts are scoped to a single tracing/capture context,
       // so cached sharding results containing them cannot be reused.
       return true;
+    }
+    if (arg.isSymIntList()) {
+      const auto symints = arg.toSymIntList();
+      for (const auto sym_idx : c10::irange(symints.size())) {
+        if (symints.get(sym_idx).is_symbolic()) {
+          return true;
+        }
+      }
     }
     if (arg.isTensor() && !arg.toTensor().defined()) {
       arg = c10::IValue();

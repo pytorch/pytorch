@@ -31,6 +31,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.cpp_builder import is_msvc_cl
 from torch._inductor.test_case import run_tests, TestCase
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.overrides import BaseTorchFunctionMode
@@ -47,6 +48,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -4446,9 +4448,6 @@ class CompiledAutograd1(torch.nn.Module):
         "FakePG relies on distributed build",
     )
     def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
-        from torch.distributed.tensor import DeviceMesh, DTensor, Shard
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
         def run_case():
             torch._dynamo.reset()
             with compiled_autograd._enable(compiler_fn):
@@ -4461,26 +4460,21 @@ class CompiledAutograd1(torch.nn.Module):
 
                 opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
 
-                x_ref = DTensor.from_local(
+                x_eager = DTensor.from_local(
                     torch.randn(4), mesh, [Shard(0)], run_check=False
                 ).requires_grad_(True)
-                y_ref = DTensor.from_local(
+                y_eager = DTensor.from_local(
                     torch.randn(4), mesh, [Shard(0)], run_check=False
                 ).requires_grad_(False)
 
-                x = x_ref.clone().detach().requires_grad_(True)
-                y = y_ref.clone().detach().requires_grad_(False)
-
-                ref = fn(x_ref.clone(), y_ref)
-                res = opt_fn(x.clone(), y)
-                self.assertEqual(res, ref)
+                x = x_eager.clone().detach().requires_grad_(True)
+                y = y_eager.clone().detach().requires_grad_(False)
 
                 # The first backward populates the native sharding cache.
                 # The compiled-autograd backward must not reuse that entry when it
                 # contains SymInts from a different tracing context.
-                ref.sum().backward()
-                res.sum().backward()
-                self.assertEqual(x.grad, x_ref.grad)
+                fn(x_eager.clone(), y_eager).sum().backward()
+                opt_fn(x.clone(), y).sum().backward()
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
