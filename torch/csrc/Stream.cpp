@@ -552,12 +552,7 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  if (PyType_Ready(&THPStreamType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPStreamType);
-  if (PyModule_AddObject(
-          module, "Stream", reinterpret_cast<PyObject*>(&THPStreamType)) < 0) {
+  if (PyModule_AddType(module, &THPStreamType) < 0) {
     throw python_error();
   }
 }
