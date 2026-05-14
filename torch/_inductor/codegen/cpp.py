@@ -210,7 +210,7 @@ def reduction_combine(
     var,
     next_value,
     helper_val=None,
-    index: sympy.Symbol | None = None,
+    index: sympy.Expr | CSEVariable | str | None = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
@@ -2383,7 +2383,12 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
-        reduction_key = src_dtype, reduction_type, value
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
+        reduction_value = (value, logical_index) if logical_index is not None else value
+        reduction_key = src_dtype, reduction_type, reduction_value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -2428,10 +2433,13 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
             )
         else:
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
+            if logical_index is not None:
+                index = logical_index
+            else:
+                assert self.reduction_depth is not None
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
@@ -3106,14 +3114,22 @@ class CppVecKernel(CppKernel):
         # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
+        assert logical_index is None or isinstance(logical_index, CppCSEVariable), (
+            logical_index
+        )
 
         if not value.is_vec:
             value = self.broadcast(value)
 
-        reduction_key = src_dtype, reduction_type, value
+        reduction_value = (value, logical_index) if logical_index is not None else value
+        reduction_key = src_dtype, reduction_type, reduction_value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -3225,14 +3241,19 @@ class CppVecKernel(CppKernel):
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
                 )
         else:
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
+            if logical_index is not None:
+                index = logical_index
+                index_horizontal_reduction = False
+            else:
+                assert self.reduction_depth is not None
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
+                index_horizontal_reduction = horizontal_reduction
             kwargs = {
                 "next_value": value,
                 "index": index,
-                "horizontal_reduction": horizontal_reduction,
+                "horizontal_reduction": index_horizontal_reduction,
                 "src_dtype": src_dtype,
             }
             self.stores.writeline(
@@ -3459,10 +3480,11 @@ class CppVecKernel(CppKernel):
         var,
         next_value,
         helper_val=None,
-        index: sympy.Symbol | None = None,
+        index: sympy.Expr | CppCSEVariable | None = None,
         horizontal_reduction: bool | None = None,
         src_dtype: torch.dtype | None = torch.float32,
     ):
+        """Generate the C++ expression that combines a vector reduction value."""
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
             if self.tail_size:
@@ -3542,9 +3564,16 @@ class CppVecKernel(CppKernel):
             t_extra = ""
             arg_extra = ""
             if index is not None:
-                assert horizontal_reduction is not None
-                t_extra = f", {str(horizontal_reduction).lower()}"
-                arg_extra = f", {self._adjust_argreduce_index(index)}"
+                if isinstance(index, CppCSEVariable):
+                    if index.is_vec:
+                        arg_extra = f", {index}"
+                    else:
+                        t_extra = ", false"
+                        arg_extra = f", {index}"
+                else:
+                    assert horizontal_reduction is not None
+                    t_extra = f", {str(horizontal_reduction).lower()}"
+                    arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
