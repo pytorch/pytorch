@@ -74,7 +74,7 @@ static IValue listToIValue(py::handle obj) {
 IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
-      if (obj.ptr() == Py_None) {
+      if (Py_IsNone(obj.ptr())) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }
@@ -996,6 +996,10 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
+  if (consume_should_skip_torch_function()) {
+    return invokeOperatorFromPython(operations, args, kwargs, dk);
+  }
+
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();

@@ -63,6 +63,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("onednn::qconv2d_pointwise", datetime.date(2026, 5, 1)),
     ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
@@ -249,7 +250,7 @@ def is_core_aten_op(schema) -> bool:
         #
         # If the core ATen op has been removed, we cannot be sure whether it
         # was previously a core ATen op or not via checking tags this way.
-        # Conservatively assume that you are ARE a core ATen op in this case.
+        # Conservatively assume that you ARE a core ATen op in this case.
         # This means that deleting a core ATen op will still be caught.
         # But if you're deleting an operator that is not a core ATen op
         # and add it to the allow_list, you would need to additionally specify

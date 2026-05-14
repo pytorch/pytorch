@@ -112,6 +112,11 @@ def _build_test(
                     keep_config = False
                     break
 
+            if "mps" in attr.values():
+                if not torch.backends.mps.is_available():
+                    keep_config = False
+                    break
+
             test_attrs.update(attr)
 
         if not keep_config:
@@ -382,12 +387,21 @@ class BenchmarkRunner:
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
+        cuda_sync = "cuda" in test_case.test_config.test_name
+        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=cuda_sync)
         test_case._output_mean()
-        backward_time = timeit.timeit(
-            functools.partial(test_case.run_backward, iters, print_per_iter), number=1
+
+        timer = Timer(
+            stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
+            globals={
+                "test_case": test_case,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "cuda_sync": cuda_sync,
+            },
         )
-        return backward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
@@ -408,14 +422,16 @@ class BenchmarkRunner:
             device_module = torch.get_device_module(device.type)
         # TODO: add support for cpu memory measurement
         while True:
-            if hasattr(device_module, "reset_peak_memory_stats"):
-                device_module.reset_peak_memory_stats(device)
+            if device_module is not None:
+                if hasattr(device_module, "reset_peak_memory_stats"):
+                    device_module.reset_peak_memory_stats(device)
             run_time_sec = launch_test(test_case, iters, print_per_iter)
-            if hasattr(device_module, "synchronize"):
-                device_module.synchronize(device)
+            if device_module is not None:
+                device_module.synchronize()
             # Memory measurement process
-            if hasattr(device_module, "max_memory_allocated"):
-                peak_memory = device_module.max_memory_allocated(device)
+            if device_module is not None:
+                if hasattr(device_module, "max_memory_allocated"):
+                    peak_memory = device_module.max_memory_allocated(device)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
