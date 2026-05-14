@@ -1012,19 +1012,16 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(tensor_mps.to(device="cpu"), tensor_cpu)
         self.assertEqual(tensor.to(device="cpu"), tensor_0)
 
-    def test_fill_storage_offset_byte_types(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/183631
-        # The vec4 fill kernel requires 4-byte aligned buffer offsets;
-        # misaligned offsets (e.g. x[1:] on a bool tensor) caused writes
-        # to land at wrong positions.
-        for dtype in [torch.bool, torch.uint8, torch.int8]:
-            for offset in range(1, 8):
-                x_mps = torch.zeros(16, dtype=dtype, device="mps")
-                x_cpu = torch.zeros(16, dtype=dtype, device="cpu")
-                fill_val = True if dtype == torch.bool else 42
-                x_mps[offset:].fill_(fill_val)
-                x_cpu[offset:].fill_(fill_val)
-                self.assertEqual(x_mps, x_cpu)
+    # Regression test for https://github.com/pytorch/pytorch/issues/183631
+    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8])
+    def test_fill_storage_offset_byte_types(self, dtype):
+        for offset in range(1, 8):
+            x_mps = torch.zeros(16, dtype=dtype, device="mps")
+            x_cpu = torch.zeros(16, dtype=dtype, device="cpu")
+            fill_val = True if dtype == torch.bool else 42
+            x_mps[offset:].fill_(fill_val)
+            x_cpu[offset:].fill_(fill_val)
+            self.assertEqual(x_mps, x_cpu)
 
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
