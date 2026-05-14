@@ -1,7 +1,11 @@
+#pragma once
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/headeronly/macros/Macros.h>
 
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <stdexcept>
-#include <string>
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
@@ -27,4 +31,38 @@
 // Users of this macro are expected to include cuda_runtime.h
 #define STD_CUDA_KERNEL_LAUNCH_CHECK() STD_CUDA_CHECK(cudaGetLastError())
 
-#endif
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
+[[maybe_unused]] C10_NOINLINE static void throw_exception(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  std::stringstream ss;
+  ss << torch_exception_get_what_without_backtrace();
+  ss << " (originally from " << call << " API call failed at " << file
+     << ", line " << line << ")";
+
+  std::time_t t = std::time(nullptr);
+  std::tm tm = *std::localtime(&t);
+  std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
+            << line << "] Exception across libtorch C API boundary: "
+            << torch_exception_get_what();
+  throw std::runtime_error(ss.str());
+}
+HIDDEN_NAMESPACE_END(torch, stable, detail)
+
+// This macro is similar to the header-only macro TORCH_ERROR_CODE_CHECK, but
+// this macro is NOT header-only! It depends on the stable ABI but provides more
+// info in the exception, including the error message as retrieved through the c
+// shims from the original error message.
+#define STABLE_TORCH_ERROR_CODE_CHECK(call)                            \
+  if ((call) != TORCH_SUCCESS) {                                       \
+    torch::stable::detail::throw_exception(#call, __FILE__, __LINE__); \
+  }
+
+#else
+#define STABLE_TORCH_ERROR_CODE_CHECK(call) TORCH_ERROR_CODE_CHECK(call)
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0

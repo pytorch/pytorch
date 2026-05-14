@@ -7301,32 +7301,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
 
-    def test_unfold_invalid_arg(self):
-        # input wrong dimension
-
-        unfold = nn.Unfold(kernel_size=(2, 3))
-
-        # calculated output shape is too small
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(2, 3))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
-            unfold(torch.randn(1, 2, 2, 3))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
-            tensor_data = torch.tensor([
-                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
-                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
-                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
-            ])
-            F.fold(tensor_data, 16, 7318349394477056)
-
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
@@ -10030,7 +10004,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
-    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -10041,6 +10014,40 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 3, 4, device=device)
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
+
+    def test_unfold_invalid_arg(self, device):
+        # output shape components must be >= 1
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(2, 3))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
+            unfold(torch.randn(1, 2, 2, 3, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        # im2col_shape_check invariants
+        x = torch.randn(1, 3, 8, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"kernel size should be greater than zero"):
+            F.unfold(x, kernel_size=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"dilation should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), dilation=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"padding should be non-negative"):
+            F.unfold(x, kernel_size=(3, 3), padding=(-1, 0))
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
+
+        # Host-side overflow guard on kernel_size product.
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ], device=device)
+            F.fold(tensor_data, 16, 7318349394477056)
 
     @onlyCUDA
     @skipIfRocmArch(MI300_ARCH)

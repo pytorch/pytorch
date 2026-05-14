@@ -20,7 +20,8 @@ struct softshrink_functor {
     } else if (x < -lambda) {
       return x + lambda;
     } else {
-      return T(0);
+      // multiplication to propagate Nan, Nan * 0 = Nan.
+      return x * T(0);
     }
   }
 };
