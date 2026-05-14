@@ -11259,6 +11259,31 @@ class TestIndexAddOverrideCorrectness(TestCase):
         ref = _naive_index_add(self_t, idx, src, alpha=0.5)
         self.assertEqual(got, ref)
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    @parametrize("M_src", [
+        subtest(4, name="M4"),      # M_src == K -> exactly one full tile
+        subtest(99, name="M99"),    # not divisible by K=4
+        subtest(3, name="M3"),      # M_src < K -> single partial tile
+    ])
+    def test_partial_last_tile_alpha(self, M_src, dtype):
+        # Combines two small-N kernel boundary conditions:
+        #   - the K-row mask on the partial last tile (M_src not a
+        #     multiple of K=4), and
+        #   - the alpha != 1 scale path, which on the small-N path
+        #     scales all K rows of the tile (including masked-out ones,
+        #     which TMA OOB-clamps to zero so the scaling is benign).
+        # Covers bf16/fp16 explicitly -- the small-N path is tuned for
+        # those, and a partial-tile bug at the dtype boundary on the
+        # scale path would otherwise slip past CI.
+        torch.manual_seed(0)
+        tol = 1e-4 if dtype is torch.float32 else 1e-2
+        self_t = torch.zeros(M_src + 5, 128, device="cuda", dtype=dtype)
+        src = torch.randn(M_src, 128, device="cuda", dtype=dtype)
+        idx = torch.randint(0, M_src + 5, (M_src,), device="cuda", dtype=torch.int64)
+        got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
+        ref = _naive_index_add(self_t, idx, src, alpha=0.5)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
 
 instantiate_parametrized_tests(TestIndexAddOverrideConds)
 instantiate_parametrized_tests(TestIndexAddOverrideCorrectness)
