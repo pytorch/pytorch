@@ -3606,6 +3606,31 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autocast_dict_input(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("autocast_dict(Tensor trigger, Dict(str, Tensor) x) -> Tensor")
+
+            def autocast_dict(trigger, x):
+                self.assertEqual(trigger.dtype, torch.bfloat16)
+                self.assertEqual(x["first"].dtype, torch.bfloat16)
+                self.assertEqual(x["second"].dtype, torch.bfloat16)
+                return trigger + x["first"]
+
+            lib.impl("autocast_dict", autocast_dict, "CPU")
+            torch.library.register_autocast(
+                "_torch_testing::autocast_dict", "cpu", torch.bfloat16, lib=lib
+            )
+
+            x = {
+                "first": torch.randn(3, dtype=torch.float32),
+                "second": torch.randn(3, dtype=torch.float32),
+            }
+            trigger = torch.randn(3, dtype=torch.float32)
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                y = torch.ops._torch_testing.autocast_dict(trigger, x)
+            self.assertEqual(y.dtype, torch.bfloat16)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_library_register_autocast_multiple_times(self):
         for device in ["cuda", "cpu"]:

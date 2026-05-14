@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import collections
 import inspect
 import logging
 import warnings
@@ -10,6 +9,7 @@ from typing import Any, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
+from torch.amp.autocast_mode import _cast
 from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
@@ -917,28 +917,6 @@ class CustomOpDef:
             self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
 
         return kernel
-
-
-# TODO: Merge this function with torch.amp.autocast_mode._cast, and refactor it
-# into a utility function once custom ops support arbitrary input types.
-def _cast(value, device_type: str, dtype: _dtype):
-    if isinstance(value, torch.Tensor):
-        is_eligible = (
-            value.is_floating_point()
-            and value.device.type == device_type
-            and (value.dtype is not torch.float64)
-        )
-        return value.to(dtype) if is_eligible else value
-    elif isinstance(value, (str, bytes)):
-        return value
-    elif isinstance(value, collections.abc.Iterable):
-        iterable = (_cast(v, device_type, dtype) for v in value)
-        if isinstance(value, (list, tuple)):
-            return type(value)(iterable)
-        else:
-            return iterable
-    else:
-        return value
 
 
 def increment_version(val: Any) -> None:
