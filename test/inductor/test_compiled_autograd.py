@@ -5128,7 +5128,7 @@ def make_wrapped(fn, ctxs):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
-            stack.enter_context(ctx)
+            stack.enter_context(ctx())
         out = fn(self)
         stack.close()
         return out
@@ -5166,13 +5166,13 @@ def wrap_test_class(orig_cls):
             if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
             ctxs = [
-                compiled_autograd._enable(
+                lambda b=backend, n=name: compiled_autograd._enable(
                     make_compiler_fn(
-                        backend=backend,
-                        fullgraph=name not in known_graph_breaks_tests,
+                        backend=b,
+                        fullgraph=n not in known_graph_breaks_tests,
                     )
                 ),
-                test_contexts.get(name, contextlib.nullcontext()),
+                lambda n=name: test_contexts.get(n, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
 
