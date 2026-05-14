@@ -33,6 +33,15 @@ OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
+INPUT_STORAGE_MUTATION_TARGETS = (
+    torch.ops.aten.set_.default,
+    torch.ops.aten.set_.source_Storage,
+    torch.ops.aten.set_.source_Storage_storage_offset,
+    torch.ops.aten.set_.source_Tensor,
+    torch.ops.aten.set_.source_Tensor_storage_offset,
+)
+
+
 class CUDAGraphPolicy:
     """Pluggable policy controlling CUDA graph wrapping in Inductor's post_compile.
 
@@ -175,6 +184,58 @@ def get_mutating_use_stack_trace_from_node(
 
 def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | None:
     return placeholder_info.mutating_use_stack_trace
+
+
+def get_input_storage_mutation_indices(
+    gm: torch.fx.GraphModule,
+) -> OrderedSet[int]:
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_indices = {node: idx for idx, node in enumerate(placeholders)}
+    storage_mutation_input_idxs: OrderedSet[int] = OrderedSet()
+
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target not in INPUT_STORAGE_MUTATION_TARGETS
+        ):
+            continue
+
+        mutated_arg = node.args[0] if node.args else None
+        if (
+            isinstance(mutated_arg, torch.fx.Node)
+            and mutated_arg in placeholder_indices
+        ):
+            storage_mutation_input_idxs.add(placeholder_indices[mutated_arg])
+
+    return storage_mutation_input_idxs
+
+
+def get_input_storage_mutation_reason(
+    gm: torch.fx.GraphModule,
+    storage_mutation_input_idxs: AbstractSet[int] | Sequence[int],
+) -> str | None:
+    if not storage_mutation_input_idxs:
+        return None
+
+    msg = f"input storage mutation ({len(storage_mutation_input_idxs)} instances)"
+
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    storage_mutation_inputs = tuple(
+        placeholders[idx] for idx in storage_mutation_input_idxs
+    )
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target not in INPUT_STORAGE_MUTATION_TARGETS
+        ):
+            continue
+
+        mutated_arg = node.args[0] if node.args else None
+        if mutated_arg in storage_mutation_inputs:
+            if stack_trace := node.meta.get("stack_trace", None):
+                return f"{msg}. Found from : \n {stack_trace}"
+
+    return msg
 
 
 def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
