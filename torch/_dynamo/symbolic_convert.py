@@ -4032,7 +4032,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source
+                LazySymNodeFormatString(value, fmt_spec), source=value.source, tx=self
             )
             self.push(value)
             return
@@ -5249,6 +5249,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                             is_input=True,
                             dynamism=local_dynamism,
                         ),
+                        tx=self,
                     )
                     self.symbolic_locals[name] = var
 
@@ -5285,7 +5286,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         is_derefed_cell_contents=True,
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
-                        value, contents_source
+                        value, contents_source, tx=self
                     )
                     cell_var = side_effects.track_cell_new()
                     side_effects.store_cell(cell_var, contents_var)
@@ -5303,7 +5304,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
-                        cell.cell_contents, contents_source
+                        cell.cell_contents, contents_source, tx=self
                     )
                 except ValueError:
                     # Cell has not yet been assigned

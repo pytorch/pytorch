@@ -1115,7 +1115,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # won't cause recompilation when their values change.
             return variables.LazyConstantVariable.create(value, source)
         else:
-            return variables.LazyVariableTracker.create(value, source)
+            return variables.LazyVariableTracker.create(value, source, tx=tx)
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.

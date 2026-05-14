@@ -967,6 +967,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 init_args,
+                tx=tx,
             )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
@@ -1029,6 +1030,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 SourcelessBuilder.create(tx, object),
                 self,
                 [],
+                tx=tx,
             )
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
@@ -1059,6 +1061,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 SourcelessBuilder.create(tx, dict),
                 self,
                 [],
+                tx=tx,
             )
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
@@ -1286,6 +1289,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     self,
                     self,
                     list(args),
+                    tx=tx,
                 )
             else:
                 # Namedtuple __new__ is a Python function that calls
@@ -1514,6 +1518,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
                 SourcelessBuilder.create(tx, BaseException),
                 self,
                 list(args),
+                tx=tx,
             )
             var.call_method(tx, "__init__", list(args), dict(kwargs))
             return var
@@ -1579,6 +1584,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         init_args: Sequence[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
+        kwargs.pop("tx", None)
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
@@ -2446,6 +2452,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 variables.LazyVariableTracker.create(
                     self.value[k],  # type: ignore[index]
                     source=GetItemSource(self.source, k),
+                    tx=tx,
                 )
                 for k in range(len(self.value))  # type: ignore[arg-type]
             ]
@@ -4148,6 +4155,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             VariableTracker.build(tx, dict),
             VariableTracker.build(tx, collections.defaultdict),
             [],
+            tx=tx,
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
         new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
@@ -4207,6 +4215,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 SourcelessBuilder.create(tx, dict),
                 SourcelessBuilder.create(tx, collections.defaultdict),
                 [],
+                tx=tx,
             )
             if not isinstance(new_dd, DefaultDictVariable):
                 raise AssertionError(
@@ -4275,8 +4284,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
             else:
                 init_args = kwargs.get("init_args", {})
-                if tx is None:
-                    tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
                 self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
@@ -4377,10 +4384,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            if tx is None:
-                from torch._dynamo.symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
             elems = init_args[0].force_unpack_var_sequence(tx)
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
