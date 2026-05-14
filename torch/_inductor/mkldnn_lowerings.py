@@ -227,6 +227,7 @@ def _convert_to_0d_constant(
     tensor_box.realize()
 
     from .ir import GenericView, ExternKernel
+
     if isinstance(tensor_box.data, GenericView):
         tensor_box = ir.TensorBox(ExternKernel.require_contiguous(tensor_box.data))
 
@@ -1345,17 +1346,6 @@ def register_onednn_fusion_ops():
                 4: lambda x: V.graph.constants[x.get_name()],
                 5: lambda x: V.graph.constants[x.get_name()],
             }
-            if isinstance(
-                ir.InputsKernel.unwrap_storage_for_input(x_scale),
-                ir.ConstantBuffer,
-            ):
-                # x is statically quantized
-                input_gen_fns[1] = lambda x: V.graph.constants[x.get_name()]
-            if isinstance(
-                ir.InputsKernel.unwrap_storage_for_input(x_zp),
-                ir.ConstantBuffer,
-            ):
-                input_gen_fns[2] = lambda x: V.graph.constants[x.get_name()]
             if bias is not None:
                 input_gen_fns[7] = lambda x: V.graph.constants[x.get_name()]  # For bias
             result, _ = autotune_select_algorithm(
