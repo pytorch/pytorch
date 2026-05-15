@@ -41,6 +41,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
+    free_symbols,
     free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
@@ -362,6 +363,8 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """Lower an FX graph into Inductor IR and wrapper code."""
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -994,6 +997,27 @@ class GraphLowering(torch.fx.Interpreter):
             self.device_idxs.add(device.index)
         if V.graph.current_node and device not in self.device_node_mapping:
             self.device_node_mapping[device] = V.graph.current_node
+
+    def _runtime_assert_available_symbols(self) -> OrderedSet[sympy.Symbol]:
+        """
+        Symbols that generated wrapper code can reference in runtime asserts.
+
+        Keep this in sync with PythonWrapperCodegen.codegen_input_symbol_assignment:
+        graph input symbols are assigned in the wrapper prefix, and unbacked
+        symbols become available as their defining operations are lowered.
+        """
+        symbols = OrderedSet(self.bound_unbacked_symbols)
+        for value in self.graph_inputs.values():
+            if isinstance(value, sympy.Symbol):
+                symbols.add(value)
+            elif isinstance(value, TensorBox):
+                for expr in value.get_size():
+                    if isinstance(expr, sympy.Symbol):
+                        symbols.add(expr)
+                for expr in value.get_stride():
+                    if isinstance(expr, sympy.Symbol):
+                        symbols.add(expr)
+        return symbols
 
     @property
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
@@ -2219,6 +2243,7 @@ class GraphLowering(torch.fx.Interpreter):
     def create_deferred_runtime_asserts(
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
+        """Emit deferred runtime asserts whose symbols are available to the wrapper."""
         if config.do_not_emit_runtime_assertions:
             return
         # [NOTE] Codegen runtime asserts in Inductor
@@ -2266,12 +2291,13 @@ class GraphLowering(torch.fx.Interpreter):
             if node_args[0] != True:  # noqa: E712
                 make_assert(node_args[0], f"{node_args[0]} to be True")
         else:
-            # bound_unbacked_symbols tracks the symbols that are created so far,
-            # we use it to make sure that runtime assertions are added after all
-            # symbols used in them are defined.
+            # Track the symbols that are created so far. Runtime assertions may
+            # mention both unbacked and backed symbols, so only emit one when
+            # every symbol in the expression can be referenced by the wrapper.
             self.bound_unbacked_symbols |= new_unbacked_defs
 
             shape_env = V.graph.sizevars.shape_env
+            available_symbols = self._runtime_assert_available_symbols()
 
             # Emit code for runtime asserts that can be inserted at this point.
             for i0 in new_unbacked_defs:
@@ -2295,11 +2321,27 @@ class GraphLowering(torch.fx.Interpreter):
                         make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
 
                 for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
+                    missing = OrderedSet(
+                        s for s in free_symbols(ra.expr) if s not in available_symbols
+                    )
                     if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                        missing_unbacked = OrderedSet(
+                            s for s in free_unbacked_symbols(ra.expr) if s in missing
+                        )
+                        if missing_unbacked:
+                            i1 = min(missing_unbacked, key=str)
+                            self.ras_by_symbol.setdefault(i1, []).append(ra)
+                        elif self.is_backward:
+                            log.debug(
+                                "Skipping stale backward runtime assert %s; missing symbols: %s",
+                                ra.expr,
+                                sorted(missing, key=str),
+                            )
+                        else:
+                            raise AssertionError(
+                                "Cannot emit runtime assert "
+                                f"{ra.expr}; missing symbols: {sorted(missing, key=str)}"
+                            )
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
 
