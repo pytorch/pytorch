@@ -8588,14 +8588,15 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         if epilogue_arg_indices:
             if gemm_op != torch.ops.aten.mm.default or len(epilogue_arg_indices) != 1:
                 raise NotImplementedError(
-                    "QUACK epilogues with captured tensor reads currently support only one full-tile mm aux tensor"
+                    "QUACK epilogues with captured tensor reads currently support only one mm aux tensor"
                 )
-            epilogue_arg = args[epilogue_arg_indices[0]]
-            if epilogue_arg.get_size() != size:
+            epilogue_arg_size = args[epilogue_arg_indices[0]].get_size()
+            m, n = size
+            if epilogue_arg_size not in (size, [1, n], [m, 1]):
                 raise NotImplementedError(
-                    "QUACK captured tensor epilogue args currently must match the GEMM output shape"
+                    "QUACK captured tensor epilogue args currently must match "
+                    "the GEMM output shape or broadcast as [1, N] / [M, 1]"
                 )
-        epilogue_arg_kinds = tuple("tile" for _ in epilogue_arg_indices)
         input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
         choices: list[Any] = []
         quack_gemm_epilogue_template.maybe_append_choice(
@@ -8609,7 +8610,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             beta=beta,
             out_dtype=gemm_kwargs.get("out_dtype"),
             epilogue_arg_indices=epilogue_arg_indices,
-            epilogue_arg_kinds=epilogue_arg_kinds,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout

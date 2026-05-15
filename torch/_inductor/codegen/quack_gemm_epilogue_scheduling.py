@@ -77,10 +77,7 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         epilogue_args = [input_args[i] for i in qtb.epilogue_arg_indices]
         epilogue_kwargs = ""
         if epilogue_args:
-            epilogue_kwargs = (
-                f", epilogue_args=({', '.join(epilogue_args)},), "
-                f"epilogue_arg_kinds={qtb.epilogue_arg_kinds!r}"
-            )
+            epilogue_kwargs = f", epilogue_args=({', '.join(epilogue_args)},)"
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
             call_kwargs = epilogue_kwargs
