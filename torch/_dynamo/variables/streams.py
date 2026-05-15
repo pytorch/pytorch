@@ -1,4 +1,5 @@
 import collections
+import contextlib
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -20,7 +21,7 @@ from ..graph_bytecode_inputs import (
 from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import FxTracebackAnnotateVariable
+from .ctx_manager import ContextWrappingVariable
 from .lazy import LazyVariableTracker
 
 
@@ -319,7 +320,7 @@ class SymbolicStreamState:
         return id(stream.value)
 
 
-class StreamContextVariable(FxTracebackAnnotateVariable):
+class StreamContextVariable(ContextWrappingVariable):
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
@@ -347,7 +348,19 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
         tx.symbolic_stream_state.enter_stream(self.get_stream())
-        return super().enter(tx)
+        # Run torch.fx.traceback.annotate + preserve_node_meta in eager so
+        # the captured FX nodes pick up ``meta["custom"]["stream"] = idx``
+        # for inductor's stream-affinity scheduling.  This used to come from
+        # inheriting :class:`FxTracebackAnnotateVariable`, but that dragged
+        # its ``reconstruct_type`` (which raises ``Unsupported``) into the
+        # MRO of :class:`StreamVariable` and turned otherwise-graceful
+        # graph breaks ungraceful.  Inlining the annotate setup here keeps
+        # the same runtime behaviour without the inheritance baggage.
+        stack = contextlib.ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
+        return ConstantVariable.create(None)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -355,13 +368,23 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
         tx.symbolic_stream_state.exit_stream()
-        return super().exit(tx, *args)
+        # cleanup_assert() runs the cleanup hook installed in enter(),
+        # which closes the ExitStack and tears down the annotate +
+        # preserve_node_meta contexts in LIFO order.
+        self.cleanup_assert()
+        return ConstantVariable.create(None)
 
     def python_type(self) -> type:
         return torch.cuda.StreamContext
 
     def supports_graph_breaks(self) -> bool:
         return True
+
+    def module_name(self) -> str:
+        return "torch.cuda"
+
+    def fn_name(self) -> str:
+        return "stream"
 
     def get_stream(self) -> "StreamVariable":
         if not self.stream:
