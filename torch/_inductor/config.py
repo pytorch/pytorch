@@ -1656,7 +1656,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )
+    )  # type: ignore[assignment]
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2095,7 +2095,7 @@ class triton:
     # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
     # by per-block amax over a small group dimension like FP8 block size)
     # into a single kernel with two sequential reduction passes.
-    nested_reduction = False
+    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
