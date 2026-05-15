@@ -11,7 +11,7 @@ from functools import partial
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
@@ -121,9 +121,29 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
 
 
+class DynamicShapesTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
+
+
 if HAS_CPU:
 
-    class DynamicShapesCpuTests(TestCase):
+    class DynamicShapesCpuTests(DynamicShapesTestCase):
         common = check_model
         device = "cpu"
 
@@ -132,7 +152,7 @@ if HAS_CPU:
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(TestCase):
+    class DynamicShapesGPUTests(DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -151,7 +171,7 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         )
 
 
-class TestInductorDynamic(TestCase):
+class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
