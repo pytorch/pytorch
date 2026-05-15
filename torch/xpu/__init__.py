@@ -1339,7 +1339,10 @@ def device_memory_used(device: Device = None) -> int:
         pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props)),
         "Can't get Level Zero Sysman memory properties.",
     )
-    return mem_props.physicalSize - mem_state.free
+    # TODO: Some drivers report physicalSize as 0 on client GPUs; fall back to
+    # the allocatable size as an approximation in that case.
+    total = mem_props.physicalSize if mem_props.physicalSize != 0 else mem_state.size
+    return total - mem_state.free
 
 
 # import here to avoid circular import
