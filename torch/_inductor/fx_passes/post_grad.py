@@ -231,7 +231,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     ),
                 )
         if config.b2b_gemm_pass:
-            B2B_GEMM_PASS.apply(gm.graph)
+            B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
@@ -305,7 +305,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_bucket_mode,
+                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -317,7 +317,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: bucket_all_reduce(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_reduces_fx_bucket_size_determinator,
-                config.bucket_all_reduces_fx,
+                config.bucket_all_reduces_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -329,7 +329,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
 
         p = (
-            bucket_fsdp_all_gather
+            bucket_fsdp_all_gather  # type: ignore[assignment]
             if "fsdp" in config.bucket_all_gathers_fx
             else bucket_all_gather
         )
@@ -337,7 +337,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_bucket_mode,
+                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -722,13 +722,13 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             def cond_fn(*flat_args):
                 loop_idx, _, _, _, _ = pytree.tree_unflatten(
                     flat_args, operands_and_additional_inputs_spec
-                )
-                return loop_idx < scan_length
+                )  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
 
             def body_fn(*flat_args):
                 loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
                     flat_args,
-                    operands_and_additional_inputs_spec,
+                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
                 )
 
                 idx_int = loop_idx.item()
