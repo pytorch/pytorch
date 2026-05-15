@@ -153,6 +153,24 @@ __global__ void tma_scatter_add_kernel(
         const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
         scalar_t* dst_entry = self_data + ind * self_stride;
 
+        // Wait for a stage's TMA load to complete, then reduce it.
+        auto drain_chunk = [&](int stage, int off) {
+            while (!tma::mbar_try_wait_parity(
+                mbars[stage], static_cast<uint32_t>(mbar_phase[stage] & 1))) {}
+            mbar_phase[stage]++;
+
+            int elems = min(chunk_elems, D - off);
+            uint32_t bytes = elems * sizeof(scalar_t);
+            if (lane == 0) {
+                tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0 + stage * chunk_elems, bytes);
+                tma::commit_group();
+            }
+        };
+
+        // Producer-ahead-of-consumer: issue load for current chunk,
+        // then drain previous chunk while current loads.
+        int prev_off = 0;
+        int pair_count = 0;
         int phase = 0;
         for (int off = blockIdx.y * chunk_elems; off < D;
              off += gridDim.y * chunk_elems, phase++) {
@@ -160,8 +178,10 @@ __global__ void tma_scatter_add_kernel(
             int cur_elems = min(chunk_elems, D - off);
             uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
 
+            // Before reusing a buffer (phase >= 2), wait for the reduce
+            // that last read from it to finish.
             if (phase >= 2 && lane == 0) {
-                tma::wait_group_lt1();
+                tma::wait_group_lt0();
             }
             __syncwarp();
 
@@ -169,14 +189,18 @@ __global__ void tma_scatter_add_kernel(
                 tma::mbar_expect_tx(mbars[cur], cur_bytes);
                 tma::bulk_load(buf0 + cur * chunk_elems, src_entry + off, cur_bytes, mbars[cur]);
             }
-            while (!tma::mbar_try_wait_parity(
-                mbars[cur], static_cast<uint32_t>(mbar_phase[cur] & 1))) {}
-            mbar_phase[cur]++;
 
-            if (lane == 0) {
-                tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0 + cur * chunk_elems, cur_bytes);
-                tma::commit_group();
+            if (pair_count > 0) {
+                drain_chunk((phase - 1) & 1, prev_off);
             }
+
+            prev_off = off;
+            pair_count++;
+        }
+
+        // Epilogue: drain the final chunk.
+        if (pair_count > 0) {
+            drain_chunk((phase - 1) & 1, prev_off);
         }
 
         if (lane == 0) {
