@@ -842,187 +842,107 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   }
 }
 
-// Shared implementation for sum/nansum/count_nonzero/mean Metal kernels.
-// `kernel_prefix` is "sum_", "nansum_" or "count_nonzero_" — selects the
-// kernel variant to dispatch.  `divisor` > 0 divides the accumulator (in
-// opmath_t) before casting to output, enabling fused mean without losing the
-// fp32 accumulation precision for fp16/bf16/half2 outputs.
-static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kernel_prefix, float divisor = 0.0f) {
+// Unified host-side dispatch for value-preserving reductions on MPS, shared
+// by sum/nansum/mean/count_nonzero and min/max/all/any. Kernel name pattern
+// is always `{prefix}reduction_{variant}_{TI}_{TO}` with variant in
+// `""/"outer"/"inner"`. Selects among four code paths:
+//   1. Outer-dim kernel (dim=0 on contiguous input).
+//   2. Inner-dim kernel (last dim on contiguous input).
+//   3. Two-pass full reduction (scalar output, large input).
+//   4. Generic single-pass fallback.
+struct ReductionDispatch {
+  std::string prefix; // "sum_", "nansum_", "count_nonzero_", "min_", "max_",
+                      // "all_", "any_".
+  ScalarType input_kernel_dtype; // may differ from input.scalar_type() (e.g.
+                                 // bool -> char for min/max).
+  ScalarType output_kernel_dtype; // may differ from output.scalar_type() for
+                                  // the same remap reason.
+  ScalarType partial_dtype; // pass-1 output dtype: output.scalar_type() for
+                            // sum/min/max, uchar for all/any.
+  std::string pass2_prefix; // pass-2 op prefix. count_nonzero -> "sum_" (the
+                            // partials are already per-block counts), all/any
+                            // -> "min_"/"max_" (predicate ran in pass 1).
+  bool has_strided_pass1 = false; // sum has a `_strided_` pass-1 kernel; ops
+                                  // without it call .contiguous() first.
+  std::optional<float> divisor; // sum/mean only; appended as a float buffer
+                                // to the outer/inner kernel signatures, and
+                                // passed via NormParams.p elsewhere.
+};
+
+static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch& opts) {
   const Tensor& output = iter.output(0);
-  const Tensor& input = iter.input(0);
+  const Tensor& input_orig = iter.input(0);
+  TORCH_INTERNAL_ASSERT(input_orig.numel() > 0 && output.numel() > 0);
+  TORCH_INTERNAL_ASSERT(output.dim() == input_orig.dim());
 
-  if (input.numel() == 0) {
-    output.zero_();
-    return;
-  }
-
-  if (output.numel() == 0) {
-    return;
-  }
-
-  uint32_t reduction_size = input.numel() / output.numel();
-
-  // TensorIterator ensures input and output have matching ndim
-  // (reduced dims have size 1 in output)
-  TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
-
+  const uint32_t reduction_size = input_orig.numel() / output.numel();
   constexpr uint32_t NCHAINS = SUM_NCHAINS;
-
-  auto kernel_name =
-      fmt::format("{}reduction_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output));
-
   MPSStream* stream = getCurrentMPSStream();
 
-  // For large full reductions (output is scalar), use multi-TG with a
-  // two-pass approach: first pass splits work across num_groups TGs writing
-  // partial sums, second pass reduces the partials to the final scalar.
-  if (output.numel() == 1 && reduction_size > MAX_THREADGROUP_SIZE * NCHAINS) {
-    auto num_groups = std::min(512u, c10::metal::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * NCHAINS));
+  const auto in_str = scalarToMetalTypeString(opts.input_kernel_dtype);
+  const auto out_str = scalarToMetalTypeString(opts.output_kernel_dtype);
+  const auto partial_str = scalarToMetalTypeString(opts.partial_dtype);
 
-    // elems_per_group * num_groups must equal reduction_size exactly,
-    // otherwise pass 1's last TG reads past the input's logical end.
-    // Reduce num_groups down to a divisor of reduction_size (falling back
-    // to 1 is always safe — the inner loop still parallelizes via threads).
-    while (num_groups > 1 && reduction_size % num_groups != 0) {
-      num_groups--;
-    }
-
-    auto partials = at::empty({num_groups}, output.options());
-    const auto elems_per_group = reduction_size / num_groups;
-
-    auto out_metal = scalarToMetalTypeString(output);
-    auto is_contig = input.is_contiguous();
-    auto p1_kernel = fmt::format(
-        "{}reduction{}_{}_{}", kernel_prefix, is_contig ? "" : "_strided", scalarToMetalTypeString(input), out_metal);
-    // Pass 2 combines partials by summing them regardless of pass-1 mode.
-    // For count_nonzero the partials are already per-block counts (long);
-    // counting them again would be wrong, so always use "sum_" here.
-    auto p2_kernel = fmt::format("sum_reduction_{}_{}", out_metal, out_metal);
-
-    NormParams params1{};
-    params1.reduction_size = elems_per_group;
-    if (is_contig) {
-      // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1.
-      params1.ndim = 2;
-      params1.input_sizes[0] = num_groups;
-      params1.input_strides[0] = elems_per_group;
-      params1.output_sizes[0] = num_groups;
-      params1.output_strides[0] = 1;
-      params1.input_sizes[1] = elems_per_group;
-      params1.input_strides[1] = 1;
-    } else {
-      params1.ndim = input.dim();
-      for (const auto d : c10::irange(input.dim())) {
-        params1.input_sizes[d] = input.size(d);
-        params1.input_strides[d] = input.stride(d);
-      }
-    }
-
-    // Pass 2: partials[num_groups] -> output[1], reduce dim=0.
-    // divisor applies here (not on pass 1), so pass 2 produces
-    // accumulator/divisor before the final cast to output dtype.
-    NormParams params2;
-    params2.ndim = 1;
-    params2.p = divisor;
-    params2.reduction_size = num_groups;
-    params2.input_sizes[0] = num_groups;
-    params2.input_strides[0] = 1;
-    params2.output_sizes[0] = 1;
-    params2.output_strides[0] = 0;
-
-    dispatch_sync_with_rethrow(stream->queue(), ^() {
-      @autoreleasepool {
-        id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-
-        // Pass 1: input -> partials
-        auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
-        getMPSProfiler().beginProfileKernel(ps1, "sum_reduction_pass1", {input});
-        [compute_encoder setComputePipelineState:ps1];
-        mtl_setArgs(compute_encoder, input, partials, params1);
-        auto tpg1 = std::min(MAX_THREADGROUP_SIZE, elems_per_group);
-        [compute_encoder dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1)
-                   threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
-        getMPSProfiler().endProfileKernel(ps1);
-
-        // Pass 2: partials -> output
-        auto ps2 = lib.getPipelineStateForFunc(p2_kernel);
-        getMPSProfiler().beginProfileKernel(ps2, "sum_reduction_pass2", {partials});
-        [compute_encoder setComputePipelineState:ps2];
-        mtl_setArgs(compute_encoder, partials, output, params2);
-        auto tpg2 = std::min(MAX_THREADGROUP_SIZE, num_groups);
-        [compute_encoder dispatchThreads:MTLSizeMake(tpg2, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg2, 1, 1)];
-        getMPSProfiler().endProfileKernel(ps2);
-      }
-    });
-    return;
-  }
-
-  // Detect outer-dim (non-innermost) reduction on contiguous 2D tensor.
-  // For this case, use a specialized kernel with coalesced column reads.
-  // Condition: exactly one reduced dim, it's not the last dim, input is contiguous.
-  {
+  // Outer-dim (dim=0 on contiguous input) and inner-dim (last dim on
+  // contiguous input) specializations: handle the dim-reduction case with
+  // dedicated kernels that have better thread layout than the generic kernel.
+  if (output.numel() > 1 && input_orig.is_contiguous() && output.is_contiguous()) {
     int num_reduced = 0;
     int reduced_dim = -1;
-    for (int64_t d = 0; d < input.dim(); d++) {
-      if (input.size(d) != output.size(d)) {
+    for (int64_t d = 0; d < input_orig.dim(); d++) {
+      if (input_orig.size(d) != output.size(d)) {
         num_reduced++;
         reduced_dim = d;
       }
     }
-    bool is_outer_reduction = (num_reduced == 1 && reduced_dim < input.dim() - 1 && input.is_contiguous());
-    bool is_inner_reduction = (num_reduced == 1 && reduced_dim == input.dim() - 1 && input.is_contiguous());
-
-    if (is_outer_reduction && reduced_dim == 0 && output.is_contiguous()) {
-      uint32_t M = input.size(0);
-      uint32_t N = input.numel() / M;
-
-      auto outer_kernel = fmt::format(
-          "{}reduction_outer_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output));
+    if (num_reduced == 1 && reduced_dim == 0 && input_orig.dim() >= 2) {
+      uint32_t M = input_orig.size(0);
+      uint32_t N = input_orig.numel() / M;
+      auto outer_kernel = fmt::format("{}reduction_outer_{}_{}", opts.prefix, in_str, out_str);
       constexpr uint32_t TG_X = 32, TG_Y = 32;
       const auto num_tg_x = c10::metal::ceil_div(N, TG_X);
-
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(outer_kernel);
-          getMPSProfiler().beginProfileKernel(ps, "sum_reduction_outer", {input});
+          getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction_outer", {input_orig});
           struct {
             uint32_t M, N, out_stride;
           } sizes_s = {M, N, 1};
-          [compute_encoder setComputePipelineState:ps];
-          mtl_setArgs(compute_encoder, input, output, sizes_s, divisor);
-          [compute_encoder dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1)
-                     threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+          [ce setComputePipelineState:ps];
+          if (opts.divisor.has_value()) {
+            mtl_setArgs(ce, input_orig, output, sizes_s, *opts.divisor);
+          } else {
+            mtl_setArgs(ce, input_orig, output, sizes_s);
+          }
+          [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
           getMPSProfiler().endProfileKernel(ps);
         }
       });
       return;
     }
-
-    if (is_inner_reduction && output.is_contiguous()) {
-      // M = product of all non-reduced dims, N = size of last dim
-      uint32_t N = input.size(input.dim() - 1);
-      uint32_t M = input.numel() / N;
-
-      auto inner_kernel = fmt::format(
-          "{}reduction_inner_{}_{}", kernel_prefix, scalarToMetalTypeString(input), scalarToMetalTypeString(output));
-      // Pack multiple rows per TG: each SIMD group (32 threads) handles one row
-      constexpr uint32_t TG_SIZE = 256; // 8 SIMD groups = 8 rows per TG
+    if (num_reduced == 1 && reduced_dim == input_orig.dim() - 1) {
+      uint32_t N = input_orig.size(input_orig.dim() - 1);
+      uint32_t M = input_orig.numel() / N;
+      auto inner_kernel = fmt::format("{}reduction_inner_{}_{}", opts.prefix, in_str, out_str);
+      constexpr uint32_t TG_SIZE = 256;
       constexpr uint32_t rows_per_tg = TG_SIZE / 32;
       const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
-
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(inner_kernel);
-          getMPSProfiler().beginProfileKernel(ps, "sum_reduction_inner", {input});
+          getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction_inner", {input_orig});
           struct {
             uint32_t M, N;
           } sizes_s = {M, N};
-          [compute_encoder setComputePipelineState:ps];
-          mtl_setArgs(compute_encoder, input, output, sizes_s, divisor);
-          [compute_encoder dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1)
-                     threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+          [ce setComputePipelineState:ps];
+          if (opts.divisor.has_value()) {
+            mtl_setArgs(ce, input_orig, output, sizes_s, *opts.divisor);
+          } else {
+            mtl_setArgs(ce, input_orig, output, sizes_s);
+          }
+          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
           getMPSProfiler().endProfileKernel(ps);
         }
       });
@@ -1030,35 +950,140 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
     }
   }
 
-  NormParams params;
-  params.ndim = input.dim();
-  params.p = divisor;
-  params.reduction_size = reduction_size;
+  // Two-pass for large full reductions: pass 1 splits input into <=512
+  // contiguous slices, each TG reduces one slice to a partial; pass 2
+  // collapses the num_groups partials into the final scalar.
+  if (output.numel() == 1 && reduction_size > MAX_THREADGROUP_SIZE * NCHAINS) {
+    auto num_groups = std::min(512u, c10::metal::ceil_div(reduction_size, MAX_THREADGROUP_SIZE * NCHAINS));
+    while (num_groups > 1 && reduction_size % num_groups != 0) {
+      num_groups--;
+    }
+    if (num_groups > 1) {
+      const bool is_contig = input_orig.is_contiguous();
+      // For ops without a strided pass-1 kernel, .contiguous() the input
+      // (no-op when already contiguous).
+      auto input = (!is_contig && !opts.has_strided_pass1) ? input_orig.contiguous() : input_orig;
+      const bool use_strided = !is_contig && opts.has_strided_pass1;
+      const uint32_t elems_per_group = reduction_size / num_groups;
+      auto partials = at::empty({(int64_t)num_groups}, output.options().dtype(opts.partial_dtype));
 
-  for (const auto dim_idx : c10::irange(input.dim())) {
-    params.input_sizes[dim_idx] = input.size(dim_idx);
-    params.input_strides[dim_idx] = input.stride(dim_idx);
+      auto p1_kernel =
+          fmt::format("{}reduction{}_{}_{}", opts.prefix, use_strided ? "_strided" : "", in_str, partial_str);
+      auto p2_kernel = fmt::format("{}reduction_{}_{}", opts.pass2_prefix, partial_str, out_str);
+
+      NormParams params1{};
+      params1.reduction_size = elems_per_group;
+      if (use_strided) {
+        params1.ndim = input.dim();
+        for (const auto d : c10::irange(input.dim())) {
+          params1.input_sizes[d] = input.size(d);
+          params1.input_strides[d] = input.stride(d);
+        }
+      } else {
+        // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1.
+        params1.ndim = 2;
+        params1.input_sizes[0] = num_groups;
+        params1.input_strides[0] = elems_per_group;
+        params1.output_sizes[0] = num_groups;
+        params1.output_strides[0] = 1;
+        params1.input_sizes[1] = elems_per_group;
+        params1.input_strides[1] = 1;
+      }
+
+      // Pass 2: partials[num_groups] -> output[1], reduce dim=0. divisor
+      // applies here (not on pass 1) so the accumulator/divisor happens in
+      // opmath_t before the final cast to output dtype.
+      NormParams params2{};
+      params2.ndim = 1;
+      params2.p = opts.divisor.value_or(0.0f);
+      params2.reduction_size = num_groups;
+      params2.input_sizes[0] = num_groups;
+      params2.input_strides[0] = 1;
+      params2.output_sizes[0] = 1;
+      params2.output_strides[0] = 0;
+
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+
+          auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
+          getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
+          [ce setComputePipelineState:ps1];
+          mtl_setArgs(ce, input, partials, params1);
+          auto tpg1 = std::min(MAX_THREADGROUP_SIZE, elems_per_group);
+          [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
+          getMPSProfiler().endProfileKernel(ps1);
+
+          auto ps2 = lib.getPipelineStateForFunc(p2_kernel);
+          getMPSProfiler().beginProfileKernel(ps2, opts.prefix + "reduction_pass2", {partials});
+          [ce setComputePipelineState:ps2];
+          mtl_setArgs(ce, partials, output, params2);
+          auto tpg2 = std::min(MAX_THREADGROUP_SIZE, num_groups);
+          [ce dispatchThreads:MTLSizeMake(tpg2, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg2, 1, 1)];
+          getMPSProfiler().endProfileKernel(ps2);
+        }
+      });
+      return;
+    }
+  }
+
+  // Generic single-pass fallback.
+  auto kernel_name = fmt::format("{}reduction_{}_{}", opts.prefix, in_str, out_str);
+  NormParams params{};
+  params.ndim = input_orig.dim();
+  params.p = opts.divisor.value_or(0.0f);
+  params.reduction_size = reduction_size;
+  for (const auto dim_idx : c10::irange(input_orig.dim())) {
+    params.input_sizes[dim_idx] = input_orig.size(dim_idx);
+    params.input_strides[dim_idx] = input_orig.stride(dim_idx);
     params.output_sizes[dim_idx] = output.size(dim_idx);
     params.output_strides[dim_idx] = output.stride(dim_idx);
   }
-
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(pipeline_state, "sum_reduction", {input});
-      [compute_encoder setComputePipelineState:pipeline_state];
-      mtl_setArgs(compute_encoder, input, output, params);
-
-      auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, reduction_size);
+      id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+      auto ps = lib.getPipelineStateForFunc(kernel_name);
+      getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction", {input_orig});
+      [ce setComputePipelineState:ps];
+      mtl_setArgs(ce, input_orig, output, params);
+      // Round per-TG thread count up to a full simdgroup (32 lanes). With
+      // fewer threads, inactive lanes still participate in simd_shuffle but
+      // carry register-zero, corrupting min/max reductions whose identity
+      // is not zero. Padding threads load Op::identity() and contribute
+      // nothing to the result.
+      const auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(reduction_size, 32u));
       uint32_t num_threads = output.numel() * threads_per_group;
-
-      [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
-                 threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      [ce dispatchThreads:MTLSizeMake(num_threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
+      getMPSProfiler().endProfileKernel(ps);
     }
   });
+}
+
+// Shared implementation for sum/nansum/count_nonzero/mean. `divisor` > 0
+// divides the accumulator (in opmath_t) before casting to output, enabling
+// fused mean.
+static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kernel_prefix, float divisor = 0.0f) {
+  const Tensor& input = iter.input(0);
+  const Tensor& output = iter.output(0);
+  if (input.numel() == 0) {
+    output.zero_();
+    return;
+  }
+  if (output.numel() == 0) {
+    return;
+  }
+  // Pass 2 always sums partials (count_nonzero's partials are per-block
+  // counts -- counting again would be wrong, so always use sum_).
+  reduction_dispatch_mps(iter,
+                         ReductionDispatch{
+                             .prefix = kernel_prefix,
+                             .input_kernel_dtype = input.scalar_type(),
+                             .output_kernel_dtype = output.scalar_type(),
+                             .partial_dtype = output.scalar_type(),
+                             .pass2_prefix = "sum_",
+                             .has_strided_pass1 = true,
+                             .divisor = divisor,
+                         });
 }
 
 static void sum_kernel_mps(TensorIterator& iter) {
@@ -1089,58 +1114,43 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "count_nonzero_");
 }
 
-// Value reduction via the Metal value_reduction kernel. `op_prefix` is one
-// of "min_"/"max_" (min/max of values, output dtype = input dtype) or
-// "all_"/"any_" (predicate-load reduction, output dtype = bool/uchar).
+// Value reductions: min/max (Op + identity load on T), all/any (Op +
+// predicate load with uchar accumulator). Delegates to the shared
+// reduction_dispatch_mps.
 static void value_reduction_kernel_mps(TensorIterator& iter, const std::string& op_prefix) {
-  const Tensor& output = iter.output(0);
   const Tensor& input = iter.input(0);
+  const Tensor& output = iter.output(0);
   if (input.numel() == 0 || output.numel() == 0) {
     return;
   }
-  TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
-  uint32_t reduction_size = input.numel() / output.numel();
-
-  // For min/max, Metal's simd_min/simd_max have no bool overload, so we
-  // remap bool to char (identical 1-byte layout, max/min of {0,1} is {0,1}).
-  // all/any registers a dedicated bool kernel via predicate load, so no
-  // remap needed there.
   const bool is_predicate = op_prefix == "all_" || op_prefix == "any_";
-  auto kernel_dtype = (!is_predicate && input.scalar_type() == kBool) ? kChar : input.scalar_type();
-  auto kernel_name = fmt::format("{}reduction_{}", op_prefix, scalarToMetalTypeString(kernel_dtype));
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  NormParams params;
-  params.ndim = input.dim();
-  params.p = 0;
-  params.reduction_size = reduction_size;
-  for (const auto dim_idx : c10::irange(input.dim())) {
-    params.input_sizes[dim_idx] = input.size(dim_idx);
-    params.input_strides[dim_idx] = input.stride(dim_idx);
-    params.output_sizes[dim_idx] = output.size(dim_idx);
-    params.output_strides[dim_idx] = output.stride(dim_idx);
+  // For min/max, Metal's simd_min/simd_max have no bool overload; remap
+  // BOTH input and output to char (identical 1-byte 0/1 layout). all/any
+  // outputs uchar partials regardless of input dtype.
+  ScalarType in_kdtype = input.scalar_type();
+  ScalarType out_kdtype = output.scalar_type();
+  if (!is_predicate && in_kdtype == kBool) {
+    in_kdtype = out_kdtype = kChar;
+  } else if (is_predicate) {
+    out_kdtype = kByte;
   }
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto ps = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(ps, op_prefix + "reduction", {input});
-      [compute_encoder setComputePipelineState:ps];
-      mtl_setArgs(compute_encoder, input, output, params);
-      // Round per-TG thread count up to a full simdgroup (32 lanes). With
-      // fewer threads, inactive lanes still participate in simd_shuffle but
-      // carry register-zero, corrupting min/max reductions whose identity
-      // is not zero. Padding threads load Op::identity() and contribute
-      // nothing to the result.
-      const auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(reduction_size, 32u));
-      uint32_t num_threads = output.numel() * threads_per_group;
-      [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
-                 threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-      getMPSProfiler().endProfileKernel(ps);
-    }
-  });
+  // all/any partials are uchar (the predicate-reduction accumulator); pass 2
+  // collapses uchar partials with min/max. For min/max, partial == output.
+  ScalarType partial_dtype = is_predicate ? kByte : out_kdtype;
+  std::string pass2_prefix = op_prefix;
+  if (op_prefix == "all_") {
+    pass2_prefix = "min_";
+  } else if (op_prefix == "any_") {
+    pass2_prefix = "max_";
+  }
+  reduction_dispatch_mps(iter,
+                         ReductionDispatch{
+                             .prefix = op_prefix,
+                             .input_kernel_dtype = in_kdtype,
+                             .output_kernel_dtype = out_kdtype,
+                             .partial_dtype = partial_dtype,
+                             .pass2_prefix = pass2_prefix,
+                         });
 }
 
 static void min_values_kernel_mps(TensorIterator& iter) {
