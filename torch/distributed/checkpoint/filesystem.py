@@ -468,8 +468,7 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
-                    # For local files, this pushes Python's internal buffers to the OS.
-                    # For cloud storage, this pushes the in-memory data over the network to remote storage.
+                    # Flush Python-level buffers (OS for local files, network for cloud storage) before fsync.
                     stream.flush()
                     try:
                         os.fsync(stream.fileno())
@@ -776,8 +775,7 @@ class _FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
-                # For local files, this pushes Python's internal buffers to the OS.
-                # For cloud storage, this pushes the in-memory data over the network to remote storage.
+                # Flush Python-level buffers (OS for local files, network for cloud storage) before fsync.
                 metadata_file.flush()
                 try:
                     os.fsync(metadata_file.fileno())
