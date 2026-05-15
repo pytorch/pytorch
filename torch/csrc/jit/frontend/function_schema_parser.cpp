@@ -121,7 +121,7 @@ struct SchemaParser {
     // and so shouldn't be used as an overload name
     // also disallow dunder attribute names to be overload names
     bool is_a_valid_overload_name =
-        !((overload_name == "default") || (overload_name.rfind("__", 0) == 0));
+        !((overload_name == "default") || (overload_name.starts_with("__")));
     TORCH_CHECK(
         is_a_valid_overload_name,
         overload_name,
@@ -409,8 +409,8 @@ std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName,
     bool allow_typevars) {
   // We're ignoring aten and prim for BC reasons
-  if (schemaOrName.rfind("aten::", 0) == 0 ||
-      schemaOrName.rfind("prim::", 0) == 0) {
+  if (schemaOrName.starts_with("aten::") ||
+      schemaOrName.starts_with("prim::")) {
     allow_typevars = true;
   }
   return SchemaParser(schemaOrName, allow_typevars)
