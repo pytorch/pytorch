@@ -15909,8 +15909,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_mean"),
             DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_sum"),
             DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weights_per_sample_grad_input_no_grad"),
-            # tensor-likes are not close
-            DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
             DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
