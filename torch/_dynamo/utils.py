@@ -1259,7 +1259,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, (types.UnionType, typing._Final))
+        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
         or value is typing.Generic
         or value is typing.Union
     )
@@ -1764,7 +1764,13 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: sorted(value) if isinstance(value, set) else value
+            key: (
+                sorted(value)
+                if isinstance(value, set)
+                else value.to_jsonable()
+                if hasattr(value, "to_jsonable")
+                else value
+            )
             for key, value in d.items()
             if key not in blocklist
         }
@@ -2838,10 +2844,6 @@ def specialize_symnode(arg: Any) -> Any:
             source = arg.original_source()
             value = arg.original_value()
 
-            # ComputedLazyConstantVariable has no source, so it can't be a symnode
-            if source is None:
-                return arg
-
             is_symnode_vt = is_torch_sym(value) or (
                 not config.specialize_int
                 and type(value) is int
@@ -2872,20 +2874,6 @@ def guard_if_dyn(arg: Any) -> Any:
 
 def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
-
-
-def check_args_peekable_as_constant(
-    args: Iterable[Any], kwargs: Mapping[Any, Any]
-) -> bool:
-    """Check if all args can be peeked as constants, including unrealized lazy constants.
-
-    Unlike check_constant_args (which uses is_python_constant and returns False
-    for containers with unrealized lazy items), this uses try_peek_constant to
-    check peekability without triggering realization. Use this when constant
-    folding is desired even if args contain lazy constants (e.g., Enum class
-    creation, namedtuple type creation).
-    """
-    return all(x.try_peek_constant()[0] for x in itertools.chain(args, kwargs.values()))
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
@@ -4172,7 +4160,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(
+    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -4258,9 +4246,31 @@ def object_has_getattribute(value: Any) -> bool:
 
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
-    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
-    d = object.__getattribute__(obj, "__dict__")
+    # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        # threading.local stores attributes in a per-thread C-backed dict that
+        # object.__getattribute__ cannot see. CPython passes that dict directly
+        # to _PyObject_GenericSetAttrWithDict:
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
+        d = threading.local.__getattribute__(obj, "__dict__")
     d[name] = value
+
+
+def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
+    # Same path as object_setattr_ignore_descriptor with a NULL value.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        d = threading.local.__getattribute__(obj, "__dict__")
+    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:
@@ -4980,7 +4990,7 @@ def is_tensor_base_attr_getter(value: Any) -> bool:
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
         and hasattr(value.__self__, "__objclass__")
-        and value.__self__.__objclass__ is torch._C._TensorBase
+        and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
 
 
