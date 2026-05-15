@@ -102,7 +102,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_shim_bc_const_char_ptr, torch_exception_get_what_without_backtrace);
   if (error_msg_without) {
-    ss <<  error_msg_without;
+    ss << error_msg_without;
     ss << " (originally from " << call << " API call failed at " << file
        << ", line " << line << ")";
   } else {
