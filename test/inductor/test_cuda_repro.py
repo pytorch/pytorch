@@ -411,6 +411,141 @@ class CudaReproTests(TestCase):
                 f"Expected device type {device_type}, got {compiled([])[0].device.type!r}"
             )
 
+    def test_fractional_max_pool2d_implicit_random_samples(self):
+        def fn(x):
+            return F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(use_post_grad_passes=False)
+    def test_fractional_max_pool2d_implicit_random_samples_no_post_grad(self):
+        def fn(x):
+            return F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_fractional_max_pool2d_explicit_randn_samples_compile(self):
+        def fn(x):
+            samples = torch.randn(1, x.size(1), 2, device=x.device, dtype=x.dtype)
+            return F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), _random_samples=samples
+            )
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        out = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(out.shape, (1, 3, 4, 4))
+
+    def test_fractional_max_pool2d_mixed_random_ordering(self):
+        def fn(x):
+            y0, i0 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            z = torch.rand(2, device=x.device, dtype=x.dtype)
+            y1, i1 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            return y0, i0, z, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(use_post_grad_passes=False)
+    def test_fractional_max_pool2d_mixed_random_ordering_no_post_grad(self):
+        def fn(x):
+            y0, i0 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            z = torch.rand(2, device=x.device, dtype=x.dtype)
+            y1, i1 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            return y0, i0, z, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_fractional_max_pool2d_mixed_bernoulli_ordering(self):
+        def fn(x):
+            y0, i0 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            b = torch.bernoulli(torch.full((256,), 0.5, device=x.device))
+            y1, i1 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            return y0, i0, b, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_fractional_max_pool2d_mixed_normal_ordering(self):
+        def fn(x):
+            y0, i0 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            z = torch.normal(0.0, 1.0, (2,), device=x.device)
+            y1, i1 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            return y0, i0, z, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_fractional_max_pool2d_explicit_rand_samples_mixed_bernoulli_ordering(
+        self,
+    ):
+        def functional_fn(x):
+            samples0 = torch.rand(1, x.size(1), 2, device=x.device, dtype=x.dtype)
+            y0, i0 = F.fractional_max_pool2d(
+                x,
+                3,
+                output_size=(4, 4),
+                return_indices=True,
+                _random_samples=samples0,
+            )
+            b = torch.bernoulli(torch.full((256,), 0.5, device=x.device))
+            samples1 = torch.rand(1, x.size(1), 2, device=x.device, dtype=x.dtype)
+            y1, i1 = F.fractional_max_pool2d(
+                x,
+                3,
+                output_size=(4, 4),
+                return_indices=True,
+                _random_samples=samples1,
+            )
+            return y0, i0, b, y1, i1
+
+        def aten_kwarg_fn(x):
+            samples0 = torch.rand(1, x.size(1), 2, device=x.device, dtype=x.dtype)
+            y0, i0 = torch.ops.aten.fractional_max_pool2d.default(
+                x, [3, 3], [4, 4], random_samples=samples0
+            )
+            b = torch.bernoulli(torch.full((256,), 0.5, device=x.device))
+            samples1 = torch.rand(1, x.size(1), 2, device=x.device, dtype=x.dtype)
+            y1, i1 = torch.ops.aten.fractional_max_pool2d.default(
+                x, [3, 3], [4, 4], random_samples=samples1
+            )
+            return y0, i0, b, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(functional_fn, (x,), check_lowp=False)
+        self.common(aten_kwarg_fn, (x,), check_lowp=False)
+
+    def test_fractional_max_pool3d_implicit_random_samples(self):
+        def fn(x):
+            return F.fractional_max_pool3d(
+                x, 3, output_size=(4, 4, 4), return_indices=True
+            )
+
+        x = torch.randn(1, 3, 16, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):

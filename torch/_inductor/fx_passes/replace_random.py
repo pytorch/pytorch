@@ -15,6 +15,11 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from ..virtualized import V
+from .random_utils import (
+    chain_random_ops_for_ordering,
+    has_fractional_pool_sample_rand,
+    uses_fallback_random_for_fractional_pool,
+)
 
 
 log = logging.getLogger(__name__)
@@ -59,6 +64,16 @@ def _shape_to_offset(shape, device: torch.device):
 def replace_random_passes(gm: torch.fx.GraphModule):
     """Modify the given FX graph to use backend-native random ops"""
     if config.fallback_random:
+        return 0
+
+    if has_fractional_pool_sample_rand(gm.graph):
+        with GraphTransformObserver(
+            gm, "chain_random_ops_ordering", "joint_graph_passes"
+        ):
+            chain_random_ops_for_ordering(gm.graph, mark_fallback_random=True)
+        return 0
+
+    if uses_fallback_random_for_fractional_pool(gm.graph):
         return 0
 
     count = patterns.apply(gm)
@@ -193,6 +208,13 @@ def replace_random(
     if generator is not None:
         return
 
+    mode = {
+        aten.rand: "rand",
+        aten.randn: "randn",
+    }[
+        match.output_node().target.overloadpacket  # type: ignore[union-attr]
+    ]  # type: ignore[union-attr]
+
     def replacement(size):
         result = inductor_prims.random(
             size, inductor_prims.seed(device), mode, **default_kwargs(device)
@@ -201,12 +223,6 @@ def replace_random(
             result = result.to(dtype)
         return result
 
-    mode = {
-        aten.rand: "rand",
-        aten.randn: "randn",
-    }[
-        match.output_node().target.overloadpacket  # type: ignore[union-attr]
-    ]  # type: ignore[union-attr]
     device = get_device(device)
     replacement_fn = replacement
 
