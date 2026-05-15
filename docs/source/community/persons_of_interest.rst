@@ -24,7 +24,6 @@ Core Maintainers
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
--  Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
