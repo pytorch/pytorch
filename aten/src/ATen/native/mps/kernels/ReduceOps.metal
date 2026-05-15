@@ -717,129 +717,112 @@ REGISTER_COUNT_NONZERO_INNER(float2);
 REGISTER_COUNT_NONZERO_INNER(half2);
 
 // =============================================================================
-// min/max value-only reductions (amin / amax)
+// value reductions: amin/amax (Op = MinOp/MaxOp on T, identity load) and
+// all/any (Op = MinOp/MaxOp on uchar, predicate load).
+// any = max-of-bool, all = min-of-bool; the predicate load converts each
+// input element to {0, 1} (nonzero, NaN -> 1) before the reduction.
 // =============================================================================
 
 // Reduction op functors. Each Op defines identity<T>(), combine(), and
-// simd_reduce(). Identity is the "neutral" element for the op (-INF for max
-// on floats, numeric_limits<T>::lowest() for integers, etc.).
-// NaN-aware combine: for floats, an incoming NaN must propagate to the
-// accumulator; for integer/bool types, NaN doesn't exist so the ternary
-// branch reduces to a straight max/min. `a != a` detects NaN without needing
-// isnan (which has overload-resolution ambiguities across namespaces).
-template <typename T>
-inline T max_combine(T a, T b) {
-  return (a != a) ? a : ((b != b) ? b : (a > b ? a : b));
-}
-template <typename T>
-inline T min_combine(T a, T b) {
-  return (a != a) ? a : ((b != b) ? b : (a < b ? a : b));
-}
-
-// Lowest/highest-representable values per integer dtype. Metal's
-// ::metal::numeric_limits isn't reliably populated for long/signed char, so
-// hardcode them. For 64-bit long we reinterpret an int2 bit pattern because
-// Metal rejects literals like 0x8000000000000000L as out-of-range for signed
-// long.
-template <typename T>
-inline T int_lowest();
-template <>
-inline long int_lowest<long>() {
-  // LONG_MIN = 0x8000000000000000; Metal rejects the 64-bit literal, so
-  // reinterpret the bit pattern (little-endian: low=0, high=0x80000000).
-  return as_type<long>(int2(0, int(0x80000000)));
-}
-template <>
-inline int int_lowest<int>() {
-  return int(0x80000000);
-}
-template <>
-inline short int_lowest<short>() {
-  return short(0x8000);
-}
-template <>
-inline char int_lowest<char>() {
-  return char(0x80);
-}
-template <>
-inline uchar int_lowest<uchar>() {
-  return uchar(0);
-}
-template <typename T>
-inline T int_highest();
-template <>
-inline long int_highest<long>() {
-  return as_type<long>(int2(-1, int(0x7FFFFFFF)));
-}
-template <>
-inline int int_highest<int>() {
-  return int(0x7FFFFFFF);
-}
-template <>
-inline short int_highest<short>() {
-  return short(0x7FFF);
-}
-template <>
-inline char int_highest<char>() {
-  return char(0x7F);
-}
-template <>
-inline uchar int_highest<uchar>() {
-  return uchar(0xFF);
-}
-
+// threadgroup_reduce(). Identity is the "neutral" element for the op (-INF
+// for max on floats, numeric_limits<T>::lowest() for integers, etc.).
+// combine() and threadgroup_reduce() delegate to c10::metal helpers, which
+// propagate NaN for floats.
 struct MaxOp {
-  template <typename T, ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
+  template <
+      typename T,
+      ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
   static inline T identity() {
-    return int_lowest<T>();
+    return ::metal::numeric_limits<T>::lowest();
   }
-  template <typename T, ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
+  // Float identity is -INFINITY (not -FLT_MAX): max(-INF, x) = x for any
+  // finite x including -FLT_MAX, but max(-FLT_MAX, -INFINITY) would
+  // incorrectly return -FLT_MAX.
+  template <
+      typename T,
+      ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
   static inline T identity() {
     return T(-INFINITY);
   }
   template <typename T>
   static inline T combine(T a, T b) {
-    return max_combine(a, b);
+    return c10::metal::max(a, b);
   }
   template <typename T>
-  static inline T simd_reduce(T val) {
-    return c10::metal::simd_max(val);
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_max(shared, val, tid, tptg);
   }
 };
 
 struct MinOp {
-  template <typename T, ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
+  template <
+      typename T,
+      ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
   static inline T identity() {
-    return int_highest<T>();
+    return ::metal::numeric_limits<T>::max();
   }
-  template <typename T, ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
+  template <
+      typename T,
+      ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
   static inline T identity() {
     return T(INFINITY);
   }
   template <typename T>
   static inline T combine(T a, T b) {
-    return min_combine(a, b);
+    return c10::metal::min(a, b);
   }
   template <typename T>
-  static inline T simd_reduce(T val) {
-    return c10::metal::simd_min(val);
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_min(shared, val, tid, tptg);
+  }
+};
+
+// Load functors decide how an input element is converted into the
+// accumulator type. IdentityLoad casts (min/max keep the value unchanged);
+// PredicateLoad maps nonzero (and NaN) -> 1, zero -> 0 (any/all).
+struct IdentityLoad {
+  template <typename TA, typename TI>
+  static inline TA load(TI v) {
+    return static_cast<TA>(v);
+  }
+};
+
+struct PredicateLoad {
+  template <typename TA, typename TI>
+  static inline TA load(TI v) {
+    return load_is_nonzero(v) ? TA(1) : TA(0);
   }
 };
 
 // General value reduction: same 2D-via-NormParams layout as sum_reduction,
-// parameterised on the reduction op. Input and output dtype match (min/max
-// never promote). Output stride handling mirrors sum_reduction.
-template <typename Op, typename T, uint NCHAINS = SUM_NCHAINS>
+// parameterised on the reduction op and load mode. For min/max, TI == TO
+// and Load = IdentityLoad. For all/any, TO = uchar (a 1-byte alias for the
+// bool output buffer) and Load = PredicateLoad. The
+// max_total_threads_per_threadgroup hint lets the compiler bound the
+// runtime tptg value, which in turn lets c10::metal::threadgroup_min/max
+// constant-fold its size-vs-simdgroup_size branch.
+template <
+    typename Op,
+    typename Load,
+    typename TI,
+    typename TO,
+    uint NCHAINS = SUM_NCHAINS>
+[[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void value_reduction(
-    constant T* input [[buffer(0)]],
-    device T* output [[buffer(1)]],
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
     constant NormParams<>& params [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
-    uint tgid [[threadgroup_position_in_grid]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simdgroup_id [[simdgroup_index_in_threadgroup]],
-    uint simdgroup_size [[threads_per_simdgroup]]) {
+    uint tgid [[threadgroup_position_in_grid]]) {
   uint32_t input_base = 0;
   uint32_t reduction_stride = 1;
   uint32_t num_reduced_dims = 0;
@@ -857,8 +840,9 @@ kernel void value_reduction(
     }
   }
 
-  const T identity_val = Op::template identity<T>();
-  metal::array<T, NCHAINS> acc;
+  using TA = TO;
+  const TA identity_val = Op::template identity<TA>();
+  metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
     acc[j] = identity_val;
   }
@@ -871,51 +855,39 @@ kernel void value_reduction(
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
         acc[j] = Op::combine(
-            acc[j], input[input_base + (base + j) * reduction_stride]);
+            acc[j],
+            Load::template load<TA>(
+                input[input_base + (base + j) * reduction_stride]));
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] = Op::combine(
-          acc[idx % NCHAINS], input[input_base + idx * reduction_stride]);
+          acc[idx % NCHAINS],
+          Load::template load<TA>(input[input_base + idx * reduction_stride]));
     }
   } else {
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
         acc[j] = Op::combine(
-            acc[j], input[get_input_offset(base + j, tgid, params)]);
+            acc[j],
+            Load::template load<TA>(
+                input[get_input_offset(base + j, tgid, params)]));
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
       acc[idx % NCHAINS] = Op::combine(
-          acc[idx % NCHAINS], input[get_input_offset(idx, tgid, params)]);
+          acc[idx % NCHAINS],
+          Load::template load<TA>(input[get_input_offset(idx, tgid, params)]));
     }
   }
 
-  T output_val = acc[0];
+  TA output_val = acc[0];
   for (uint j = 1; j < NCHAINS; j++) {
     output_val = Op::combine(output_val, acc[j]);
   }
 
-  auto threads_remaining = tptg;
-  threadgroup T shared_outputs[MAX_THREADGROUP_SIZE];
-
-  while (threads_remaining > 1) {
-    output_val = Op::simd_reduce(output_val);
-    threads_remaining = ceil_div(threads_remaining, simdgroup_size);
-
-    if (threads_remaining > 1) {
-      if (simd_lane_id == 0) {
-        shared_outputs[simdgroup_id] = output_val;
-      }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
-      // Load identity (not early-return) for lanes past threads_remaining:
-      // the next iteration's simd_reduce requires all lanes in the simdgroup
-      // to hold valid values, else inactive lanes contribute register-zero
-      // and corrupt reductions whose identity != 0 (e.g. int64 max = LONG_MIN).
-      output_val =
-          (tid < threads_remaining) ? shared_outputs[tid] : identity_val;
-    }
-  }
+  threadgroup TA shared_outputs[MAX_THREADGROUP_SIZE / simdgroup_size];
+  output_val = Op::threadgroup_reduce(shared_outputs, output_val, tid, tptg);
 
   if (tid == 0) {
     uint32_t output_offset = 0;
@@ -932,21 +904,24 @@ kernel void value_reduction(
   }
 }
 
-#define REGISTER_VALUE_REDUCTION_IMPL(T, PREFIX, OP)        \
-  template [[host_name(PREFIX "reduction_" #T)]]            \
-  kernel void value_reduction<OP, T, SUM_NCHAINS>(          \
-      constant T * input [[buffer(0)]],                     \
-      device T * output [[buffer(1)]],                      \
-      constant NormParams<> & params [[buffer(2)]],         \
-      uint tid [[thread_position_in_threadgroup]],          \
-      uint tptg [[threads_per_threadgroup]],                \
-      uint tgid [[threadgroup_position_in_grid]],           \
-      uint simd_lane_id [[thread_index_in_simdgroup]],      \
-      uint simdgroup_id [[simdgroup_index_in_threadgroup]], \
-      uint simdgroup_size [[threads_per_simdgroup]]);
+#define REGISTER_VALUE_REDUCTION_IMPL(TI, TO, NAME, OP, LOAD) \
+  template [[host_name(NAME "_reduction_" #TI)]]              \
+  kernel void value_reduction<OP, LOAD, TI, TO, SUM_NCHAINS>( \
+      constant TI * input [[buffer(0)]],                      \
+      device TO * output [[buffer(1)]],                       \
+      constant NormParams<> & params [[buffer(2)]],           \
+      uint tid [[thread_position_in_threadgroup]],            \
+      uint tptg [[threads_per_threadgroup]],                  \
+      uint tgid [[threadgroup_position_in_grid]]);
 
-#define REGISTER_MAX(T) REGISTER_VALUE_REDUCTION_IMPL(T, "max_", MaxOp)
-#define REGISTER_MIN(T) REGISTER_VALUE_REDUCTION_IMPL(T, "min_", MinOp)
+#define REGISTER_MAX(T) \
+  REGISTER_VALUE_REDUCTION_IMPL(T, T, "max", MaxOp, IdentityLoad)
+#define REGISTER_MIN(T) \
+  REGISTER_VALUE_REDUCTION_IMPL(T, T, "min", MinOp, IdentityLoad)
+#define REGISTER_ANY(TI) \
+  REGISTER_VALUE_REDUCTION_IMPL(TI, uchar, "any", MaxOp, PredicateLoad)
+#define REGISTER_ALL(TI) \
+  REGISTER_VALUE_REDUCTION_IMPL(TI, uchar, "all", MinOp, PredicateLoad)
 
 REGISTER_MAX(float);
 REGISTER_MAX(half);
@@ -954,6 +929,7 @@ REGISTER_MAX(bfloat);
 REGISTER_MAX(long);
 REGISTER_MAX(int);
 REGISTER_MAX(short);
+REGISTER_MAX(char);
 REGISTER_MAX(uchar);
 
 REGISTER_MIN(float);
@@ -962,4 +938,33 @@ REGISTER_MIN(bfloat);
 REGISTER_MIN(long);
 REGISTER_MIN(int);
 REGISTER_MIN(short);
+REGISTER_MIN(char);
 REGISTER_MIN(uchar);
+
+// any/all accept any numeric input dtype; output is always bool (uchar).
+// For complex (float2/half2), PredicateLoad's load_is_nonzero handles the
+// (real != 0 || imag != 0) check, and the actual MaxOp/MinOp reduction
+// then runs on uchar — so no complex simd_min/max is required.
+REGISTER_ANY(float);
+REGISTER_ANY(half);
+REGISTER_ANY(bfloat);
+REGISTER_ANY(long);
+REGISTER_ANY(int);
+REGISTER_ANY(short);
+REGISTER_ANY(char);
+REGISTER_ANY(uchar);
+REGISTER_ANY(bool);
+REGISTER_ANY(float2);
+REGISTER_ANY(half2);
+
+REGISTER_ALL(float);
+REGISTER_ALL(half);
+REGISTER_ALL(bfloat);
+REGISTER_ALL(long);
+REGISTER_ALL(int);
+REGISTER_ALL(short);
+REGISTER_ALL(char);
+REGISTER_ALL(uchar);
+REGISTER_ALL(bool);
+REGISTER_ALL(float2);
+REGISTER_ALL(half2);
