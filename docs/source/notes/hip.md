@@ -174,7 +174,7 @@ by recompiling the PyTorch from source.
 
 Please add below line as an argument to cmake command parameters:
 
-```cmake
+```text
 -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON
 ```
 
