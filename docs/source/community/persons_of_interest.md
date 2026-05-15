@@ -97,7 +97,7 @@ orphan: true
 ### AOT Inductor (AOTI) & AOTI Runtime
 
 - Bin Bao ([desertfire](https://github.com/desertfire))
-- Shangdi Yu ([shangdiy](https://github.com/shangdiy))
+- Shangdi Yu ([shangdiy](https://github.com/yushangdi))
 - (emeritus) Angela Yi ([angelayi](https://github.com/angelayi))
 - (emeritus) Yang Chen ([chenyang78](https://github.com/chenyang78))
 
@@ -392,7 +392,7 @@ orphan: true
 - Mark Saroufim ([msaroufIm](https://github.com/msaroufIm))
 - Manoj Rao ([mycpuorg](https://github.com/mycpuorg))
 - Vamshi Dantu ([vdantu](https://github.com/vdantu))
-- Dhanasekar Karuppasamy ([dhanainme](https://github.com/dhanainme))
+- Dhanasekar Karuppasamy
 
 ### Other Compilers (JIT / TorchScript / Package / Deploy)
 
