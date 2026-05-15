@@ -965,6 +965,88 @@ class TestSparseCompressed(TestCase):
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
 
     @skipMeta
+    @onlyCUDA
+    @suppress_warnings
+    @all_sparse_compressed_layouts()
+    @dtypes(torch.float32)
+    def test_sparse_compressed_parameter_set_data_module_to_device(self, layout, device, dtype):
+        class SparseCompressedModule(torch.nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.weight = torch.nn.Parameter(tensor)
+
+        def to_layout(t):
+            if layout is torch.sparse_csr:
+                return t.to_sparse_csr()
+            if layout is torch.sparse_csc:
+                return t.to_sparse_csc()
+            if layout is torch.sparse_bsr:
+                return t.to_sparse_bsr((2, 2))
+            if layout is torch.sparse_bsc:
+                return t.to_sparse_bsc((2, 2))
+            raise AssertionError(f"unexpected layout {layout}")
+
+        def canonical_device(dev):
+            return torch.empty((), device=dev).device
+
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
+
+        def assert_sparse_compressed_device(t, expected_device):
+            expected_device = canonical_device(expected_device)
+            self.assertEqual(t.device, expected_device)
+            self.assertEqual(compressed_indices_mth(t).device, expected_device)
+            self.assertEqual(plain_indices_mth(t).device, expected_device)
+            self.assertEqual(t.values().device, expected_device)
+
+        dense = torch.tensor([[1, 0, 2, 0],
+                              [0, 3, 0, 4],
+                              [5, 0, 6, 0],
+                              [0, 7, 0, 8]], dtype=dtype)
+
+        param = torch.nn.Parameter(to_layout(dense))
+        param.data = param.data.to(device)
+        assert_sparse_compressed_device(param.data, device)
+        param.data = param.data.cpu()
+        assert_sparse_compressed_device(param.data, "cpu")
+
+        module = SparseCompressedModule(to_layout(dense))
+        module.to(device)
+        assert_sparse_compressed_device(module.weight.data, device)
+        module.to("cpu")
+        assert_sparse_compressed_device(module.weight.data, "cpu")
+
+    @skipMeta
+    @onlyCUDA
+    @suppress_warnings
+    @dtypes(torch.float32)
+    def test_to_side_effect_controls(self, device, dtype):
+        def canonical_device(dev):
+            return torch.empty((), device=dev).device
+
+        dense_param = torch.nn.Parameter(torch.ones(2, 2, dtype=dtype))
+        moved_dense_param = dense_param.to(device)
+        self.assertEqual(dense_param.device, torch.device("cpu"))
+        self.assertEqual(moved_dense_param.device, canonical_device(device))
+
+        dense_module = torch.nn.Linear(2, 2, dtype=dtype)
+        dense_module.to(device)
+        self.assertEqual(dense_module.weight.device, canonical_device(device))
+        dense_module.to("cpu")
+        self.assertEqual(dense_module.weight.device, torch.device("cpu"))
+
+        csr = torch.tensor([[1, 0, 2],
+                            [0, 3, 0]], dtype=dtype).to_sparse_csr()
+        moved_csr = csr.to(device)
+        self.assertEqual(csr.device, torch.device("cpu"))
+        self.assertEqual(csr.crow_indices().device, torch.device("cpu"))
+        self.assertEqual(csr.col_indices().device, torch.device("cpu"))
+        self.assertEqual(csr.values().device, torch.device("cpu"))
+        self.assertEqual(moved_csr.device, canonical_device(device))
+        self.assertEqual(moved_csr.crow_indices().device, canonical_device(device))
+        self.assertEqual(moved_csr.col_indices().device, canonical_device(device))
+        self.assertEqual(moved_csr.values().device, canonical_device(device))
+
+    @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(torch.double)
     def test_pickle(self, layout, dtype, device):
