@@ -1523,6 +1523,7 @@ AOTITorchError aoti_torch_stream_id(
   });
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 AOTITorchError aoti_torch_stream_native_handle(
     StreamHandle stream,
     void** ret_native_handle) {
@@ -1531,6 +1532,7 @@ AOTITorchError aoti_torch_stream_native_handle(
     *ret_native_handle = stream_ptr->native_handle();
   });
 }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // This function creates a new Stream object and makes StreamHandle point to it.
 // The caller is responsible for managing the object's lifecycle.

@@ -455,17 +455,16 @@ class TestLibtorchAgnostic(TestCase):
 
         self.assertEqual(stream_id, expected_stream_id)
 
+    @skipIfTorchVersionLessThan(2, 13)
     @onlyCUDA
     def test_stream_native_handle(self, device):
-        import libtorch_agn_2_9 as libtorch_agnostic
+        import libtorch_agn_2_13 as libtorch_agnostic
 
         stream = torch.cuda.Stream()
         device_idx = torch.cuda.current_device()
 
         with stream:
-            expected = torch.accelerator.current_stream(
-                device_idx
-            ).native_handle
+            expected = torch.accelerator.current_stream(device_idx).native_handle
             nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
 
         self.assertEqual(nh, expected)

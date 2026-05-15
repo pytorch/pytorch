@@ -332,21 +332,6 @@ def test_stream(device_index) -> int:
     return torch.ops.libtorch_agn_2_9.test_stream.default(device_index)
 
 
-def test_stream_native_handle(device_index) -> int:
-    """
-    Returns the current stream's native handle (pointer bit pattern) via
-    ``torch::stable::accelerator::getCurrentStream`` and ``Stream::nativeHandle``.
-
-    Args:
-        device_index: Device index to get the stream for
-
-    Returns: Native stream handle as int (``uintptr_t`` of the void pointer)
-    """
-    return torch.ops.libtorch_agn_2_9.test_stream_native_handle.default(
-        device_index
-    )
-
-
 def test_get_current_device_index() -> int:
     """
     Tests the getCurrentDeviceIndex functionality by getting the current device index.

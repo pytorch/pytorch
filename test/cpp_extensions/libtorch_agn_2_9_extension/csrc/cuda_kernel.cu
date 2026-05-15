@@ -5,10 +5,12 @@
 #else
 #include <cuda_runtime.h>
 #endif
-#include <torch/csrc/stable/library.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/tensor.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 using torch::stable::Tensor;
 
@@ -24,8 +26,9 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
   torch::stable::accelerator::DeviceGuard device_guard(device_index);
   Tensor res = new_empty(m, {m.size(0)});
 
-  void* raw_stream =
-      torch::stable::accelerator::getCurrentStream(device_index).nativeHandle();
+  void* raw_stream = nullptr;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_current_cuda_stream(device_index, &raw_stream));
 #ifdef USE_ROCM
   auto stream = static_cast<hipStream_t>(raw_stream);
 #else

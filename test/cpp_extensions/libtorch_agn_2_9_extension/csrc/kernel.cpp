@@ -8,7 +8,6 @@
 #include <torch/headeronly/core/ScalarType.h>
 
 #ifdef LAE_USE_CUDA
-#include <cstdint>
 #include <cuda_runtime.h>
 #include <torch/csrc/stable/accelerator.h>
 #endif
@@ -425,17 +424,6 @@ int64_t test_stream(int32_t device_index) {
   return torch::stable::accelerator::getCurrentStream(device_index).id();
 }
 
-int64_t test_stream_native_handle(int32_t device_index) {
-  STD_TORCH_CHECK(
-      device_index >= std::numeric_limits<int32_t>::min() &&
-          device_index <= std::numeric_limits<int32_t>::max(),
-      "Device index is out of range of DeviceIndex (int32_t).");
-
-  void* native_handle =
-      torch::stable::accelerator::getCurrentStream(device_index).nativeHandle();
-  return static_cast<int64_t>(reinterpret_cast<uintptr_t>(native_handle));
-}
-
 int64_t test_get_current_device_index() {
   return torch::stable::accelerator::getCurrentDeviceIndex();
 }
@@ -444,7 +432,6 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_device_guard(int device_index) -> int");
   m.def("test_device_guard_set_index() -> int");
   m.def("test_stream(int device_index) -> int");
-  m.def("test_stream_native_handle(int device_index) -> int");
   m.def("test_get_current_device_index() -> int");
 }
 
@@ -452,7 +439,6 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_device_guard", TORCH_BOX(&test_device_guard));
   m.impl("test_device_guard_set_index", TORCH_BOX(&test_device_guard_set_index));
   m.impl("test_stream", TORCH_BOX(&test_stream));
-  m.impl("test_stream_native_handle", TORCH_BOX(&test_stream_native_handle));
   m.impl("test_get_current_device_index", TORCH_BOX(&test_get_current_device_index));
 }
 

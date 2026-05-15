@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/util/Exception.h>
 
 // This header defines a stable C API for certain ATen functionality in
@@ -571,10 +572,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_delete_stream(StreamHandle stream);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_stream_id(StreamHandle stream, int64_t* ret_stream_id);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 /// Backend-specific non-owning stream handle (e.g. `cudaStream_t` for CUDA).
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_stream_native_handle(
-    StreamHandle stream,
-    void** ret_native_handle);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
     int32_t device_index,
