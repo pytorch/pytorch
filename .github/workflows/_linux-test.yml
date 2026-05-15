@@ -583,6 +583,8 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
+          job-id: ${{ steps.setup-linux.outputs.job-id }}
+          test-conclusion: ${{ steps.test.conclusion }}
 
       - name: Collect backtraces from coredumps (if any)
         if: always()

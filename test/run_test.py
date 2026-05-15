@@ -824,9 +824,19 @@ def run_test_retries(
                 and IS_CI
                 and options.upload_artifacts_while_running
             ):
+                from tools.testing.upload_artifacts import parse_pytest_nodeid
+
+                nodeid = current_failure[1:-1]
+                parsed = parse_pytest_nodeid(nodeid)
+                if parsed is None:
+                    classname, testname = "", nodeid
+                else:
+                    _, _, classname, testname = parsed
                 upload_adhoc_failure_json(
                     test_file,
-                    current_failure[1:-1],
+                    nodeid,
+                    classname=classname,
+                    testname=testname,
                     reason=(
                         "Test failed consistently across reruns but pytest did "
                         "not generate xml. The most likely cause is a segfault."

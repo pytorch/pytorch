@@ -22,18 +22,25 @@ def _write_cache(dir_: Path, lastrun: Any, made_failing_xml: bool) -> None:
     (dir_ / "made_failing_xml").write_text(json.dumps(made_failing_xml))
 
 
-def _write_junit_xml(dir_: Path, name: str, testcases: list[tuple[str, str]]) -> None:
+def _write_junit_xml(
+    dir_: Path, name: str, testcases: list[tuple[str, str, str]]
+) -> None:
+    """testcases items: (file, classname, name) — xunit2 attributes."""
     dir_.mkdir(parents=True, exist_ok=True)
     body = "".join(
-        f'<testcase classname="{cls}" name="{n}"/>' for cls, n in testcases
+        f'<testcase file="{file_attr}" classname="{cls}" name="{n}"/>'
+        for file_attr, cls, n in testcases
     )
     (dir_ / name).write_text(f'<?xml version="1.0"?><testsuite>{body}</testsuite>')
 
 
 class TestUploadAdhocIncompleteTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = self.enterContext(__import__("tempfile").TemporaryDirectory())
-        self.repo_root = Path(self.tmp)
+        import tempfile
+
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.repo_root = Path(tmpdir.name)
         self.stepcurrent = self.repo_root / ".pytest_cache" / "v" / "cache" / "stepcurrent"
         self.test_reports = self.repo_root / "test" / "test-reports"
         # Repoint the helper's module-level paths at the temp dir.
@@ -51,6 +58,19 @@ class TestUploadAdhocIncompleteTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
+    def test_skips_when_job_id_missing(self) -> None:
+        _write_cache(
+            self.stepcurrent / "key1",
+            "test_foo.py::TestFoo::test_bar",
+            made_failing_xml=False,
+        )
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(helper, "upload_adhoc_failure_json") as up,
+        ):
+            self.assertEqual(helper.main(), 0)
+        up.assert_not_called()
+
     def test_emits_for_incomplete_test_not_in_xml(self) -> None:
         # An in-flight nodeid with no junit-xml row should produce exactly
         # one adhoc emission.
@@ -64,7 +84,12 @@ class TestUploadAdhocIncompleteTests(unittest.TestCase):
         self.assertEqual(up.call_count, 1)
         args, kwargs = up.call_args
         self.assertEqual(args[0], "test/dynamo/test_foo")
-        self.assertEqual(args[1], "TestFoo::test_bar")
+        # current_failure (full nodeid) is passed positionally for the
+        # logging/legacy fallback, but explicit classname/testname kwargs
+        # override the splitter.
+        self.assertEqual(args[1], "test/dynamo/test_foo.py::TestFoo::test_bar")
+        self.assertEqual(kwargs["classname"], "TestFoo")
+        self.assertEqual(kwargs["testname"], "test_bar")
         self.assertIn("SIGTERM", kwargs["reason"])
         # Deterministic suffix keyed by (classname, testname).
         self.assertEqual(
@@ -86,6 +111,9 @@ class TestUploadAdhocIncompleteTests(unittest.TestCase):
     def test_skips_when_testcase_already_in_junit_xml(self) -> None:
         # Test ran to completion (its testcase is in the xml) and a LATER
         # test was killed mid-run. Don't double-emit for the completed one.
+        # Mirrors pytest xunit2 output: classname is dotted module path,
+        # `file` is the rootdir-relative test file. Helper dedups on
+        # (file, name).
         _write_cache(
             self.stepcurrent / "key1",
             "test_foo.py::TestFoo::test_bar",
@@ -94,11 +122,46 @@ class TestUploadAdhocIncompleteTests(unittest.TestCase):
         _write_junit_xml(
             self.test_reports,
             "report.xml",
-            [("TestFoo", "test_bar")],
+            [("test_foo.py", "test_foo.TestFoo", "test_bar")],
         )
         with mock.patch.object(helper, "upload_adhoc_failure_json") as up:
             self.assertEqual(helper.main(), 0)
         up.assert_not_called()
+
+    def test_does_not_skip_on_classname_only_match(self) -> None:
+        # Pytest xunit2 uses a dotted module classname; a bare-classname
+        # match (e.g. `TestFoo` in xml vs `TestFoo` from nodeid) is NOT
+        # enough — must dedup on (file, name). If the file differs, the
+        # adhoc row should still emit.
+        _write_cache(
+            self.stepcurrent / "key1",
+            "test_a.py::TestFoo::test_bar",
+            made_failing_xml=False,
+        )
+        # An unrelated XML with the same classname+name but different file.
+        _write_junit_xml(
+            self.test_reports,
+            "other.xml",
+            [("test_b.py", "test_b.TestFoo", "test_bar")],
+        )
+        with mock.patch.object(helper, "upload_adhoc_failure_json") as up:
+            self.assertEqual(helper.main(), 0)
+        up.assert_called_once()
+
+    def test_parametrized_nodeid_with_double_colon(self) -> None:
+        # Legal parametrized id like `test_foo.py::test_bar[a::b]` must NOT
+        # be mis-split on inner `::`.
+        _write_cache(
+            self.stepcurrent / "key1",
+            "test/test_foo.py::test_bar[a::b]",
+            made_failing_xml=False,
+        )
+        with mock.patch.object(helper, "upload_adhoc_failure_json") as up:
+            self.assertEqual(helper.main(), 0)
+        self.assertEqual(up.call_count, 1)
+        kwargs = up.call_args.kwargs
+        self.assertEqual(kwargs["classname"], "")
+        self.assertEqual(kwargs["testname"], "test_bar[a::b]")
 
     def test_skips_when_lastrun_missing_or_null(self) -> None:
         _write_cache(

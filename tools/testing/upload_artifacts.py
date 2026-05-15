@@ -208,11 +208,70 @@ def parse_xml_and_upload_json() -> None:
         print(f"Failed to parse and upload json test reports: {e}")
 
 
+def parse_pytest_nodeid(nodeid: str) -> tuple[str, str, str, str] | None:
+    """Parse a pytest nodeid into (test_file_path, invoking_file, classname, testname).
+
+    Parametrized test ids can legally contain `::` inside `[...]`
+    (e.g. `test_foo.py::test_bar[a::b]`), so a plain `split("::")` is wrong.
+    This walks the string and splits on top-level `::` only.
+
+    Returns None if `nodeid` doesn't look like a `<path>.py::...` form.
+
+    - `test_file_path`: `dynamo/test_foo.py` — rootdir-relative path, matches
+      pytest xunit2's `<testcase file="...">` attribute.
+    - `invoking_file`: `dynamo/test_foo` — what `upload_adhoc_failure_json`
+      historically expects as its first arg.
+    - `classname`: last class segment (`TestFoo`) or `""` for function tests.
+      Note: pytest xunit2 uses a dotted *module-qualified* classname; we don't
+      try to reconstruct that, so callers must dedup on `(file, testname)`.
+    - `testname`: full method name including the parametrize suffix
+      (`test_bar[a::b]`).
+    """
+    sep = ".py::"
+    idx = nodeid.find(sep)
+    if idx < 0:
+        return None
+    test_file_path = nodeid[: idx + 3]
+    invoking_file = nodeid[:idx]
+    tail = nodeid[idx + len(sep) :]
+    parts: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(tail):
+        c = tail[i]
+        if c == "[":
+            depth += 1
+            cur.append(c)
+            i += 1
+        elif c == "]":
+            depth = max(0, depth - 1)
+            cur.append(c)
+            i += 1
+        elif depth == 0 and tail[i : i + 2] == "::":
+            parts.append("".join(cur))
+            cur = []
+            i += 2
+        else:
+            cur.append(c)
+            i += 1
+    parts.append("".join(cur))
+    if len(parts) >= 2:
+        classname = parts[-2]
+        testname = parts[-1]
+    else:
+        classname = ""
+        testname = parts[0]
+    return test_file_path, invoking_file, classname, testname
+
+
 def upload_adhoc_failure_json(
     invoking_file: str,
     current_failure: str,
     reason: str | None = None,
     s3_key_suffix: str | None = None,
+    classname: str | None = None,
+    testname: str | None = None,
 ) -> None:
     """
     manually upload a json to s3 indicating that a test failed without pytest
@@ -223,6 +282,10 @@ def upload_adhoc_failure_json(
     the segfault wording for callers that don't pass one. `s3_key_suffix`
     overrides the random per-call suffix used in the S3 key; pass a
     deterministic value to make repeated invocations idempotent.
+
+    `classname` and `testname` override the legacy `current_failure.split("::")`
+    parsing — pass these from `parse_pytest_nodeid` so parametrized ids that
+    contain `::` inside brackets aren't mis-split.
     """
     try:
         job_id = int(os.environ["JOB_ID"])
@@ -231,13 +294,14 @@ def upload_adhoc_failure_json(
         print(f"Failed to get job_id or workflow_id: {e}")
         return
 
-    split_failure = current_failure.split("::")
-    if len(split_failure) >= 2:
-        className = split_failure[-2]
-        testName = split_failure[-1]
-    else:
-        testName = current_failure
-        className = ""
+    if classname is None or testname is None:
+        split_failure = current_failure.split("::")
+        if len(split_failure) >= 2:
+            classname = split_failure[-2] if classname is None else classname
+            testname = split_failure[-1] if testname is None else testname
+        else:
+            testname = current_failure if testname is None else testname
+            classname = "" if classname is None else classname
 
     message = reason or (
         "The test file failed but pytest did not generate xml.  "
@@ -246,8 +310,8 @@ def upload_adhoc_failure_json(
     j = {
         "invoking_file": invoking_file,
         "file": f"{invoking_file}.py",
-        "name": testName,
-        "classname": className,
+        "name": testname,
+        "classname": classname,
         "workflow_id": workflow_id,
         "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "job_id": job_id,

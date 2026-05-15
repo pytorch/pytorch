@@ -19,6 +19,21 @@ inputs:
     description: S3 bucket to upload artifacts to
     required: false
     default: "gha-artifacts"
+  job-id:
+    description: |
+      The numeric GHA job id (e.g. `steps.setup-linux.outputs.job-id`). Needed
+      so the "Upload adhoc rows for incomplete tests" step can pass JOB_ID to
+      the helper. If unset, that step no-ops.
+    required: false
+    default: ""
+  test-conclusion:
+    description: |
+      The caller's test-step conclusion (e.g. `steps.test.conclusion`). Used
+      to gate the incomplete-tests helper explicitly instead of relying on
+      `failure()` (which can be ambiguous when a composite action has multiple
+      substeps). If unset, the helper step skips.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -33,14 +48,19 @@ runs:
     # Emit one synthetic test row to s3 for any test that started running but
     # never produced a junit-xml entry (e.g. the GHA test step was killed by
     # timeout-minutes / run cancellation / OOM before pytest_sessionfinish).
-    # Runs only when the test step failed so the success path stays untouched;
-    # internal dedup checks for `<testcase>` presence + `made_failing_xml` so
-    # it doesn't compete with `parse_xml_and_upload_json` or the
-    # FAILED CONSISTENTLY path in run_test.py.
+    # Gated explicitly on the caller's `test-conclusion` input so we never
+    # rely on the ambiguous composite-scope behaviour of `failure()`. The
+    # helper itself no-ops if `JOB_ID` is unset, so callers that don't pass
+    # `job-id` (today: ROCm/XPU container workflows that don't copy back
+    # `.pytest_cache/`) are safe by default. Linux-only for now — Windows
+    # uses different stepcurrent paths and ROCm/XPU need stepcurrent
+    # copy-back from the container; both are tracked as follow-ups.
     - name: Upload adhoc rows for incomplete tests
-      if: ${{ failure() && runner.os != 'Windows' }}
+      if: ${{ inputs.test-conclusion == 'failure' && runner.os == 'Linux' && inputs.job-id != '' }}
       shell: bash
       continue-on-error: true
+      env:
+        JOB_ID: ${{ inputs.job-id }}
       run: |
         set -euo pipefail
         uv run --no-project --with boto3 python -m tools.testing.upload_adhoc_incomplete_tests

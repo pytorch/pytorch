@@ -16,8 +16,8 @@ This script walks every `stepcurrent` subdir, reads `lastrun` and
 1. Was the last test to start running (per `lastrun`).
 2. Has NOT been flagged `made_failing_xml=true` (segfault path already
    covered by `run_test.py::run_test_retries`).
-3. Does NOT appear as a `<testcase>` in any junit-xml under
-   `test/test-reports/**/*.xml` (i.e. pytest never wrote a row for it).
+3. Has no matching `<testcase>` (keyed on the xunit2 `file` and `name`
+   attributes) in any `test/test-reports/**/*.xml` already on disk.
 
 Designed to be invoked from a GHA composite-action step gated `if: failure()`
 right before the existing `upload-test-artifacts` zip+upload step, so it
@@ -35,7 +35,10 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from tools.testing.upload_artifacts import upload_adhoc_failure_json
+from tools.testing.upload_artifacts import (
+    parse_pytest_nodeid,
+    upload_adhoc_failure_json,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -43,8 +46,8 @@ STEPCURRENT_DIR = REPO_ROOT / ".pytest_cache" / "v" / "cache" / "stepcurrent"
 TEST_REPORTS_DIR = REPO_ROOT / "test" / "test-reports"
 
 
-def _read_pytest_cache_value(path: Path) -> str | None:
-    """pytest.Cache writes JSON files; null/missing → None, string → unquoted."""
+def _read_pytest_cache_value(path: Path) -> object | None:
+    """pytest.Cache writes JSON files; missing/unparseable → None."""
     if not path.is_file():
         return None
     try:
@@ -54,11 +57,13 @@ def _read_pytest_cache_value(path: Path) -> str | None:
 
 
 def _collect_completed_testcases() -> set[tuple[str, str]]:
-    """Build a set of (classname, name) tuples from every junit-xml on disk.
+    """Build a set of (file_attr, name_attr) tuples from every junit-xml on disk.
 
-    junit-xml `<testcase>` elements carry `classname` (may be empty) + `name`.
-    These match the (className, testName) split used by
-    `upload_adhoc_failure_json` so dedup is cheap.
+    Keyed on the xunit2 `<testcase file="..." name="...">` attributes — those
+    match the rootdir-relative file path and the full test name (including
+    any parametrize suffix), which is what `parse_pytest_nodeid` returns for
+    the in-flight nodeid. xunit2's `classname` uses a dotted module path so we
+    deliberately avoid matching on it.
     """
     completed: set[tuple[str, str]] = set()
     if not TEST_REPORTS_DIR.is_dir():
@@ -68,48 +73,38 @@ def _collect_completed_testcases() -> set[tuple[str, str]]:
             tree = ET.parse(xml_file)
         except ET.ParseError:
             # A partially-written XML is treated as no data — the adhoc helper
-            # will fill the gap if the relevant testcase is missing.
+            # will still fire if the relevant testcase is missing elsewhere.
             continue
         for testcase in tree.iter("testcase"):
-            classname = testcase.get("classname") or ""
-            name = testcase.get("name") or ""
-            if name:
-                completed.add((classname, name))
+            file_attr = testcase.get("file") or ""
+            name_attr = testcase.get("name") or ""
+            if file_attr and name_attr:
+                completed.add((file_attr, name_attr))
     return completed
 
 
-def _nodeid_to_emit_args(nodeid: str) -> tuple[str, str] | None:
-    """Map a pytest nodeid to (invoking_file, current_failure_arg).
-
-    A pytest nodeid is `<path>.py::<class>::<name>` or `<path>.py::<name>`.
-    `upload_adhoc_failure_json` expects:
-      - invoking_file: path without `.py` (e.g. `dynamo/test_foo`)
-      - current_failure: the `::`-delimited tail (className::testName or just
-        testName), so its own splitter recovers the same classname/name.
-    """
-    parts = nodeid.split("::")
-    if len(parts) < 2:
-        return None
-    path_part = parts[0]
-    if not path_part.endswith(".py"):
-        return None
-    invoking_file = path_part[:-3]
-    # Re-join everything after the file part; `upload_adhoc_failure_json`
-    # takes the last two `::`-separated segments.
-    current_failure = "::".join(parts[1:])
-    return invoking_file, current_failure
-
-
-def _classname_testname(current_failure: str) -> tuple[str, str]:
-    parts = current_failure.split("::")
-    if len(parts) >= 2:
-        return parts[-2], parts[-1]
-    return "", current_failure
+def _sanitize_for_s3_key(s: str) -> str:
+    return (
+        s.replace("/", "_")
+        .replace(" ", "_")
+        .replace("[", "_")
+        .replace("]", "_")
+        .replace(":", "_")
+    )
 
 
 def main() -> int:
     if not STEPCURRENT_DIR.is_dir():
         print(f"No stepcurrent cache at {STEPCURRENT_DIR}; nothing to emit.")
+        return 0
+
+    if not os.environ.get("JOB_ID") or not os.environ.get("GITHUB_RUN_ID"):
+        # `upload_adhoc_failure_json` would early-return anyway, but log it
+        # clearly so the CI step output flags the misconfiguration.
+        print(
+            "JOB_ID or GITHUB_RUN_ID not set in env; cannot emit adhoc rows. "
+            "The composite action must pass `job-id` and set JOB_ID/GITHUB_RUN_ID."
+        )
         return 0
 
     completed = _collect_completed_testcases()
@@ -129,13 +124,13 @@ def main() -> int:
         if not isinstance(lastrun, str) or not lastrun:
             continue
 
-        emit_args = _nodeid_to_emit_args(lastrun)
-        if emit_args is None:
+        parsed = parse_pytest_nodeid(lastrun)
+        if parsed is None:
+            print(f"Skipping unparseable nodeid: {lastrun!r}")
             continue
-        invoking_file, current_failure = emit_args
+        test_file_path, invoking_file, classname, testname = parsed
 
-        classname, testname = _classname_testname(current_failure)
-        if (classname, testname) in completed:
+        if (test_file_path, testname) in completed:
             # junit-xml already has a row for this test (it ran to completion
             # and a later test was killed). Don't duplicate.
             continue
@@ -145,13 +140,15 @@ def main() -> int:
             "(SIGTERM/SIGKILL — e.g. timeout-minutes, run cancellation, "
             f"or OOM). Last test seen by stepcurrent: {lastrun}"
         )
-        suffix = f"{classname}_{testname}".replace("/", "_").replace(" ", "_")
+        suffix = _sanitize_for_s3_key(f"incomplete_{classname}_{testname}")
         try:
             upload_adhoc_failure_json(
                 invoking_file,
-                current_failure,
+                lastrun,
                 reason=reason,
-                s3_key_suffix=f"incomplete_{suffix}",
+                s3_key_suffix=suffix,
+                classname=classname,
+                testname=testname,
             )
         except Exception as e:  # noqa: BLE001
             print(f"Failed to emit adhoc row for {lastrun}: {e}")
