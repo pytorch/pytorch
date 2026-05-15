@@ -97,7 +97,7 @@ orphan: true
 ### AOT Inductor (AOTI) & AOTI Runtime
 
 - Bin Bao ([desertfire](https://github.com/desertfire))
-- Shangdi Yu ([shangdiy](https://github.com/shangdiy))
+- Shangdi Yu ([shangdiy](https://github.com/yushangdi))
 - (emeritus) Angela Yi ([angelayi](https://github.com/angelayi))
 - (emeritus) Yang Chen ([chenyang78](https://github.com/chenyang78))
 
