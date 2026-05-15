@@ -5122,16 +5122,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn, ctxs):
+def make_wrapped(fn, ctx_fns):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        stack = contextlib.ExitStack()
-        for ctx in ctxs:
-            stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
-        return out
+        with contextlib.ExitStack() as stack:
+            for ctx_fn in ctx_fns:
+                stack.enter_context(ctx_fn())
+            return fn(self)
 
     return wrapped
 
@@ -5165,16 +5163,17 @@ def wrap_test_class(orig_cls):
             backend = lookup_backend(name)
             if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
-            ctxs = [
-                compiled_autograd._enable(
+            ctx_fns = [
+                functools.partial(
+                    compiled_autograd._enable,
                     make_compiler_fn(
                         backend=backend,
                         fullgraph=name not in known_graph_breaks_tests,
-                    )
+                    ),
                 ),
-                test_contexts.get(name, contextlib.nullcontext()),
+                test_contexts.get(name, contextlib.nullcontext),
             ]
-            dct[name] = make_wrapped(fn, ctxs)
+            dct[name] = make_wrapped(fn, ctx_fns)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -5201,6 +5200,40 @@ class WrapTestClassTests(TestCase):
         test.setUp()
         test.tearDown()
         self.assertTrue(getattr(test, "super_called", False))
+
+    def test_wrap_recreates_contexts_per_call(self):
+        events = []
+        test_name = "test_context_reentrant"
+
+        @contextlib.contextmanager
+        def extra_context():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        class DummyTest(unittest.TestCase):
+            def test_context_reentrant(self):
+                events.append("body")
+
+        xfail_by_backend["eager"].add(test_name)
+        test_contexts[test_name] = extra_context
+        try:
+            wrapped = wrap_test_class(DummyTest)
+        finally:
+            xfail_by_backend["eager"].discard(test_name)
+            test_contexts.pop(test_name)
+
+        for _ in range(2):
+            test = wrapped(test_name)
+            test.setUp()
+            try:
+                getattr(test, test_name)()
+            finally:
+                test.tearDown()
+
+        self.assertEqual(events, ["enter", "body", "exit", "enter", "body", "exit"])
 
 
 known_graph_breaks_tests = {
@@ -5305,9 +5338,12 @@ known_graph_breaks_tests = {
 }
 
 test_contexts = {
-    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
-    "test_index_backward_does_not_save_tensor": config.patch(
-        capture_dynamic_output_shape_ops=True
+    "test_setitem_mask": functools.partial(
+        config.patch, capture_dynamic_output_shape_ops=True
+    ),
+    "test_index_backward_does_not_save_tensor": functools.partial(
+        config.patch,
+        capture_dynamic_output_shape_ops=True,
     ),
 }
 
