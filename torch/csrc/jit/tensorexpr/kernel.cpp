@@ -1276,7 +1276,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate the equivalent indices in the
+  // and we can calculate the equivalent indices in the
   // output tensor strides by iteratively computing the index of
   // the biggest stride:
   // absolute = ...

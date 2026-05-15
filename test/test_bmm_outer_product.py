@@ -80,6 +80,18 @@ class TestBmmOuterProduct(TestCase):
         self.assertEqual(a.grad.shape, a.shape)
         self.assertEqual(b.grad.shape, b.shape)
 
+    def test_cpu_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16)
+        self.assertTrue(a.device.type == "cpu")
+        self.assertEqual(torch.bmm(a, b), a @ b)
+
+    def test_mixed_device_outer_product_fallback(self):
+        a = torch.randn(4, 8, 1)
+        b = torch.randn(4, 1, 16, device=GPU_TYPE)
+        with self.assertRaises(RuntimeError):
+            torch.bmm(a, b)
+
 
 class TestOuterProductDetection(TestCase):
     def test_is_outer_product(self):

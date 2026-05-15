@@ -191,7 +191,7 @@ class PatchCaches(contextlib.AbstractContextManager):
         self._stack.__enter__()
 
         ctx = patch(
-            "torch._inductor.runtime.autotune_cache.LocalAutotuneCache.backend_override_cls",
+            "torch._inductor.remote_cache.LocalAutotuneCache.backend_override_cls",
             MockBackend.with_name("autotune_local"),
         )
         self._stack.enter_context(ctx)
