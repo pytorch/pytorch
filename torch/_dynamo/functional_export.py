@@ -443,7 +443,7 @@ def _suggest_or_raise_constraint_violation(
         graph_capture_output.graph_capture_output.build_guards(fn.__code__)
     except ConstraintViolationError as e:
         constraint_violation_error = e
-        e.__traceback__ = None
+        traceback.clear_frames(e.__traceback__)
 
     if (
         (shape_env := getattr(fake_mode, "shape_env", None)) is not None

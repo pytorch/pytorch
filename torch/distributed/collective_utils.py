@@ -90,7 +90,7 @@ def broadcast(
             except Exception as e:
                 success = False
                 exception = e
-                e.__traceback__ = None
+                traceback.clear_frames(e.__traceback__)
         else:
             payload = data_or_fn
 
@@ -155,7 +155,7 @@ def all_gather(
         except Exception as e:
             success = False
             exception = e
-            e.__traceback__ = None
+            traceback.clear_frames(e.__traceback__)
     else:
         payload = data_or_fn
 

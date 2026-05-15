@@ -11,6 +11,7 @@ import inspect
 import itertools
 import logging
 import math
+import traceback
 import operator
 import os
 import os.path
@@ -645,7 +646,7 @@ class CachingAutotuner(KernelInterface):
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc = e
-                e.__traceback__ = None
+                traceback.clear_frames(e.__traceback__)
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
                 f"No valid triton configs. {type(exc).__name__}: {exc}"

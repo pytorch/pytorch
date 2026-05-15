@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+import traceback
 from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
@@ -214,7 +215,7 @@ class PrecompileContext:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
 
                 error = e
-                e.__traceback__ = None
+                traceback.clear_frames(e.__traceback__)
                 data = json.dumps(
                     {
                         "key": key,

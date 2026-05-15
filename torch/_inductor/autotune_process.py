@@ -5,6 +5,7 @@ import atexit
 import contextvars
 import ctypes
 import dataclasses
+import traceback
 import functools
 import logging
 import multiprocessing as mp
@@ -104,7 +105,7 @@ class TuningProcess:
                     result = job()
                 except Exception as e:
                     result = e
-                    e.__traceback__ = None
+                    traceback.clear_frames(e.__traceback__)
                 TuningProcess.send(result, write_pipe)
 
         try:

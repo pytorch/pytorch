@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import traceback
 from collections import defaultdict
 from threading import Lock
 
@@ -119,7 +120,7 @@ def _wait_for_all(rpc_futs):
         except Exception as e:
             results.append(e)
             exception = e
-            e.__traceback__ = None
+            traceback.clear_frames(e.__traceback__)
     if exception is not None:
         raise exception
     return results

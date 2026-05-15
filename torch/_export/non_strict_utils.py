@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import math
+import traceback
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -590,7 +591,7 @@ def produce_guards_and_solve_constraints(
         )
     except ConstraintViolationError as e:
         constraint_violation_error = e
-        e.__traceback__ = None
+        traceback.clear_frames(e.__traceback__)
 
     shape_env.frozen = True
     dim_constraints = shape_env.dim_constraints
