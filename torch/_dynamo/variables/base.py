@@ -149,6 +149,15 @@ class MutationType:
             )
 
 
+class AttrMutationKind(Enum):
+    # Replay through STORE_ATTR/DELETE_ATTR, preserving descriptor-aware
+    # setattr/delattr semantics. Used for slots, getset descriptors, and other
+    # ordinary attribute writes that should not bypass descriptors.
+    GENERIC_SETATTR = 0
+    # Replay a direct object.__dict__ mutation while bypassing descriptors.
+    INSTANCE_DICT = 1
+
+
 class ValueMutationNew(MutationType):
     """
     This case of VariableTracker.mutation_type marker indicates
