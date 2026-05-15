@@ -223,6 +223,19 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
+/**
+ * The beginning of all shims added in 2.13.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+// Stable corollary to torch::Library method m.set_python_module(...).
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
