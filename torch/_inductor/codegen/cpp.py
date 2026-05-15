@@ -388,7 +388,6 @@ def replace_cascade_sum_with_add(buffer: IndentedBuffer):
                 buffer._lines[i] = new_content
 
 
-
 @dataclasses.dataclass
 class ParallelDepth:
     """
