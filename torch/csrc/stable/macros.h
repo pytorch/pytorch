@@ -53,19 +53,18 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 //
 // Return type is inferred from the return value of FALLBACK_FUNCTION.
 #if !defined(C10_MOBILE) && !defined(_WIN32)
-#define TORCH_DYNAMIC_VERSION_CALL(                                  \
-    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)     \
-  ([]() {                                                            \
-    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {          \
-      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);       \
-      if (fn_ptr) {                                                  \
-        using ReturnType = decltype(FALLBACK_FUNCTION(__VA_ARGS__)); \
-        const auto typed_ptr =                                       \
-            reinterpret_cast<ReturnType (*)(__VA_ARGS__)>(fn_ptr);   \
-        return (typed_ptr)(__VA_ARGS__);                             \
-      }                                                              \
-    }                                                                \
-    return FALLBACK_FUNCTION(__VA_ARGS__);                           \
+#define TORCH_DYNAMIC_VERSION_CALL(                                    \
+    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)       \
+  ([]() {                                                              \
+    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {            \
+      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);         \
+      if (fn_ptr) {                                                    \
+        using FunctionType = decltype(&FALLBACK_FUNCTION);             \
+        const auto typed_ptr = reinterpret_cast<FunctionType>(fn_ptr); \
+        return (typed_ptr)(__VA_ARGS__);                               \
+      }                                                                \
+    }                                                                  \
+    return FALLBACK_FUNCTION(__VA_ARGS__);                             \
   })()
 #else
 // On a platform without dlsym, so immediately call the fallback function.
@@ -109,17 +108,13 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     ss << call << " API call failed at " << file << ", line " << line;
   }
 
-  std::time_t t = std::time(nullptr);
-  std::tm tm = *std::localtime(&t);
-  std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
-            << line;
-
   const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_shim_bc_const_char_ptr, torch_exception_get_what);
   if (error_msg) {
-    std::cerr << "] Exception across libtorch C API boundary:" << error_msg;
-  } else {
-    std::cerr << "] API call failed: " << call << error_msg;
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
+    std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
+              << line << "] Exception across libtorch C API boundary:" << error_msg;
   }
 
   throw std::runtime_error(ss.str());
