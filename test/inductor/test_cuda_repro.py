@@ -484,6 +484,20 @@ class CudaReproTests(TestCase):
         x = torch.randn(1, 3, 16, 16, device=device_type)
         self.common(fn, (x,), check_lowp=False)
 
+    def test_fractional_max_pool2d_mixed_normal_ordering(self):
+        def fn(x):
+            y0, i0 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            z = torch.normal(0.0, 1.0, (2,), device=x.device)
+            y1, i1 = F.fractional_max_pool2d(
+                x, 3, output_size=(4, 4), return_indices=True
+            )
+            return y0, i0, z, y1, i1
+
+        x = torch.randn(1, 3, 16, 16, device=device_type)
+        self.common(fn, (x,), check_lowp=False)
+
     def test_fractional_max_pool2d_explicit_rand_samples_mixed_bernoulli_ordering(
         self,
     ):

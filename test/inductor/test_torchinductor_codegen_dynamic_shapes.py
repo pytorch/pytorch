@@ -171,6 +171,17 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    # Fallback ops (data-dependent output size) route to ATen eager — no
+    # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
+    "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # test_amp_update_scale does not use self.common(), so check_codegen() is
+    # never triggered — the test calls torch.compile() directly and passes.
+    # No TestFailure entry needed.
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
