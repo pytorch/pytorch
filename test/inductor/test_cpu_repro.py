@@ -4886,28 +4886,54 @@ class CPUReproTests(TestCase):
             y = x.to(torch.float16)
             return (y * y).to(torch.float32)
 
-        def promoted_consumer(x):
-            y = x.to(torch.float16)
-            return (y * y) + x
+        for emulate_precision_casts in (False, True):
+            with config.patch(emulate_precision_casts=emulate_precision_casts):
+                for size in (1, 32):
+                    x = torch.full((size,), 5000.0)
+                    expected = fn(x)
 
-        for size in (1, 32):
-            x = torch.full((size,), 5000.0)
-            for test_fn in (fn, promoted_consumer):
-                expected = test_fn(x)
+                    torch._dynamo.reset()
+                    actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                    self.assertEqual(actual, expected)
+
+                def cast_chain(x):
+                    return x.to(torch.float16).to(torch.float32)
+
+                x = torch.tensor([70000.0])
+                expected = cast_chain(x)
 
                 torch._dynamo.reset()
-                actual = torch.compile(test_fn, backend="inductor", fullgraph=True)(x)
+                actual = torch.compile(cast_chain, backend="inductor", fullgraph=True)(
+                    x
+                )
                 self.assertEqual(actual, expected)
 
-        def cast_chain(x):
-            return x.to(torch.float16).to(torch.float32)
+    def test_predicate_fp16_cast_does_not_round_unrelated_data_path(self):
+        def predicate_cast(x, h, one):
+            c = x.to(torch.float16) > 0
+            y = h + one
+            return torch.where(c, y, y).to(torch.float32)
 
-        x = torch.tensor([70000.0])
-        expected = cast_chain(x)
+        def predicate_no_cast(x, h, one):
+            c = x > 0
+            y = h + one
+            return torch.where(c, y, y).to(torch.float32)
+
+        x = torch.tensor([1.0], dtype=torch.float32)
+        h = torch.tensor([65504.0], dtype=torch.float16)
+        one = torch.tensor([1.0], dtype=torch.float16)
 
         torch._dynamo.reset()
-        actual = torch.compile(cast_chain, backend="inductor", fullgraph=True)(x)
-        self.assertEqual(actual, expected)
+        actual_with_predicate_cast = torch.compile(
+            predicate_cast, backend="inductor", fullgraph=True
+        )(x, h, one)
+
+        torch._dynamo.reset()
+        actual_without_predicate_cast = torch.compile(
+            predicate_no_cast, backend="inductor", fullgraph=True
+        )(x, h, one)
+
+        self.assertEqual(actual_with_predicate_cast, actual_without_predicate_cast)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):

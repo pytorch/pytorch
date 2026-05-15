@@ -859,30 +859,6 @@ def to_dtype(
     if src_dtype == dtype:
         return clone(x) if copy else x
 
-    low_pr_fp = (torch.bfloat16, torch.float16)
-    if src_dtype in low_pr_fp and not ir.is_storage_and_layout(x):
-
-        def _to_dtype_preserve_lowp_source(x):
-            rounded = ops.to_dtype(
-                x,
-                src_dtype,
-                src_dtype=src_dtype,
-                use_compute_types=False,
-            )
-            result = ops.to_dtype(
-                rounded,
-                dtype,
-                src_dtype=src_dtype,
-                use_compute_types=use_compute_types,
-            )
-            if not use_compute_types and dtype in low_pr_fp:
-                result = ops.to_dtype(result, dtype)
-            return result
-
-        return make_pointwise(
-            _to_dtype_preserve_lowp_source, override_return_dtype=dtype
-        )(x)
-
     def _to_dtype(x):
         result = ops.to_dtype(
             x,
@@ -890,6 +866,7 @@ def to_dtype(
             src_dtype=src_dtype,
             use_compute_types=use_compute_types,
         )
+        low_pr_fp = (torch.bfloat16, torch.float16)
         if not use_compute_types and dtype in low_pr_fp:
             # Upcast back to compute type so fused consumers see a compute-type
             # value. Without this, a raw low-precision value gets a redundant
@@ -898,6 +875,53 @@ def to_dtype(
         return result
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
+
+
+def _has_explicit_lowp_cast_source(
+    node: torch.fx.Node | None, source_dtype: torch.dtype
+) -> bool:
+    def is_explicit_lowp_cast(node: torch.fx.Node) -> bool:
+        if node.target is not prims.convert_element_type.default:
+            return False
+
+        dtype = node.args[1] if len(node.args) > 1 else node.kwargs.get("dtype")
+        if dtype != source_dtype:
+            return False
+
+        src_node = node.args[0] if node.args else None
+        if not isinstance(src_node, torch.fx.Node):
+            return True
+
+        src_val = src_node.meta.get("val")
+        return not (isinstance(src_val, torch.Tensor) and src_val.dtype == dtype)
+
+    def produces_source_dtype(node: torch.fx.Node) -> bool:
+        if is_explicit_lowp_cast(node):
+            return True
+
+        val = node.meta.get("val")
+        return isinstance(val, torch.Tensor) and val.dtype == source_dtype
+
+    if not isinstance(node, torch.fx.Node):
+        return False
+
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if cur in visited:
+            continue
+        visited.add(cur)
+        if not produces_source_dtype(cur):
+            continue
+        if is_explicit_lowp_cast(cur):
+            return True
+        stack.extend(
+            input_node
+            for input_node in cur.all_input_nodes
+            if produces_source_dtype(input_node)
+        )
+    return False
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
@@ -961,6 +985,46 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
     use_compute_types = not (src_dtype in low_pr_fp or dtype in low_pr_fp)
+
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    current_input_node: torch.fx.Node | None = None
+    if (
+        isinstance(current_node, torch.fx.Node)
+        and current_node.args
+        and isinstance(current_node.args[0], torch.fx.Node)
+    ):
+        current_input_node = current_node.args[0]
+
+    if (
+        src_dtype != dtype
+        and src_dtype in low_pr_fp
+        and not ir.is_storage_and_layout(x)
+        and _has_explicit_lowp_cast_source(current_input_node, src_dtype)
+    ):
+
+        def _to_dtype_preserve_explicit_lowp_source(x):
+            rounded = ops.to_dtype(
+                x,
+                src_dtype,
+                src_dtype=src_dtype,
+                use_compute_types=False,
+            )
+            result = ops.to_dtype(
+                rounded,
+                dtype,
+                src_dtype=src_dtype,
+                use_compute_types=use_compute_types,
+            )
+            if not use_compute_types and dtype in low_pr_fp:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+        return make_pointwise(
+            _to_dtype_preserve_explicit_lowp_source, override_return_dtype=dtype
+        )(x)
+
     return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
 
 
