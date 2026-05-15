@@ -5470,6 +5470,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
     def setUp(self):
         super().setUp()
+        AutotuneProcessPool._shutdown_for_inactivity = False
         test_name = self._testMethodName
         for skip_test_name in self.SKIP_TESTS:
             if skip_test_name in test_name or TEST_XPU or config.cpp_wrapper:
@@ -5478,6 +5479,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     def tearDown(self):
         super().tearDown()
         AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
         # Clear the AsyncAutotuner cache to prevent test pollution
         AsyncAutotuner.choice_hash_to_future.clear()
 
