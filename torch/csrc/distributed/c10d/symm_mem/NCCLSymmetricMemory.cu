@@ -441,10 +441,6 @@ ncclWindow_t NCCLSymmetricMemory::get_window() {
   return pai_->combined_win_;
 }
 
-ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
-  return pai_->combined_win_;
-}
-
 size_t NCCLSymmetricMemory::get_offset() {
   return offset_;
 }
