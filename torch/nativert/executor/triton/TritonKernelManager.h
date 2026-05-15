@@ -1,12 +1,15 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
@@ -91,7 +94,9 @@ class KernelInputs {
   KernelInputs(size_t num_args, size_t num_attrs)
       : num_args_(num_args),
         inputs_(num_args + num_attrs),
-        num_attrs_(num_attrs) {}
+        num_attrs_(num_attrs) {
+    scalar_values_.reserve(num_args + num_attrs);
+  }
   virtual ~KernelInputs() = default;
 
   virtual void add_arg(void* arg) {
@@ -106,6 +111,12 @@ class KernelInputs {
     add_arg(tensor.data_ptr());
   }
 
+  virtual void add_scalar_arg(
+      const c10::IValue& value,
+      std::string_view param_type) {
+    add_arg(store_scalar_arg(value, param_type));
+  }
+
   virtual void add_attribute(void* attr) {
     TORCH_CHECK(attr_idx_ < num_attrs_, "Too many attributes");
     inputs_[num_args_ + attr_idx_++] = attr;
@@ -116,11 +127,16 @@ class KernelInputs {
   }
 
  protected:
+  void* store_scalar_arg(const c10::IValue& value, std::string_view param_type);
+
   size_t num_args_;
   size_t arg_idx_ = 0;
   std::vector<void*> inputs_;
 
  private:
+  using ScalarValue = std::variant<bool, int32_t, int64_t, float, double>;
+
+  std::vector<ScalarValue> scalar_values_;
   size_t num_attrs_;
   size_t attr_idx_ = 0;
 };

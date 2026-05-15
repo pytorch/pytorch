@@ -64,6 +64,44 @@ def fail_minimal_arrayref_interface(is_skip=False):
 
 
 class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
+    def test_proxy_executor_runtime_lookup_handles_arrayref_tensor_inputs(self):
+        @torch.library.custom_op(
+            "aoti_arrayref_test::proxy_executor_tensor_arg", mutates_args=()
+        )
+        def proxy_executor_tensor_arg(
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            return x + 1, x + 2
+
+        @proxy_executor_tensor_arg.register_fake
+        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(x)
+
+        class Model(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                y, z = torch.ops.aoti_arrayref_test.proxy_executor_tensor_arg(x)
+                return y + z
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        model = Model()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            # run() compiles the generated wrapper.cpp into an AOTI package before
+            # loading it, so this catches ArrayRefTensor -> AtenTensorHandle C++
+            # compiler failures in the proxy-executor path.
+            actual, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.run, model, example_inputs
+            )
+
+        self.assertTrue(torch.allclose(actual, model(*example_inputs)))
+        FileCheck().check("aoti_torch_proxy_executor_call_function").check(
+            "borrow_arrayref_tensor_as_tensor("
+        ).run(code)
+
     def test_simple_v2_interface(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

@@ -35,6 +35,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -166,12 +167,12 @@ void decrease_stat_array(
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorRegistrationCounter(const Block* a, const Block* b);
+static bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorRegistrationCounter),
+      : blocks(BlockComparatorSizeCounterAddress),
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
@@ -233,10 +234,7 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {
-    registration_counter =
-        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
-  }
+        ptr(ptr) {}
 
   // constructor for search key
   // Use the default value for registration_counter and not modify
@@ -490,6 +488,16 @@ struct ExpandableSegment {
 #endif
       if (status != CUDA_SUCCESS) {
         if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+          {
+            size_t device_free = 0;
+            size_t device_total = 0;
+            (void)cudaMemGetInfo(&device_free, &device_total);
+            LOG(WARNING)
+                << "expandable_segments: memory mapping failed with OOM on device "
+                << static_cast<int>(device_) << " while trying to map "
+                << segment_size_ << " bytes (free: " << device_free
+                << ", total: " << device_total << ").";
+          }
 #ifdef USE_ROCM
           // hipMemCreate above returned hipErrorOutOfMemory and treated it
           // like a sticky runtime error. Which means we need to clear it.
@@ -1072,14 +1080,17 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-bool BlockComparatorRegistrationCounter(const Block* a, const Block* b) {
+bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
   if (a->size != b->size) {
     return a->size < b->size;
   }
-  return a->registration_counter < b->registration_counter;
+  if (a->registration_counter != b->registration_counter) {
+    return a->registration_counter < b->registration_counter;
+  }
+  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
 bool BlockComparatorAddress(const Block* a, const Block* b) {
@@ -1419,12 +1430,29 @@ class DeviceCachingAllocator {
   // whether they came from graph_pools or one of the BlockPools above.
   ska::flat_hash_set<Block*> active_blocks;
 
-  // captures_underway tracks if we are diverting some
-  // allocations to a specific pool.
-  // Most of the time it's empty, in which case malloc can avoid calling
-  // cudaStreamGetCaptureInfo in the hot path.
+  // Active pool-diversion scopes. Each entry routes allocations matching
+  // its filter into a private mempool. Populated by beginAllocateToPool /
+  // endAllocateToPool from any caller that wants such routing — including
+  // CUDAGraph capture, torch.cuda.use_mem_pool, ProcessGroupNCCL
+  // registration, inductor cudagraph_trees warmup, and the allocator's own
+  // try_mempool_fallback. Note: a non-empty list does NOT imply an active
+  // CUDA stream capture; for that, see num_active_captures_ below.
+  // Most of the time it's empty, so malloc can short-circuit on the hot path.
   std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
-      captures_underway;
+      allocation_scopes_;
+
+  // Count of in-progress CUDA stream captures on this device. Bumped by
+  // CUDAGraph's capture_begin / capture_end (and conditional-node helpers)
+  // around cudaStreamBeginCapture / cudaStreamEndCapture. Distinct from
+  // allocation_scopes_, which tracks pool routing — the latter can be
+  // populated without an active capture (e.g. torch.cuda.use_mem_pool,
+  // NCCL registration, inductor cudagraph_trees warmup, internal
+  // try_mempool_fallback).
+  //
+  // Plain int because all access is serialized through `mutex`. Promote to
+  // std::atomic<int> (relaxed) if begin/end ever need to race or if any
+  // reader wants lock-free access.
+  int num_active_captures_ = 0;
 
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
@@ -1627,17 +1655,20 @@ class DeviceCachingAllocator {
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(!is_capture_context())) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
       // recycles their memory if so)
       //
-      // Q. Why skip process_events if a capture might be underway?
+      // Q. Why skip process_events if a graph capture might be underway?
       // A. process_events involves cudaEventQueries, illegal during CUDA graph
       //    capture.
       //    Dumb simple solution: defer reclaiming these allocations until after
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
+      //
+      // Note: user mempools (via use_mem_pool) are also in allocation_scopes_
+      // but do NOT involve graph capture, so process_events is safe for them.
       process_events(context);
     } else {
       if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
@@ -1702,7 +1733,9 @@ class DeviceCachingAllocator {
             || (release_available_cached_blocks(params, context) &&
                 alloc_block(params, false, context, lock))
             // Free all non-split cached blocks and retry alloc.
-            || (C10_LIKELY(captures_underway.empty()) &&
+            // Only skip this during actual graph capture; user mempools
+            // should be able to reclaim cached memory.
+            || (C10_LIKELY(!is_capture_context()) &&
                 release_cached_blocks(context, {0, 0}) &&
                 alloc_block(params, true, context, lock));
       }
@@ -1929,6 +1962,7 @@ class DeviceCachingAllocator {
 
       block = new Block(device, stream, size, pool, block->ptr);
       block->expandable_segment_ = remaining->expandable_segment_;
+      block->registration_counter = remaining->registration_counter;
       block->prev = remaining->prev;
       if (block->prev) {
         block->prev->next = block;
@@ -2014,7 +2048,7 @@ class DeviceCachingAllocator {
     cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
   };
 
-  CaptureInfo stream_get_capture_info(cudaStream_t stream) {
+  CaptureInfo stream_get_capture_info(cudaStream_t stream) const {
     CaptureInfo info{};
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
     C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
@@ -2177,8 +2211,9 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      // Use the reverse iterator to search captures_underway in LIFO order.
-      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
+      for (auto it = allocation_scopes_.rbegin();
+           it != allocation_scopes_.rend();
            ++it) {
         if (it->second(stream)) {
           auto graph_pool = graph_pools.find(it->first);
@@ -2270,7 +2305,7 @@ class DeviceCachingAllocator {
 
     // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(!captures_underway.empty())) {
+      if (C10_UNLIKELY(is_capture_context())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
           // record_free_markers returns a vector of free markers,
           // or an empty vector if any associated stream is not currently
@@ -2351,7 +2386,7 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
-    if (C10_UNLIKELY(!captures_underway.empty())) {
+    if (C10_UNLIKELY(is_capture_context())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
   }
@@ -2375,8 +2410,8 @@ class DeviceCachingAllocator {
         ". Please set within [0, 1].");
     allowed_memory_maximum = std::nullopt;
     if (fraction < 1.0) {
-      allowed_memory_maximum = static_cast<size_t>(
-          fraction * static_cast<double>(device_prop.totalGlobalMem));
+      allowed_memory_maximum = static_cast<size_t>(std::round(
+          fraction * static_cast<double>(device_prop.totalGlobalMem)));
     }
   }
 
@@ -2907,22 +2942,29 @@ class DeviceCachingAllocator {
 
   // See Note [Interaction with CUDA graph capture]
 
-  // Called by CUDAGraph::capture_begin
+  // Routes allocations matching `filter` into the private mempool
+  // identified by `mempool_id` for the duration of the matching
+  // endAllocateToPool call. Callers include CUDAGraph::capture_begin (during
+  // real CUDA stream capture), torch.cuda.use_mem_pool, ProcessGroupNCCL
+  // registration, inductor cudagraph_trees warmup, and the allocator's own
+  // try_mempool_fallback. Note: this does NOT signal that a CUDA stream
+  // capture is in progress — see markCaptureBegin for that.
   void beginAllocateToPool(
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
+    for (auto it = allocation_scopes_.begin(); it != allocation_scopes_.end();
          ++it) {
       TORCH_CHECK(
           it->first != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
-    captures_underway.emplace_back(mempool_id, std::move(filter));
+    allocation_scopes_.emplace_back(mempool_id, std::move(filter));
   }
 
-  // Called by CUDAGraph::capture_end
+  // Ends the allocation-routing scope opened by beginAllocateToPool for
+  // this mempool_id. See beginAllocateToPool for the full caller list.
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
@@ -2984,15 +3026,35 @@ class DeviceCachingAllocator {
       }
     }
 
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
+    for (auto it = allocation_scopes_.begin(); it != allocation_scopes_.end();
          ++it) {
       if (it->first == mempool_id) {
-        captures_underway.erase(it);
+        allocation_scopes_.erase(it);
         return;
       }
     }
     TORCH_CHECK(
         false, "endAllocatePool: not currently recording to mempool_id");
+  }
+
+  // Called by CUDAGraph after cudaStreamBeginCapture succeeds. Tracks real
+  // captures separately from the pool-routing list `allocation_scopes_`, so
+  // that allocator paths gated on "is a capture in progress" can distinguish
+  // a real capture (where cudaEventQuery / cudaStreamSynchronize are illegal)
+  // from a private mempool diversion (where they are fine). Assumes
+  // begin/end for one capture are not racing each other.
+  void markCaptureBegin() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    num_active_captures_++;
+  }
+
+  // Called by CUDAGraph after cudaStreamEndCapture.
+  void markCaptureEnd() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        num_active_captures_ > 0,
+        "markCaptureEnd called with no captures in progress");
+    num_active_captures_--;
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -3168,6 +3230,8 @@ class DeviceCachingAllocator {
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment_ = es;
+    candidate->registration_counter =
+        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
     pool->unmapped.insert(candidate);
     return candidate;
   }
@@ -3203,6 +3267,7 @@ class DeviceCachingAllocator {
           static_cast<char*>(to_map->ptr) + mapped_range.size);
       remaining->mapped = false;
       remaining->expandable_segment_ = to_map->expandable_segment_;
+      remaining->registration_counter = to_map->registration_counter;
       remaining->splice(to_map, to_map->next);
       pool.unmapped.insert(remaining);
       to_map->size = mapped_range.size;
@@ -3386,14 +3451,43 @@ class DeviceCachingAllocator {
     return subsumed_size;
   }
 
+  // Returns true iff the calling thread's current stream is in an active
+  // CUDA stream capture. Allocator paths that gate on capture safety
+  // (event insertion, deferred-free, OOM-time release_cached_blocks, ...)
+  // use this in place of a bare allocation_scopes_.empty() check, so that
+  // a private mempool diversion (use_mem_pool, NCCL register, warmup) is
+  // not mistaken for a real capture.
+  //
+  // Two layers, from cheapest to most expensive:
+  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is
+  //      in progress anywhere on this device, so the answer is trivially
+  //      false. This is the common case and the hot path.
+  //   2. Per-stream syscall: cudaStreamGetCaptureInfo on the current stream.
+  //      Costs one TLS lookup + one driver call, only paid when some capture
+  //      is active on this device. Distinguishes a non-capturing stream on a
+  //      device that has another stream capturing (eager-eligible) from the
+  //      capturing stream itself (must follow capture rules).
+  //
+  // The counter read is safe because all callers hold `mutex`
+  // (see num_active_captures_).
+  bool is_capture_context() {
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return false;
+    }
+    cudaStream_t stream = cuda::getCurrentCUDAStream(device_id).stream();
+    return stream_get_capture_info(stream).status !=
+        cudaStreamCaptureStatusNone;
+  }
+
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-    // captures_underway is a conservative guess that the current stream may be
-    // capturing. It's only non-empty if some thread has begun and not yet ended
-    // a capture, so it's usually 0, and we can short-circuit
-    // cudaStreamCaptureStatus (which does a TLS lookup).
-    if (C10_UNLIKELY(!captures_underway.empty())) {
-      // Use the reverse iterator to search captures_underway in LIFO order.
-      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+    // allocation_scopes_ tracks active mempool diversions (real captures or
+    // user-managed pools via use_mem_pool / NCCL registration / inductor
+    // warmup). When non-empty we route allocations into the matching private
+    // pool. It is usually empty, so we can short-circuit on the common path.
+    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
+      for (auto it = allocation_scopes_.rbegin();
+           it != allocation_scopes_.rend();
            ++it) {
         if (it->second(stream)) {
           auto it1 = graph_pools.find(it->first);
@@ -3670,6 +3764,16 @@ class DeviceCachingAllocator {
 
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
+          {
+            size_t device_free = 0;
+            size_t device_total = 0;
+            (void)cudaMemGetInfo(&device_free, &device_total);
+            LOG(WARNING) << "memory allocation failed with OOM on device "
+                         << static_cast<int>(device_id)
+                         << " while trying to allocate " << size
+                         << " bytes (free: " << device_free
+                         << ", total: " << device_total << ").";
+          }
           // If this is the first attempt (!isRetry), we can forgive and clear
           // CUDA's internal error state.
           //
@@ -3696,6 +3800,8 @@ class DeviceCachingAllocator {
     total_allocated_memory += size;
     p.block = new Block(
         p.device(), p.stream(), size, p.pool, static_cast<char*>(ptr));
+    p.block->registration_counter =
+        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
@@ -3787,8 +3893,9 @@ class DeviceCachingAllocator {
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
-      // If there is no active mempool, we work on releasing *all* blocks.
+        !is_capture_context()) {
+      // If no graph capture is underway, we can release *all* default pool
+      // blocks.
 
       // First ensure that all blocks that can't currently be allocated due to
       // outstanding events are returned to the pool.
@@ -3907,6 +4014,7 @@ class DeviceCachingAllocator {
       Block* before_free = new Block(
           block->device, block->stream, before_size, block->pool, block->ptr);
       before_free->expandable_segment_ = block->expandable_segment_;
+      before_free->registration_counter = block->registration_counter;
       before_free->splice(block->prev, block);
       block->pool->insert_into_blocks(before_free);
     }
@@ -3921,6 +4029,7 @@ class DeviceCachingAllocator {
           block->pool,
           unmapped.ptr + unmapped.size);
       after_free->expandable_segment_ = block->expandable_segment_;
+      after_free->registration_counter = block->registration_counter;
       after_free->splice(block, block->next);
       block->pool->insert_into_blocks(after_free);
     }
@@ -4000,9 +4109,9 @@ class DeviceCachingAllocator {
     // Synchronize on outstanding events and then free associated blocks.
     stats.num_sync_all_streams++;
 
-    // This function syncs, so capture should not be underway. Might as well
-    // make sure capture-deferred end of life events get processed too.
-    TORCH_INTERNAL_ASSERT(captures_underway.empty());
+    // This function syncs, so graph capture should not be underway. Might as
+    // well make sure capture-deferred end of life events get processed too.
+    TORCH_INTERNAL_ASSERT(!is_capture_context());
     insert_events_deferred_until_no_capture(context);
 
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
@@ -4731,6 +4840,16 @@ class NativeCachingAllocator : public CUDAAllocator {
       override {
     assertValidDevice(device);
     device_allocator[device]->endAllocateToPool(mempool_id);
+  }
+
+  void markCaptureBegin(c10::DeviceIndex device) override {
+    assertValidDevice(device);
+    device_allocator[device]->markCaptureBegin();
+  }
+
+  void markCaptureEnd(c10::DeviceIndex device) override {
+    assertValidDevice(device);
+    device_allocator[device]->markCaptureEnd();
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
