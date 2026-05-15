@@ -5122,16 +5122,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn, ctxs):
+def make_wrapped(fn, ctx_factories):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        stack = contextlib.ExitStack()
-        for ctx in ctxs:
-            stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
-        return out
+        with contextlib.ExitStack() as stack:
+            for ctx_factory in ctx_factories:
+                stack.enter_context(ctx_factory())
+            return fn(self)
 
     return wrapped
 
@@ -5165,16 +5163,17 @@ def wrap_test_class(orig_cls):
             backend = lookup_backend(name)
             if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
-            ctxs = [
-                compiled_autograd._enable(
+            ctx_factories = [
+                functools.partial(
+                    compiled_autograd._enable,
                     make_compiler_fn(
                         backend=backend,
                         fullgraph=name not in known_graph_breaks_tests,
-                    )
+                    ),
                 ),
-                test_contexts.get(name, contextlib.nullcontext()),
+                test_contexts.get(name, contextlib.nullcontext),
             ]
-            dct[name] = make_wrapped(fn, ctxs)
+            dct[name] = make_wrapped(fn, ctx_factories)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -5201,6 +5200,16 @@ class WrapTestClassTests(TestCase):
         test.setUp()
         test.tearDown()
         self.assertTrue(getattr(test, "super_called", False))
+
+    def test_wrapped_contexts_are_repeatable(self):
+        class DummyTest(unittest.TestCase):
+            def test_grad(self):
+                pass
+
+        wrapped = wrap_test_class(DummyTest)
+        test = wrapped("test_grad")
+        test.test_grad()
+        test.test_grad()
 
 
 known_graph_breaks_tests = {
@@ -5305,9 +5314,13 @@ known_graph_breaks_tests = {
 }
 
 test_contexts = {
-    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
-    "test_index_backward_does_not_save_tensor": config.patch(
-        capture_dynamic_output_shape_ops=True
+    "test_setitem_mask": functools.partial(
+        config.patch,
+        capture_dynamic_output_shape_ops=True,
+    ),
+    "test_index_backward_does_not_save_tensor": functools.partial(
+        config.patch,
+        capture_dynamic_output_shape_ops=True,
     ),
 }
 
