@@ -824,15 +824,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name == "__sub__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_subtract_impl(tx, args[0])
-        elif name == "__rsub__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_subtract_impl(tx, args[0], reverse=True)
-        elif name == "__isub__":
-            return self.nb_inplace_subtract_impl(tx, args[0])
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1300,27 +1291,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement nb_positive_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
-
-    def nb_subtract_impl(
-        self,
-        tx: Any,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        """tp_as_number->nb_subtract slot. Default: graph break.
-
-        ``reverse=True`` means self is the right-hand operand (CPython would
-        look up ``__rsub__`` instead of ``__sub__``).
-        """
-        return variables.ConstantVariable(NotImplemented)
-
-    def nb_inplace_subtract_impl(
-        self,
-        tx: Any,
-        other: VariableTracker,
-    ) -> VariableTracker:
-        """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
-        return variables.ConstantVariable(NotImplemented)
 
     def __init__(
         self,
