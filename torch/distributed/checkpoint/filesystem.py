@@ -468,6 +468,9 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
+                    # For local files, this pushes Python's internal buffers to the OS.
+                    # For cloud storage, this pushes the in-memory data over the network to remote storage.
+                    stream.flush()
                     try:
                         os.fsync(stream.fileno())
                     except (AttributeError, UnsupportedOperation):

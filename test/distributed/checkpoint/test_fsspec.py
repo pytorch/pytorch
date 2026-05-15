@@ -184,6 +184,34 @@ class TestFSSpec(ShardedTensorTestBase):
                 storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
             )
 
+    @with_comms(backend=BACKEND, init_rpc=False)
+    @requires_accelerator_dist_backend()
+    @skip_if_lt_x_gpu(2)
+    def test_fsspec_without_fileno_support(self):
+        """
+        This tests that the stream is flushed and fsync degrades gracefully.
+        """
+        checkpoint_dir = f"memory://test_checkpoint"
+
+        state_dict = {"tensor": torch.randn(10, device=device_type)}
+
+        # This will crash without the stream.flush() and fsync try/except fix
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+        )
+
+        load_dict = {"tensor": torch.zeros(10, device=device_type)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+        )
+
+        self.assertTrue(
+            torch.allclose(state_dict["tensor"], load_dict["tensor"]))
+
 
 class TestFileSystem(TestCase):
     @with_temp_dir
