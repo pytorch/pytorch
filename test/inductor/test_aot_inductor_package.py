@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import functools
+import gc
 import io
 import os
 import shutil
@@ -253,6 +254,93 @@ class TestAOTInductorPackage(TestCase):
                 actual = loaded(*example_inputs)
 
             self.assertEqual(actual, expected)
+
+    def test_load_package_from_directory(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with torch.no_grad():
+            model = model.to(self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=True)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                    inductor_configs={
+                        "aot_inductor.package_cpp_only": self.package_cpp_only,
+                    },
+                )
+
+                # Unzip to a temporary directory
+                temp_dir = tempfile.mkdtemp()
+                try:
+                    with zipfile.ZipFile(package_path, "r") as zip_ref:
+                        zip_ref.extractall(temp_dir)
+
+                    # Identify prefix if any (ZipFile.extractall extracts as is)
+                    # The loader should be able to load from temp_dir which contains 'data/...'
+                    # or 'some_prefix/data/...'
+
+                    loaded = torch._inductor.aoti_load_package(temp_dir)
+                    actual = loaded(*example_inputs)
+                    self.assertEqual(actual, expected)
+
+                    collision_dir = tempfile.mkdtemp()
+                    try:
+                        with zipfile.ZipFile(package_path, "r") as zip_ref:
+                            zip_ref.extractall(collision_dir)
+
+                        model_dirs = [
+                            path
+                            for path in Path(collision_dir).rglob("model")
+                            if path.is_dir() and path.parent.name == "aotinductor"
+                        ]
+                        self.assertEqual(len(model_dirs), 1)
+                        model_dirs[0].rename(model_dirs[0].with_name("model2"))
+                        with self.assertRaises(RuntimeError):
+                            load_package(collision_dir, model_name="model")
+                    finally:
+                        shutil.rmtree(collision_dir)
+
+                    # Verify robustness: move data deeper
+                    nested_dir = os.path.join(temp_dir, "nested_dir")
+                    os.makedirs(nested_dir)
+                    # Move all contents to nested_dir
+                    for item in os.listdir(temp_dir):
+                        if item != "nested_dir":
+                            shutil.move(os.path.join(temp_dir, item), nested_dir)
+
+                    # Load from root temp_dir again, it should find it in nested_dir
+                    loaded_nested = torch._inductor.aoti_load_package(temp_dir)
+                    actual_nested = loaded_nested(*example_inputs)
+                    self.assertEqual(actual_nested, expected)
+
+                    # Determine if destructor deletes the files
+                    del loaded
+                    del loaded_nested
+                    gc.collect()
+
+                    # In shared mode, the directory should NOT be deleted
+                    # We check if we can still find some files.
+                    self.assertTrue(os.path.exists(nested_dir))
+                    self.assertTrue(len(os.listdir(nested_dir)) > 0)
+
+                finally:
+                    shutil.rmtree(temp_dir)
 
     def test_linear(self):
         class Model(torch.nn.Module):
@@ -588,6 +676,28 @@ class TestAOTInductorPackage(TestCase):
                     )
                 )
                 self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    with zipfile.ZipFile(package_path, "r") as zip_ref:
+                        zip_ref.extractall(temp_dir)
+
+                    loaded_metadata_from_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
+                    )
+                    self.assertEqual(loaded_metadata_from_directory, loaded_metadata)
+
+                    nested_dir = os.path.join(temp_dir, "nested_dir")
+                    os.makedirs(nested_dir)
+                    for item in os.listdir(temp_dir):
+                        if item != "nested_dir":
+                            shutil.move(os.path.join(temp_dir, item), nested_dir)
+
+                    loaded_metadata_from_nested_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
+                    )
+                    self.assertEqual(
+                        loaded_metadata_from_nested_directory, loaded_metadata
+                    )
 
                 device = loaded_metadata["AOTI_DEVICE_KEY"]
                 current_device_info = torch._inductor.codecache.get_device_information(
