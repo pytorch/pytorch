@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     get_gcc_major_version,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -3522,8 +3521,6 @@ class CPUReproTests(TestCase):
                 3,
             )
 
-    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3542,8 +3539,10 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            atol = None
-            rtol = None
+            # Outer-loop fusion changes fp32 reduction order enough to exceed
+            # the default tolerance on numerically sensitive inputs.
+            atol = 1e-5
+            rtol = 2e-6
             if (
                 not cpu_vec_isa.valid_vec_isa_list()
                 or os.getenv("ATEN_CPU_CAPABILITY") == "default"
