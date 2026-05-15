@@ -502,7 +502,7 @@ void ValueCache::trimPrefixes() {
   for (auto& it : std::get<CallType::PyCall>(state_)) {
     std::string filename = it.second.filename_.str();
     for (const auto& p : prefixes) {
-      if (filename.compare(0, p.size(), p) == 0) {
+      if (filename.starts_with(p)) {
         filename.erase(0, p.size());
         it.second.filename_ = at::StringView(filename);
         break;
