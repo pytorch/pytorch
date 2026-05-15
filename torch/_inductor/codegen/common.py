@@ -2711,19 +2711,18 @@ class CSEProxy(DefaultHandler):
 
             csevar.update_on_args(name, args, kwargs)
 
-            # index_expr manages its own dtype/shape checking internally
-            # and has complex dtype semantics (ks* args use int64 regardless
-            # of index_dtype). Skip redundant checks here.
-            if output_shape is not None:
-                if (
-                    config.test_configs.runtime_triton_dtype_assert
-                    or config.test_configs.static_cpp_dtype_assert
-                ):
-                    assert var_dtype is not None
-                    check_dtype(V.kernel.compute, csevar, var_dtype)
+            if (
+                config.test_configs.runtime_triton_dtype_assert
+                or config.test_configs.static_cpp_dtype_assert
+            ):
+                assert var_dtype is not None
+                check_dtype(V.kernel.compute, csevar, var_dtype)
 
-                if config.test_configs.runtime_triton_shape_assert:
-                    check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and var_shape is not None
+            ):
+                check_shape(V.kernel.compute, csevar, var_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)

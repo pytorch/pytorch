@@ -2151,66 +2151,23 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # Our sympy expr printing casts to the current kernel index dtype.
-        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
+        output_dtype = (
+            index_dtype
+            if dtype in (torch.int32, torch.int64)
+            else upcast_compute_type(dtype)
+        )
 
-        # The index expression is emitted in index_dtype (int32/int64),
-        # EXCEPT ks* kernel args which are always int64 (per _decide_tl_dtype
-        # in triton_utils.py) even when index_dtype is int32.
-        # If dtype is non-integer, we cast afterwards, so set the actual
-        # triton representation dtype here, not the target dtype.
-        if (
-            not config.triton.use_block_ptr
-            and isinstance(indexing.index_str, str)
-            and indexing.index_str.startswith("ks")
-        ):
-            cse_dtype = torch.int64
-        elif dtype not in (torch.int32, torch.int64):
-            cse_dtype = index_dtype
-        else:
-            cse_dtype = dtype
-        orig = config.test_configs.runtime_triton_dtype_assert
-        try:
-            config.test_configs.runtime_triton_dtype_assert = False
-            var = V.kernel.cse.generate(
-                V.kernel.compute,
-                indexing.index_str,
-                bounds=get_bounds_index_expr(expr),
-                dtype=cse_dtype,
-                shape=shape,
-            )
-        finally:
-            config.test_configs.runtime_triton_dtype_assert = orig
-
-        if dtype not in (torch.int32, torch.int64):
-            var = V.kernel.cse.generate(
-                V.kernel.compute,
-                cls.to_dtype(var, dtype),
-                dtype=upcast_compute_type(dtype),
-                shape=var.shape,
-            )
-        else:
-            # Check if the actual representation dtype differs from the
-            # kernel's index_dtype and cast if needed. This handles ks* args
-            # which are always int64 but may need to be narrowed to int32.
-            actual_dtype = index_dtype
-            if var.dtype is not None and var.dtype != index_dtype:
-                actual_dtype = var.dtype
-            for index_var in expr.free_symbols:
-                if symbol_is_type(index_var, SymT.TMP):
-                    actual_dtype = torch.promote_types(
-                        actual_dtype, V.kernel.cse.varname_map[index_var.name].dtype
-                    )
-
-            if actual_dtype != index_dtype:
-                var = V.kernel.cse.generate(
-                    V.kernel.compute,
-                    cls.to_dtype(var, index_dtype),
-                    dtype=index_dtype,
-                    shape=var.shape,
-                )
+        # Make the index_expr boundary explicit so the emitted Triton dtype
+        # matches the CSE dtype metadata.
+        cast_dtype = index_dtype if dtype in (torch.int32, torch.int64) else dtype
+        var = V.kernel.cse.generate(
+            V.kernel.compute,
+            cls.to_dtype(f"({indexing.index_str})", cast_dtype),
+            dtype=output_dtype,
+            bounds=get_bounds_index_expr(expr),
+            shape=shape,
+        )
 
         var.mask_vars = indexing.mask_vars
         return var

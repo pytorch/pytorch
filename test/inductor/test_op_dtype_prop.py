@@ -357,7 +357,6 @@ class TestCase(InductorTestCase):
         self.assertIn("'ks0': 'fp64'", code)
         self.assertIn(".to(tl.float32)", code)
 
-
     @requires_gpu()
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_shape_assert", True)
@@ -365,8 +364,7 @@ class TestCase(InductorTestCase):
         """
         ks* kernel args are always int64 in the Triton signature (per
         _decide_tl_dtype), even when the kernel's index_dtype is int32.
-        Verify that index_expr sets the correct dtype on the CSE variable
-        and emits a cast to index_dtype when needed.
+        Verify that index_expr emits an explicit final cast to index_dtype.
         """
 
         def fn(a, b, alpha):
@@ -376,8 +374,11 @@ class TestCase(InductorTestCase):
         b = torch.randint(0, 10, (5, 5), device=GPU_TYPE, dtype=torch.int32)
 
         compiled = torch.compile(fn, dynamic=True)
-        result = compiled(a, b, 2)
+        result, codes = run_and_get_code(compiled, a, b, 2)
+        code = "\n".join(codes)
         self.assertEqual(result, torch.add(a, b, alpha=2))
+        self.assertIn("'ks0': 'i64'", code)
+        self.assertIn(".to(tl.int32)", code)
 
     @requires_gpu()
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
@@ -385,9 +386,8 @@ class TestCase(InductorTestCase):
     def test_index_expr_ks_arg_dtype_float(self):
         """
         When a symbolic scalar is used in a float context (e.g. math.sqrt of
-        a tensor size), the ks* arg (int64) must be cast to float. Verify
-        that the CSE variable dtype correctly reflects the int representation
-        so that the cast is emitted.
+        a tensor size), index_expr emits an explicit final cast to the
+        requested float dtype.
         """
         import math
 
@@ -398,9 +398,11 @@ class TestCase(InductorTestCase):
 
         a = torch.randn(2, 4, 4, device=GPU_TYPE)
         b = torch.randn(2, 4, 4, device=GPU_TYPE)
-        result = fn(a, b)
+        result, codes = run_and_get_code(fn, a, b)
+        code = "\n".join(codes)
         expected = torch.bmm(a, b) / (1 / math.sqrt(a.size(1)))
         self.assertTrue(torch.allclose(result, expected))
+        self.assertIn(".to(tl.float32)", code)
 
 
 instantiate_device_type_tests(
