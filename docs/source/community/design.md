@@ -83,7 +83,7 @@ represented in its IR?
 
 Some classic arguments in favor of this sort of design come from
 [A Note on Distributed Computation](https://dl.acm.org/doi/book/10.5555/974938)
-(TLDR: Do not model resources with very different performance characteristics
+(**TLDR:** Do not model resources with very different performance characteristics
 uniformly, the details will leak) and the [End-to-End Principle](http://web.mit.edu/Saltzer/www/publications/endtoend/endtoend.pdf)
 (TLDR: building smarts into the lower-layers of the stack can prevent
 building performant features at higher layers in the stack, and often
