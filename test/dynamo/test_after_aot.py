@@ -355,6 +355,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIsNotNone(derived_expr)
         self.assertIn("//", derived_expr)
 
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
     def test_symint_expr_e2e_repro(self):
         """End-to-end: generate a repro from a symbolically-traced graph
         with SymInt args, verify expr= appears, and run the repro."""
