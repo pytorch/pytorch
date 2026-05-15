@@ -65,7 +65,7 @@ from torch._inductor.utils import (
     triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import check_significant_strides, is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.library import _scoped_library
 from torch.nn import functional as F
@@ -435,6 +435,59 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def _assert_same_significant_strides(self: TestCase, actual, expected):
+    actual_flat = pytree.tree_leaves(actual)
+    expected_flat = pytree.tree_leaves(expected)
+    if len(actual_flat) != len(expected_flat):
+        raise AssertionError(
+            f"Tree leaf count mismatch: {len(actual_flat)} != {len(expected_flat)}"
+        )
+
+    for i, (actual_val, expected_val) in enumerate(zip(actual_flat, expected_flat)):
+        if not (
+            isinstance(actual_val, torch.Tensor)
+            and isinstance(expected_val, torch.Tensor)
+            and actual_val.layout == torch.strided
+            and expected_val.layout == torch.strided
+        ):
+            continue
+
+        same_strides, dim = check_significant_strides(
+            actual_val, expected_val, only_cuda=False
+        )
+        if not same_strides:
+            raise AssertionError(
+                f"Significant strides mismatch at leaf {i}, dim {dim}: "
+                f"{actual_val.stride()} != {expected_val.stride()} "
+                f"for shape {actual_val.shape}"
+            )
+
+
+def _assert_equal_with_significant_stride_check(
+    self: TestCase,
+    assert_equal_fn,
+    actual,
+    expected,
+    *,
+    atol,
+    rtol,
+    equal_nan,
+    exact_dtype,
+    exact_stride,
+):
+    assert_equal_fn(
+        actual,
+        expected,
+        atol=atol,
+        rtol=rtol,
+        equal_nan=equal_nan,
+        exact_dtype=exact_dtype,
+        exact_stride=False,
+    )
+    if exact_stride:
+        _assert_same_significant_strides(self, actual, expected)
+
+
 def check_model(
     self: TestCase,
     model,
@@ -616,7 +669,9 @@ def check_model(
             assert_equal_fn = self.assertEqual
 
         check_exact_stride = exact_stride and not has_zero_dim(correct)
-        assert_equal_fn(
+        _assert_equal_with_significant_stride_check(
+            self,
+            assert_equal_fn,
             actual,
             correct,
             atol=atol,
@@ -635,8 +690,10 @@ def check_model(
             equal_nan=True,
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
-            exact_stride=exact_stride,
+            exact_stride=False,
         )
+        if exact_stride:
+            _assert_same_significant_strides(self, ref_inputs, example_inputs)
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
@@ -648,8 +705,8 @@ def check_model(
                     raise AssertionError(
                         f"Expected size {correct_val.size()}, got {actual_val.size()}"
                     )
-                strides_equal, _ = torch._prims_common.check_significant_strides(
-                    correct_val, actual_val
+                strides_equal, _ = check_significant_strides(
+                    correct_val, actual_val, only_cuda=False
                 )
                 if not strides_equal:
                     raise AssertionError(
@@ -665,13 +722,6 @@ def check_model(
                         raise AssertionError(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
-                check_exact_stride = exact_stride and not has_zero_dim(correct_val)
-                if check_exact_stride:
-                    if correct_val.stride() != actual_val.stride():
-                        raise AssertionError(
-                            f"Expected stride {correct_val.stride()}, got {actual_val.stride()}"
-                        )
-
     if check_gradient:
         actual = output_process_fn_grad(actual)
         correct = output_process_fn_grad(correct)
@@ -719,7 +769,9 @@ def check_model(
 
             for actual_g, expect_g in zip(actual_grad, expect_grad):
                 check_exact_stride = exact_stride and not has_zero_dim(expect_g)
-                self.assertEqual(
+                _assert_equal_with_significant_stride_check(
+                    self,
+                    self.assertEqual,
                     actual_g,
                     expect_g,
                     atol=grad_atol or atol,
@@ -18912,6 +18964,36 @@ if RUN_GPU:
 
 
 if RUN_CPU:
+
+    class CheckModelStrideSemanticsTest(TestCase):
+        def test_check_model_exact_stride_ignores_insignificant_strides(self):
+            def fn(x, y):
+                return torch.einsum("aij,ajk->aik", x, y)
+
+            x = torch.arange(6, dtype=torch.int64).reshape(1, 2, 3)
+            y = torch.arange(12, dtype=torch.int64).reshape(1, 3, 4)
+
+            check_model(
+                self,
+                fn,
+                (x, y),
+                exact_stride=True,
+                reference_in_float=False,
+            )
+
+        def test_significant_stride_check_rejects_meaningful_stride_mismatch(self):
+            _assert_same_significant_strides(
+                self,
+                torch.empty_strided((1, 2, 4), (4, 4, 1)),
+                torch.empty_strided((1, 2, 4), (8, 4, 1)),
+            )
+
+            with self.assertRaisesRegex(AssertionError, "Significant strides mismatch"):
+                _assert_same_significant_strides(
+                    self,
+                    torch.empty_strided((2, 2, 4), (4, 4, 1)),
+                    torch.empty_strided((2, 2, 4), (8, 4, 1)),
+                )
 
     class TestFull(TestCase):
         def test_full_dtype(self):
