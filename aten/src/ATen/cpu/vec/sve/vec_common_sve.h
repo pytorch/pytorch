@@ -85,8 +85,7 @@ std::
         const double* base_addr,
         const Vectorized<int64_t>& vindex_,
         const Vectorized<double>& mask_) {
-  svbool_t mask =
-      svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+  svbool_t mask = svcmpne_s64(ptrue, svreinterpret_s64_f64(mask_), ZERO_S64);
   svint64_t vindex =
       svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
   return svsel_f64(
@@ -100,8 +99,7 @@ std::
         const float* base_addr,
         const Vectorized<int32_t>& vindex_,
         const Vectorized<float>& mask_) {
-  svbool_t mask =
-      svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+  svbool_t mask = svcmpne_s32(ptrue, svreinterpret_s32_f32(mask_), ZERO_S32);
   svint32_t vindex =
       svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
   return svsel_f32(
