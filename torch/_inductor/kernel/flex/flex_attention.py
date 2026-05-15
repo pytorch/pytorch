@@ -379,6 +379,21 @@ def flex_attention(
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
+    if torch.version.hip is not None:
+        _capability = torch.cuda.get_device_capability()
+        # CDNA3+ (gfx942/gfx950) GPUs have multiple XCDs with separate L2 caches.
+        # Remap head indices so consecutive heads land on the same XCD for better
+        # L2 reuse of shared K/V data.
+        if _capability >= (9, 4):
+            kernel_options.setdefault("ENABLE_XCD_REMAP", True)
+            kernel_options.setdefault("NUM_XCDS", 8)
+        else:
+            kernel_options.setdefault("ENABLE_XCD_REMAP", False)
+            kernel_options.setdefault("NUM_XCDS", 1)
+    else:
+        kernel_options.setdefault("ENABLE_XCD_REMAP", False)
+        kernel_options.setdefault("NUM_XCDS", 1)
+
     choices: list[Any] = []
 
     dtype = query.get_dtype()

@@ -48,6 +48,21 @@
     q_start = tl.program_id(0).to(INDEX_DTYPE)
     off_zq = tl.program_id(1).to(INDEX_DTYPE)
     off_hq = tl.program_id(2).to(INDEX_DTYPE)
+    if ENABLE_XCD_REMAP:
+        # On multi-XCD GPUs (e.g. MI300X/MI350X), the hardware round-robin spreads
+        # consecutive program IDs across XCDs with separate L2 caches. Remap head
+        # indices so that consecutive heads land on the same XCD, improving L2
+        # reuse for shared K/V data across heads within a batch element.
+        pids_per_xcd = (HQ + NUM_XCDS - 1) // NUM_XCDS
+        remainder = HQ % NUM_XCDS
+        tall_xcds = NUM_XCDS if remainder == 0 else remainder
+        xcd = off_hq % NUM_XCDS
+        local_pid = off_hq // NUM_XCDS
+        if xcd < tall_xcds:
+            off_hq = xcd * pids_per_xcd + local_pid
+        else:
+            off_hq = tall_xcds * pids_per_xcd + (xcd - tall_xcds) * (pids_per_xcd - 1) + local_pid
+        off_hq = off_hq.to(INDEX_DTYPE)
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
