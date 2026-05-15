@@ -82,6 +82,9 @@ class NonTensorOutputSpec:
 @dataclasses.dataclass(frozen=True)
 class EmptyTensorOutputSpec:
     device: torch.device
+    dtype: torch.dtype
+    stride: tuple[int, ...]
+    size: tuple[int, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -290,13 +293,28 @@ def cudagraphify(
     dynamic_tensors_list: list[list[tuple[int, int]]] = []
     capture_keepalive: list[Any] = []
     capture_pool_keepalive: list[Any] = []
+    input_pool_keepalive: list[Any] = []
     capture_inputs: list[InputType] = []
     static_outputs: tuple[torch.Tensor | int | None, ...] = ()
     segment_address_starts: list[int] = []
     segment_sizes: list[int] = []
     segment_devices: list[torch.device] = []
+    segment_input_idxs: list[int | None] = []
     output_specs: list[OutputSpec] = []
     input_slot_specs: list[InputSlotSpec] = []
+
+    copy_outputs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_COPY_OUTPUTS", "never")
+    if copy_outputs not in ("backward_only", "forward_only", "always", "never"):
+        raise RuntimeError(
+            "TORCHINDUCTOR_CUDAGRAPHS_COPY_OUTPUTS must be one of "
+            "'backward_only', 'forward_only', 'always', or 'never', "
+            f"but got {copy_outputs!r}"
+        )
+    copy_replay_outputs = (
+        copy_outputs == "always"
+        or (copy_outputs == "backward_only" and is_backward)
+        or (copy_outputs == "forward_only" and not is_backward)
+    )
 
     reserved_mem_before_captures = torch.cuda.memory_reserved(device_index)
 
@@ -309,9 +327,14 @@ def cudagraphify(
         mem_allocator = graph.get_mem_allocator()
         capture_pool = torch.cuda.MemPool(mem_allocator)
         capture_pool_keepalive.append(capture_pool)
+        if config.triton.cudagraphs_separate_input_pool:
+            input_pool = torch.cuda.MemPool(mem_allocator)
+            input_pool_keepalive.append(input_pool)
+        else:
+            input_pool = capture_pool
 
         with torch.cuda.stream(stream):
-            with torch.cuda.use_mem_pool(capture_pool):
+            with torch.cuda.use_mem_pool(input_pool):
                 old_value = torch._C._get_deterministic_fill_uninitialized_memory()
                 torch._C._set_deterministic_fill_uninitialized_memory(False)
                 try:
@@ -404,9 +427,17 @@ def cudagraphify(
             static_outputs = tuple(model_outputs)
         capture_keepalive.append(static_outputs)
 
-        memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(
+        graph_memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(
             graph.pool(), include_traces=True
         )
+        if input_pool.id == graph.pool():
+            memory_snapshot = graph_memory_snapshot
+            input_memory_snapshot = graph_memory_snapshot
+        else:
+            input_memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(
+                input_pool.id, include_traces=True
+            )
+            memory_snapshot = graph_memory_snapshot
 
         segment_address_starts = [
             int(segment_snapshot["address"]) for segment_snapshot in memory_snapshot
@@ -435,12 +466,69 @@ def cudagraphify(
                 return segment_idx
             return -1
 
-        static_captured_input_ranges: list[tuple[int, int, int]] = []
+        input_segment_address_starts = [
+            int(segment_snapshot["address"])
+            for segment_snapshot in input_memory_snapshot
+        ]
+        input_segment_sizes = [
+            int(segment_snapshot["total_size"])
+            for segment_snapshot in input_memory_snapshot
+        ]
+        input_segment_idxs_sorted_by_address = sorted(
+            range(len(input_segment_address_starts)),
+            key=lambda idx: input_segment_address_starts[idx],
+        )
+        input_segment_address_starts_sorted = [
+            input_segment_address_starts[idx]
+            for idx in input_segment_idxs_sorted_by_address
+        ]
+
+        def lookup_input_segment_idx(ptr: int) -> int:
+            sorted_idx = bisect.bisect(input_segment_address_starts_sorted, ptr) - 1
+            if sorted_idx == -1:
+                return -1
+            segment_idx = input_segment_idxs_sorted_by_address[sorted_idx]
+            if (
+                ptr
+                < input_segment_address_starts[segment_idx]
+                + input_segment_sizes[segment_idx]
+            ):
+                return segment_idx
+            return -1
+
+        captured_input_ranges: list[tuple[int, int, int]] = []
+        direct_input_infos: list[CapturedInputInfo] = []
         input_segment_idxs: dict[int, list[int]] = {}
         input_slot_specs = []
         for input_info in captured_input_infos:
+            if input_info.nbytes == 0:
+                continue
             if input_info.is_static:
-                static_captured_input_ranges.append(
+                captured_input_ranges.append(
+                    (
+                        input_info.input_idx,
+                        input_info.data_ptr,
+                        input_info.nbytes,
+                    )
+                )
+                continue
+            if config.triton.cudagraphs_separate_input_pool:
+                input_segment_idx = lookup_input_segment_idx(input_info.data_ptr)
+                if input_segment_idx == -1:
+                    raise RuntimeError(
+                        "Non-static CUDA graph input was not allocated in the "
+                        f"input capture pool {input_info.device}"
+                    )
+                input_storage_offset = (
+                    input_info.data_ptr
+                    - input_segment_address_starts[input_segment_idx]
+                )
+                assert (
+                    input_storage_offset + input_info.nbytes
+                    <= input_segment_sizes[input_segment_idx]
+                )
+                direct_input_infos.append(input_info)
+                captured_input_ranges.append(
                     (
                         input_info.input_idx,
                         input_info.data_ptr,
@@ -452,7 +540,7 @@ def cudagraphify(
             if segment_idx == -1:
                 raise RuntimeError(
                     "Non-static CUDA graph input was not allocated in the "
-                    "capture pool"
+                    f"capture pool {input_info.device}"
                 )
             storage_offset = (
                 input_info.data_ptr - segment_address_starts[segment_idx]
@@ -484,14 +572,21 @@ def cudagraphify(
                 continue
             if static_output.data_ptr() == 0:
                 assert static_output.nbytes == 0
-                output_specs.append(EmptyTensorOutputSpec(static_output.device))
+                output_specs.append(
+                    EmptyTensorOutputSpec(
+                        device=static_output.device,
+                        dtype=static_output.dtype,
+                        stride=tuple(static_output.stride()),
+                        size=tuple(static_output.size()),
+                    )
+                )
                 continue
             assert static_output.is_cuda, (
                 "I suppose non cuda outputs are allowed, but I would like to "
                 "catch them explicitly for now"
             )
             input_alias_spec: InputAliasOutputSpec | None = None
-            for input_idx, input_data_ptr, input_nbytes in static_captured_input_ranges:
+            for input_idx, input_data_ptr, input_nbytes in captured_input_ranges:
                 if (
                     input_data_ptr <= static_output.data_ptr()
                     and static_output.data_ptr()
@@ -499,7 +594,7 @@ def cudagraphify(
                     <= input_data_ptr + input_nbytes
                 ):
                     assert input_alias_spec is None, (
-                        "Static inputs should never share a buffer "
+                        "CUDA graph inputs should never share a buffer "
                         "during stream capture!!!"
                     )
                     offset_from_input = static_output.data_ptr() - input_data_ptr
@@ -580,22 +675,36 @@ def cudagraphify(
         old_to_new_segment_idx = {
             old_idx: new_idx for new_idx, old_idx in enumerate(segment_order)
         }
+        num_direct_input_allocations = len(direct_input_infos)
+        old_to_new_allocation_idx = {
+            old_idx: num_direct_input_allocations + new_idx
+            for old_idx, new_idx in old_to_new_segment_idx.items()
+        }
         segment_address_starts = [
+            input_info.data_ptr for input_info in direct_input_infos
+        ] + [
             segment_address_starts[idx] for idx in segment_order
         ]
-        segment_sizes = [segment_sizes[idx] for idx in segment_order]
-        segment_devices = [segment_devices[idx] for idx in segment_order]
+        segment_sizes = [input_info.nbytes for input_info in direct_input_infos] + [
+            segment_sizes[idx] for idx in segment_order
+        ]
+        segment_devices = [input_info.device for input_info in direct_input_infos] + [
+            segment_devices[idx] for idx in segment_order
+        ]
+        segment_input_idxs = [
+            input_info.input_idx for input_info in direct_input_infos
+        ] + [None for _ in segment_order]
         input_slot_specs = [
             dataclasses.replace(
                 input_slot_spec,
-                segment_idx=old_to_new_segment_idx[input_slot_spec.segment_idx],
+                segment_idx=old_to_new_allocation_idx[input_slot_spec.segment_idx],
             )
             for input_slot_spec in input_slot_specs
         ]
         output_specs = [
             dataclasses.replace(
                 output_spec,
-                segment_idx=old_to_new_segment_idx[output_spec.segment_idx],
+                segment_idx=old_to_new_allocation_idx[output_spec.segment_idx],
             )
             if isinstance(output_spec, SegmentOutputSpec)
             else output_spec
@@ -648,6 +757,7 @@ def cudagraphify(
     copy_srcs = []
     original_input = None
     capture_pool = None
+    input_pool = None
     gc.collect()
     for graph_idx, captured_graph in enumerate(graphs):
         pool_id = captured_graph.pool()
@@ -671,6 +781,8 @@ def cudagraphify(
         captured_graph.release_pool_memory()
     mem_allocator = None
     capture_pool_keepalive.clear()
+    input_pool_keepalive.clear()
+    gc.collect()
     # torch.cuda.synchronize() # TODO: is this necessary? I don't think it is...
     # gc.collect()
     # torch.cuda.empty_cache()
@@ -694,10 +806,27 @@ def cudagraphify(
 
         dynamic_tensors: list[torch.Tensor] = []
 
-        dynamic_tensors.extend(
-            torch.empty(size, dtype=torch.int8, device=device)
-            for size, device in zip(segment_sizes, segment_devices)
-        )
+        for size, device, input_idx in zip(
+            segment_sizes, segment_devices, segment_input_idxs
+        ):
+            if input_idx is None:
+                dynamic_tensors.append(
+                    torch.empty(size, dtype=torch.int8, device=device)
+                )
+                continue
+            new_input = new_inputs[input_idx]
+            if not isinstance(new_input, torch.Tensor) or not new_input.is_cuda:
+                raise RuntimeError(
+                    "CUDA graph input pointer update expected replay input "
+                    f"{input_idx} to be a CUDA tensor, got {new_input!r}"
+                )
+            if nbytes_underlying_storage(new_input) < size:
+                raise RuntimeError(
+                    "CUDA graph replay input storage is smaller than the "
+                    f"captured input storage for input {input_idx}: "
+                    f"{nbytes_underlying_storage(new_input)} < {size}"
+                )
+            dynamic_tensors.append(new_input)
 
         copy_dsts: list[torch.Tensor] = []
         copy_srcs: list[torch.Tensor] = []
@@ -751,7 +880,14 @@ def cudagraphify(
                 outputs.append(output_spec.value)
                 continue
             if isinstance(output_spec, EmptyTensorOutputSpec):
-                outputs.append(torch.empty(0, device=output_spec.device))
+                outputs.append(
+                    torch.empty_strided(
+                        output_spec.size,
+                        output_spec.stride,
+                        device=output_spec.device,
+                        dtype=output_spec.dtype,
+                    )
+                )
                 continue
             if isinstance(output_spec, InputAliasOutputSpec):
                 input_tensor = new_inputs[output_spec.input_idx]
@@ -789,6 +925,15 @@ def cudagraphify(
                 stride=output_spec.stride,
                 size=output_spec.size,
             )
+            if copy_replay_outputs:
+                compact_output_tensor = torch.empty_strided(
+                    output_spec.size,
+                    output_spec.stride,
+                    device=output_spec.device,
+                    dtype=output_spec.dtype,
+                )
+                compact_output_tensor.copy_(true_output_tensor)
+                true_output_tensor = compact_output_tensor
             outputs.append(true_output_tensor)
 
         return outputs
