@@ -75,12 +75,41 @@ aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
 
+_BMM_DOT_K_DECOMPOSE_THRESHOLD = 32
+_BMM_DOT_DECOMPOSE_DTYPES = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
+    torch.complex64,
+    torch.complex128,
+)
+
 
 @L.register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    sizevars = V.graph.sizevars
+    dtype = mat1.get_dtype()
+    device_type = mat1.get_device().type
+    if (
+        out_dtype is None
+        and device_type in ("cuda", "xpu")
+        and device_type == mat2.get_device().type
+        and dtype == mat2.get_dtype()
+        and dtype in _BMM_DOT_DECOMPOSE_DTYPES
+        and sizevars.statically_known_equals(mat1.get_size()[1], 1)
+        and sizevars.statically_known_equals(mat2.get_size()[2], 1)
+        and sizevars.statically_known_leq(
+            mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD
+        )
+    ):
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 1)
+        return L.sum_(L.mul(mat1, mat2), axis=2)
+
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
