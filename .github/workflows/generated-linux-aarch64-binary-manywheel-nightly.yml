@@ -46,10 +46,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-  # Build every CPython wheel for cpu-aarch64 on a single runner. libtorch_cpu is
-  # Python-ABI-free and shared across iterations via build/; libtorch_python and
-  # _C are recompiled per interpreter thanks to the cache invalidation in
-  # tools/setup_helpers/cmake.py.
+
   manywheel-cpu-aarch64-build:
     name: manywheel-cpu-aarch64-build
     if: ${{ github.repository_owner == 'pytorch' }}
