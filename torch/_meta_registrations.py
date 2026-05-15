@@ -4861,15 +4861,15 @@ def pool2d_shape_check(
 
     if memory_format == torch.channels_last:
         torch._check(
-            sym_and(ndim == 4, valid_dims, input.size(3) != 0),
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
             sym_or(
-                sym_and(ndim == 3, input.size(0) != 0, valid_dims),
-                sym_and(ndim == 4, valid_dims, input.size(3) != 0),
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
