@@ -1178,6 +1178,18 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo(inp), out)
 
         def foo(x):
+            return x.log()
+
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        with config.patch(use_fast_math=True):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("tl_math.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
             return x.sigmoid()
 
         inp = torch.ones(64, device=device_type).to(torch.float64)
