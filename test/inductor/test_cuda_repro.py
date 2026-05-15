@@ -118,6 +118,20 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    def test_addmm_out_dtype_compile(self):
+        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
+        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
+        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
+
+        def fn(bias, x, y):
+            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(bias, a, b)
+        expected = fn(bias, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -194,7 +208,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2891")
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 

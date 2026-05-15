@@ -61,6 +61,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
     - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
     - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
+    - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -115,6 +116,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.12 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 13):
+            try:
+                import libtorch_agn_2_13  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_13_extension"
+                )
+        else:
+            print(f"Skipping 2.13 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -1935,6 +1946,52 @@ except RuntimeError as e:
         t_sparse_csr = torch.sparse_csr_tensor(crow_indices, col_indices, csr_values)
         self.assertTrue(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.sparse_csr))
         self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.strided))
+
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCPU
+    def test_set_python_module_meta_works(self, device):
+        import libtorch_agn_2_13  # noqa: F401
+
+        x = torch.randn(3, device="meta")
+        out = torch.ops.libtorch_agn_2_13.identity_with_fake_module.default(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.device, x.device)
+
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCPU
+    def test_set_python_module_nonexistent_module(self, device):
+        # When set_python_module points at a module that doesn't exist, the
+        # meta call should fail with the configured module name in the error.
+        import libtorch_agn_2_13  # noqa: F401
+
+        x = torch.randn(3, device="meta")
+        with self.assertRaisesRegex(
+            NotImplementedError, "libtorch_agn_2_13_nonexistent_module"
+        ):
+            torch.ops.libtorch_agn_2_13.identity_w_nonexistent_fake_module.default(x)
+
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCPU
+    def test_set_python_module_registers_properly(self, device):
+        import libtorch_agn_2_13  # noqa: F401
+
+        # Confirm the dispatcher recorded the mapping for both ops.
+        fake_module = torch._C._dispatch_pystub(
+            "libtorch_agn_2_13::identity_with_fake_module", ""
+        )
+        self.assertIsNotNone(fake_module)
+        self.assertEqual(fake_module[0], "libtorch_agn_2_13")
+
+        fake_module = torch._C._dispatch_pystub(
+            "libtorch_agn_2_13::identity_w_nonexistent_fake_module", ""
+        )
+        self.assertIsNotNone(fake_module)
+        self.assertEqual(fake_module[0], "libtorch_agn_2_13_nonexistent_module")
+
+        # Sanity check: the op itself still works on real tensors.
+        t = torch.randn(3, device=device)
+        out = torch.ops.libtorch_agn_2_13.identity_with_fake_module.default(t)
+        self.assertEqual(out, t)
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)

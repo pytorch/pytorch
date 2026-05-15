@@ -1032,7 +1032,7 @@
       "Context": "",
       "Explanation": "Dynamo does not support tracing classes that are defined in the compiled region.",
       "Hints": [
-        "Move the class definition out of the compiled region.",
+        "Move the class definition out of the compiled region or set `torch._dynamo.config.enable_trace_load_build_class=True`.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2047,6 +2047,16 @@
       "Hints": []
     }
   ],
+  "GB4411": [
+    {
+      "Gb_type": "missing sq_contains",
+      "Context": "sq_contains not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0154": [
     {
       "Gb_type": "Unsupported kwargs for itertools.accumulate",
@@ -2064,6 +2074,24 @@
       "Explanation": "Expected kwargs: 'key', but got {','.join(set(kwargs.keys()) - {'key'})}",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9522": [
+    {
+      "Gb_type": "hasattr() on unsupported type",
+      "Context": "hasattr({obj}, {attr})",
+      "Explanation": "hasattr() is not supported on type {obj.python_type_name()}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "hasattr() on unsupported type",
+      "Context": "hasattr({obj}, {attr})",
+      "Explanation": "hasattr() is not supported on type {type(obj).__name__}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2478,6 +2506,16 @@
       "Hints": [
         "Manually convert the argument to a list.",
         "Ensure all keys are hashable."
+      ]
+    }
+  ],
+  "GB7489": [
+    {
+      "Gb_type": "Unsupported argument type in tensor method call",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo could not create a proxy for an argument in the call to Tensor.{name}(). This usually means an unsupported type was passed as an argument to a tensor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3187,6 +3225,24 @@
       "Explanation": "Calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region. This is not supported.",
       "Hints": [
         "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0467": [
+    {
+      "Gb_type": "setattr() on unsupported type",
+      "Context": "setattr({obj}, {name_var}, {val})",
+      "Explanation": "setattr() is not supported on type {obj.python_type_name()}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on unsupported type",
+      "Context": "setattr({obj}, {name_var}, {val})",
+      "Explanation": "setattr() is not supported on type {type(obj).__name__}",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -4189,6 +4245,16 @@
       ]
     }
   ],
+  "GB7510": [
+    {
+      "Gb_type": "nb_positive_impl not implemented",
+      "Context": "{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_positive C slot but the corresponding VariableTracker doesn't implement nb_positive_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0306": [
     {
       "Gb_type": "unsupported HigherOrderOperator",
@@ -4513,6 +4579,16 @@
       "Gb_type": "missing_mp_subscript_impl",
       "Context": "mp_subscript_impl not defined for {type(self).__name__}",
       "Explanation": "'{self.python_type_name()}' subscript is not yet supported by Dynamo.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8977": [
+    {
+      "Gb_type": "Invalid call to __build_class__",
+      "Context": "Non-constant args to __build_class__: {args} {kwargs}",
+      "Explanation": "Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
