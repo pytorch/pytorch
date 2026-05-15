@@ -2094,7 +2094,9 @@ class TestProfilerDevice(TestCase):
         self.assertTrue("aten::mm" in str(p))
 
         output = p.key_averages().table(
-            sort_by="self_device_time_total" if device_type != "cpu" else "self_cpu_time_total",
+            sort_by="self_device_time_total"
+            if device_type != "cpu"
+            else "self_cpu_time_total",
             row_limit=-1,
         )
         found_gemm = False
@@ -2562,7 +2564,11 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(True, "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263", device_type="xpu")
+    @skipIf(
+        True,
+        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
+        device_type="xpu",
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
