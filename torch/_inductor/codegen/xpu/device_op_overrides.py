@@ -23,9 +23,6 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def current_stream(self) -> str:
         return "torch.xpu.current_stream()"
 
-    def stream_context(self, stream_name: str) -> str:
-        return f"torch.xpu.stream({stream_name})"
-
     def cpp_device_guard(self) -> str:
         return "at::DeviceGuard"
 

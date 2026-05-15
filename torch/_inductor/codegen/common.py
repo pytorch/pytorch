@@ -330,9 +330,6 @@ class DeviceOpOverrides:
     def current_stream(self) -> str:
         raise NotImplementedError
 
-    def stream_context(self, stream_name: str) -> str:
-        raise NotImplementedError
-
     def stream_handle(self, stream_name: str) -> str:
         return f"{stream_name}.native_handle"
 
@@ -720,7 +717,7 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
@@ -2695,7 +2692,7 @@ class CSEProxy(DefaultHandler):
                 else output_dtype
             )
             var_shape: BlockShapeType = (
-                output_shape[output_idx]
+                output_shape[output_idx]  # type: ignore[assignment]
                 if isinstance(output_shape, (list, tuple))
                 and len(output_shape) > 0
                 and isinstance(output_shape[0], (list, tuple))
