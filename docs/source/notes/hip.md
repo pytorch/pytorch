@@ -19,9 +19,9 @@ very few code changes are necessary, if any.
 The example from {ref}`cuda-semantics` will work exactly the same for HIP:
 
 ```python
-cuda = torch.device('cuda')    # Default HIP device
-cuda0 = torch.device('cuda:0') # 'rocm' or 'hip' are not valid, use 'cuda'
-cuda2 = torch.device('cuda:2') # GPU 2 (these are 0-indexed)
+cuda = torch.device('cuda')     # Default HIP device
+cuda0 = torch.device('cuda:0')  # 'rocm' or 'hip' are not valid, use 'cuda'
+cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
 
 x = torch.tensor([1., 2.], device=cuda0)
 # x.device is device(type='cuda', index=0)
