@@ -30,6 +30,21 @@ runs:
       with:
         python-version: "3.12"
 
+    # Emit one synthetic test row to s3 for any test that started running but
+    # never produced a junit-xml entry (e.g. the GHA test step was killed by
+    # timeout-minutes / run cancellation / OOM before pytest_sessionfinish).
+    # Runs only when the test step failed so the success path stays untouched;
+    # internal dedup checks for `<testcase>` presence + `made_failing_xml` so
+    # it doesn't compete with `parse_xml_and_upload_json` or the
+    # FAILED CONSISTENTLY path in run_test.py.
+    - name: Upload adhoc rows for incomplete tests
+      if: ${{ failure() && runner.os != 'Windows' }}
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        uv run --no-project --with boto3 python -m tools.testing.upload_adhoc_incomplete_tests
+
     - name: Zip artifacts for upload
       if: runner.os != 'Windows'
       shell: bash

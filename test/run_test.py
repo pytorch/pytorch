@@ -824,7 +824,14 @@ def run_test_retries(
                 and IS_CI
                 and options.upload_artifacts_while_running
             ):
-                upload_adhoc_failure_json(test_file, current_failure[1:-1])
+                upload_adhoc_failure_json(
+                    test_file,
+                    current_failure[1:-1],
+                    reason=(
+                        "Test failed consistently across reruns but pytest did "
+                        "not generate xml. The most likely cause is a segfault."
+                    ),
+                )
 
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")

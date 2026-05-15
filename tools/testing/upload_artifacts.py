@@ -208,10 +208,21 @@ def parse_xml_and_upload_json() -> None:
         print(f"Failed to parse and upload json test reports: {e}")
 
 
-def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
+def upload_adhoc_failure_json(
+    invoking_file: str,
+    current_failure: str,
+    reason: str | None = None,
+    s3_key_suffix: str | None = None,
+) -> None:
     """
-    manually upload a json to s3 indicating that the entire test file failed
-    since xml was probably not generated in this case
+    manually upload a json to s3 indicating that a test failed without pytest
+    writing a junit-xml entry for it (e.g. segfault before sessionfinish, or
+    shard SIGTERM-on-timeout).
+
+    `reason` overrides the failure message written into the row; defaults to
+    the segfault wording for callers that don't pass one. `s3_key_suffix`
+    overrides the random per-call suffix used in the S3 key; pass a
+    deterministic value to make repeated invocations idempotent.
     """
     try:
         job_id = int(os.environ["JOB_ID"])
@@ -228,7 +239,10 @@ def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
         testName = current_failure
         className = ""
 
-    message = "The test file failed but pytest did not generate xml.  The most likely cause is a segfault"
+    message = reason or (
+        "The test file failed but pytest did not generate xml.  "
+        "The most likely cause is a segfault"
+    )
     j = {
         "invoking_file": invoking_file,
         "file": f"{invoking_file}.py",
@@ -240,7 +254,8 @@ def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
         "failure": {"message": message, "text": message},
     }
     gzipped = gzip.compress(json.dumps(j).encode("utf-8"))
-    s3_key = f"{invoking_file.replace('/', '_')}_{os.urandom(8).hex()}.json"
+    suffix = s3_key_suffix if s3_key_suffix is not None else os.urandom(8).hex()
+    s3_key = f"{invoking_file.replace('/', '_')}_{suffix}.json"
     get_s3_resource().put_object(
         Body=gzipped,
         Bucket="gha-artifacts",
