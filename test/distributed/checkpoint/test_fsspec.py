@@ -184,32 +184,6 @@ class TestFSSpec(ShardedTensorTestBase):
                 storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
             )
 
-    @with_comms(backend=BACKEND, init_rpc=False)
-    def test_fsspec_without_fileno_support(self):
-        """
-        This tests that the stream is flushed and fsync degrades gracefully.
-        """
-        checkpoint_dir = f"memory://test_checkpoint"
-
-        state_dict = {"tensor": torch.randn(10, device=device_type)}
-
-        # This will crash without the stream.flush() and fsync try/except fix
-        dcp.save(
-            state_dict=state_dict,
-            storage_writer=FsspecWriter(checkpoint_dir),
-            planner=dcp.DefaultSavePlanner(),
-        )
-
-        load_dict = {"tensor": torch.zeros(10, device=device_type)}
-        dcp.load(
-            state_dict=load_dict,
-            storage_reader=FsspecReader(checkpoint_dir),
-            planner=dcp.DefaultLoadPlanner(),
-        )
-
-        self.assertTrue(
-            torch.allclose(state_dict["tensor"], load_dict["tensor"]))
-
 
 class TestFileSystem(TestCase):
     @with_temp_dir
@@ -233,6 +207,36 @@ class TestFileSystem(TestCase):
             with fs.create_stream(read_file, "r") as s:
                 raise OSError("fail")
         self.assertTrue(fs.exists(read_file))
+
+    def test_fsspec_without_fileno_support(self):
+        """
+        fsspec's "memory://" protocol simulates cloud storage like GCS or S3
+        by not supporting .fileno() and raising io.UnsupportedOperation.
+        This tests that the stream is flushed and fsync degrades gracefully.
+        """
+        checkpoint_dir = "memory://test_checkpoint_with_no_file_no"
+
+        # Create a dummy state dict
+        state_dict = {"tensor": torch.randn(10)}
+
+        # Save using FsspecWriter
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        # Verify it saved properly and can be loaded
+        load_dict = {"tensor": torch.zeros(10)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+            no_dist=True,
+        )
+
+        self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
 
 
 if __name__ == "__main__":
