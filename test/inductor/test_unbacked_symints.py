@@ -1040,6 +1040,113 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
 
+class TestDeferredRuntimeAsserts(InductorTestCase):
+    def _codegen_mixed_deferred_runtime_assert(
+        self, *, bind_backed_symbol: bool
+    ) -> list[str]:
+        import sympy
+
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch.fx import Graph, GraphModule
+        from torch.fx.experimental.symbolic_shapes import RuntimeAssert, ShapeEnv
+        from torch.utils._ordered_set import OrderedSet
+        from torch.utils._traceback import CapturedTraceback
+
+        fx_graph = Graph()
+        fx_graph.output(())
+        gm = GraphModule({}, fx_graph)
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint().node.expr
+        s0 = sympy.Symbol("s0")
+        shape_env.deferred_runtime_asserts.setdefault(u0, []).append(
+            RuntimeAssert(
+                sympy.Eq(s0, u0),
+                "mixed backed/unbacked runtime assert",
+                CapturedTraceback.extract(skip=0),
+            )
+        )
+
+        graph = GraphLowering(gm, [], shape_env=shape_env, is_backward=True)
+
+        class DummyNode:
+            target = None
+
+        with V.set_graph_handler(graph):
+            graph.init_wrapper_code()
+            if bind_backed_symbol:
+                graph.graph_inputs["s0_arg"] = s0
+            graph.create_deferred_runtime_asserts(DummyNode(), OrderedSet([u0]))
+            for op in graph.operations:
+                op.codegen(graph.wrapper_code)
+            return [str(line) for line in graph.wrapper_code.lines]
+
+    def test_deferred_runtime_assert_requires_backed_symbol_available(self):
+        missing_backed_symbol_lines = self._codegen_mixed_deferred_runtime_assert(
+            bind_backed_symbol=False
+        )
+        self.assertFalse(
+            any("s0" in line for line in missing_backed_symbol_lines),
+            missing_backed_symbol_lines,
+        )
+
+        available_backed_symbol_lines = self._codegen_mixed_deferred_runtime_assert(
+            bind_backed_symbol=True
+        )
+        self.assertTrue(
+            any("if not (s0 == u0):" in line for line in available_backed_symbol_lines),
+            available_backed_symbol_lines,
+        )
+
+    def test_deferred_runtime_assert_requeues_missing_unbacked_symfloat(self):
+        import sympy
+
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch.fx import Graph, GraphModule
+        from torch.fx.experimental.symbolic_shapes import RuntimeAssert, ShapeEnv
+        from torch.utils._ordered_set import OrderedSet
+        from torch.utils._traceback import CapturedTraceback
+
+        fx_graph = Graph()
+        fx_graph.output(())
+        gm = GraphModule({}, fx_graph)
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint().node.expr
+        zuf0 = shape_env.create_unbacked_symfloat().node.expr
+        runtime_assert = RuntimeAssert(
+            sympy.Eq(u0, zuf0),
+            "mixed unbacked int/float runtime assert",
+            CapturedTraceback.extract(skip=0),
+        )
+        shape_env.deferred_runtime_asserts.setdefault(u0, []).append(runtime_assert)
+
+        graph = GraphLowering(gm, [], shape_env=shape_env)
+
+        class DummyNode:
+            target = None
+
+        with V.set_graph_handler(graph):
+            graph.init_wrapper_code()
+            graph.create_deferred_runtime_asserts(DummyNode(), OrderedSet([u0]))
+            self.assertEqual(graph.operations, [])
+            self.assertIs(graph.ras_by_symbol[zuf0][0], runtime_assert)
+
+            graph.create_deferred_runtime_asserts(DummyNode(), OrderedSet([zuf0]))
+            for op in graph.operations:
+                op.codegen(graph.wrapper_code)
+            lines = [str(line) for line in graph.wrapper_code.lines]
+            self.assertTrue(
+                any(
+                    "if not" in line and "u0" in line and "zuf0" in line
+                    for line in lines
+                ),
+                lines,
+            )
+
+
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
