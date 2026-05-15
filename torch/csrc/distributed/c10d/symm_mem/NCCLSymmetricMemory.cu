@@ -36,14 +36,15 @@ static StoreExchange storeExchange = StoreExchange("NCCLAllocation");
 
 struct NCCLAllocation {
   // Combined ncclMemAlloc region. Layout:
-  //   [0, buffer_size)                                       - user buffer
-  //   [aligned_buffer_size, aligned_buffer_size + get_signal_pad_size()) - signal pad
-  // aligned_buffer_size is buffer_size rounded up to 16 bytes so the signal
-  // pad start is 16-byte aligned. Total allocation size is
-  // aligned_buffer_size + get_signal_pad_size().
+  //   [0, buffer_size)                                          - user data buffer
+  //   [round_up(buffer_size, 16), round_up(buffer_size, 16) + signal_pad_size)
+  //                                                             - signal pad
+  // Total allocation size is round_up(buffer_size, 16) + signal_pad_size.
   void* ptr;
+  // Size of the user-visible data buffer in bytes, as requested by the
+  // caller of `alloc()`.
   size_t buffer_size;
-  size_t aligned_buffer_size;
+  size_t signal_pad_size;
   int device_idx;
   std::mutex mutex;
   // Map of group name to peer alloc info
@@ -53,11 +54,11 @@ struct NCCLAllocation {
   NCCLAllocation(
       void* ptr,
       size_t buffer_size,
-      size_t aligned_buffer_size,
+      size_t signal_pad_size,
       int device_idx)
       : ptr(ptr),
         buffer_size(buffer_size),
-        aligned_buffer_size(aligned_buffer_size),
+        signal_pad_size(signal_pad_size),
         device_idx(device_idx) {}
 
   ~NCCLAllocation() {
@@ -171,31 +172,26 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
     comm_ = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
 
+    // Register a single window over the combined buffer + signal pad region.
+    // Layout inside the registration:
+    //   [0, aligned_buffer_size)            - user data buffer
+    //   [aligned_buffer_size, total_size)   - signal pad
+    // The single registration sidesteps NCCL's window-alignment requirement
+    // for the signal-pad sub-region: only the base pointer (returned by
+    // ncclMemAlloc, already granularity-aligned) is registered.
+    const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
+    const size_t signal_pad_size = allocation->signal_pad_size;
+    const size_t total_size = aligned_buffer_size + signal_pad_size;
     C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm_, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
+      ncclCommWindowRegister(comm_, allocation->ptr, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
           "Failed to window register segment with ptr ",
           allocation->ptr,
           ", size ",
-          buffer_size_,
+          total_size,
           " on rank ",
           rank_));
-
-    // Signal pad lives in the same ncclMemAlloc region as the buffer,
-    // starting at aligned_buffer_size (buffer_size rounded up to 16 bytes for
-    // alignment); no additional ncclMemAlloc is needed.
-    signal_pad_ptr_ = static_cast<char*>(allocation->ptr) +
-        allocation->aligned_buffer_size;
-    const size_t signal_pad_size = get_signal_pad_size();
-    C10D_NCCL_CHECK(
-    ncclCommWindowRegister(comm_, signal_pad_ptr_, signal_pad_size, &signal_handle_, NCCL_WIN_COLL_SYMMETRIC),
-    c10::str(
-        "Failed to window register segment with ptr ",
-        signal_pad_ptr_,
-        ", size ",
-        signal_pad_size,
-        " on rank ",
-        rank_));
+    signal_pad_ptr_ = static_cast<char*>(allocation->ptr) + aligned_buffer_size;
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Register the host-side communicator for device communicator management.
@@ -215,25 +211,21 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
-    // Fill out the peer pointer array
+    // Fill out the peer pointer array. We only fetch the buffer pointers
+    // for each peer; signal pad pointers are derived from them as
+    // buffer + aligned_buffer_size, since every rank sees the same
+    // symmetric-memory layout.
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
     // Lack of host-side API to get peer pointers, so we get them inside a
     // kernel and copy the result to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_win_, 0, buffers_dev_, world_size_);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle_, 0, signal_pads_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(combined_win_, 0, buffers_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
     C10_CUDA_CHECK(cudaMemcpy(
       buffers_.data(),  // dst (host)
       buffers_dev_,  // src (device)
-      arr_size,
-      cudaMemcpyDeviceToHost));
-    C10_CUDA_CHECK(cudaMemcpy(
-      signal_pads_.data(),  // dst (host)
-      signal_pads_dev_,  // src (device)
       arr_size,
       cudaMemcpyDeviceToHost));
 #else
@@ -242,21 +234,13 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // If peer is not accessible within LSA domain, `ncclGetPeerDevicePointer`
     // returns nullptr.
     C10D_NCCL_CHECK(
-      ncclGetPeerDevicePointer(buffer_win_, 0, i, &buffers_[i]),
-      "ncclGetPeerDevicePointer failed");
-    C10D_NCCL_CHECK(
-      ncclGetPeerDevicePointer(signal_handle_, 0, i, &signal_pads_[i]),
+      ncclGetPeerDevicePointer(combined_win_, 0, i, &buffers_[i]),
       "ncclGetPeerDevicePointer failed");
   }
-  // Copy the peer access pointers to device arrays.
+  // Copy the peer buffer pointers to the device-side buffers array.
   C10_CUDA_CHECK(cudaMemcpy(
     buffers_dev_,  // dst (device)
     buffers_.data(),  // src (host)
-    arr_size,
-    cudaMemcpyHostToDevice));
-  C10_CUDA_CHECK(cudaMemcpy(
-    signal_pads_dev_,  // dst (device)
-    signal_pads_.data(),  // src (host)
     arr_size,
     cudaMemcpyHostToDevice));
 
@@ -265,10 +249,24 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   void* mc_addr = nullptr;
   // Skip CHECK on purpose to improve fault tolerance since some machine's
   // Fabric Manager may be in bad NVLink Sharp state.
-  if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
+  if (ncclGetLsaMultimemDevicePointer(combined_win_, 0, &mc_addr) == ncclSuccess) {
     mc_addr_ = mc_addr;
   }
 #endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+
+    // Derive each peer's signal pad pointer from its buffer pointer; all
+    // ranks share the same aligned_buffer_size so we don't have to ask
+    // NCCL for the signal pad pointers separately.
+    for (int i = 0; i < world_size_; i++) {
+      signal_pads_[i] = buffers_[i] == nullptr
+          ? nullptr
+          : static_cast<char*>(buffers_[i]) + aligned_buffer_size;
+    }
+    C10_CUDA_CHECK(cudaMemcpy(
+        signal_pads_dev_,  // dst (device)
+        signal_pads_.data(),  // src (host)
+        arr_size,
+        cudaMemcpyHostToDevice));
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
@@ -283,17 +281,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx_);
-    if (buffer_win_ != nullptr) {
-      auto res = ncclCommWindowDeregister(comm_, buffer_win_);
+    if (combined_win_ != nullptr) {
+      auto res = ncclCommWindowDeregister(comm_, combined_win_);
       if (res != ncclSuccess) {
-        LOG(WARNING) << "ncclCommWindowDeregister failed for buffer_win: "
-                     << ncclGetErrorString(res);
-      }
-    }
-    if (signal_handle_ != nullptr) {
-      auto res = ncclCommWindowDeregister(comm_, signal_handle_);
-      if (res != ncclSuccess) {
-        LOG(WARNING) << "ncclCommWindowDeregister failed for signal_handle: "
+        LOG(WARNING) << "ncclCommWindowDeregister failed: "
                      << ncclGetErrorString(res);
       }
     }
@@ -319,8 +310,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   void** buffers_dev_{nullptr};
   void** signal_pads_dev_{nullptr};
   std::string group_name_;
-  ncclWindow_t buffer_win_{nullptr};
-  ncclWindow_t signal_handle_{nullptr};
+  // Single NCCL window covering both the user data buffer and the signal pad.
+  ncclWindow_t combined_win_{nullptr};
   void* signal_pad_ptr_{nullptr};
   // Multicast address
   void* mc_addr_{nullptr};
@@ -441,11 +432,11 @@ c10::Device NCCLSymmetricMemory::get_device() {
 }
 
 ncclWindow_t NCCLSymmetricMemory::get_window() {
-  return pai_->buffer_win_;
+  return pai_->combined_win_;
 }
 
 ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
-  return pai_->signal_handle_;
+  return pai_->combined_win_;
 }
 
 size_t NCCLSymmetricMemory::get_offset() {
@@ -469,26 +460,12 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     c10::cuda::CUDAGuard guard(device_idx);
     // Allocate buffer + signal pad together in a single ncclMemAlloc call.
-    // Buffer occupies [0, size); signal pad starts at aligned_buffer_size.
-    // The signal pad start must be aligned to NCCL's window registration
-    // granularity (the CUDA VMM allocation granularity, typically 2MB on
-    // Hopper) — `ncclCommWindowRegister` rejects sub-allocation addresses
-    // that aren't aligned to that granularity.
-    size_t window_alignment = 16UL;
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-    {
-      CUmemAllocationProp prop = {};
-      prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-      prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-      prop.location.id = device_idx;
-      auto driver_api = c10::cuda::DriverAPI::get();
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
-          &window_alignment, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
-    }
-#endif
-    const size_t aligned_buffer_size = at::round_up(size, window_alignment);
-    const size_t total_size = aligned_buffer_size + get_signal_pad_size();
+    // Buffer occupies [0, size); signal pad starts at round_up(size, 16).
+    // A single window is registered over the whole region at rendezvous
+    // time, so only the base pointer (already granularity-aligned by
+    // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
+    const size_t signal_pad_size = get_signal_pad_size();
+    const size_t total_size = at::round_up(size, 16UL) + signal_pad_size;
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, total_size), "ncclMemAlloc");
     {
@@ -496,7 +473,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       allocations_.emplace(
           ptr,
           std::make_unique<NCCLAllocation>(
-              ptr, size, aligned_buffer_size, device_idx));
+              ptr, size, signal_pad_size, device_idx));
     }
     return ptr;
   }
