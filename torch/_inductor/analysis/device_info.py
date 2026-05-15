@@ -211,6 +211,9 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     callers always receive the throughput achievable by cuBLAS/cuDNN on
     non-sparse data.
     """
+    if not torch.cuda.is_available():
+        log.info("CUDA not available, skipping datasheet lookup")
+        return None
     name: str | None = torch.cuda.get_device_name()
     if name is None:
         log.info("No device found, returning None")
