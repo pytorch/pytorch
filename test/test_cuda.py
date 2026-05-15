@@ -4861,6 +4861,9 @@ class TestCudaAllocator(TestCase):
             torch.cuda.memory._record_memory_history(None)
 
     @skipIfRocm(msg="ROCTracer does not capture Python stack frames in profiler output")
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
