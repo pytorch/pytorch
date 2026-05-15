@@ -225,8 +225,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   if (std::any_of(input_shape.begin(), input_shape.end(), [](auto s) { return s == 0; })) {
     return std::make_tuple(
         at::native::empty_like(input),
-        at::native::full({N, group}, NAN, input.scalar_type()),
-        at::native::full({N, group}, NAN, input.scalar_type()));
+        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()),
+        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()));
   }
 
   auto input_reshaped = input.view({N, group, C / group * HxW});
