@@ -3101,20 +3101,21 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 def get_tensor_method() -> frozenset[Any]:
     disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
-    for name in dir(torch.Tensor):
-        method = getattr(torch.Tensor, name)
-        if (
-            isinstance(
-                method,
-                (
-                    types.MethodDescriptorType,
-                    types.WrapperDescriptorType,
-                    types.BuiltinFunctionType,
-                ),
-            )
-            and name not in disallowed_tensor_methods
-        ):
-            s.add(method)
+    for cls in (torch.Tensor, torch._C.TensorBase):
+        for name in dir(cls):
+            method = getattr(cls, name)
+            if (
+                isinstance(
+                    method,
+                    (
+                        types.MethodDescriptorType,
+                        types.WrapperDescriptorType,
+                        types.BuiltinFunctionType,
+                    ),
+                )
+                and name not in disallowed_tensor_methods
+            ):
+                s.add(method)
 
     # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
