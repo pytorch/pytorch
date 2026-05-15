@@ -195,15 +195,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
+          # IMDS link-local IPv4 (169.254.169.254) is unreachable from IPv6-only
+          # pods (e.g. EKS). Probe first; skip the banner if the endpoint is unavailable.
+          IMDS_TOKEN=$(curl --connect-timeout 2 --max-time 5 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30" 2>/dev/null || echo "")
+          if [ -n "${IMDS_TOKEN}" ]; then
+            function get_ec2_metadata() {
+              # Pulled from instance metadata endpoint for EC2
+              # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+              category=$1
+              curl -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            }
+            echo "ami-id: $(get_ec2_metadata ami-id)"
+            echo "instance-id: $(get_ec2_metadata instance-id)"
+            echo "instance-type: $(get_ec2_metadata instance-type)"
+          else
+            echo "EC2 IMDS unavailable (likely non-EC2 or IPv6-only runner); skipping instance metadata."
+          fi
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
