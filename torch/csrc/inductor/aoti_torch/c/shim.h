@@ -571,6 +571,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_delete_stream(StreamHandle stream);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_stream_id(StreamHandle stream, int64_t* ret_stream_id);
 
+/// Backend-specific non-owning stream handle (e.g. `cudaStream_t` for CUDA).
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_stream_native_handle(
+    StreamHandle stream,
+    void** ret_native_handle);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
     int32_t device_index,
     StreamHandle* ret_stream // returns new reference

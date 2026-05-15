@@ -24,9 +24,8 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
   torch::stable::accelerator::DeviceGuard device_guard(device_index);
   Tensor res = new_empty(m, {m.size(0)});
 
-  void* raw_stream = nullptr;
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_get_current_cuda_stream(device_index, &raw_stream));
+  void* raw_stream =
+      torch::stable::accelerator::getCurrentStream(device_index).nativeHandle();
 #ifdef USE_ROCM
   auto stream = static_cast<hipStream_t>(raw_stream);
 #else

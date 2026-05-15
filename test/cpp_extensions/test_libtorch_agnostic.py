@@ -456,6 +456,21 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(stream_id, expected_stream_id)
 
     @onlyCUDA
+    def test_stream_native_handle(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        stream = torch.cuda.Stream()
+        device_idx = torch.cuda.current_device()
+
+        with stream:
+            expected = torch.accelerator.current_stream(
+                device_idx
+            ).native_handle
+            nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
+
+        self.assertEqual(nh, expected)
+
+    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_get_current_device_index(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
