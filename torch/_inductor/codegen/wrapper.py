@@ -215,7 +215,7 @@ TritonGrid = (
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: list[triton.Config],
+    configs: list[triton.Config],  # type: ignore[name-defined]
     grids: list[TritonGrid],
     wrapper: PythonWrapperCodegen | None = None,
     original_fxnode_name: str | None = None,
@@ -340,8 +340,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     # Also include any possible kernel being called indirectly
     import triton
-    from triton import JITFunction
-    from triton.language import constexpr
+    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
+    from triton.language import constexpr  # type: ignore[name-defined]
     from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
@@ -1110,7 +1110,7 @@ class MultiOutputLine(WrapperLine):
     indices: Sequence[Any]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        def codegen_list_tuple_access(basename, indices):
+        def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
             if len(indices) > 0:
                 itype, i = indices[0]
                 if issubclass(itype, list):
@@ -2185,7 +2185,7 @@ class PythonWrapperCodegen(CodeGen):
             del async_compile
         """
         )
-        scope = {}
+        scope = {}  # type: ignore[var-annotated]
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
@@ -2790,6 +2790,15 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
+        """Codegen a user-defined Triton kernel and return its cache entry.
+
+        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        name (with a leading dunder stripped to avoid Python class-based name
+        mangling at the call site), and records the kernel in
+        ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
+        inductor_meta, extra_launcher_call_args)``; subsequent calls with the
+        same ``cache_key`` reuse the previously assigned name.
+        """
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -2906,7 +2915,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg,
-                        1,
+                        1,  # type: ignore[arg-type]
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -3020,6 +3029,11 @@ class PythonWrapperCodegen(CodeGen):
             )
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+        # when the generated call site is inside a class body.
+        # See https://github.com/pytorch/pytorch/issues/170398
+        if name.startswith("__") and not name.endswith("__"):
+            name = name[1:]
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
@@ -3894,7 +3908,7 @@ class PythonWrapperCodegen(CodeGen):
             # `go_outer` manages the top-level logic for generating the final expression.
             # It handles special cases for C++ code generation and adjusts
             # the keypath based on the context (e.g., single vs. multiple outputs).
-            def go_outer():
+            def go_outer():  # type: ignore[no-untyped-def]
                 if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
@@ -4228,7 +4242,7 @@ class PythonWrapperCodegen(CodeGen):
             val = V.graph._shape_env._maybe_evaluate_static(x)
             if val is None:
                 return val
-            return int(val)
+            return int(val)  # type: ignore[call-overload]
         except Exception:
             return None
 
