@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
@@ -1048,6 +1049,70 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+class TestFastLauncherDeviceSupport(TestCase):
+    @staticmethod
+    def _make_autotuner(device_type):
+        def triton_():
+            pass
+
+        device = DeviceProperties(
+            type=device_type,
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {
+            "signature": {},
+            "device": device,
+            "constants": {},
+            "configs": [],
+        }
+        return CachingAutotuner(
+            fn=triton_,
+            triton_meta=triton_meta,
+            configs=[triton_config({"x": 1}, 1)],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=False,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"use_fast_triton_launcher": True},
+        )
+
+    @staticmethod
+    def _make_static_launcher():
+        class Kernel:
+            function = 1
+            num_warps = 4
+            shared = 0
+            arg_tys = ""
+            has_global_scratch = False
+            has_profile_scratch = False
+
+            def run(self):
+                pass
+
+        def launcher_template():
+            pass
+
+        kernel = Kernel()
+        launcher = types.FunctionType(
+            launcher_template.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        return launcher
+
+    def test_fast_launcher_not_built_for_xpu(self):
+        autotuner = self._make_autotuner("xpu")
+        launcher = self._make_static_launcher()
+
+        with patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+            fast_launcher.assert_not_called()
 
 
 class TestDynamicScaleRblockCacheInteraction(TestCase):
