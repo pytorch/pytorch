@@ -272,6 +272,7 @@ def upload_adhoc_failure_json(
     s3_key_suffix: str | None = None,
     classname: str | None = None,
     testname: str | None = None,
+    file_attr: str | None = None,
 ) -> None:
     """
     manually upload a json to s3 indicating that a test failed without pytest
@@ -286,6 +287,12 @@ def upload_adhoc_failure_json(
     `classname` and `testname` override the legacy `current_failure.split("::")`
     parsing — pass these from `parse_pytest_nodeid` so parametrized ids that
     contain `::` inside brackets aren't mis-split.
+
+    `file_attr` overrides the `file` JSON field. Defaults to `f"{invoking_file}.py"`
+    for backwards compatibility. Pass the true source file path (from the
+    pytest nodeid) when `invoking_file` is the discovery unit and you want
+    the row's `file` to point at the real test source — useful when an
+    inherited test lives in a different file from the one run_test.py invoked.
     """
     try:
         job_id = int(os.environ["JOB_ID"])
@@ -309,7 +316,7 @@ def upload_adhoc_failure_json(
     )
     j = {
         "invoking_file": invoking_file,
-        "file": f"{invoking_file}.py",
+        "file": file_attr if file_attr else f"{invoking_file}.py",
         "name": testname,
         "classname": classname,
         "workflow_id": workflow_id,

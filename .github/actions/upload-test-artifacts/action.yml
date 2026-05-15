@@ -56,14 +56,20 @@ runs:
     # uses different stepcurrent paths and ROCm/XPU need stepcurrent
     # copy-back from the container; both are tracked as follow-ups.
     - name: Upload adhoc rows for incomplete tests
-      if: ${{ inputs.test-conclusion == 'failure' && runner.os == 'Linux' && inputs.job-id != '' }}
+      if: ${{ (inputs.test-conclusion == 'failure' || inputs.test-conclusion == 'cancelled') && runner.os == 'Linux' && inputs.job-id != '' }}
       shell: bash
       continue-on-error: true
       env:
         JOB_ID: ${{ inputs.job-id }}
       run: |
         set -euo pipefail
-        uv run --no-project --with boto3 python -m tools.testing.upload_adhoc_incomplete_tests
+        # The helper transitively imports `tools.testing.upload_artifacts`,
+        # which pulls in `filelock` and `tools.stats.test_dashboard` (which
+        # imports `requests`). Pre-install all three so the import chain
+        # doesn't fail before `main()` runs and silently swallow incomplete-
+        # test rows under `continue-on-error: true`.
+        uv run --no-project --with boto3 --with filelock --with requests \
+          python -m tools.testing.upload_adhoc_incomplete_tests
 
     - name: Zip artifacts for upload
       if: runner.os != 'Windows'

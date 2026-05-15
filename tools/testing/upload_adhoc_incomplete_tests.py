@@ -16,21 +16,26 @@ This script walks every `stepcurrent` subdir, reads `lastrun` and
 1. Was the last test to start running (per `lastrun`).
 2. Has NOT been flagged `made_failing_xml=true` (segfault path already
    covered by `run_test.py::run_test_retries`).
-3. Has no matching `<testcase>` (keyed on the xunit2 `file` and `name`
-   attributes) in any `test/test-reports/**/*.xml` already on disk.
+3. Has no matching `<testcase>` (keyed on xunit2 `(file, classname, name)`
+   attributes, with classname compared by last segment to bridge xunit2's
+   dotted module-qualified form vs the bare class segment in the nodeid)
+   in any `test/test-reports/**/*.xml` already on disk.
 
-Designed to be invoked from a GHA composite-action step gated `if: failure()`
-right before the existing `upload-test-artifacts` zip+upload step, so it
-fires for ANY test-step failure mode — not just SIGTERM — without competing
-with the in-process `parse_xml_and_upload_json()` path or the
-`FAILED CONSISTENTLY` path in `run_test.py`.
+Designed to be invoked from a GHA composite-action step gated explicitly on
+the caller's `test-conclusion == 'failure' || 'cancelled'`, right before the
+existing `upload-test-artifacts` zip+upload step, so it fires for ANY
+test-step failure mode — not just SIGTERM — without competing with the
+in-process `parse_xml_and_upload_json()` path or the `FAILED CONSISTENTLY`
+path in `run_test.py`.
 """
 
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -45,6 +50,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 STEPCURRENT_DIR = REPO_ROOT / ".pytest_cache" / "v" / "cache" / "stepcurrent"
 TEST_REPORTS_DIR = REPO_ROOT / "test" / "test-reports"
 
+# stepcurrent_key shapes from run_test.py:508-530:
+#   <test_file>                         (cpp test, line 508)
+#   <test_file>_<hex16>                 (cpp variant, line 522)
+#   <test_file>_<shard>_<hex16>         (regular, line 530)
+# `test_file` itself may contain underscores. Extract by stripping the
+# `_<shard>?_<hex16>` suffix if present.
+_STEPCURRENT_KEY_RE = re.compile(r"^(.+?)(?:_\d+)?_[a-f0-9]{16}$")
+
 
 def _read_pytest_cache_value(path: Path) -> object | None:
     """pytest.Cache writes JSON files; missing/unparseable → None."""
@@ -56,16 +69,28 @@ def _read_pytest_cache_value(path: Path) -> object | None:
         return None
 
 
-def _collect_completed_testcases() -> set[tuple[str, str]]:
-    """Build a set of (file_attr, name_attr) tuples from every junit-xml on disk.
+def _invoking_file_from_stepcurrent_key(key: str) -> str:
+    """Recover the run_test.py `test_file` (invocation unit) from the cache key."""
+    m = _STEPCURRENT_KEY_RE.match(key)
+    return m.group(1) if m else key
 
-    Keyed on the xunit2 `<testcase file="..." name="...">` attributes — those
-    match the rootdir-relative file path and the full test name (including
-    any parametrize suffix), which is what `parse_pytest_nodeid` returns for
-    the in-flight nodeid. xunit2's `classname` uses a dotted module path so we
-    deliberately avoid matching on it.
+
+def _xunit_classname_last_segment(classname: str) -> str:
+    """xunit2 emits `package.module.TestClass` for class tests, `package.module`
+    for function tests. The "last segment" is `TestClass` (class tests) or
+    the full path (function tests; we treat as no-class)."""
+    if "." not in classname:
+        return ""  # function-test xunit2 classname is just the module path
+    return classname.rsplit(".", 1)[-1]
+
+
+def _collect_completed_testcases() -> set[tuple[str, str, str]]:
+    """Build `(file, last_class_segment, name)` from every junit-xml on disk.
+
+    Match key bridges xunit2's dotted module-qualified `classname` against
+    the bare class segment that `parse_pytest_nodeid` returns.
     """
-    completed: set[tuple[str, str]] = set()
+    completed: set[tuple[str, str, str]] = set()
     if not TEST_REPORTS_DIR.is_dir():
         return completed
     for xml_file in glob.glob(f"{TEST_REPORTS_DIR}/**/*.xml", recursive=True):
@@ -77,13 +102,20 @@ def _collect_completed_testcases() -> set[tuple[str, str]]:
             continue
         for testcase in tree.iter("testcase"):
             file_attr = testcase.get("file") or ""
+            classname = testcase.get("classname") or ""
             name_attr = testcase.get("name") or ""
             if file_attr and name_attr:
-                completed.add((file_attr, name_attr))
+                completed.add(
+                    (file_attr, _xunit_classname_last_segment(classname), name_attr)
+                )
     return completed
 
 
 def _sanitize_for_s3_key(s: str) -> str:
+    # S3 keys allow most chars but we keep the existing path-safe shape and
+    # avoid `:` / `/` / `[` / `]` / whitespace which can collide between
+    # different parametrize values (`a:b` vs `a::b` vs `a/b`). The nodeid
+    # hash appended in main() preserves distinguishability.
     return (
         s.replace("/", "_")
         .replace(" ", "_")
@@ -128,9 +160,15 @@ def main() -> int:
         if parsed is None:
             print(f"Skipping unparseable nodeid: {lastrun!r}")
             continue
-        test_file_path, invoking_file, classname, testname = parsed
+        test_file_path, _, classname, testname = parsed
 
-        if (test_file_path, testname) in completed:
+        # Use the run_test.py invocation unit as `invoking_file` so this row
+        # groups with other rows from the same test_file in downstream
+        # consumers (HUD, autorevert). The pytest nodeid's path goes into
+        # `file_attr` so the row still records the true source location.
+        invoking_file = _invoking_file_from_stepcurrent_key(entry.name)
+
+        if (test_file_path, classname, testname) in completed:
             # junit-xml already has a row for this test (it ran to completion
             # and a later test was killed). Don't duplicate.
             continue
@@ -140,7 +178,12 @@ def main() -> int:
             "(SIGTERM/SIGKILL — e.g. timeout-minutes, run cancellation, "
             f"or OOM). Last test seen by stepcurrent: {lastrun}"
         )
-        suffix = _sanitize_for_s3_key(f"incomplete_{classname}_{testname}")
+        # Deterministic, collision-resistant s3 key: sanitized human-readable
+        # prefix plus an 8-char hash of the full nodeid so parametrize values
+        # like `a:b` vs `a::b` vs `a/b` don't collapse onto each other.
+        prefix = _sanitize_for_s3_key(f"incomplete_{classname}_{testname}")
+        digest = hashlib.sha256(lastrun.encode("utf-8")).hexdigest()[:8]
+        suffix = f"{prefix}_{digest}"
         try:
             upload_adhoc_failure_json(
                 invoking_file,
@@ -149,6 +192,7 @@ def main() -> int:
                 s3_key_suffix=suffix,
                 classname=classname,
                 testname=testname,
+                file_attr=test_file_path,
             )
         except Exception as e:  # noqa: BLE001
             print(f"Failed to emit adhoc row for {lastrun}: {e}")
