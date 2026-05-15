@@ -5505,6 +5505,8 @@ skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
 # The compiled-autograd graph keeps graph-local references to gradients while
 # calling Python, so it cannot match eager PyNode::apply's no-extra-ref check.
 skipped_tests.add("test_custom_function_boxed_grads_no_extra_refs")
+# test_custom_function_boxed_grads_single_list_arg exercises direct
+# grad_fn.apply() and is already covered by its @skipIfTorchDynamo decorator.
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
