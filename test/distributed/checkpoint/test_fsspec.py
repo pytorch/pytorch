@@ -185,8 +185,6 @@ class TestFSSpec(ShardedTensorTestBase):
             )
 
     @with_comms(backend=BACKEND, init_rpc=False)
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(2)
     def test_fsspec_without_fileno_support(self):
         """
         This tests that the stream is flushed and fsync degrades gracefully.

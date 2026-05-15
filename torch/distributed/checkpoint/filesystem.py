@@ -776,6 +776,9 @@ class _FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
+                # For local files, this pushes Python's internal buffers to the OS.
+                # For cloud storage, this pushes the in-memory data over the network to remote storage.
+                metadata_file.flush()
                 try:
                     os.fsync(metadata_file.fileno())
                 except (AttributeError, UnsupportedOperation):
