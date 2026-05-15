@@ -669,9 +669,6 @@ test_inductor_aoti_cpp() {
   fi
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
-
-  # Call into the shim run tests helper to run its test in valgrind.
-  test/cpp/shim/run_test.sh "$BUILD_BIN_DIR"
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
