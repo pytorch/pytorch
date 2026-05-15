@@ -191,6 +191,32 @@ def use_native_matmul(mat1, mat2):
     return True
 
 
+def emulate_lowp_native_matmul_output_precision(
+    dot_reduction: TensorBox, output_dtype: torch.dtype
+) -> TensorBox:
+    if output_dtype not in (torch.float16, torch.bfloat16):
+        return dot_reduction
+
+    from torch._inductor.virtualized import ops
+
+    from ..lowering import make_pointwise
+
+    def _to_output_dtype(x):
+        # tl.dot accumulates in fp32, but aten.mm/bmm return fp16/bf16 here.
+        # Preserve that dtype boundary before fused consumers see the value.
+        result = ops.to_dtype(
+            x,
+            output_dtype,
+            src_dtype=torch.float32,
+            use_compute_types=False,
+        )
+        return ops.to_dtype(result, output_dtype)
+
+    return make_pointwise(_to_output_dtype, override_return_dtype=output_dtype)(
+        dot_reduction
+    )
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.

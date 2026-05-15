@@ -145,6 +145,18 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    def test_bmm_fp16_output_precision(self):
+        def f(x, y):
+            z = torch.bmm(x, y)
+            return z + torch.zeros(z.shape, dtype=torch.float32, device=z.device)
+
+        B, M, K, N = 2, 32, 32, 32
+        x = rand_strided((B, M, K), (M * K, K, 1), dtype=torch.float16, device=GPU_TYPE)
+        y = rand_strided((B, K, N), (K * N, N, 1), dtype=torch.float16, device=GPU_TYPE)
+
+        self._check_equal(f, (x, y))
+        self._check_code(f, (x, y), 1, 1)
+
     def test_bmm_vertical_fusion(self):
         def f(x, y):
             z = torch.bmm(x, y)
