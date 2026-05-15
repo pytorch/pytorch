@@ -8485,26 +8485,41 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(
-    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
-):
+def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    if len(additional_inputs) > 0:
+    num_scan_inputs = 2 * len(xs)
+    placeholders = [
+        node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    additional_placeholders = placeholders[num_scan_inputs:]
+    if len(additional_placeholders) != len(additional_inputs):
+        raise RuntimeError("Unable to generate code for associative_scan op")
+
+    # Dynamic shapes can lift symbols from the scan element metadata into the
+    # combine graph even when the combine function does not read them.
+    unsupported_inputs = []
+    for arg, placeholder in zip(additional_inputs, additional_placeholders):
+        if not isinstance(arg, (int, sympy.Basic)) or placeholder.users:
+            unsupported_inputs.append(arg)
+    if unsupported_inputs:
         raise RuntimeError(
-            "Unable to generate code for associative_scan op, because there are lifted arguments"
+            "Unable to generate code for associative_scan op, because there are "
+            "unsupported lifted arguments"
         )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+    subgraph_inputs.extend(additional_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
+            *additional_inputs,
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
