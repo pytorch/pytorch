@@ -58,23 +58,6 @@ retryable_workflows:
 - linux-binary
 - windows-binary
 - inductor-A100-perf-nightly
-- build-magma-rocm-linux
-- docker-cache-rocm
-- inductor-perf-test-nightly-rocm-mi300
-- inductor-perf-test-nightly-rocm-mi355
-- inductor-rocm-mi200
-- inductor-rocm-mi300
-- inductor-rocm-mi355
-- periodic-rocm-mi200
-- periodic-rocm-mi300
-- periodic-rocm-mi355
-- rocm-mi200
-- rocm-mi300
-- rocm-mi355
-- rocm-navi31
-- rocm-nightly
-- slow-rocm-mi200
-- trunk-rocm-sandbox
 retryable_step_names:
 - Initialize containers
 labeler_config: labeler.yml
