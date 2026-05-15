@@ -19008,11 +19008,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NotImplementedError: "remainder_cpu" not implemented for *
-                        DecorateInfo(
-                            unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                            dtypes=(torch.bool, torch.int16, torch.uint8, torch.int8, torch.int32, torch.int64)
-                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
