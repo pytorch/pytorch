@@ -137,30 +137,48 @@ def _make_kernel(
     # partial final chunk handled by TMA OOB clamp.
     num_chunks = (N + chunk_elems - 1) // chunk_elems
 
+    # Split chunk_elems into a 32-aligned bulk + a < 32 tail. fp32
+    # row_bytes >= 16 allows chunk_elems == 4; bf16/fp16 allows
+    # chunk_elems == 8; neither dtype's chunk_elems is required to be
+    # a multiple of 32 (e.g. bf16 N=40 -> chunk_elems=40 hits
+    # bulk_slots=32, tail_slots=8). Both branches must work.
+    _bulk_slots = (chunk_elems // 32) * 32
+    _tail_slots = chunk_elems - _bulk_slots
+
     @cute.jit
     def _scale_smem(cbuf_ptr, alpha, dtype, lane_id):
         """Multiply chunk_elems smem slots starting at cbuf_ptr by
         ``alpha`` (cast to ``dtype``) using up to 32 warp lanes
-        cooperatively. Each lane handles slot indices
-        ``lane_id, lane_id+32, lane_id+64, ...``. After this returns
-        the caller MUST issue ``cute.arch.sync_warp()`` so lane 0's
-        subsequent bulk-reduce sees every lane's writes through the
-        async proxy.
+        cooperatively. The 32-aligned bulk is handled via a
+        (32, slots_per_lane) strided view -- each lane vector-loads
+        its column, multiplies, vector-stores -- and any tail of
+        chunk_elems % 32 slots is handled by the first ``_tail_slots``
+        lanes.
+
+        Caller is responsible for the post-pass synchronization before
+        any bulk-reduce reads these slots: a ``cute.arch.sync_warp()``
+        (so lane 0 sees every other lane's writes) and a
+        ``cute.arch.fence_view_async_shared()`` (so the async proxy
+        sees the writes).
 
         Must be called outside any ``if lane_id == 0:`` gate so all
         lanes participate.
         """
         alpha_t = dtype(alpha)
-        if const_expr(chunk_elems >= 32):
-            slots_per_lane = chunk_elems // 32
-            for k in cutlass.range_constexpr(slots_per_lane):
-                i = lane_id + Int32(k * 32)
-                slot = cute.make_tensor(cbuf_ptr + i, cute.make_layout(1))
-                slot[0] = slot[0] * alpha_t
-        else:
-            # chunk_elems < 32: only the first chunk_elems lanes work.
-            if lane_id < Int32(chunk_elems):
-                slot = cute.make_tensor(cbuf_ptr + lane_id, cute.make_layout(1))
+        if const_expr(_bulk_slots > 0):
+            slots_per_lane = _bulk_slots // 32
+            buf_2d = cute.make_tensor(
+                cbuf_ptr,
+                cute.make_layout((32, slots_per_lane), stride=(1, 32)),
+            )
+            lane_slice = buf_2d[lane_id, None]
+            vals = lane_slice.load()
+            lane_slice.store(vals * alpha_t)
+        if const_expr(_tail_slots > 0):
+            if lane_id < Int32(_tail_slots):
+                slot = cute.make_tensor(
+                    cbuf_ptr + Int32(_bulk_slots) + lane_id, cute.make_layout(1)
+                )
                 slot[0] = slot[0] * alpha_t
         cute.arch.fence_view_async_shared()
 
