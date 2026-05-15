@@ -3817,14 +3817,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
     def is_tensor_method(self) -> bool:
-        from ..trace_rules import get_tensor_method
+        from ..trace_rules import is_tensor_method
 
-        return (
-            inspect.ismethoddescriptor(self.get_function())
-            and hasattr(self.get_function(), "__objclass__")
-            # pyrefly: ignore[missing-attribute]
-            and self.get_function().__objclass__ == torch._C.TensorBase
-        ) or self.get_function() in get_tensor_method()
+        return is_tensor_method(self.get_function())
 
     def torch_function_override_enabled(
         self, tx: "InstructionTranslator", args: Iterable[Any], kwargs: dict[str, Any]

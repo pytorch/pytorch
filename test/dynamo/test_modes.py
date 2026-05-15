@@ -750,6 +750,17 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
+    def test_tensor_unflatten_default_device(self):
+        def fn(x):
+            return x.unflatten(0, (2, 2))
+
+        x = torch.randn(4, 3)
+        with torch.device("cpu"):
+            expected = fn(x)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+
     @requires_gpu
     def test_flex_attention(self):
         import torch
