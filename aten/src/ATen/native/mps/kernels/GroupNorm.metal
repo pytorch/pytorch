@@ -13,7 +13,7 @@ inline float load_affine_scale(constant T* ptr, uint idx) {
 
 template <>
 inline float load_affine_scale(constant void* ptr, uint idx) {
-  return 1.0f;
+  return 1;
 }
 
 template <typename T>
@@ -23,7 +23,7 @@ inline float load_affine_bias(constant T* ptr, uint idx) {
 
 template <>
 inline float load_affine_bias(constant void* ptr, uint idx) {
-  return 0.0f;
+  return 0;
 }
 
 template <typename T, typename affine_T>
@@ -67,6 +67,14 @@ kernel void group_norm(
   threadgroup float local_sums_sq[simdgroup_size];
   threadgroup float tg_mean_val[1];
   threadgroup float tg_rstd_val[1];
+
+  // Zero-initialize so that unused entries don't contribute garbage to the
+  // simd_sum below when num_simdgroups < simdgroup_size.
+  if (simdgroup_id == 0) {
+    local_sums[simd_lane_id] = 0;
+    local_sums_sq[simd_lane_id] = 0;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   partial_sum = simd_sum(partial_sum);
   partial_sum_sq = simd_sum(partial_sum_sq);

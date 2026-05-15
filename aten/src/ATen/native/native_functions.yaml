@@ -4643,16 +4643,14 @@
 
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
-    CPU, CUDA: _cdist_forward
+    CPU, CUDA, MPS: _cdist_forward
     MTIA: _cdist_forward_mtia
-    MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
   tags: core
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   dispatch:
-    CPU, CUDA: _cdist_backward
-    MPS: _cdist_backward_mps
+    CPU, CUDA, MPS: _cdist_backward
   autogen: _cdist_backward.out
 
 - func: pdist(Tensor self, float p=2) -> Tensor
