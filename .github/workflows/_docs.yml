@@ -206,24 +206,14 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload Python Docs Preview
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: pytorch_docs/main/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
+        run: |
+          aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --delete --quiet
 
       - name: Upload C++ Docs Preview
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          s3-bucket: doc-previews
-          path: cppdocs/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+        run: |
+          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --delete --quiet
 
       - name: Post C++ Docs Coverage Comment
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
@@ -353,25 +343,19 @@ jobs:
           pip install $(echo dist/*.whl)[opt-einsum]
           ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh
 
+      - name: Install AWS CLI
+        if: ${{ steps.aws-creds.outcome == 'success' && steps.build-docs.outcome == 'success' }}
+        run: pip install awscli==1.29.40
+
       - name: Upload Python Docs Preview
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: pytorch_docs/main/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
+        run: |
+          aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --delete --quiet
 
       - name: Upload C++ Docs Preview
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          s3-bucket: doc-previews
-          path: cppdocs/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+        run: |
+          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --delete --quiet
 
       - name: Post C++ Docs Coverage Comment
         if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
