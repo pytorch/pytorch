@@ -1620,6 +1620,50 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def require_view_as_complex_input_layout(gm):
+    """
+    Make layout requirements explicit before fake propagation.
+
+    The lowering for view_as_complex already falls back through a contiguous
+    input, but fake tensor propagation runs before lowering and can otherwise
+    see computed tensors with a non-unit last stride. Limit this to single-use
+    inputs in compiled backward graphs to preserve output aliasing for graphs
+    that also expose the real tensor.
+    """
+
+    def _require_view_as_complex_input_layout_graph(graph):
+        apply_pass_to_subgraphs(_require_view_as_complex_input_layout_graph, graph)
+
+        for nd in graph.find_nodes(
+            op="call_function", target=torch.ops.aten.view_as_complex.default
+        ):
+            arg = nd.args[0]
+            if not isinstance(arg, torch.fx.Node) or arg.op in (
+                "placeholder",
+                "get_attr",
+            ):
+                continue
+            if len(arg.users) != 1:
+                continue
+            if (
+                arg.target is torch.ops.aten.clone.default
+                and arg.kwargs.get("memory_format") == torch.contiguous_format
+            ):
+                continue
+
+            with graph.inserting_before(nd):
+                clone = graph.call_function(
+                    torch.ops.aten.clone.default,
+                    (arg,),
+                    {"memory_format": torch.contiguous_format},
+                )
+            nd.replace_input_with(arg, clone)
+
+    _require_view_as_complex_input_layout_graph(gm.graph)
+    gm.graph.lint()
+    gm.recompile()
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):

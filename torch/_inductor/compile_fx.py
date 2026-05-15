@@ -116,7 +116,11 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes, view_to_reshape
+from .fx_passes.post_grad import (
+    post_grad_passes,
+    require_view_as_complex_input_layout,
+    view_to_reshape,
+)
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
@@ -1345,6 +1349,8 @@ class _InProcessFxCompile(FxCompile):
             # Also this has to be done before FakeTensorProp below to avoid the failed
             # .view() call.
             view_to_reshape(gm)
+            if is_backward:
+                require_view_as_complex_input_layout(gm)
 
             with dynamo_timed(
                 "additional_fake_tensor_prop", log_pt2_compile_event=True
