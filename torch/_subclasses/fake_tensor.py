@@ -2852,8 +2852,10 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
         if func is torch.ops.aten.to_dense.default:
-            # The native composite sees a fake MKLDNN tensor's strided meta
-            # backing, so handle this before generic decomposition.
+            # The registered fake op impl handles the usual path, but symbolic
+            # shapes can still reach generic decomposition below. The native
+            # composite sees a fake MKLDNN tensor's strided meta backing, so
+            # handle this before generic decomposition.
             dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
             masked_grad = kwargs.get("masked_grad")
             op_impl_out = maybe_to_dense_mkldnn(
@@ -3190,6 +3192,8 @@ class FakeTensorMode(TorchDispatchMode):
         return ret
 
     _cpp_meta_supports_symint = ordered_set(
+        # Keep alias on the C++ meta path so fake output wrapping preserves
+        # dispatch_keys for MKLDNN tensors.
         aten.alias.default,
         aten.empty.memory_format,
         aten.empty_strided.default,

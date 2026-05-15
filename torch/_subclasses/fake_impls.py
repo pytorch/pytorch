@@ -14,7 +14,16 @@ import torch
 import torch._custom_op
 import torch._logging
 import torch._prims_common as utils
+from torch._C._functorch import (
+    _unwrap_for_grad,
+    _wrap_for_grad,
+    get_unwrapped,
+    is_functorch_wrapped_tensor,
+    TransformType,
+)
 from torch._dispatch.python import no_python_dispatcher
+from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+from torch._functorch.utils import enable_single_level_autograd_function
 from torch._ops import OpOverload
 from torch._prims_common import (
     canonicalize_dim,
@@ -1409,14 +1418,21 @@ def maybe_to_dense_mkldnn(
 class _ToDenseMkldnn(torch.autograd.Function):
     @staticmethod
     def forward(
-        ctx: Any,
         self: torch.Tensor,
         dtype: torch.dtype | None,
         masked_grad: bool | None,
     ) -> torch.Tensor:
-        ctx.set_materialize_grads(False)
-        ctx.input_dtype = self.dtype
         return aten._to_dense.default(self, dtype, masked_grad)
+
+    @staticmethod
+    def setup_context(
+        ctx: Any,
+        inputs: tuple[torch.Tensor, torch.dtype | None, bool | None],
+        output: torch.Tensor,
+    ) -> None:
+        ctx.set_materialize_grads(False)
+        ctx.input_is_mkldnn = inputs[0].is_mkldnn
+        ctx.input_dtype = inputs[0].dtype
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1425,7 +1441,11 @@ class _ToDenseMkldnn(torch.autograd.Function):
     ) -> tuple[torch.Tensor | None, None, None]:
         if grad is None:
             return None, None, None
-        return aten.to_mkldnn.default(grad, ctx.input_dtype), None, None
+        if ctx.input_is_mkldnn:
+            return aten.to_mkldnn.default(grad, ctx.input_dtype), None, None
+        # torch.func transforms may replay setup_context on a strided wrapper;
+        # match that expected gradient layout instead of forcing MKLDNN.
+        return grad.to(dtype=ctx.input_dtype), None, None
 
 
 # Fake MKLDNN tensors keep MKLDNN-ness in a side channel because the backing
@@ -1454,6 +1474,58 @@ def to_dense_composite_impl(
     if dtype is not None:
         return self.to(dtype=dtype)
     return self
+
+
+def to_dense_functorch_frontmode_impl(
+    self: torch.Tensor,
+    dtype: torch.dtype | None = None,
+    *,
+    masked_grad: bool | None = None,
+) -> torch.Tensor:
+    # Grad transforms present MKLDNN inputs as strided wrappers.  Handle those
+    # before the generic composite decides to treat to_dense as a no-op.
+    interpreter = retrieve_current_functorch_interpreter()
+    if (
+        interpreter.key() != TransformType.Grad
+        or not is_functorch_wrapped_tensor(self)
+        or not get_unwrapped(self).is_mkldnn
+    ):
+        with interpreter.lower():
+            return aten.to_dense.default(self, dtype=dtype, masked_grad=masked_grad)
+
+    level = interpreter.level()
+
+    class _ToDenseMkldnnGrad(torch.autograd.function._SingleLevelFunction):
+        @staticmethod
+        def forward(
+            ctx: Any,
+            self: torch.Tensor,
+            dtype: torch.dtype | None,
+            masked_grad: bool | None,
+        ) -> torch.Tensor:
+            ctx.set_materialize_grads(False)
+            unwrapped_self = _unwrap_for_grad(self, level)
+            ctx.input_dtype = unwrapped_self.dtype
+            with torch.enable_grad(), interpreter.lower():
+                out = _ToDenseMkldnn.apply(unwrapped_self, dtype, masked_grad)
+            return _wrap_for_grad(out, level)
+
+        @staticmethod
+        def backward(ctx: Any, *grads: Any) -> Any:
+            (grad,) = grads
+            if grad is None:
+                return None, None, None
+            return grad.to(dtype=ctx.input_dtype), None, None
+
+    with enable_single_level_autograd_function():
+        # pyrefly: ignore [missing-attribute]
+        return _ToDenseMkldnnGrad.apply(self, dtype, masked_grad)
+
+
+_to_dense_functorch_lib = torch.library.Library(
+    "aten", "IMPL", "FuncTorchDynamicLayerFrontMode"
+)
+_to_dense_functorch_lib.impl("to_dense", to_dense_functorch_frontmode_impl)
 
 
 # Register through torch.library so direct aten.to_dense dispatch is intercepted
