@@ -6582,9 +6582,14 @@ class CPUReproTests(TestCase):
         model = torch.export.export(model, example_batch, strict=True).module()
 
         with torch.no_grad():
+            expected = model(*example_batch)
             metrics.reset()
-            torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(5)
+            actual, code = run_and_get_cpp_code(torch.compile(model), *example_batch)
+            self.assertTrue(same(expected, actual))
+            FileCheck().check("cpp_fused_add_native_layer_norm").run(code)
+            if _can_check_vec_metrics():
+                # The exact split of vectorized loops can vary by CPU backend.
+                self.assertGreaterEqual(metrics.generated_cpp_vec_kernel_count, 5)
 
     def test_dropout(self):
         class Model(nn.Module):
