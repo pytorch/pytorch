@@ -146,8 +146,7 @@ void listReverse(Stack& stack);
 
 template <typename T>
 void minList(Stack& stack) {
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
-  c10::List<T> b = pop(stack).to<c10::List<T>>();
+  auto [a, b] = pop<c10::List<T>, c10::List<T>>(stack);
 
   size_t min_size = std::min(a.size(), b.size());
   for (const auto i : c10::irange(min_size)) {
@@ -159,13 +158,12 @@ void minList(Stack& stack) {
     return;
   }
 
-  push(stack, b.size() < a.size() ? b : a);
+  push(stack, a.size() < b.size() ? a : b);
 }
 
 template <typename T>
 void maxList(Stack& stack) {
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
-  c10::List<T> b = pop(stack).to<c10::List<T>>();
+  auto [a, b] = pop<c10::List<T>, c10::List<T>>(stack);
 
   size_t min_size = std::min(a.size(), b.size());
   for (const auto i : c10::irange(min_size)) {
@@ -177,7 +175,7 @@ void maxList(Stack& stack) {
     return;
   }
 
-  push(stack, b.size() > a.size() ? b : a);
+  push(stack, a.size() > b.size() ? a : b);
 }
 
 void listPopImpl(Stack& stack, const char* empty_message);
