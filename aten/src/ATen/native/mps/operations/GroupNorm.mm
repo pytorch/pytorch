@@ -41,8 +41,7 @@ static void GroupNormKernelImpl(const Tensor& X,
   TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == C);
   TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == C);
   TORCH_INTERNAL_ASSERT(X.is_contiguous());
-  TORCH_INTERNAL_ASSERT(gamma.defined() == beta.defined());
-  TORCH_INTERNAL_ASSERT(!gamma.defined() || (gamma.scalar_type() == beta.scalar_type()));
+  TORCH_INTERNAL_ASSERT(!(gamma.defined() && beta.defined()) || (gamma.scalar_type() == beta.scalar_type()));
 
   if (N == 0) {
     return;
@@ -75,8 +74,11 @@ static void GroupNormKernelImpl(const Tensor& X,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format(
-          "group_norm_{}_{}", scalarToMetalTypeString(X), gamma.defined() ? scalarToMetalTypeString(gamma) : "void"));
+      auto pipeline_state =
+          lib.getPipelineStateForFunc(fmt::format("group_norm_{}_{}_{}",
+                                                  scalarToMetalTypeString(X),
+                                                  gamma.defined() ? scalarToMetalTypeString(gamma) : "void",
+                                                  beta.defined() ? scalarToMetalTypeString(beta) : "void"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X});
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, Y, mean, rstd, X, gamma_opt, beta_opt, params);

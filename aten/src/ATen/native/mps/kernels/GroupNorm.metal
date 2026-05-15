@@ -26,14 +26,14 @@ inline float load_affine_bias(constant void* ptr, uint idx) {
   return 0;
 }
 
-template <typename T, typename affine_T>
+template <typename T, typename gamma_T, typename beta_T>
 kernel void group_norm(
     device T* Y [[buffer(0)]],
     device T* mean [[buffer(1)]],
     device T* rstd [[buffer(2)]],
     constant T* X [[buffer(3)]],
-    constant affine_T* gamma [[buffer(4)]],
-    constant affine_T* beta [[buffer(5)]],
+    constant gamma_T* gamma [[buffer(4)]],
+    constant beta_T* beta [[buffer(5)]],
     constant GroupNormParams& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
@@ -134,31 +134,36 @@ kernel void group_norm(
   }
 }
 
-#define REGISTER_GROUP_NORM(T, affine_T)                 \
-  template [[host_name("group_norm_" #T "_" #affine_T)]] \
-  kernel void group_norm<T, affine_T>(                   \
-      device T * Y [[buffer(0)]],                        \
-      device T * mean [[buffer(1)]],                     \
-      device T * rstd [[buffer(2)]],                     \
-      constant T * X [[buffer(3)]],                      \
-      constant affine_T * gamma [[buffer(4)]],           \
-      constant affine_T * beta [[buffer(5)]],            \
-      constant GroupNormParams & params [[buffer(6)]],   \
-      uint tg_id [[threadgroup_position_in_grid]],       \
-      uint tid [[thread_position_in_threadgroup]],       \
-      uint tptg [[threads_per_threadgroup]],             \
-      uint simd_lane_id [[thread_index_in_simdgroup]],   \
+#define REGISTER_GROUP_NORM(T, gamma_T, beta_T)                     \
+  template [[host_name("group_norm_" #T "_" #gamma_T "_" #beta_T)]] \
+  kernel void group_norm<T, gamma_T, beta_T>(                       \
+      device T * Y [[buffer(0)]],                                   \
+      device T * mean [[buffer(1)]],                                \
+      device T * rstd [[buffer(2)]],                                \
+      constant T * X [[buffer(3)]],                                 \
+      constant gamma_T * gamma [[buffer(4)]],                       \
+      constant beta_T * beta [[buffer(5)]],                         \
+      constant GroupNormParams & params [[buffer(6)]],              \
+      uint tg_id [[threadgroup_position_in_grid]],                  \
+      uint tid [[thread_position_in_threadgroup]],                  \
+      uint tptg [[threads_per_threadgroup]],                        \
+      uint simd_lane_id [[thread_index_in_simdgroup]],              \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
-#define REGISTER_GROUP_NORM_AFFINE_TYPES(T) \
-  REGISTER_GROUP_NORM(T, float);            \
-  REGISTER_GROUP_NORM(T, half);             \
-  REGISTER_GROUP_NORM(T, bfloat);           \
-  REGISTER_GROUP_NORM(T, uchar);            \
-  REGISTER_GROUP_NORM(T, char);             \
-  REGISTER_GROUP_NORM(T, short);            \
-  REGISTER_GROUP_NORM(T, int);              \
-  REGISTER_GROUP_NORM(T, void);
+#define REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, affine_T) \
+  REGISTER_GROUP_NORM(T, affine_T, affine_T);               \
+  REGISTER_GROUP_NORM(T, affine_T, void);                   \
+  REGISTER_GROUP_NORM(T, void, affine_T);
+
+#define REGISTER_GROUP_NORM_AFFINE_TYPES(T)          \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, float);  \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, half);   \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, bfloat); \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, uchar);  \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, char);   \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, short);  \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, int);    \
+  REGISTER_GROUP_NORM(T, void, void);
 
 REGISTER_GROUP_NORM_AFFINE_TYPES(float);
 REGISTER_GROUP_NORM_AFFINE_TYPES(half);
