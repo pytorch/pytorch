@@ -108,9 +108,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
-        # assert_size_stride would fail to compile.
-        return
+        # Stack-allocated buffers and minimal-interface inputs are ArrayRefTensor.
+        # Other values in this wrapper are handle-backed and can use the base check.
+        if name in self.stack_allocated_buffers or (
+            V.graph.aot_mode
+            and config.aot_inductor.use_minimal_arrayref_interface
+            and name in V.graph.graph_inputs
+        ):
+            return
+        super().write_assert_size_stride(name, size, stride, op_name)
 
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
