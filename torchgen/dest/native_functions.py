@@ -21,8 +21,8 @@ _CPU_DLL_CUDA_KERNEL_TAG = "cpu_dll_cuda_kernel"
 _CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG = "cpu_dll_quantized_cuda_kernel"
 
 # Dispatch key → TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
-def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
-    if backend_index.external:
+def torch_api_key_word_prefix(bankend_index: BackendIndex) -> str:
+    if bankend_index.external:
         return ""
 
     # Use DispatchKey predicates, not only the bare "CUDA"/"XPU" enum names: NestedTensorCUDA,
