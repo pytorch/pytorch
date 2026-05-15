@@ -28,7 +28,6 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
-    IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -1633,6 +1632,53 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.common(mod, (qx, x_scale.item(), x_zp.item()))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
+    def test_int8_woq_arm_vec_micro_gemm_configs(self):
+        import importlib
+
+        # Import lowering first to avoid cpp_micro_gemm import cycles in isolated runs.
+        importlib.import_module("torch._inductor.lowering")
+        import torch._inductor.codegen.cpp_micro_gemm as cpp_micro_gemm
+        from torch._inductor.cpu_vec_isa import VecNEON, VecSVE256
+
+        class SizeVars:
+            def optimization_hint(self, x, fallback=1):
+                return x
+
+        class Graph:
+            sizevars = SizeVars()
+
+        class Kernel:
+            assert_function = "TORCH_CHECK"
+
+            def unroll_pragma(self, unroll):
+                return ""
+
+        with cpp_micro_gemm.V.set_graph_handler(Graph()):
+            for vec_isa_cls in (VecNEON, VecSVE256):
+                for m, n, k in ((136, 1024, 1024), (1, 64, 128)):
+                    with self.subTest(vec_isa=vec_isa_cls.__name__, m=m, n=n, k=k):
+                        with patch.object(
+                            cpp_micro_gemm, "pick_vec_isa", return_value=vec_isa_cls()
+                        ):
+                            micro_gemm = cpp_micro_gemm.create_micro_gemm(
+                                "micro_gemm",
+                                m,
+                                n,
+                                k,
+                                input_dtype=torch.bfloat16,
+                                input2_dtype=torch.int8,
+                                output_dtype=torch.float,
+                                compute_dtype=torch.float,
+                                num_threads=1,
+                                use_ref=False,
+                            )
+                        self.assertIsInstance(
+                            micro_gemm, cpp_micro_gemm.CppMicroGemmFP32Vec
+                        )
+                        code = micro_gemm.codegen_define(Kernel())
+                        self.assertIn("load_int8_as_float", code)
+                        self.assertIn("__builtin_prefetch", code)
+
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -1655,9 +1701,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
-    @unittest.skipIf(
-        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
-    )
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1721,9 +1764,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
-    @unittest.skipIf(
-        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
-    )
     def test_int8_woq_mm_concat(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):

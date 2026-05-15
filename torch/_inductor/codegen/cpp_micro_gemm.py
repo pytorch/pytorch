@@ -426,12 +426,54 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
+        VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecNEON,
+        [
+            (2, 16, 64),
+            (4, 16, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
+    ),
+    *generate_gemm_config(
         VecSVE256,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE256,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecSVE256,
+        [
+            (2, 16, 64),
+            (4, 16, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
@@ -576,6 +618,29 @@ inline void {{kernel_name}}_transpose_b_kernel(
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
 
+    {%- if input2_dtype == torch.int8 %}
+    auto load_int8_as_float = [](const int8_t* src, int64_t count) -> Vectorized {
+    #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+        auto src32 = at::vec::convert_to_int32<int8_t>(src, count);
+        return at::vec::convert<{{compute_t}}>(src32);
+    #else
+        constexpr auto VEC_LEN = Vectorized::size();
+        alignas(64) {{compute_t}} values[VEC_LEN] = {};
+        for (int64_t i = 0; i < count; ++i) {
+            values[i] = static_cast<{{compute_t}}>(src[i]);
+        }
+        return Vectorized::loadu(values);
+    #endif
+    };
+    auto prefetch_t0 = [](const void* ptr) {
+    #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+        _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0);
+    #elif defined(__GNUC__) || defined(__clang__)
+        __builtin_prefetch(ptr, 0, 3);
+    #endif
+    };
+
+    {%- endif %}
     Vectorized va;
     at::vec::VectorizedN<{{compute_t}}, COLS> vb;
     at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
@@ -624,8 +689,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
                 vb[col] = at::vec::convert<{{compute_t}}>(b);
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
-                auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN, load_size);
-                vb[col] = at::vec::convert<float>(b32);
+                vb[col] = load_int8_as_float(B + k * ldb + col * VLEN, load_size);
         {%- else %}
                 vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN, load_size);
         {%- endif %}
@@ -640,11 +704,10 @@ inline void {{kernel_name}}_transpose_b_kernel(
             vb[col] = at::vec::convert<{{compute_t}}>(b);
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
-            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
             if constexpr (prefetch) {
-              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+              prefetch_t0(B + (k + {{block_k}}) * ldb + col * VLEN);
             }
-            vb[col] = at::vec::convert<float>(b32);
+            vb[col] = load_int8_as_float(B + k * ldb + col * VLEN, VLEN);
         {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
         {%- endif %}
