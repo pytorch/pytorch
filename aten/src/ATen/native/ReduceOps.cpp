@@ -84,6 +84,7 @@
 #include <ATen/ops/mean.h>
 #include <ATen/ops/mean_meta.h>
 #include <ATen/ops/mean_native.h>
+#include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/nanmean_native.h>
 #include <ATen/ops/nansum.h>
 #include <ATen/ops/nansum_native.h>
@@ -1294,6 +1295,11 @@ Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
   }
 
   ScalarType dtype = get_dtype_from_result(result, opt_dtype);
+  // Integer dtype: NaN is unrepresentable, replace with 0 and use sum (#183318).
+  if (opt_dtype.has_value() && c10::isIntegralType(dtype, /*includeBool=*/true)) {
+    return at::sum_out(
+        result, at::nan_to_num(self, /*nan=*/0.0), dim, keepdim, opt_dtype);
+  }
   auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result = result.zero_();

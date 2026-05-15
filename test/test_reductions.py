@@ -1877,6 +1877,49 @@ class TestReductions(TestCase):
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
+    @dtypes(torch.int32, torch.int64)
+    def test_nansum_int_out_dtype_float_input(self, device, dtype):
+        # Regression for #183318.
+        x = torch.tensor(
+            [[float("nan"), 2.0], [3.0, float("nan")]],
+            dtype=torch.float32,
+            device=device,
+        )
+        expected = torch.tensor([2, 3], dtype=dtype, device=device)
+        self.assertEqual(torch.nansum(x, dim=1, dtype=dtype), expected)
+
+        y = torch.arange(1, 46, device=device, dtype=torch.float32).reshape(5, 9)
+        for idx in [(0, 2), (1, 0), (2, 4), (4, 8)]:
+            y[idx] = float("nan")
+        ref_dim = torch.nan_to_num(y, nan=0.0).sum(dim=1, dtype=dtype)
+        self.assertEqual(torch.nansum(y, dim=1, dtype=dtype), ref_dim)
+        ref_all = torch.nan_to_num(y, nan=0.0).sum(dtype=dtype)
+        self.assertEqual(torch.nansum(y, dtype=dtype), ref_all)
+
+        all_nan = torch.full((6,), float("nan"), device=device, dtype=torch.float32)
+        self.assertEqual(
+            torch.nansum(all_nan, dtype=dtype),
+            torch.zeros((), dtype=dtype, device=device),
+        )
+
+    @onlyCPU
+    @dtypes(torch.int32, torch.int64)
+    def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
+        # Eager/inductor parity for #183318.
+        out_dtype = dtype
+        x = torch.tensor(
+            [[float("nan"), 2.0], [3.0, float("nan")]],
+            dtype=torch.float32,
+            device=device,
+        )
+        eager = torch.nansum(x, dim=1, dtype=out_dtype)
+        compiled = torch.compile(
+            lambda t: torch.nansum(t, dim=1, dtype=out_dtype),
+            backend="inductor",
+            fullgraph=True,
+        )(x)
+        self.assertEqual(eager, compiled)
+
     @dtypes(*all_types_and(torch.half))
     @dtypesIfXPU(torch.half, torch.int8, torch.uint8, torch.float32)
     # Acc issue for other types on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
