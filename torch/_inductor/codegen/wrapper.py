@@ -2131,27 +2131,25 @@ class PythonWrapperCodegen(CodeGen):
     def set_writeline(
         self,
         target: IndentedBuffer,
-        writeline: Callable[..., None] | None = None,
+        writeline: Callable[..., None],
     ) -> Iterator[Callable[..., None]]:
         """Temporarily redirect self.writeline to write into `target`.
 
-        Plain strings go through `writeline` (default target.writeline; pass
-        target.writeline_aot/writeline_jit for one side of a dual buffer).
+        Plain strings go through `writeline`.
         WrapperLines are codegen'd into `target` directly.
         """
         old = self.writeline
-        emit = writeline if writeline is not None else target.writeline
 
         def dispatch(line: LineContext | DeferredLineBase | WrapperLine | str) -> None:
             if isinstance(line, WrapperLine):
                 # pyrefly: ignore [missing-attribute]
                 line.codegen(target)
             else:
-                emit(line)
+                writeline(line)
 
         try:
             self.writeline = dispatch  # type: ignore[method-assign]
-            yield emit
+            yield dispatch
         finally:
             self.writeline = old  # type: ignore[method-assign]
 
@@ -2180,7 +2178,7 @@ class PythonWrapperCodegen(CodeGen):
 
             # At this point, we shouldn't generate any new memory planning lines.
             # Override writeline to point at the wrapper call, in case it gets called.
-            with self.set_writeline(self.wrapper_call):
+            with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
                         # pyrefly: ignore [missing-attribute]
