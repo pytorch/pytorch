@@ -193,7 +193,7 @@ __global__ void adaptivemaxgradinput(
       const T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
       const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
-      int argmax = (*ptr_ind);
+      int64_t argmax = (*ptr_ind);
       gradInput_d[argmax] += grad_delta;
     }
   }
