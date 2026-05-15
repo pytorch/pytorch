@@ -60,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyOn,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2084,19 +2085,16 @@ class TestProfilerDevice(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self, device):
         device_type = device.split(":")[0]
-        use_device = device_type != "cpu"
-        with _profile(use_device=device_type if use_device else None, use_kineto=True):
+        with _profile(use_device=device_type, use_kineto=True):
             self.payload(device=device)
 
-        with _profile(
-            use_device=device_type if use_device else None, use_kineto=True
-        ) as p:
+        with _profile(use_device=device_type, use_kineto=True) as p:
             self.payload(device=device)
 
         self.assertTrue("aten::mm" in str(p))
 
         output = p.key_averages().table(
-            sort_by="self_device_time_total" if use_device else "self_cpu_time_total",
+            sort_by="self_device_time_total" if device_type != "cpu" else "self_cpu_time_total",
             row_limit=-1,
         )
         found_gemm = False
@@ -2382,7 +2380,6 @@ class TestProfilerDevice(TestCase):
     def test_kineto_profiler_multiple_steppers(self, device):
         device_type = device.split(":")[0]
         niters = 8
-        use_device = device_type != "cpu"
         net = SimpleNet()
         opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
         opt.zero_grad()
@@ -2420,8 +2417,7 @@ class TestProfilerDevice(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self, device):
         device_type = device.split(":")[0]
-        use_device = device_type != "cpu"
-        with _profile(use_device=device_type if use_device else None, use_kineto=True):
+        with _profile(use_device=device_type, use_kineto=True):
             self.payload(device=device)
 
         with TemporaryDirectoryName() as dname:
@@ -2566,10 +2562,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @unittest.skipIf(
-        torch.xpu.is_available(),
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-    )
+    @skipIf(True, "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263", device_type="xpu")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -2612,7 +2605,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_user_annotation(self, device):
         device_type = device.split(":")[0]
-        use_device = device_type != "cpu"
         with profile(activities=supported_activities()) as p:
             with torch.profiler.record_function("test_user_annotation"):
                 self.payload(device=device)
@@ -2641,8 +2633,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
         gpu_activity = getattr(ProfilerActivity, device_type.upper(), None)
-        self.assertIsNotNone(gpu_activity)
-        activities = [ProfilerActivity.CPU, gpu_activity]
+        activities = get_profiler_activities(device_type)
         with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
                 x, y = (torch.rand(4, 4).to(device) for _ in range(2))
@@ -2674,10 +2665,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertTrue(len(p2.events()) == 0)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    @unittest.skipIf(
-        torch.cuda.is_available(), "CUDA complains about forking after init"
-    )
-    @unittest.skipIf(torch.xpu.is_available(), "XPU complains about forking after init")
+    @onlyOn("cpu")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     def test_forked_process(self, device):
         device_type = device.split(":")[0]
@@ -2717,7 +2705,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/150059 for example",
     )
     def test_profile_all_threads(self, device):
-        device_type = device.split(":")[0]
         profiling_started = threading.Event()
         profiling_ended = threading.Event()
         n_rep = 5
@@ -2813,7 +2800,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cuda"])
     @onlyAccelerator
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -2865,7 +2852,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cuda"])
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
