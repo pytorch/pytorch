@@ -159,17 +159,4 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
-    # Auto-generated redirects for moved files
-    "community/index": "community/index.html",
-    "cpp_extension": "cpp_extension.html",
-    "elastic/events": "elastic/events.html",
-    "elastic/multiprocessing": "elastic/multiprocessing.html",
-    "elastic/rendezvous": "elastic/rendezvous.html",
-    "nativert": "nativert.html",
-    "nn.init": "nn.init.html",
-    "quantization": "quantization.html",
-    "sparse": "sparse.html",
-    "tensors": "tensors.html",
-    "torch": "torch.html",
-    "notes/hip": "notes/hip.html",
 }
