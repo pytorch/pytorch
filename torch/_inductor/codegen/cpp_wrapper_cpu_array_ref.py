@@ -535,7 +535,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
-                            V.graph.graph_inputs[input_key]
+                            V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
                         assert dtype is not None, (
                             "Fails to get the dtype of the sympy.Expr"
