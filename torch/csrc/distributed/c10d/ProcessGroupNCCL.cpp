@@ -34,7 +34,6 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -1638,18 +1637,6 @@ void ProcessGroupNCCL::shutdown() {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
-
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
-  // Drop our entry from NCCLDevCommManager so a future PG reusing the same
-  // group name can register a fresh comm. Skip if we never registered; the
-  // manager is a per-device singleton that throws if accessed with a
-  // different device than the one it was created for, so we must use the
-  // exact device we registered with rather than at::cuda::current_device().
-  if (symmMemRegisteredDevice_.has_value()) {
-    c10d::symmetric_memory::NCCLDevCommManager::get(*symmMemRegisteredDevice_)
-        .unregister_comm(getGroupUid());
-  }
-#endif
 
   // `shutdown()` or `abort` already called. Skip the favor of disposing
   // communicators.
@@ -3343,29 +3330,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
-
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
-    // Publish the freshly-created host ncclComm into NCCLDevCommManager so
-    // that NCCLSymmetricMemory can find it by group name without
-    // dynamic_cast'ing back to ProcessGroupNCCL. Other producers (e.g.
-    // torchcomms' TorchCommNCCLX) populate the same registry, so symm_mem
-    // sees a uniform group_name -> ncclComm_t lookup regardless of which
-    // backend owns the comm. Unregistered in ~ProcessGroupNCCL.
-    //
-    // One ProcessGroupNCCL can create multiple ncclComms (one per device
-    // key) under the same group name. NCCLDevCommManager's registry is
-    // keyed by group_name only, so we skip registering subsequent comms
-    // -- the first-registered comm matches the legacy getCommPtr()
-    // semantics (current-device comm), which is all symm_mem ever asked
-    // for. Multi-device-per-rank symm_mem is not supported by this path.
-    {
-      auto& mgr = c10d::symmetric_memory::NCCLDevCommManager::get(device);
-      if (!mgr.get_comm_if_exists(getGroupUid()).has_value()) {
-        mgr.register_comm(getGroupUid(), ncclComm->getNcclComm());
-      }
-      symmMemRegisteredDevice_ = device;
-    }
-#endif
   }
 
   it = devNCCLCommMap_.find(deviceKey);
