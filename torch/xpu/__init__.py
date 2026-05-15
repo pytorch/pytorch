@@ -62,6 +62,8 @@ class _ZesDeviceInfo:
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
+# Interval between two HW counter reads; must be >=100ms for fresh data.
+_zes_sample_interval_ms = 150
 
 
 def _is_compiled() -> bool:
@@ -1041,8 +1043,7 @@ def power_draw(device: Device = None) -> float:
 
     import time
 
-    # 100ms is well above the hardware energy-counter update granularity.
-    time.sleep(0.1)
+    time.sleep(_zes_sample_interval_ms / 1000.0)
 
     counter_end = pyzes.zes_power_energy_counter_t()
     _zes_check(
