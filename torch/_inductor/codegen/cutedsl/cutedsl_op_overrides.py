@@ -26,9 +26,11 @@ class CuteDSLCSEVariable(CSEVariable):
         shape=None,
         *,
         is_scalar_expr: bool = False,
+        index_expr: sympy.Expr | None = None,
     ):
         super().__init__(name, bounds, dtype, shape)
         self.is_scalar_expr = is_scalar_expr
+        self.index_expr = index_expr
 
 
 CuteDSLArg = CSEVariable | str | bool | float | int
@@ -108,6 +110,17 @@ class CuteDSLOpOverrides(OpOverrides):
         return cse_var is not None and not CuteDSLOpOverrides._is_scalar_expr(arg)
 
     @staticmethod
+    def _index_expr(arg: CuteDSLArg) -> sympy.Expr | None:
+        cse_var = CuteDSLOpOverrides._get_cse_var(arg)
+        if isinstance(cse_var, CuteDSLCSEVariable):
+            return cse_var.index_expr
+        if isinstance(arg, (int, sympy.Integer)):
+            return sympy.Integer(arg)
+        if isinstance(arg, str) and arg.lstrip("-").isdigit():
+            return sympy.Integer(int(arg))
+        return None
+
+    @staticmethod
     def _ensure_tensor_ssa(
         arg: CuteDSLArg, template_tensor: CuteDSLArg, *, is_tensor: bool
     ) -> str:
@@ -139,7 +152,12 @@ class CuteDSLOpOverrides(OpOverrides):
         return None, ValueRanges.unknown()
 
     @staticmethod
-    def _apply_binary_op(a: CuteDSLArg, b: CuteDSLArg, op_format: str) -> CuteDSLArg:
+    def _apply_binary_op(
+        a: CuteDSLArg,
+        b: CuteDSLArg,
+        op_format: str,
+        index_expr_fn=None,
+    ) -> CuteDSLArg:
         """
         Apply a binary operation with automatic scalar-to-tensor conversion.
 
@@ -197,9 +215,17 @@ class CuteDSLOpOverrides(OpOverrides):
             else:
                 shape = tuple(expected.size()) if expected is not None else None
 
-            return V.kernel.cse.generate(
+            result = V.kernel.cse.generate(
                 V.kernel.body, result_expr, bounds=bounds, dtype=dtype, shape=shape
             )
+            if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+                a_expr = CuteDSLOpOverrides._index_expr(a)
+                b_expr = CuteDSLOpOverrides._index_expr(b)
+                if a_expr is not None and b_expr is not None:
+                    result.index_expr = V.graph.sizevars.simplify(
+                        index_expr_fn(a_expr, b_expr)
+                    )
+            return result
 
         result_expr = op_format.format(
             a=CuteDSLOpOverrides._as_expr(a),
@@ -216,6 +242,13 @@ class CuteDSLOpOverrides(OpOverrides):
             dtype=dtype if dtype is not None else torch.int32,
         )
         result.is_scalar_expr = True
+        if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+            a_expr = CuteDSLOpOverrides._index_expr(a)
+            b_expr = CuteDSLOpOverrides._index_expr(b)
+            if a_expr is not None and b_expr is not None:
+                result.index_expr = V.graph.sizevars.simplify(
+                    index_expr_fn(a_expr, b_expr)
+                )
         return result
 
     @staticmethod
@@ -286,19 +319,27 @@ class CuteDSLOpOverrides(OpOverrides):
             dtype=dtype,
         )
         result.is_scalar_expr = True
+        if isinstance(result, CuteDSLCSEVariable):
+            result.index_expr = V.graph.sizevars.simplify(expr)
         return result
 
     @staticmethod
     def add(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} + {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} + {b})", lambda a_expr, b_expr: a_expr + b_expr
+        )
 
     @staticmethod
     def mul(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} * {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} * {b})", lambda a_expr, b_expr: a_expr * b_expr
+        )
 
     @staticmethod
     def sub(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} - {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} - {b})", lambda a_expr, b_expr: a_expr - b_expr
+        )
 
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
@@ -306,15 +347,21 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def floordiv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} // {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} // {b})", lambda a_expr, b_expr: a_expr // b_expr
+        )
 
     @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        # Inductor ops.mod is C-style; SymPy/Python % is Python-style for
+        # negative values, so don't attach index_expr metadata here.
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
     def remainder(a, b):
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
+        return CuteDSLOpOverrides._apply_binary_op(
+            a, b, "({a} % {b})", lambda a_expr, b_expr: a_expr % b_expr
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
