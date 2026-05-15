@@ -1014,6 +1014,32 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_group16_fuses(self):
+        M = 128
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (acc.relu(), acc.float().view(M, -1, 16).sum(-1)),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 128, device="cuda", dtype=torch.float16)
+        b = torch.rand(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
+        FileCheck().check("local_reduce_group=16").check("local_reduce_out=").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_local_reduce_feeds_main(self):
         M = 64
         N = 64
