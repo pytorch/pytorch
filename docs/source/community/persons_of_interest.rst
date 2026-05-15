@@ -13,7 +13,7 @@ Responsibilities
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
-Lead Core Maintainer 
+Lead Core Maintainer
 ---------------------------
 
 * Alban Desmaison (`albanD <https://github.com/albanD>`__)
