@@ -102,7 +102,10 @@ Rules for working with ghstack:
   burning unnecessary CI. Use a full `ghstack` when you're intentionally
   updating CI for the whole stack.
 - **Preserve metadata trailers.** When editing a commit message, never delete
-  `Pull-Request:` or `ghstack-source-id:` trailers. If you modified the commit
+  `Pull-Request:` or `ghstack-source-id:` trailers. Always re-read them from
+  HEAD each time you compose an amend — never reuse a saved/cached message
+  body, since `ghstack` rewrites `ghstack-source-id` on every push and a
+  stale trailer will clobber HEAD's current one. If you modified the commit
   message, run `ghstack -u` afterwards to push the updated PR description.
 - **Never push directly.** Do not `git push` to branches, and never directly
   modify the `gh/USERNAME/N` branches — ghstack manages those.
