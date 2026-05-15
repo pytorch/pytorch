@@ -319,7 +319,13 @@ def convolution_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
-    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    if statically_known_true(input.size(1) == 0) and statically_known_true(
+        bias_sizes[0] != 0
+    ):
+        # deal with the `input_channel=0` case
+        grad_bias = grad_output.new_zeros(bias_sizes)
+    else:
+        grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
