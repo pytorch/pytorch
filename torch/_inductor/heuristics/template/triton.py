@@ -12,7 +12,6 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
@@ -41,6 +40,7 @@ from ...utils import (
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .registry import register_template_heuristic
 from .triton_addmm import AddMMConfigMixin
 
 
@@ -2882,7 +2882,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,  # type: ignore[misc]
+    ROCmConfigHeuristic,
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
