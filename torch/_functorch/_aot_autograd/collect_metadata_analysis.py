@@ -63,7 +63,7 @@ from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 zip = strict_zip
 
@@ -148,7 +148,7 @@ def _run_forward_in_functionalized_mode(
     f: Callable[..., Any],
     flat_args: tuple[Any, ...],
     to_fun_fn: Callable[[object], object],
-) -> tuple[Any, Any, list[AOTOutput], FunctionalTensorMode, bool]:
+) -> tuple[Any, Any, list[PlainAOTOutput], FunctionalTensorMode, bool]:
     prior_grad_enabled = torch.is_grad_enabled()
     prior_autocast_states = _get_autocast_states()
 
@@ -259,7 +259,7 @@ def _collect_input_alias_info(
 def _collect_output_alias_info(
     flat_f_args: Any,
     flat_f_outs: Any,
-    flat_f_outs_descs: list[AOTOutput],
+    flat_f_outs_descs: Sequence[AOTOutput],
     input_info: list[InputAliasInfo],
 ) -> tuple[list[OutputAliasInfo], list[torch.Tensor], list[AOTInput]]:
     output_info: list[OutputAliasInfo] = []
@@ -562,8 +562,8 @@ from a multi-output view call"
                     base_idx = maybe_existing_out_idx
                 else:
                     # Next, check if o's ._base is an intermediate base that we already returned
-                    maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
-                        id(o._base)
+                    maybe_existing_base_output_idx = (
+                        intermediate_base_tensor_id_to_output_idx.get(id(o._base))
                     )
                     if maybe_existing_base_output_idx is not None:
                         output_type = OutputType.alias_of_intermediate
@@ -698,7 +698,7 @@ def _collect_traced_tangents_and_fw_graph_outs(
     flat_f_args: Any,
     flat_args_descs: list[AOTInput],
     flat_f_outs: Any,
-    flat_f_outs_descs: list[AOTOutput],
+    flat_f_outs_descs: Sequence[AOTOutput],
     input_info: list[InputAliasInfo],
     output_info: list[OutputAliasInfo],
     intermediate_bases: list[torch.Tensor],
@@ -783,8 +783,7 @@ def _collect_traced_tangents_and_fw_graph_outs(
     traced_tangents = pytree.tree_map(from_fun, f_tangents)
     traced_tangents = pytree.tree_map(_view_avoid_dupes_with_primals, traced_tangents)
     traced_tangents = [
-        coerce_tangent_and_suggest_memory_format(tt)[0]
-        for i, tt in enumerate(traced_tangents)
+        coerce_tangent_and_suggest_memory_format(tt)[0] for tt in traced_tangents
     ]
     # NB: update this if the maps above ever change structure.
     # Also, it might be helpful to add coercion information to the tangent desc!
@@ -798,7 +797,7 @@ def _collect_traced_tangents_and_fw_graph_outs(
     # Build the full list of forward graph outputs so the subclass wrapping
     # code knows exactly which graph outputs to wrap back into subclasses.
     # Including intermediate_bases unconditionally is safe: they are only
-    # populated when outputs require grad (line ~539), so they are naturally
+    # populated when outputs require grad, so they are naturally
     # empty during pure inference.  In the "downgrade from training to
     # inference" path, num_intermediate_bases > 0 is already gated behind
     # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
@@ -942,9 +941,7 @@ def run_functionalized_fw_and_collect_metadata(
         static_input_indices = _normalize_static_input_indices(
             static_input_indices, flat_args
         )
-        grad_enabled_mutation = _restore_grad_mode_and_get_mutation(
-            prior_grad_enabled
-        )
+        grad_enabled_mutation = _restore_grad_mode_and_get_mutation(prior_grad_enabled)
 
         subclass_inp_meta = create_subclass_meta(flat_args)
         subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
