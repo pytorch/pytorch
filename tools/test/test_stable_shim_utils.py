@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
@@ -10,13 +11,13 @@ import re
 
 from tools.linter.adapters._stable_shim_utils import (
     FUNCTION_IDENTIFIER_MATCHER,
-    STRUCT_CLASS_IDENTIFIER_MATCHER,
-    TYPEDEF_IDENTIFIER_MATCHER,
-    USING_IDENTIFIER_MATCHER,
     IdentifierMatcher,
     IdentifierUse,
     MatcherAccumulator,
     MultilineMatcher,
+    STRUCT_CLASS_IDENTIFIER_MATCHER,
+    TYPEDEF_IDENTIFIER_MATCHER,
+    USING_IDENTIFIER_MATCHER,
 )
 
 
@@ -27,7 +28,7 @@ class TestStableShimUtils(unittest.TestCase):
         self,
         sample: str,
         matcher: MatcherAccumulator,
-        expected_version: tuple[int, int] | None,
+        expected_version: tuple[int, int, int] | None,
     ) -> dict[int, list[str]]:
         # Run through the lines, collect all identifiers on the line and return.
         result = {}
@@ -42,7 +43,7 @@ class TestStableShimUtils(unittest.TestCase):
 
     def test_function_match_accumulator(self):
         matcher = MatcherAccumulator([FUNCTION_IDENTIFIER_MATCHER])
-        expected_version = (2, 8)
+        expected_version = (2, 8, 0)
         matcher.set_scope_version(expected_version)
 
         sample = """
@@ -94,7 +95,7 @@ class TestStableShimUtils(unittest.TestCase):
     def test_using_match_accumulator(self):
         matcher = MatcherAccumulator([USING_IDENTIFIER_MATCHER])
 
-        expected_version = (2, 5)
+        expected_version = (2, 5, 0)
         matcher.set_scope_version(expected_version)
 
         sample = """
@@ -110,7 +111,7 @@ class TestStableShimUtils(unittest.TestCase):
     def test_struct_class_match_accumulator(self):
         matcher = MatcherAccumulator([STRUCT_CLASS_IDENTIFIER_MATCHER])
 
-        expected_version = (2, 5)
+        expected_version = (2, 5, 0)
         matcher.set_scope_version(expected_version)
 
         sample = """
@@ -141,7 +142,9 @@ class TestStableShimUtils(unittest.TestCase):
         # In this case it parses a macro called `TO_BE_DETERMINED_MULTI_VERSION_MACRO`
         # with two arguments, where one argument gets the provided version, while the
         # other arguments is always set to the None version.
-        def bespoke_macro_parser(buffer: str, current_version: tuple[int, int] | None):
+        def bespoke_macro_parser(
+            buffer: str, current_version: tuple[int, int, int] | None
+        ):
             pattern = r"TO_BE_DETERMINED_MULTI_VERSION_MACRO\(([^,]*),([^\)]*)\)"
             buffer_without_space = buffer.replace(" ", "").replace("\n", "")
             res = re.findall(pattern, buffer_without_space)
@@ -160,7 +163,7 @@ class TestStableShimUtils(unittest.TestCase):
             ]
         )
 
-        expected_version = (2, 5)
+        expected_version = (2, 5, 0)
         matcher.set_scope_version(expected_version)
 
         sample = """
@@ -175,11 +178,11 @@ class TestStableShimUtils(unittest.TestCase):
         expected = {
             2: [
                 IdentifierUse(identifier="A", version=None),
-                IdentifierUse(identifier="B", version=(2, 5)),
+                IdentifierUse(identifier="B", version=(2, 5, 0)),
             ],
             8: [
                 IdentifierUse(identifier="old_thing", version=None),
-                IdentifierUse(identifier="new_thing", version=(2, 5)),
+                IdentifierUse(identifier="new_thing", version=(2, 5, 0)),
             ],
         }
         result = {}
@@ -205,7 +208,7 @@ class TestStableShimUtils(unittest.TestCase):
                 IdentifierMatcher.word("short2"),
             ]
         )
-        expected_version = (2, 8)
+        expected_version = (2, 8, 0)
         matcher.set_scope_version(expected_version)
 
         sample = """

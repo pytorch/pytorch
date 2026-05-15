@@ -13,7 +13,8 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,7 +51,7 @@ class IdentifierUse(NamedTuple):
     """
 
     identifier: str
-    version: tuple[int, int] | None
+    version: tuple[int, int, int] | None
 
 
 class MultilineMatcher(NamedTuple):
@@ -64,10 +65,10 @@ class MultilineMatcher(NamedTuple):
     # Handler is a function that takes:
     # - buffer: str -> This is the accumulated buffer between the start and end
     #   pattern, unstripped and possibly containing newlines.
-    # - version: tuple[int, int] | None -> Provides the version of the block this
+    # - version: tuple[int, int, int] | None -> Provides the version of the block this
     #   buffer is located in, None if outside of a versioning block.
     # It returns a list of IdentifierUse entries.
-    handler: Callable[[str, tuple[int, int] | None], list[IdentifierUse]]
+    handler: Callable[[str, tuple[int, int, int] | None], list[IdentifierUse]]
 
 
 class IdentifierMatcher(NamedTuple):
@@ -89,14 +90,14 @@ class IdentifierMatcher(NamedTuple):
 
 def extract_factory(
     pattern,
-) -> Callable[[str, tuple[int, int] | None], list[IdentifierUse]]:
+) -> Callable[[str, tuple[int, int, int] | None], list[IdentifierUse]]:
     """
     Default handler that uses a single pattern and is expected to just find a single match.
     It uses re.DOTALL to compile the regex pattern provided.
     """
     p = re.compile(pattern, flags=re.DOTALL)
 
-    def extractor(buffer: str, current_version: tuple[int, int] | None):
+    def extractor(buffer: str, current_version: tuple[int, int, int] | None):
         identifier = p.search(buffer)
 
         if identifier:
@@ -198,7 +199,7 @@ class MatcherAccumulator:
         self._active_matcher = None
         self._found_identifiers = []
 
-    def set_scope_version(self, scope_version: tuple[int, int] | None):
+    def set_scope_version(self, scope_version: tuple[int, int, int] | None):
         """
         Function called whenever the outer version 'scope' we're parsing from
         changes, this is provided to the handler.
@@ -284,17 +285,17 @@ class PreprocessorTracker:
         # Stack of (is_version_block, version_tuple) tuples
         # is_version_block: True if this is a TORCH_FEATURE_VERSION >= TORCH_VERSION_X_Y_0 block
         # version_tuple: (major, minor) if is_version_block is True, else None
-        self.preprocessor_stack: list[tuple[bool, tuple[int, int] | None]] = []
+        self.preprocessor_stack: list[tuple[bool, tuple[int, int, int] | None]] = []
 
         # Current version requirement (if inside a version block)
-        self.version_of_block: tuple[int, int] | None = None
+        self.version_of_block: tuple[int, int, int] | None = None
 
         # Track if we're inside a block comment
         self.in_block_comment: bool = False
 
         # Regex to match version conditions in #if or #elif
         self.version_pattern = re.compile(
-            r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
+            r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_(\d+)"
         )
 
         self._identifier_accumulator = MatcherAccumulator(matchers)
@@ -333,7 +334,8 @@ class PreprocessorTracker:
             if version_match:
                 major = int(version_match.group(1))
                 minor = int(version_match.group(2))
-                version_tuple = (major, minor)
+                patch = int(version_match.group(3))
+                version_tuple = (major, minor, patch)
                 self.preprocessor_stack.append((True, version_tuple))
                 self.version_of_block = version_tuple
             else:
@@ -382,7 +384,8 @@ class PreprocessorTracker:
             if version_match_elif:
                 major = int(version_match_elif.group(1))
                 minor = int(version_match_elif.group(2))
-                version_tuple = (major, minor)
+                patch = int(version_match_elif.group(3))
+                version_tuple = (major, minor, patch)
                 self.preprocessor_stack.append((True, version_tuple))
                 self.version_of_block = version_tuple
             else:

@@ -119,6 +119,19 @@ AOTI_TORCH_EXPORT AOTITorchError // This is a really long function
 this_is_a_very_long_function2(StableIValue** ret_value);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
+// Functions with their version names in them for readable tests.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+AOTI_TORCH_EXPORT void function_2_11_0();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_1
+AOTI_TORCH_EXPORT void function_2_12_1();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_1
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_2
+AOTI_TORCH_EXPORT void function_2_13_2();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_2
+
 
 #ifdef __cplusplus
 } // extern "C"

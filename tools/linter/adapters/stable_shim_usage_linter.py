@@ -33,7 +33,7 @@ LINTER_CODE = "STABLE_SHIM_USAGE"
 
 def get_shim_functions(
     shim_files: list[Path | str] | None = None,
-) -> dict[str, tuple[int, int]]:
+) -> dict[str, tuple[int, int, int]]:
     """
     Extract function names from shim header files and their required version.
     Returns a dict mapping function name to (major, minor) version tuple.
@@ -68,7 +68,7 @@ def get_shim_functions(
             "Ensure all shim header files exist in the repository."
         )
 
-    identifiers: dict[str, tuple[int, int]] = {}
+    identifiers: dict[str, tuple[int, int, int]] = {}
 
     for shim_file in shim_files_to_check:
         with open(shim_file) as f:
@@ -94,7 +94,7 @@ def get_shim_functions(
 
 
 def write_shim_function_versions(
-    functions: dict[str, tuple[int, int]],
+    functions: dict[str, tuple[int, int, int]],
     output_file: Path | str | None = None,
 ) -> None:
     """
@@ -128,12 +128,12 @@ def write_shim_function_versions(
         )
         f.write("# DO NOT EDIT MANUALLY.\n\n")
 
-        for func_name, (major, minor) in sorted_functions:
-            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_0\n")
+        for func_name, (major, minor, patch) in sorted_functions:
+            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n")
 
 
 def check_file(
-    filename: str, shim_functions: dict[str, tuple[int, int]]
+    filename: str, shim_functions: dict[str, tuple[int, int, int]]
 ) -> list[LintMessage]:
     """
     Check the input file for proper usage of versioned shim functions.
@@ -161,8 +161,8 @@ def check_file(
             func_name = identifier_version.identifier
             required_version = shim_functions[func_name]
 
-            major, minor = required_version
-            required_macro = f"TORCH_VERSION_{major}_{minor}_0"
+            major, minor, patch = required_version
+            required_macro = f"TORCH_VERSION_{major}_{minor}_{patch}"
 
             if version_of_block is None:
                 # Not inside any version block
@@ -187,8 +187,10 @@ def check_file(
                 )
             elif version_of_block < required_version:
                 # Inside a version block, but version is too old
-                current_major, current_minor = version_of_block
-                current_macro = f"TORCH_VERSION_{current_major}_{current_minor}_0"
+                current_major, current_minor, current_patch = version_of_block
+                current_macro = (
+                    f"TORCH_VERSION_{current_major}_{current_minor}_{current_patch}"
+                )
                 lint_messages.append(
                     LintMessage(
                         path=filename,
