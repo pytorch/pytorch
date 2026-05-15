@@ -419,6 +419,7 @@ class TestPublicBindings(TestCase):
             cuda_dep_prefixes = (
                 "torch._native.ops.scatter_add.",
                 "torch._vendor.quack",
+                "torch._vendor.oink",
             )
             if (
                 mod in private_allowlist
