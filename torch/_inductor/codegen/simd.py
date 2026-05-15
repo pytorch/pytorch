@@ -351,9 +351,27 @@ class IterationRangesEntry(IterationRanges):
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name: str) -> None:
+        old_symbol = self.symbol()
         self.codegen = lambda: name  # type: ignore[assignment]
         self.codegen.cache_clear = lambda: None  # type: ignore[method-assign]
         self.name = name
+        new_symbol = self.symbol()
+        if old_symbol == new_symbol:
+            return
+
+        existing_node = self.kernel.range_tree_nodes.get(new_symbol)
+        if existing_node is not None and existing_node is not self:
+            # Some templates reuse the same textual index name for different
+            # live range entries.  Keep the existing owner in that case.
+            return
+
+        if old_symbol in self.var_list:
+            self.var_list[self.var_list.index(old_symbol)] = new_symbol
+        if old_symbol in self.var_ranges:
+            self.var_ranges[new_symbol] = self.var_ranges.pop(old_symbol)
+        if self.kernel.range_tree_nodes.get(old_symbol) is self:
+            del self.kernel.range_tree_nodes[old_symbol]
+        self.kernel.range_tree_nodes[new_symbol] = self
 
     def cache_clear(self) -> None:
         self.codegen.cache_clear()
