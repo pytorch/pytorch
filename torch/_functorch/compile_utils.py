@@ -47,6 +47,149 @@ rand_ops = [
 ]
 
 
+def _storage_refs_from_value(value: Any) -> tuple[set[StorageWeakRef], bool]:
+    storage_refs: set[StorageWeakRef] = set()
+    for leaf in tree_flatten(value)[0]:
+        if not isinstance(leaf, torch.Tensor):
+            continue
+        try:
+            storage_refs.add(StorageWeakRef(leaf.untyped_storage()))
+        except NotImplementedError:
+            return set(), True
+    return storage_refs, False
+
+
+def _node_storage_refs(node: fx.Node) -> set[StorageWeakRef] | None:
+    if "val" not in node.meta:
+        return None
+    storage_refs, has_unavailable_storage = _storage_refs_from_value(node.meta["val"])
+    if has_unavailable_storage:
+        return None
+    return storage_refs
+
+
+def _node_has_tensor_storage(node: fx.Node) -> bool:
+    """Check if a node carries a tensor meta value with accessible storage."""
+    if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
+        return False
+    try:
+        node.meta["val"].untyped_storage()
+    except NotImplementedError:
+        return False
+    return True
+
+
+def _collect_storage_refs_from_graph_values(
+    values: Any,
+) -> set[StorageWeakRef] | None:
+    storage_refs: set[StorageWeakRef] = set()
+    for value in tree_flatten(values)[0]:
+        if isinstance(value, fx.Node):
+            node_storage_refs = _node_storage_refs(value)
+            if node_storage_refs is None:
+                return None
+            storage_refs.update(node_storage_refs)
+        elif isinstance(value, torch.Tensor):
+            value_storage_refs, has_unavailable_storage = _storage_refs_from_value(
+                value
+            )
+            if has_unavailable_storage:
+                return None
+            storage_refs.update(value_storage_refs)
+    return storage_refs
+
+
+def _get_mutated_argument_values(node: fx.Node) -> Any | None:
+    if (
+        not isinstance(node.target, torch._ops.OpOverload)
+        or node.target.namespace != "aten"
+        or not node.target._schema.is_mutable
+    ):
+        return None
+
+    mutated_values: list[Any] = []
+    positional_idx = 0
+    missing = object()
+    for schema_arg in node.target._schema.arguments:
+        if schema_arg.kwarg_only:
+            arg_value = node.kwargs.get(schema_arg.name, missing)
+        else:
+            if positional_idx < len(node.args):
+                arg_value = node.args[positional_idx]
+            else:
+                arg_value = node.kwargs.get(schema_arg.name, missing)
+                if arg_value is missing and schema_arg.name == "self":
+                    arg_value = node.kwargs.get("input", missing)
+            positional_idx += 1
+
+        alias_info = schema_arg.alias_info
+        if alias_info is not None and alias_info.is_write:
+            if arg_value is missing:
+                return None
+            mutated_values.append(arg_value)
+
+    if not mutated_values:
+        return None
+
+    return tuple(mutated_values)
+
+
+def _can_cse_across_mutation_regions(
+    node: fx.Node,
+    prev_node: fx.Node,
+    is_mutation_op_fn: Callable[[fx.Node], bool],
+) -> bool:
+    """
+    Check if ``node`` can be safely CSE'd with ``prev_node`` despite being in
+    different mutation regions.
+
+    Mutation regions are a coarse-grained mechanism: any mutable op anywhere
+    in the graph increments the region counter for all subsequent nodes, even
+    when the mutation is completely unrelated to the op being considered for
+    CSE.  This helper performs a finer-grained check for pure aten ops.
+    """
+    if node.target != prev_node.target:
+        return False
+    if not isinstance(node.target, torch._ops.OpOverload):
+        return False
+    if node.target.namespace != "aten" or node.target._schema.is_mutable:
+        return False
+    if prev_node.meta["mutation_region_id"] > node.meta["mutation_region_id"]:
+        return False
+
+    input_storage_refs = _collect_storage_refs_from_graph_values(
+        (node.args, node.kwargs)
+    )
+    prev_output_storage_refs = _node_storage_refs(prev_node)
+    if input_storage_refs is None or prev_output_storage_refs is None:
+        return False
+
+    storage_refs_to_protect = input_storage_refs | prev_output_storage_refs
+    if not storage_refs_to_protect:
+        return True
+
+    cur = prev_node.next
+    for _ in range(len(prev_node.graph.nodes)):
+        if cur is node:
+            return True
+        if cur.op == "output":
+            return False
+        if is_mutation_op_fn(cur):
+            mutated_values = _get_mutated_argument_values(cur)
+            if mutated_values is None:
+                return False
+            mutated_storage_refs = _collect_storage_refs_from_graph_values(
+                mutated_values
+            )
+            if mutated_storage_refs is None or not mutated_storage_refs:
+                return False
+            if mutated_storage_refs & storage_refs_to_protect:
+                return False
+        cur = cur.next
+
+    return False
+
+
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
 def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     new_graph = fx.Graph()
@@ -57,9 +200,11 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         tuple[str, int], fx.Node
     ] = {}  # map from hash to a node in the new graph
     token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
+    old_node_for_hash: dict[tuple[str, int], fx.Node] = {}
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
+        is_mutation_op,
         same_mutation_regions,
     )
 
@@ -74,27 +219,15 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             f"expected output_node.op to be 'output', got '{output_node.op}'"
         )
 
-    def checkable_node(node: fx.Node) -> bool:
-        """We can evaluate only nodes that represent tensors with defined storage."""
-        if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
-            return False
-
-        try:
-            node.meta["val"].untyped_storage()
-        except NotImplementedError:
-            return False
-
-        return True
-
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
-        if checkable_node(n)
+        if _node_has_tensor_storage(n)
     }
     nodes_that_alias_outputs = {
         n
         for n in fx_g.nodes
-        if checkable_node(n)
+        if _node_has_tensor_storage(n)
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
@@ -172,6 +305,11 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
                 if same_mutation_regions(n, duplicate_n_prev):
                     env[n] = duplicate_n_prev
                     continue
+                elif _can_cse_across_mutation_regions(
+                    n, old_node_for_hash[hash_val], is_mutation_op
+                ):
+                    env[n] = duplicate_n_prev
+                    continue
                 else:
                     # any futures duplicates should replace with n, not duplicate_n_prev
                     overwrite_due_to_mutation = True
@@ -181,6 +319,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             if overwrite_due_to_mutation or not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node
                 token_map[hash_val] = token
+                old_node_for_hash[hash_val] = n
 
     return new_graph
 

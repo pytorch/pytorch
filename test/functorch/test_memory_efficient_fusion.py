@@ -426,5 +426,184 @@ class RandomOpTestCase(TestCase):
             check(fx_g, t, -1, graph_input=True)
 
 
+class CrossMutationRegionCSETestCase(TestCase):
+    @staticmethod
+    def _count_target(graph, target):
+        return sum(1 for n in graph.nodes if n.target == target)
+
+    def _assert_target_count_after_cse(self, graph, target, expected_count):
+        new_graph = fx_graph_cse(graph)
+        self.assertEqual(self._count_target(new_graph, target), expected_count)
+
+        second_pass_graph = fx_graph_cse(new_graph)
+        self.assertEqual(len(second_pass_graph.nodes), len(new_graph.nodes))
+        self.assertEqual(self._count_target(second_pass_graph, target), expected_count)
+        return new_graph
+
+    @staticmethod
+    def _build_split_graph_with_mutation(mutation_kind):
+        import operator
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            qkv_fake = fake_mode.from_tensor(torch.randn(4, 768, dtype=torch.bfloat16))
+            buf_qkv_fake = fake_mode.from_tensor(
+                torch.empty(4, 768, dtype=torch.bfloat16)
+            )
+            src_qkv_fake = fake_mode.from_tensor(
+                torch.randn(4, 768, dtype=torch.bfloat16)
+            )
+            buf_view_fake = fake_mode.from_tensor(
+                torch.empty(4, 512, dtype=torch.bfloat16)
+            )
+            src_view_fake = fake_mode.from_tensor(
+                torch.randn(4, 512, dtype=torch.bfloat16)
+            )
+
+            def placeholder(name, fake_value):
+                node = graph.placeholder(name)
+                node.meta["val"] = fake_value
+                return node
+
+            qkv = placeholder("qkv", qkv_fake)
+            buf_qkv = placeholder("buf_qkv", buf_qkv_fake)
+            src_qkv = placeholder("src_qkv", src_qkv_fake)
+            buf_view = placeholder("buf_view", buf_view_fake)
+            src_view = placeholder("src_view", src_view_fake)
+
+            outs = []
+            first_split_view = None
+            for i in range(3):
+                split = graph.call_function(
+                    aten.split_with_sizes.default, (qkv, [512, 128, 128], -1)
+                )
+                split.meta["val"] = aten.split_with_sizes.default(
+                    qkv_fake, [512, 128, 128], -1
+                )
+                split_view = graph.call_function(operator.getitem, (split, i))
+                split_view.meta["val"] = split.meta["val"][i]
+                if first_split_view is None:
+                    first_split_view = split_view
+                outs.append(split_view)
+
+                if i == 2:
+                    continue
+                if mutation_kind == "unrelated":
+                    dst, src = buf_view, src_view
+                elif mutation_kind == "input":
+                    dst, src = qkv, src_qkv
+                elif mutation_kind == "input_view":
+                    dst, src = first_split_view, src_view
+                elif mutation_kind == "input_as_src":
+                    dst, src = buf_qkv, qkv
+                else:
+                    raise AssertionError(f"unknown mutation kind: {mutation_kind}")
+
+                mutation = graph.call_function(aten.copy_.default, (dst, src))
+                mutation.meta["val"] = dst.meta["val"]
+
+            graph.output(tuple(outs))
+        return graph
+
+    @staticmethod
+    def _build_graph_that_mutates_previous_duplicate_result():
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            src_fake = fake_mode.from_tensor(torch.randn(4, 4))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = x_fake
+            src = graph.placeholder("src")
+            src.meta["val"] = src_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            mutation = graph.call_function(aten.copy_.default, (cos_1, src))
+            mutation.meta["val"] = cos_1.meta["val"]
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            cos_2.meta["val"] = aten.cos.default(x_fake)
+            out = graph.call_function(aten.add.Tensor, (cos_2, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_2.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
+    @staticmethod
+    def _build_graph_with_unknown_mutation():
+        def unknown_mutation_():
+            pass
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = x_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            mutation = graph.call_function(unknown_mutation_, ())
+            mutation.meta["val"] = None
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            cos_2.meta["val"] = aten.cos.default(x_fake)
+            out = graph.call_function(aten.add.Tensor, (cos_2, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_2.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
+    def test_cse_dedup_split_across_unrelated_mutation(self):
+        aten = torch.ops.aten
+        graph = self._build_split_graph_with_mutation("unrelated")
+        self.assertEqual(self._count_target(graph, aten.split_with_sizes.default), 3)
+        self._assert_target_count_after_cse(graph, aten.split_with_sizes.default, 1)
+
+    def test_cse_dedup_split_when_input_is_only_read_by_mutation(self):
+        aten = torch.ops.aten
+        graph = self._build_split_graph_with_mutation("input_as_src")
+        self.assertEqual(self._count_target(graph, aten.split_with_sizes.default), 3)
+        self._assert_target_count_after_cse(graph, aten.split_with_sizes.default, 1)
+
+    def test_cse_no_dedup_split_when_input_mutated(self):
+        aten = torch.ops.aten
+        graph = self._build_split_graph_with_mutation("input")
+        self.assertEqual(self._count_target(graph, aten.split_with_sizes.default), 3)
+        self._assert_target_count_after_cse(graph, aten.split_with_sizes.default, 3)
+
+    def test_cse_no_dedup_split_when_input_view_mutated(self):
+        aten = torch.ops.aten
+        graph = self._build_split_graph_with_mutation("input_view")
+        self.assertEqual(self._count_target(graph, aten.split_with_sizes.default), 3)
+        self._assert_target_count_after_cse(graph, aten.split_with_sizes.default, 3)
+
+    def test_cse_no_dedup_when_previous_duplicate_result_mutated(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_that_mutates_previous_duplicate_result()
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        self.assertEqual(gm(x, src), new_gm(x, src))
+
+    def test_cse_no_dedup_across_unknown_mutation(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_with_unknown_mutation()
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+
 if __name__ == "__main__":
     run_tests()
