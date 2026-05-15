@@ -5,12 +5,10 @@
 #else
 #include <cuda_runtime.h>
 #endif
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/tensor.h>
-#include <torch/headeronly/util/shim_utils.h>
 
 using torch::stable::Tensor;
 
