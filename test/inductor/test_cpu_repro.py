@@ -6527,6 +6527,16 @@ class CPUReproTests(TestCase):
         actual = torch.compile(f, backend="inductor")(buf, idx)
         self.assertEqual(actual, expected)
 
+    def test_asinh_large_values(self):
+        def fn(x):
+            return torch.asinh(x)
+
+        x = torch.tensor([3e22, 7e25, -5e23, 1e10], dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+
+        self.assertTrue(torch.allclose(expected, actual, rtol=1e-5, atol=1e-5))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
