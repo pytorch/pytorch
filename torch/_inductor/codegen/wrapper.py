@@ -3321,6 +3321,21 @@ class PythonWrapperCodegen(CodeGen):
                 if isinstance(arg, str)
             }
         )
+        if triton_autotune_seed_infos:
+            seed_args_to_buffers = {}
+            for (
+                _seed_name,
+                seed_call_args,
+                _seed_arg_types,
+            ) in triton_autotune_seed_infos:
+                seed_args_to_buffers.update(
+                    {
+                        arg: V.graph.try_get_buffer(arg)
+                        for arg in seed_call_args
+                        if isinstance(arg, str)
+                    }
+                )
+            self.args_to_buffers.update(seed_args_to_buffers)
 
         device = device or V.graph.get_current_device_or_throw()
         current_stream_idx = V.graph.scheduler.current_stream_idx
@@ -3460,6 +3475,7 @@ class PythonWrapperCodegen(CodeGen):
                 return False
 
             all_args = []
+            autotune_arg_values_by_name = {}
             tensor_arg_strs = []  # used only when _per_kernel is True
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -3523,6 +3539,8 @@ class PythonWrapperCodegen(CodeGen):
 
                 if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
                     arg_str += ".item()"
+                if isinstance(arg, str):
+                    autotune_arg_values_by_name[arg] = arg_str
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             def tuple_call_args(args: list[str]) -> str:
@@ -3531,9 +3549,8 @@ class PythonWrapperCodegen(CodeGen):
                 return f"({', '.join(args)})"
 
             def generate_seed_autotune_arg(arg, arg_type):
-                key = None
                 if isinstance(arg, str) and "=" in str(arg):
-                    key, arg = arg.split("=")
+                    _, arg = arg.split("=")
 
                 if isinstance(arg_type, torch_dtype):
                     if re.match(r"^(workspace|semaphore)", arg):
@@ -3550,11 +3567,14 @@ class PythonWrapperCodegen(CodeGen):
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type)
+                    if isinstance(arg, str) and arg in autotune_arg_values_by_name:
+                        arg_str = autotune_arg_values_by_name[arg]
+                    else:
+                        arg_str = self.generate_example_arg_value(arg, arg_type)
 
                 if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
                     arg_str += ".item()"
-                return arg_str if key is None else f"{key}={arg_str}"
+                return arg_str
 
             autotune_seed_call = None
             if triton_autotune_seed_infos:

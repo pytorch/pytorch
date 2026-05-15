@@ -1348,6 +1348,9 @@ class ComboKernelTestsMaxAutotune(TestCase):
         FileCheck().check("start_combo_kernel_standalone_autotune(").check(
             ".run("
         ).run(code)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, seed_count + 1
+        )
         self.assertIn(
             f"Combo standalone autotune seed: submit {seed_count} standalone kernels",
             logs,
@@ -1359,6 +1362,60 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertTrue(
             "Combo standalone autotune seed: selected combo config" in logs
             or "Combo standalone autotune seed: no combo block field changes" in logs
+        )
+
+    def test_combo_seed_infos_remapped_for_compile_time_autotune(self):
+        from torch._inductor.codegen.common import InplacedBuffer
+        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
+        from torch._inductor.virtualized import V
+
+        class FakeArgs:
+            inplace_buffers = {
+                "old_buf": InplacedBuffer("inner_buf", ["old_buf", "live_buf"])
+            }
+
+            def python_argdefs(self):
+                return [], ["combo_arg"], [], [torch.float32]
+
+        class FakeWrapper:
+            def __init__(self):
+                self.lines = []
+                self.generated_kernel_call = None
+
+            def prepare_triton_kernel_call(self, call_args):
+                return list(call_args)
+
+            def writeline(self, line):
+                self.lines.append(line)
+
+            def generate_kernel_call(self, *args, **kwargs):
+                self.generated_kernel_call = (args, kwargs)
+
+        wrapper = FakeWrapper()
+        graph = SimpleNamespace(
+            wrapper_code=wrapper,
+            removed_buffers={"old_buf"},
+        )
+        kernel = ComboKernel(object, enable_autotune=True)
+        kernel.args = FakeArgs()
+        kernel.dispatch_class = ComboKernel.SequentialDispatch
+        kernel.triton_meta = {}
+        kernel.inductor_meta = {}
+        kernel.standalone_autotune_seed_infos = [
+            ("seed_kernel", ["old_buf"], [torch.float32])
+        ]
+
+        with V.set_graph_handler(graph):
+            kernel.call_kernel("combo_kernel")
+
+        self.assertEqual(len(wrapper.lines), 1)
+        self.assertIn("live_buf", wrapper.lines[0])
+        self.assertNotIn("old_buf", wrapper.lines[0])
+        self.assertIsNotNone(wrapper.generated_kernel_call)
+        _, kwargs = wrapper.generated_kernel_call
+        self.assertEqual(
+            kwargs["triton_autotune_seed_infos"],
+            [("seed_kernel", ["live_buf"], [torch.float32])],
         )
 
     @requires_gpu_and_triton
@@ -1585,6 +1642,44 @@ class ComboKernelTestsMaxAutotune(TestCase):
                     expected_groups,
                     f"{desc}: expected {expected_groups} group(s), got {len(groups)}",
                 )
+
+        meta = {
+            "num_kernels": 4,
+            "autotune_grouping": True,
+        }
+        for i, xnumel in enumerate([262144, 262144, 32, 32]):
+            meta[f"heuristic_{i}"] = "pointwise"
+            meta[f"size_hints_{i}"] = {"x": xnumel}
+            meta[f"tile_hint_{i}"] = "TileHint.DEFAULT"
+            meta[f"inductor_meta_{i}"] = {
+                "num_load": 1,
+                "num_store": 1,
+                "num_reduction": 0,
+                "autotune_hints": [],
+                "atomic_add_found": False,
+                "no_x_dim": False,
+                "tiling_scores": {"x": 1},
+            }
+        inductor_meta = {"combo_grid_meta": meta}
+
+        def pointwise_configs(*args, **kwargs):
+            return [triton.Config({"XBLOCK": 8}, num_warps=4, num_stages=1)]
+
+        with unittest.mock.patch(
+            "torch._inductor.runtime.triton_heuristics.pointwise",
+            side_effect=pointwise_configs,
+        ):
+            torch._inductor.runtime.triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
+                {"x": 262144},
+                inductor_meta,
+                triton_meta={},
+            )
+        groups = inductor_meta["combo_tuning_groups"]
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(
+            sorted(sorted(group["member_indices"]) for group in groups),
+            [[0, 1], [2, 3]],
+        )
 
     @requires_gpu_and_triton
     @parametrize("per_subkernel", [True, False])

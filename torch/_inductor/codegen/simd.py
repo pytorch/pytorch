@@ -2596,6 +2596,8 @@ class SIMDScheduling(BaseScheduling):
 
         per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
 
+        seed_removed_buffers = OrderedSet(V.graph.removed_buffers)
+        seed_inplaced_to_remove = OrderedSet(V.graph.inplaced_to_remove)
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes,
             custom_part_algorithm,
@@ -2611,13 +2613,26 @@ class SIMDScheduling(BaseScheduling):
                 if per_subkernel_blocks and kernel.enable_autotune:
                     seed_infos = []
                     for node_info in node_info_group:
-                        seed_src_code, seed_kernel = (
-                            self.generate_kernel_code_and_kernel_from_node_info(
-                                node_info
+                        removed_buffers = V.graph.removed_buffers
+                        inplaced_to_remove = V.graph.inplaced_to_remove
+                        try:
+                            V.graph.removed_buffers = OrderedSet(seed_removed_buffers)
+                            V.graph.inplaced_to_remove = OrderedSet(
+                                seed_inplaced_to_remove
                             )
-                        )
+                            seed_src_code, seed_kernel = (
+                                self.generate_kernel_code_and_kernel_from_node_info(
+                                    node_info
+                                )
+                            )
+                        finally:
+                            V.graph.removed_buffers = removed_buffers
+                            V.graph.inplaced_to_remove = inplaced_to_remove
                         seed_kernel_name = self.define_kernel(
-                            seed_src_code, node_info.node_schedule, seed_kernel
+                            seed_src_code,
+                            node_info.node_schedule,
+                            seed_kernel,
+                            dedupe=False,
                         )
                         _, seed_call_args, _, seed_arg_types = (
                             seed_kernel.args.python_argdefs()
@@ -3429,13 +3444,13 @@ class SIMDScheduling(BaseScheduling):
             features=node_info.features,
             tiling_scores=node_info.tiling_scores,
         )
-        self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
         with (
             config.patch(**config_patches),
             V.set_kernel_handler(kernel),
         ):
+            self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
             src_code = kernel.codegen_kernel()
         return src_code, kernel
 

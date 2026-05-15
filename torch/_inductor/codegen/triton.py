@@ -6706,9 +6706,9 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment += "\n" + origins + "\n" + detailed_origins
         wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
 
-    def define_kernel(self, src_code, node_schedule, kernel):
+    def define_kernel(self, src_code, node_schedule, kernel, *, dedupe: bool = True):
         wrapper = V.graph.wrapper_code
-        if src_code in wrapper.src_to_kernel:
+        if dedupe and src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
@@ -6727,8 +6727,9 @@ class TritonScheduling(SIMDScheduling):
                 # distinguish kernel related symbols.
                 kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
 
-            # use the original src_code as the key
-            wrapper.src_to_kernel[src_code] = kernel_name
+            if dedupe:
+                # use the original src_code as the key
+                wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
