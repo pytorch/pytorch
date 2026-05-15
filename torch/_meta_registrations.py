@@ -25,8 +25,6 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
-    is_channels_last_contiguous_or_false_2d,
-    is_channels_last_contiguous_or_false_3d,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
@@ -2664,22 +2662,6 @@ def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
 
-def _suggest_memory_format_or_contiguous(
-    t: torch.Tensor,
-) -> torch.memory_format:
-    """DDE-safe equivalent of t.suggest_memory_format() for the channels-last
-    family. Returns torch.channels_last for canonical 4D NHWC, torch.channels_last_3d
-    for canonical 5D NDHWC, otherwise torch.contiguous_format. For unbacked symbolic
-    strides where contiguity can't be statically decided, returns contiguous_format
-    (consistent with the ``_or_false`` helper semantics).
-    """
-    if is_channels_last_contiguous_or_false_2d(t):
-        return torch.channels_last
-    if is_channels_last_contiguous_or_false_3d(t):
-        return torch.channels_last_3d
-    return torch.contiguous_format
-
-
 @register_meta(aten.miopen_batch_norm.default)
 def meta_miopen_batch_norm(
     input_tensor: torch.Tensor,
@@ -2699,7 +2681,7 @@ def meta_miopen_batch_norm(
     # Pick the output memory format the same way eager does (suggest_memory_format),
     # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
     # the input is channels_last contiguous, fall back to plain contiguous.
-    fmt = _suggest_memory_format_or_contiguous(input_tensor)
+    fmt = suggest_memory_format(input_tensor)
 
     # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
     # instead of silently producing an output with the wrong strides.
@@ -4894,15 +4876,15 @@ def pool2d_shape_check(
 
     if memory_format == torch.channels_last:
         torch._check(
-            sym_and(ndim == 4, valid_dims, input.size(3) != 0),
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
             sym_or(
-                sym_and(ndim == 3, input.size(0) != 0, valid_dims),
-                sym_and(ndim == 4, valid_dims, input.size(3) != 0),
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
@@ -7990,7 +7972,7 @@ def meta_pixel_shuffle(self, upscale_factor):
         #           always plain contiguous regardless of input layout.
         #   else -> math_pixel_shuffle: clone(MemoryFormat::Contiguous) -> contiguous
         # So only CPU preserves channels_last; everything else is contiguous.
-        fmt = _suggest_memory_format_or_contiguous(self)
+        fmt = suggest_memory_format(self)
         if (
             fmt is torch.channels_last or fmt is torch.channels_last_3d
         ) and device_hint(self) == "cpu":
