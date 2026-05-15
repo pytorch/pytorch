@@ -48,6 +48,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM100OrLater,
+    SM120OrLater,
     SM80OrLater,
     SM90OrLater,
 )
@@ -1281,6 +1282,14 @@ class TestCutlassBackend(TestCase):
 
             x = torch.randn(M, K).to(GPU_TYPE).half()
             w = torch.randn(N, K).to(GPU_TYPE).half().t()
+
+            if SM120OrLater:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    AOTIRunnerUtil.run(
+                        model,
+                        (x, w),
+                    )
+                return
 
             actual = AOTIRunnerUtil.run(
                 model,
