@@ -3,14 +3,18 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
+import sympy
+
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -23,9 +27,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfXpu,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -78,8 +84,189 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+            simple_write = MemoryDep("buf", w0, (w0,), (16,))
+            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+            cases = [
+                (
+                    "quotient broadcast",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128),
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    True,
+                ),
+                (
+                    "quotient tail remains",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    False,
+                ),
+                (
+                    "pure broadcast",
+                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
+                    simple_write,
+                    False,
+                    True,
+                ),
+                (
+                    "dynamic dense",
+                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
+                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
+                    False,
+                    True,
+                ),
+                (
+                    "exact gapped",
+                    exact_gapped,
+                    exact_gapped,
+                    True,
+                    True,
+                ),
+                (
+                    "producer broadcast",
+                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
+                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
+                    False,
+                    False,
+                ),
+                (
+                    "producer alias",
+                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
+                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
+                    False,
+                    False,
+                ),
+            ]
+            for name, read, write, expected_default, expected_relaxed in cases:
+                with self.subTest(name):
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(read, write),
+                        expected_default,
+                    )
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(
+                            read,
+                            write,
+                            allow_index_equivalence=True,
+                        ),
+                        expected_relaxed,
+                    )
+
+            normalized_exact_gapped_read = MemoryDep(
+                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
+            )
+            normalized_exact_gapped_write = MemoryDep(
+                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
+            )
+            with inductor_config.patch(loop_ordering_after_fusion=True):
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                    )
+                )
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                        allow_index_equivalence=True,
+                    )
+                )
+
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
@@ -98,6 +285,7 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
+    @xfailIfNoAcceleratorTriton
     @skipIfXpu(
         msg="InvalidModule: Invalid SPIR-V module, "
         "https://github.com/intel/torch-xpu-ops/issues/2329"
@@ -117,7 +305,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
-    @torch._inductor.config.patch({"force_disable_caches": True})
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
@@ -220,6 +410,7 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
         """
@@ -260,6 +451,7 @@ class TestScheduler(TestCase):
             f"compiled={compiled_result.mean().item():.6f}",
         )
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_atomic_add_no_fusion_correctness(self):
         """

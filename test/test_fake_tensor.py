@@ -27,6 +27,7 @@ import torch.utils._pytree as pytree
 from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
@@ -45,12 +46,14 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     free_symbols,
+    free_unbacked_symbols,
     ShapeEnv,
     ShapeEnvSettings,
     StatelessSymbolicContext,
     statically_known_true,
 )
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
@@ -95,6 +98,27 @@ def expectedFailurePropagateRealTensors(fn):
 
 
 class FakeTensorTest(TestCase):
+    def fake_with_unbacked_batch(self, *tensors):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        fakes = []
+        # These are fake inputs created before tracing, not fresh op outputs for make_fx.
+        with fake_mode, shape_env.ignore_fresh_unbacked_symbols():
+            for i, tensor in enumerate(tensors):
+                fakes.append(
+                    fake_mode.from_tensor(
+                        tensor,
+                        source=LocalSource(f"arg{i}", is_input=True),
+                        symbolic_context=StatelessSymbolicContext(
+                            dynamic_sizes=[
+                                DimDynamic.UNBACKED,
+                                *[DimDynamic.STATIC] * (tensor.dim() - 1),
+                            ],
+                        ),
+                    )
+                )
+        return fake_mode, fakes
+
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
@@ -121,10 +145,9 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(z, FakeTensor))
 
     def test_custom_op_fallback(self):
-        from torch.library import impl, Library
+        from torch.library import _scoped_library, impl
 
-        try:
-            test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
+        with _scoped_library("my_test_op", "DEF") as test_lib:
             test_lib.define("foo(Tensor self) -> Tensor")
 
             @impl(test_lib, "foo", "CPU")
@@ -138,9 +161,6 @@ class FakeTensorTest(TestCase):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
-
-        finally:
-            test_lib._destroy()
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -392,6 +412,17 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_compare_tensor_meta_unbacked_numel(self):
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            _constrain_range_for_size(u0, min=0)
+            a = torch.empty(u0, 16, device="cpu")
+            b = torch.empty(u0, 16, device="cpu")
+        prims.utils.compare_tensor_meta(a, b, check_strides=True)
+
     def test_batch_tensor(self):
         x = torch.rand((3, 4, 5))
         b = _add_batch_dim(x, 0, 0)
@@ -601,6 +632,16 @@ class FakeTensorTest(TestCase):
             return torch.functional.split(x, 0)[0]
 
         # meta should not return self
+        with FakeTensorMode(), enable_python_dispatcher():
+            out_fake = fn(torch.empty((0,)))
+
+        out_eager = fn(torch.empty((0,)))
+        self.checkMetaProps(out_fake, out_eager)
+
+    def test_split_empty_dim(self):
+        def fn(x):
+            return torch.split(x, 2)[0]
+
         with FakeTensorMode(), enable_python_dispatcher():
             out_fake = fn(torch.empty((0,)))
 
@@ -884,6 +925,144 @@ class FakeTensorTest(TestCase):
         self.assertIs(t2.fake_mode, mode2)
         self.assertIs(t2.size(0).node.shape_env, t1.size(0).node.shape_env)
         self.assertEqual(str(t2.size(0)), str(t1.size(0)))
+
+    def test_linear_rank3_unbacked_batch_dim(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        fake_x = fake_mode.from_tensor(
+            torch.randn(4, 16, 256),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.UNBACKED,
+                    DimDynamic.STATIC,
+                    DimDynamic.STATIC,
+                ],
+                constraint_sizes=[None, None, None],
+            ),
+        )
+        fake_weight = fake_mode.from_tensor(torch.randn(3072, 256), static_shapes=True)
+
+        def f(x):
+            return torch.nn.functional.linear(x, fake_weight)
+
+        self.assertTrue(free_unbacked_symbols(fake_x.shape[0]))
+        with fake_mode:
+            out = f(fake_x)
+
+        self.assertEqual(out.shape[1:], (16, 3072))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+        x = torch.randn(4, 16, 256)
+        weight = torch.randn(3072, 256)
+        torch._dynamo.decorators.mark_unbacked(
+            x, 0, min=2, max=8, hint_override=x.shape[0]
+        )
+
+        def trace_f(x, weight):
+            return torch.nn.functional.linear(x, weight)
+
+        gm = make_fx(trace_f, tracing_mode="symbolic")(x, weight)
+        replay_out = gm(torch.randn(5, 16, 256), weight)
+        self.assertEqual(replay_out.shape, (5, 16, 3072))
+
+    def test_view_unbacked_contiguous_relation_from_hints(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        with fake_mode:
+            seq = shape_env.create_unbacked_symint()
+            torch._dynamo.override_optimization_hint(seq, 16)
+            base = torch.empty(4, seq, 256)
+            chunked = torch.as_strided(
+                base,
+                (4, 2 * (seq // 2), 256),
+                (256 * seq, 256, 1),
+            )
+            out = chunked.view(4 * 2 * (seq // 2), 256)
+
+        self.assertEqual(out.shape, (4 * 2 * (seq // 2), 256))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_matmul_rank4_unbacked_batch_dim(self):
+        fake_mode, (q, k) = self.fake_with_unbacked_batch(
+            torch.randn(4, 2, 8, 16),
+            torch.randn(4, 2, 8, 16),
+        )
+
+        def f(q, k):
+            return torch.matmul(q, k.transpose(-2, -1))
+
+        with fake_mode:
+            gm = make_fx(f)(q, k)
+            out = gm(q, k)
+
+        self.assertEqual(out.shape[1:], (2, 8, 8))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_sdpa_math_unbacked_batch_dim(self):
+        fake_mode, (q, k, v) = self.fake_with_unbacked_batch(
+            torch.randn(4, 2, 8, 16),
+            torch.randn(4, 2, 8, 16),
+            torch.randn(4, 2, 8, 16),
+        )
+
+        def f(q, k, v):
+            with sdpa_kernel([SDPBackend.MATH], set_priority=True):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, is_causal=True
+                )
+
+        with fake_mode:
+            gm = make_fx(f)(q, k, v)
+            out = gm(q, k, v)
+
+        self.assertEqual(out.shape[1:], (2, 8, 16))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_size_default_unbacked_batch_dim(self):
+        fake_mode, (x,) = self.fake_with_unbacked_batch(torch.randn(4, 2))
+
+        def f(x):
+            return x.reshape(torch.ops.aten.size.default(x))
+
+        with fake_mode:
+            gm = make_fx(f)(x)
+            out = gm(x)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    view = torch.ops.aten.view.default(x_1, [sym_size_int, 2]);  x_1 = sym_size_int = None
+    return view""",
+        )
+        self.assertEqual(out.shape[1:], (2,))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+    def test_cudnn_sdpa_unbacked_batch_dim(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        batch = shape_env.create_unbacked_symint()
+
+        def fake_cuda_attn_tensor(*shape):
+            meta = torch.empty(shape, device="meta", dtype=torch.float16)
+            return FakeTensor(fake_mode, meta, torch.device("cuda"))
+
+        q = fake_cuda_attn_tensor(batch, 2, 8, 24)
+        k = fake_cuda_attn_tensor(batch, 2, 8, 24)
+        v = fake_cuda_attn_tensor(batch, 2, 8, 16)
+        self.assertTrue(free_unbacked_symbols(q.shape[0]))
+
+        with fake_mode:
+            out = torch.ops.aten._scaled_dot_product_cudnn_attention.default(
+                q, k, v, None, False, 0.0, True
+            )[0]
+            out_size = torch.ops.aten.sym_size.default(out)
+
+        self.assertEqual(out.shape[1:], (2, 8, 16))
+        self.assertEqual(out_size[1:], (2, 8, 16))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+        self.assertTrue(free_unbacked_symbols(out_size[0]))
 
     # TODO: Support NJT.  There's also some funny business with dynamic shapes
     # which would need to be dealt with as well
@@ -2514,23 +2693,26 @@ class FakeTensorDispatchCache(TestCase):
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
-            torch.set_default_device("cpu")
-            x = torch.tensor([1, 2])
-            y = x + 1.0
-            self.assertEqual(y.device.type, "cpu")
-            self.assertHitsMisses(0, 1)
+            try:
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(0, 1)
 
-            torch.set_default_device("cuda")
-            x = torch.tensor([1, 2])
-            y = x + 1.0
-            self.assertEqual(y.device.type, "cuda")
-            self.assertHitsMisses(0, 2)
+                torch.set_default_device("cuda")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cuda")
+                self.assertHitsMisses(0, 2)
 
-            torch.set_default_device("cpu")
-            x = torch.tensor([1, 2])
-            y = x + 1.0
-            self.assertEqual(y.device.type, "cpu")
-            self.assertHitsMisses(1, 2)
+                torch.set_default_device("cpu")
+                x = torch.tensor([1, 2])
+                y = x + 1.0
+                self.assertEqual(y.device.type, "cpu")
+                self.assertHitsMisses(1, 2)
+            finally:
+                torch.set_default_device(None)
 
     def test_cache_inplace_op(self):
         """

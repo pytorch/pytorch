@@ -26,7 +26,8 @@ const PyInterpreterHooksInterface& getPyInterpreterHooks() {
 
 // Main function to get global PyInterpreter
 PyInterpreter* getGlobalPyInterpreter() {
-  return getPyInterpreterHooks().getPyInterpreter();
+  static PyInterpreter* cached = getPyInterpreterHooks().getPyInterpreter();
+  return cached;
 }
 
 } // namespace c10::impl

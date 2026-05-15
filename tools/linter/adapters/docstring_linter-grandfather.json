@@ -120,10 +120,6 @@
     "def PythonWrapperCodegen.generate_example_arg_value()": 84,
     "def user_defined_kernel_grid_fn_code()": 108
   },
-  "torch/_inductor/comms.py": {
-    "def enforce_comm_ordering_for_fsdp()": 175,
-    "def reinplace_fsdp_all_gather()": 107
-  },
   "torch/_inductor/constant_folding.py": {
     "class ConstantFolder": 225,
     "def ConstantFolder.run_node()": 94

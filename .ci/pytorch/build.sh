@@ -10,6 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
@@ -242,9 +246,10 @@ echo "The next three invocations are expected to fail with invalid command error
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
+  # s390x builds currently fail when WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -283,6 +288,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
     install_torchao
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
+    install_torchcomms
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -325,6 +334,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       sudo rm -rf original
       popd
     fi
+
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
+    build_rocm_ck_wheel dist/
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
