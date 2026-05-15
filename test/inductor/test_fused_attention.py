@@ -1510,6 +1510,37 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             f"vs no caching ({copy_count_uncached})",
         )
 
+    def _test_cache_sdpa_constraint_shared_kv_default(self):
+        """Default config should avoid duplicate shared K/V SDPA input buffers."""
+        if self.device != "cuda":
+            self.skipTest("empty_strided_cuda allocation check is CUDA-specific")
+
+        def pma_attention(query, kv):
+            kv_act = torch.relu(kv)
+            return torch.nn.functional.scaled_dot_product_attention(
+                query, kv_act, kv_act
+            )
+
+        tensor_shape = (2, 2, 16, 32)
+        dtype = torch.float16
+        query = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+        kv = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+
+        counters.clear()
+        torch._dynamo.reset()
+        result_eager = pma_attention(query, kv)
+        result_compiled, (source_code,) = run_and_get_code(
+            torch.compile(pma_attention, fullgraph=True),
+            query.clone(),
+            kv.clone(),
+        )
+        self.assertEqual(result_eager, result_compiled, atol=1e-3, rtol=0.2)
+
+        shared_kv_allocation = (
+            "empty_strided_cuda((2, 2, 16, 32), (1024, 512, 32, 1), torch.float16)"
+        )
+        self.assertEqual(source_code.count(shared_kv_allocation), 1)
+
     def _test_sdpa_rewriter_26(self):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -1690,6 +1721,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_cache_sdpa_constraint_shared_kv_gpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
         )
+        test_cache_sdpa_constraint_shared_kv_default_gpu = TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv_default
         test_sdpa_rewriter_28_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
         )
