@@ -1,1 +1,1 @@
-from . import bmm_outer_product
+from . import bmm_outer_product, scatter_add
