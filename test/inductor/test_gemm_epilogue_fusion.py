@@ -87,6 +87,21 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
+    def test_tuple_epilogue_eager_matches_reference(self):
+        M = 2
+        a = torch.randn(M, 3)
+        b = torch.randn(3, 64)
+
+        actual = gemm_epilogue_fusion(
+            torch.ops.aten.mm.default,
+            (a, b),
+            lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
+        )
+        expected = a @ b
+
+        torch.testing.assert_close(actual[0], expected.relu())
+        torch.testing.assert_close(actual[1], expected.float().view(M, -1, 32).sum(-1))
+
     def test_addmm_eager_matches_reference(self):
         bias = torch.randn(2, 4)
         a = torch.randn(2, 3)
@@ -207,6 +222,34 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(
             actual, torch.addmm(bias, a, b, alpha=0.5, beta=0.25).relu()
         )
+
+    def test_make_fx_preserves_tuple_epilogue(self):
+        M = 2
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
+            )
+
+        a = torch.randn(M, 3)
+        b = torch.randn(3, 64)
+
+        gm = make_fx(fn)(a, b)
+        actual = gm(a, b)
+        expected = a @ b
+
+        torch.testing.assert_close(actual[0], expected.relu())
+        torch.testing.assert_close(actual[1], expected.float().view(M, -1, 32).sum(-1))
+        body = next(
+            module
+            for name, module in gm.named_modules()
+            if name.startswith("gemm_epilogue_fusion_body_graph")
+        )
+        FileCheck().check("aten.mm.default").check("relu").check("view").check(
+            "sum"
+        ).run(body.code)
 
     def test_exports_as_gemm_epilogue_fusion_region(self):
         def fn(a, b):
@@ -969,6 +1012,63 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("gemm_epilogue(").check_not("call_quack_gemm_epilogue").check_not(
             "torch.ops.flex_gemm"
         ).check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_local_reduce_feeds_main(self):
+        M = 64
+        N = 64
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, 32)
+                denom = x.sum(-1, keepdim=True)
+                return (x / denom).view(M, N)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual.float(), expected, atol=5e-2, rtol=5e-2)
+        FileCheck().check("@cute.jit").check("cute.ReductionOp.ADD").check(
+            "gemm_epilogue("
+        ).check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_fuses(self):
+        M = 128
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (acc.relu(), acc.float().view(M, -1, 32).sum(-1)),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
+        FileCheck().check("local_reduce_group=32").check("local_reduce_out=").check_not(
+            "extern_kernels.mm"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_honors_epilogue_add_alpha(self):

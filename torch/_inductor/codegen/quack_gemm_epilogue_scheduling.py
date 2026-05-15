@@ -78,23 +78,34 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         epilogue_kwargs = ""
         if epilogue_args:
             epilogue_kwargs = f", epilogue_args=({', '.join(epilogue_args)},)"
+        local_reduce_kwargs = ""
+        if qtb.local_reduce_group is not None:
+            local_reduce_kwargs = f", local_reduce_group={qtb.local_reduce_group!r}"
+            if qtb.local_reduce_out_index is not None:
+                local_reduce_kwargs += f", local_reduce_out={input_args[qtb.local_reduce_out_index]}"
+            if qtb.local_reduce_feeds_main:
+                local_reduce_kwargs += ", local_reduce_feeds_main=True"
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
-            call_kwargs = epilogue_kwargs
+            call_kwargs = epilogue_kwargs + local_reduce_kwargs
         elif qtb.gemm_op == "scaled_mm":
             call_args = [input_args[0], input_args[1]]
             call_kwargs = (
                 f", scale_a={input_args[2]}, scale_b={input_args[3]}, "
-                f"out_dtype={qtb.out_dtype!r}{epilogue_kwargs}"
+                f"out_dtype={qtb.out_dtype!r}{epilogue_kwargs}{local_reduce_kwargs}"
             )
         elif qtb.gemm_op == "grouped_mm":
             call_args = [input_args[0], input_args[1]]
             call_kwargs = (
-                f", offs={input_args[2]}, out_dtype={qtb.out_dtype!r}{epilogue_kwargs}"
+                f", offs={input_args[2]}, out_dtype={qtb.out_dtype!r}"
+                f"{epilogue_kwargs}{local_reduce_kwargs}"
             )
         else:
             call_args = [input_args[1], input_args[2]]
-            call_kwargs = f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}{epilogue_kwargs}"
+            call_kwargs = (
+                f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}"
+                f"{epilogue_kwargs}{local_reduce_kwargs}"
+            )
         wrapper.writeline(
             f"{qtb.get_name()} = gemm_epilogue("
             f"{call_args[0]}, {call_args[1]}, "
