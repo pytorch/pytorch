@@ -334,8 +334,17 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   if (self.scalar_type() == ScalarType::BFloat16) {
 #if !defined(USE_ROCM)
     auto dev_prop = at::cuda::getCurrentDeviceProperties();
-    if (dev_prop->major >= 8 && use_optimized_cufft_path(dim)) {
-      auto input_sizes = self.sizes();
+    auto input_sizes = self.sizes();
+    // Native bfloat16 cuFFT path requires all signal dims to be powers of two.
+    // If any dim is not pow2, fall through to the float32 promotion fallback below.
+    bool bf16_all_pow2 = true;
+    for (const auto d : dim) {
+      if (!is_pow_of_two(input_sizes[d])) {
+        bf16_all_pow2 = false;
+        break;
+      }
+    }
+    if (dev_prop->major >= 8 && use_optimized_cufft_path(dim) && bf16_all_pow2) {
       DimVector onesided_sizes(input_sizes.begin(), input_sizes.end());
       auto last_dim = dim.back();
       auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
