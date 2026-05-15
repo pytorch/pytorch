@@ -1656,11 +1656,12 @@ static inline TensorIterator get_allany_iter(
     const Tensor& result,
     OptionalIntArrayRef dims,
     bool keepdim) {
-  if (self.is_cuda()) {
+  if (self.is_cuda() || self.is_mps()) {
     // As CUDA supports dynamic type casting, we use this overload of
     // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
     // otherwise we use the overload below which casts the input to kBool (which is
-    // an extra operation).
+    // an extra operation). MPS reads input via the Metal kernel without iter
+    // casting, so it can take the same fast path.
     return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
   }
   return meta::make_reduction_from_out_ty(
