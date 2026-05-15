@@ -97,16 +97,8 @@ class _InheritedSub(_BaseWithMul):
     pass
 
 
+@torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestNbMultiply(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
-
     # --- Integer multiply ---
 
     @make_dynamo_test
@@ -223,42 +215,62 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_list_mul_str_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError, r"can't multiply sequence by non-int of type 'str'"
+        ):
             [1, 2] * "foo"
 
     @make_dynamo_test
     def test_tuple_mul_str_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError, r"can't multiply sequence by non-int of type 'str'"
+        ):
             (1, 2) * "foo"
 
     @make_dynamo_test
     def test_str_mul_str_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError, r"can't multiply sequence by non-int of type 'str'"
+        ):
             "ab" * "cd"
 
     @make_dynamo_test
     def test_str_mul_float_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError, r"can't multiply sequence by non-int of type 'float'"
+        ):
             "ab" * 3.0
 
     @make_dynamo_test
     def test_range_mul_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*: 'range' and 'int'",
+        ):
             range(5) * 3
 
     @make_dynamo_test
     def test_int_mul_range_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*: 'int' and 'range'",
+        ):
             3 * range(5)
 
     @make_dynamo_test
     def test_dict_mul_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*: 'dict' and 'int'",
+        ):
             {1: 2} * 3
 
     @make_dynamo_test
     def test_set_mul_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*: 'set' and 'int'",
+        ):
             {1, 2} * 3
 
     # --- operator.mul / operator.imul function-call form ---
@@ -305,7 +317,10 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_operator_imul_unsupported_raises(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*=: 'set' and 'int'",
+        ):
             operator.imul({1, 2}, 3)
 
     # --- Direct method calls ---
@@ -316,9 +331,17 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_list_dunder_mul(self):
-        # list.__mul__ wraps sq_repeat — TypeError on non-int.
+        # list.__mul__ wraps sq_repeat — TypeError on non-int.  CPython's
+        # slot wrapper raises "'str' object cannot be interpreted as an
+        # integer"; Dynamo's slot_wrapper_mul currently delegates to
+        # sequence_repeat and raises "can't multiply sequence by non-int of
+        # type 'str'". Both are TypeErrors, so use a permissive regex.
         self.assertEqual([1, 2].__mul__(3), [1, 2, 1, 2, 1, 2])
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"(can't multiply sequence by non-int of type 'str'"
+            r"|'str' object cannot be interpreted as an integer)",
+        ):
             [1, 2].__mul__("foo")
 
     @make_dynamo_test
@@ -361,7 +384,10 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
     def test_right_mul_left_raises(self):
         a = RightMulClass("x")
         b = LeftMulClass(7)
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"unsupported operand type\(s\) for \*: 'RightMulClass' and 'LeftMulClass'",
+        ):
             a * b
 
     # --- Subclass right-op dispatch ---
