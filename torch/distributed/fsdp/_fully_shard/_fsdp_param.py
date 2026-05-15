@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast, TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from ._fsdp_api import DataParallelMeshDims
 
@@ -442,7 +443,8 @@ class FSDPParam:
         """
         spmd_mesh = self._spmd_mesh
         spmd_placements = self._spmd_placements
-        assert self._unsharded_dtensor_spec is not None
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("_unsharded_dtensor_spec cannot be None")
         tensor_meta = self._unsharded_dtensor_spec.tensor_meta
 
         if len(dp_shard_indices) <= 1:
@@ -453,7 +455,8 @@ class FSDPParam:
 
         # Walk spmd_mesh.mesh_dim_names in order. Replace consecutive DP
         # shard dims with the flattened DP mesh; keep non-DP dims as-is.
-        assert spmd_mesh.mesh_dim_names is not None
+        if spmd_mesh.mesh_dim_names is None:
+            raise AssertionError("mesh_dim_names cannot be None")
         submeshes: list[DeviceMesh] = []
         spec_placements: list[Placement] = []
         skip = 0
