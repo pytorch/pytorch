@@ -139,16 +139,25 @@ NCCLAllocMap::iterator find_allocation_covering(
 // Before NCCL 2.29, we can use device-side APIs to get peer pointers.
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+// Fill both peer pointer arrays in a single kernel launch. For each peer,
+// the buffer pointer comes from NCCL and the signal pad pointer is derived
+// as `buffer + round_up(buffer_size, 16)`, mirroring the host-side layout.
 static __global__ void build_ptr_dev(
   ncclWindow_t  handle,
-  size_t  offset,  // byte offset inside the window
-  void**  buffer,  // symmetric memory buffer
+  size_t  buffer_size,    // user buffer size; the kernel rounds it up to 16
+  void**  buffers,        // out: peer buffer pointers
+  void**  signal_pads,    // out: peer signal pad pointers
   int  world_size)
 {
+  const size_t aligned_buffer_size = (buffer_size + 15UL) & ~15UL;
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int peer = tid; peer < world_size; peer += stride) {
-      buffer[peer] = ncclGetLsaPointer(handle, offset, peer);
+      void* buf = ncclGetLsaPointer(handle, 0, peer);
+      buffers[peer] = buf;
+      signal_pads[peer] = buf == nullptr
+          ? nullptr
+          : static_cast<char*>(buf) + aligned_buffer_size;
   }
 }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
@@ -200,32 +209,31 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     manager.register_comm(group_name_, comm_);
 
     // Starting from NCCL 2.28, we can get peer pointers.
-    // Allocate a single device buffer for both peer arrays and split it:
-    //   [0, arr_size)            - buffers_dev_
-    //   [arr_size, 2 * arr_size) - signal_pads_dev_
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size * 2));
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
     signal_pads_dev_ = reinterpret_cast<void**>(
-        reinterpret_cast<char*>(buffers_dev_) + arr_size);
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
-    // Fill out the peer pointer array. We only fetch the buffer pointers
-    // for each peer; signal pad pointers are derived from them as
-    // buffer + aligned_buffer_size, since every rank sees the same
-    // symmetric-memory layout.
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-    // Lack of host-side API to get peer pointers, so we get them inside a
-    // kernel and copy the result to host.
+    // Lack of host-side API to get peer pointers, so a kernel writes both
+    // peer arrays at once and copies the results to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(combined_win_, 0, buffers_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(
+        combined_win_, buffer_size_, buffers_dev_, signal_pads_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
     C10_CUDA_CHECK(cudaMemcpy(
       buffers_.data(),  // dst (host)
       buffers_dev_,  // src (device)
+      arr_size,
+      cudaMemcpyDeviceToHost));
+    C10_CUDA_CHECK(cudaMemcpy(
+      signal_pads_.data(),  // dst (host)
+      signal_pads_dev_,  // src (device)
       arr_size,
       cudaMemcpyDeviceToHost));
 #else
@@ -244,6 +252,20 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     arr_size,
     cudaMemcpyHostToDevice));
 
+  // Derive each peer's signal pad pointer from its buffer pointer; all
+  // ranks share the same aligned_buffer_size so we don't need to ask NCCL
+  // for the signal pad pointers separately.
+  for (int i = 0; i < world_size_; i++) {
+    signal_pads_[i] = buffers_[i] == nullptr
+        ? nullptr
+        : static_cast<char*>(buffers_[i]) + aligned_buffer_size;
+  }
+  C10_CUDA_CHECK(cudaMemcpy(
+      signal_pads_dev_,  // dst (device)
+      signal_pads_.data(),  // src (host)
+      arr_size,
+      cudaMemcpyHostToDevice));
+
   // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
   // to get multicast address.
   void* mc_addr = nullptr;
@@ -253,20 +275,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     mc_addr_ = mc_addr;
   }
 #endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-
-    // Derive each peer's signal pad pointer from its buffer pointer; all
-    // ranks share the same aligned_buffer_size so we don't have to ask
-    // NCCL for the signal pad pointers separately.
-    for (int i = 0; i < world_size_; i++) {
-      signal_pads_[i] = buffers_[i] == nullptr
-          ? nullptr
-          : static_cast<char*>(buffers_[i]) + aligned_buffer_size;
-    }
-    C10_CUDA_CHECK(cudaMemcpy(
-        signal_pads_dev_,  // dst (device)
-        signal_pads_.data(),  // src (host)
-        arr_size,
-        cudaMemcpyHostToDevice));
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
@@ -290,10 +298,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     // signal_pad_ptr_ is part of the owning NCCLAllocation's combined
     // ncclMemAlloc region; freeing the buffer there releases it too.
-    // buffers_dev_ owns the combined allocation that also backs
-    // signal_pads_dev_; a single raw_delete frees both halves.
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
+    }
+    if (signal_pads_dev_ != nullptr) {
+      c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
     }
   }
 
@@ -304,9 +313,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   int world_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
-  // buffers_dev_ owns a single CUDACachingAllocator allocation of
-  // 2 * arr_size bytes. The first half holds the peer buffer pointers;
-  // signal_pads_dev_ points at the second half (offset arr_size).
   void** buffers_dev_{nullptr};
   void** signal_pads_dev_{nullptr};
   std::string group_name_;
