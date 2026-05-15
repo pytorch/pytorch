@@ -706,3 +706,52 @@ def is_impure(
         return True
 
     return False
+
+
+def validate_fake_signature(func: Callable, schema: _C.FunctionSchema) -> None:
+    try:
+        sig = inspect.signature(func)
+    except (ValueError, TypeError):
+        return
+    params = list(sig.parameters.values())
+
+    if any(
+        p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        for p in params
+    ):
+        return
+
+    schema_positional = [a for a in schema.arguments if not a.kwarg_only]
+    schema_kwonly = [a for a in schema.arguments if a.kwarg_only]
+
+    func_positional = [
+        p
+        for p in params
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY)
+    ]
+    func_kwonly = [p for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY]
+
+    # Positional: exact count (dispatcher forwards all the caller provides).
+    # Kwarg-only: range-checked because prims omit optional kwarg-only params.
+    n_required_kw = sum(1 for a in schema_kwonly if not a.has_default_value())
+
+    pos_ok = len(func_positional) == len(schema_positional)
+    kw_ok = n_required_kw <= len(func_kwonly) <= len(schema_kwonly)
+
+    if not pos_ok or not kw_ok:
+        schema_names = [a.name for a in schema_positional] + [
+            a.name for a in schema_kwonly
+        ]
+        func_names = [p.name for p in func_positional] + [p.name for p in func_kwonly]
+        raise TypeError(
+            f"register_fake(...): the fake kernel's signature doesn't match "
+            f"the operator's schema.\n"
+            f"  operator schema: {schema}\n"
+            f"  expected {len(schema_positional)} positional and "
+            f"{n_required_kw} to {len(schema_kwonly)} keyword-only args, "
+            f"but got {len(func_positional)} positional and "
+            f"{len(func_kwonly)} keyword-only args.\n"
+            f"  schema args: ({', '.join(schema_names)})\n"
+            f"  fake kernel args: ({', '.join(func_names)})"
+        )

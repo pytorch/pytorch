@@ -5333,6 +5333,160 @@ Please use `add.register_fake` to add an fake impl.""",
             ):
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
+    def test_register_fake_signature_validation_standalone_path(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("sig_val_standalone(Tensor x, int n) -> Tensor")
+
+            with self.assertRaises(TypeError):
+
+                @torch.library.register_fake(
+                    "_torch_testing::sig_val_standalone", lib=lib
+                )
+                def foo_fake(x: Tensor) -> Tensor:
+                    return x.clone()
+
+    def test_register_fake_signature_validation_missing_arg(self):
+        @torch.library.custom_op("_torch_testing::sig_val_missing", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        with self.assertRaises(TypeError):
+
+            @foo.register_fake
+            def foo_fake(x: Tensor) -> Tensor:
+                return x.clone()
+
+    def test_register_fake_signature_validation_extra_arg(self):
+        @torch.library.custom_op("_torch_testing::sig_val_extra", mutates_args=())
+        def foo(x: Tensor) -> Tensor:
+            return x.clone()
+
+        with self.assertRaises(TypeError):
+
+            @foo.register_fake
+            def foo_fake(x: Tensor, n: int) -> Tensor:
+                return x.clone()
+
+    def test_register_fake_signature_validation_wrong_names_ok(self):
+        @torch.library.custom_op("_torch_testing::sig_val_names", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        @foo.register_fake
+        def foo_fake(a: Tensor, b: int) -> Tensor:
+            return a.clone()
+
+    def test_register_fake_signature_validation_varargs_skipped(self):
+        @torch.library.custom_op("_torch_testing::sig_val_varargs", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        @foo.register_fake
+        def foo_fake(*args) -> Tensor:
+            return args[0].clone()
+
+    def test_register_fake_signature_validation_happy_path(self):
+        @torch.library.custom_op("_torch_testing::sig_val_happy", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        @foo.register_fake
+        def foo_fake(x: Tensor, n: int) -> Tensor:
+            return x.clone()
+
+    def test_register_fake_signature_validation_default_args(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define(
+                "sig_val_defaults(Tensor x, int n=0, *, float scale=1.0) -> Tensor"
+            )
+
+            @torch.library.register_fake("_torch_testing::sig_val_defaults", lib=lib)
+            def foo_fake(x: Tensor, n: int = 0) -> Tensor:
+                return x.clone()
+
+    def test_register_fake_signature_validation_runtime(self):
+        @torch.library.custom_op("_torch_testing::sig_val_runtime", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        @foo.register_fake
+        def foo_fake(x: Tensor, n: int) -> Tensor:
+            return x.clone()
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            t = torch.randn(3)
+            result = foo(t, 2)
+            self.assertEqual(result.shape, t.shape)
+
+    def test_register_fake_signature_validation_positional_default_rejected(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("sig_val_pos_def(Tensor x, int n=0) -> Tensor")
+
+            with self.assertRaises(TypeError):
+
+                @torch.library.register_fake("_torch_testing::sig_val_pos_def", lib=lib)
+                def foo_fake(x: Tensor) -> Tensor:
+                    return x.clone()
+
+    def test_register_fake_signature_validation_kwonly_mismatch(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("sig_val_kw(Tensor x, *, float scale=1.0) -> Tensor")
+
+            with self.assertRaises(TypeError):
+
+                @torch.library.register_fake("_torch_testing::sig_val_kw", lib=lib)
+                def foo_fake(
+                    x: Tensor, *, scale: float = 1.0, extra: int = 0
+                ) -> Tensor:
+                    return x.clone()
+
+    def test_register_fake_signature_validation_kwargs_skipped(self):
+        @torch.library.custom_op("_torch_testing::sig_val_kwargs", mutates_args=())
+        def foo(x: Tensor, n: int) -> Tensor:
+            return x.clone().repeat(n)
+
+        @foo.register_fake
+        def foo_fake(**kwargs) -> Tensor:
+            return kwargs["x"].clone()
+
+    def test_register_fake_signature_validation_unregistered_op(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            with self.assertRaises(RuntimeError):
+
+                @torch.library.register_fake("_torch_testing::nonexistent_op", lib=lib)
+                def foo_fake(x: Tensor) -> Tensor:
+                    return x.clone()
+
+    def test_register_fake_signature_validation_out_op(self):
+        @torch.library.custom_op(
+            "_torch_testing::sig_val_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def foo(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        @foo.register_fake
+        def foo_fake(x, *, out):
+            return out.clone()
+
+    def test_register_fake_signature_validation_out_op_missing(self):
+        @torch.library.custom_op(
+            "_torch_testing::sig_val_out_missing",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def foo(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        with self.assertRaises(TypeError):
+
+            @foo.register_fake
+            def foo_fake(x):
+                return x.clone()
+
 
 class TestLibrarySourceLocation(TestCase):
     def test_library_source_location(self):

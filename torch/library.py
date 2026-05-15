@@ -343,6 +343,15 @@ class Library:
             caller_module_name = None
 
         qualname = f"{self.ns}::{op_name}"
+        try:
+            op = torch._library.utils.lookup_op(qualname)
+        except AttributeError as e:
+            raise RuntimeError(
+                f"register_fake(...): operator '{qualname}' has not been "
+                f"registered. Please define the operator before registering "
+                f"a fake implementation."
+            ) from e
+        torch._library.utils.validate_fake_signature(fn, op._schema)
         entry = torch._library.simple_registry.singleton.find(qualname)
         if caller_module_name is not None:
             func_to_register = _check_pystubs_once(fn, qualname, caller_module_name)

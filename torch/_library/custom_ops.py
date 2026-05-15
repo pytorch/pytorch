@@ -598,6 +598,9 @@ class CustomOpDef:
                 "The provided fake impl will be used instead.",
                 stacklevel=2,
             )
+        from torch._library.utils import validate_fake_signature
+
+        validate_fake_signature(fn, self._opoverload._schema)
         self._abstract_fn = fn
         return fn
 
