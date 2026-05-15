@@ -1596,9 +1596,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if (
-                fill_value.is_tensor()
-                and fill_value.python_type() is not torch.nn.Parameter
+            if fill_value.is_tensor() and not issubclass(
+                fill_value.python_type(), torch.nn.Parameter
             ):
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
