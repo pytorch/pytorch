@@ -127,8 +127,13 @@ struct LazyTensorContext {
 
 template<int kRank, bool kRequireZeros>
 struct LazyTensorFunctions : public LazyTensorContext {
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+  static aotriton::TensorView<kRank> acquire(aotriton::LazyTensor<kRank>* self) {
+    auto ctx = (LazyTensorContext*)self->cookie;
+#else
   static aotriton::TensorView<kRank> acquire(void* cookie) {
     auto ctx = (LazyTensorContext*)cookie;
+#endif
     if (!ctx->tensor.defined()) {
       auto q = ctx->like_tensor;
       if constexpr (kRequireZeros) {
