@@ -1313,6 +1313,36 @@ class TestMaxAutotune(TestCase):
             act = opt_f(x, weight)
             self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
 
+    @skipIfXpu
+    @config.patch(
+        cpp_wrapper=True,
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        max_autotune_gemm_search_space="DEFAULT",
+        pipeline_max_autotune_gemm=False,
+    )
+    def test_empty_conv_input_cpp_wrapper_triton_conv_backends(self):
+        x = torch.randn(0, 256, 14, 14, device=GPU_TYPE)
+        weight = torch.randn(256, 256, 1, 1, device=GPU_TYPE)
+
+        def f(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                bias=None,
+                stride=[1, 1],
+                padding=[0, 0],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
     @config.patch(max_autotune_gemm_backends="TRITON")
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_baddmm(self, search_space):
