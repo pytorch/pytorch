@@ -4304,6 +4304,14 @@ class GraphModule(torch.nn.Module):
 
         ep = ep.run_decompositions({})
 
+        # After decomposition the lifted constant moves from the CONSTANT_TENSOR
+        # path to a persistent buffer in the graph signature backed by the
+        # subgraph submodule's state. Call _graph_module_flat_inputs again
+        # to exercise the new gm_state_dict fallback branch in that method.
+        flat_inputs_post = ep._graph_module_flat_inputs((x,), {})
+        self.assertIsInstance(flat_inputs_post, tuple)
+        self.assertIs(flat_inputs_post[-1], x)
+
         # The inner tensor constant should be exposed as a subgraph-scoped
         # buffer in the top-level graph signature.
         buffer_names = list(ep.graph_signature.buffers)

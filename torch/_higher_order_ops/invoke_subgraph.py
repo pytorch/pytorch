@@ -284,7 +284,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             candidate = subgraph
         else:
             candidate = None
-        bufs = list(candidate.buffers()) if candidate is not None else []
+        bufs = (
+            list(candidate.buffers())
+            if isinstance(candidate, torch.fx.GraphModule)
+            else []
+        )
         if bufs and all(isinstance(buf, FunctionalTensor) for buf in bufs):
             gm = candidate
         if gm is None:
