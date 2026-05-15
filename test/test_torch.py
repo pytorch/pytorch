@@ -11195,6 +11195,31 @@ class TestIndexAddOverrideCorrectness(TestCase):
         tol = _index_add_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
 
+    @parametrize("dtype,N", [
+        # Shapes whose chunk_elems is not a multiple of 32, exercising
+        # the cooperative scale's tail handler. chunk_elems is min of
+        # (row_bytes, 512) // elem_bytes, so we keep row_bytes < 512.
+        # Row alignment requires row_bytes % 16 == 0.
+        subtest((torch.float32, 4), name="fp32_N4"),     # tail-only (bulk=0, tail=4)
+        subtest((torch.float32, 36), name="fp32_N36"),   # bulk=32, tail=4
+        subtest((torch.bfloat16, 8), name="bf16_N8"),    # tail-only (bulk=0, tail=8)
+        subtest((torch.bfloat16, 40), name="bf16_N40"),  # bulk=32, tail=8
+        subtest((torch.float16, 72), name="fp16_N72"),   # bulk=64, tail=8
+    ])
+    def test_alpha_chunk_elems_with_tail(self, dtype, N):
+        # Regression for the warp-cooperative scale path when
+        # chunk_elems % 32 != 0: lanes [bulk_slots, chunk_elems) used
+        # to be skipped entirely. Only triggered with alpha != 1 (the
+        # alpha == 1 fast path bypasses _scale_smem).
+        torch.manual_seed(0)
+        self_t = torch.zeros(20, N, device="cuda", dtype=dtype)
+        src = torch.randn(10, N, device="cuda", dtype=dtype)
+        idx = torch.randint(0, 20, (10,), device="cuda", dtype=torch.int64)
+        got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
+        ref = _naive_index_add(self_t, idx, src, alpha=0.5)
+        tol = _index_add_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
     @parametrize("variant", ["functional", "out", "inplace"])
     def test_op_variants(self, variant):
         torch.manual_seed(0)
