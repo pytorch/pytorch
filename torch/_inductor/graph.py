@@ -148,6 +148,59 @@ aten = torch.ops.aten
 
 _post_grad_graph_counter = itertools.count()
 
+
+def _is_valid_generator_user(user: Node, generator_node: Node) -> bool:
+    valid_targets = (
+        torch._prims.rng_prims.graphsafe_run_with_rng_state,
+        torch.ops.higher_order.invoke_subgraph,
+    )
+    if user.target in valid_targets:
+        return True
+
+    from torch._inductor.fx_passes.control_dependencies import control_deps
+
+    if user.target is not control_deps or len(user.args) < 2:
+        return False
+
+    # control_deps wraps the original op in a subgraph and passes the original
+    # FX node arguments after (deps, subgraph).
+    subgraph_node = user.args[1]
+    if not isinstance(subgraph_node, Node) or subgraph_node.op != "get_attr":
+        return False
+    if not isinstance(subgraph_node.target, str):
+        return False
+
+    owning_module = subgraph_node.graph.owning_module
+    if owning_module is None:
+        return False
+
+    try:
+        subgraph = getattr(owning_module, subgraph_node.target)
+    except AttributeError:
+        return False
+    if not isinstance(subgraph, torch.fx.GraphModule):
+        return False
+
+    placeholders = [n for n in subgraph.graph.nodes if n.op == "placeholder"]
+    generator_arg_indices = [
+        i for i, arg in enumerate(user.args[2:]) if arg is generator_node
+    ]
+    if not generator_arg_indices:
+        return False
+
+    for arg_idx in generator_arg_indices:
+        if arg_idx >= len(placeholders):
+            return False
+        placeholder = placeholders[arg_idx]
+        if not (
+            len(placeholder.users) == 1
+            and next(iter(placeholder.users)).target in valid_targets
+        ):
+            return False
+
+    return True
+
+
 if config.is_fbcode():
     from torch._inductor.fb.triton_kernel_metadata import (
         save_triton_kernel_perf_artifact,
@@ -1273,11 +1326,8 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and next(
-                iter(V.graph.current_node.users)
-            ).target in (
-                torch._prims.rng_prims.graphsafe_run_with_rng_state,
-                torch.ops.higher_order.invoke_subgraph,
+            assert len(V.graph.current_node.users) == 1 and _is_valid_generator_user(
+                next(iter(V.graph.current_node.users)), V.graph.current_node
             )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen
