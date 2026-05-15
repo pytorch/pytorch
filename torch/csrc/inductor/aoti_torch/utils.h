@@ -12,6 +12,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/shim_exception_state.h>
 #include <optional>
+#include <variant>
 
 namespace torch::aot_inductor {
 TORCH_API const char* get_last_error();
@@ -230,29 +231,46 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
 
 // Owning wrapper used as the return type of pointer_to_optional_list.
 //
-// The previous implementation returned `std::optional<c10::ArrayRef<T>>`
-// constructed from a `std::vector<T>` temporary. When the caller's T differs
-// from the on-wire type U (e.g. T=c10::SymInt, U=int64_t), pointer_to_list
-// materializes a new std::vector<T> by value; that vector is destroyed at the
-// end of pointer_to_optional_list, leaving the ArrayRef inside the returned
-// optional dangling. The receiving op (e.g. convolution_backward_symint) then
-// reads freed memory -- ASAN catches it as heap-use-after-free at
-// c10::SymInt::is_heap_allocated.
+// pointer_to_list has two return shapes:
+//   * T == U  -> c10::ArrayRef<T> view of the wire buffer (zero-copy).
+//   * T != U  -> std::vector<T> materialized after a per-element conversion.
 //
-// This wrapper holds the vector itself. The implicit conversion below produces
-// a c10::OptionalArrayRef<T> view into that vector. Because the wrapper is the
-// temporary in the call site's full expression, its storage stays alive for
-// the duration of the receiving function call.
+// Returning `std::optional<c10::ArrayRef<T>>` directly was buggy in the
+// T != U path: the ArrayRef pointed into the materialized vector, which
+// died at the end of pointer_to_optional_list, leaving a dangling view
+// (heap-use-after-free at e.g. c10::SymInt::is_heap_allocated when
+// convolution_backward_symint read freed SymInt memory).
+//
+// This wrapper carries either case: the materialized vector (owned), or
+// the wire-buffer ArrayRef (borrowed from the caller's frame, which
+// outlives the call expression we are part of). The implicit conversions
+// below expose both as a view into whichever storage is active.
 template <class T>
 struct OwningOptionalArrayRef {
-  std::optional<std::vector<T>> storage;
+  // monostate = nullopt (caller passed nullptr).
+  // std::vector<T> = owned (T != U materialization).
+  // c10::ArrayRef<T> = borrowed view of the wire buffer (T == U).
+  std::variant<std::monostate, std::vector<T>, c10::ArrayRef<T>> storage;
 
   OwningOptionalArrayRef() = default;
-  explicit OwningOptionalArrayRef(std::vector<T> v) : storage(std::move(v)) {}
+  /* implicit */ OwningOptionalArrayRef(std::vector<T> v)
+      : storage(std::move(v)) {}
+  /* implicit */ OwningOptionalArrayRef(c10::ArrayRef<T> v) : storage(v) {}
+
+  bool has_value() const noexcept {
+    return !std::holds_alternative<std::monostate>(storage);
+  }
+
+  c10::ArrayRef<T> view() const {
+    if (auto* v = std::get_if<std::vector<T>>(&storage)) {
+      return c10::ArrayRef<T>(*v);
+    }
+    return std::get<c10::ArrayRef<T>>(storage);
+  }
 
   /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
-                   : c10::OptionalArrayRef<T>(std::nullopt);
+    return has_value() ? c10::OptionalArrayRef<T>(view())
+                       : c10::OptionalArrayRef<T>(std::nullopt);
   }
 
   // Some generated shim call sites pass into a parameter of type
@@ -260,8 +278,7 @@ struct OwningOptionalArrayRef {
   // e.g. at::cpu::_histogramdd_from_bin_cts(...,
   // std::optional<ArrayRef<double>>).
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
-    return storage ? std::make_optional(c10::ArrayRef<T>(*storage))
-                   : std::nullopt;
+    return has_value() ? std::make_optional(view()) : std::nullopt;
   }
 };
 
@@ -273,13 +290,10 @@ inline OwningOptionalArrayRef<T> pointer_to_optional_list(
   if (!ptr) {
     return OwningOptionalArrayRef<T>{};
   }
-  // pointer_to_list returns a std::vector<T> by value when T != U (typical:
-  // T=c10::SymInt, U=int64_t), or a c10::ArrayRef<T> when T == U. Materialize
-  // into a vector either way so the wrapper owns the storage uniformly.
-  // TODO: skip the copy when T == U (the wire buffer already outlives the
-  // call); would require the wrapper to optionally hold an ArrayRef view.
-  auto list = pointer_to_list<T>(*ptr, len);
-  return OwningOptionalArrayRef<T>(std::vector<T>(list.begin(), list.end()));
+  // pointer_to_list returns ArrayRef<T> (zero-copy) when T == U, or
+  // std::vector<T> (materialized) when T != U. OwningOptionalArrayRef
+  // has constructors for both; overload resolution picks the right one.
+  return OwningOptionalArrayRef<T>(pointer_to_list<T>(*ptr, len));
 }
 
 template <typename T>
