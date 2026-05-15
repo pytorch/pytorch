@@ -428,7 +428,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
-    def benchmark_gpu(
+    def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
         estimation_iters: int = 5,
