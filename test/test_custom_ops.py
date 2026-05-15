@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_XPU,
     TestCase,
 )
@@ -3522,9 +3523,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_sin", mutates_args=())
@@ -3548,9 +3549,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_low_level(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["qualname", "opoverload"]:
                 with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
                     lib.define("my_sin(Tensor x) -> Tensor")
@@ -3578,9 +3579,9 @@ with warnings.catch_warnings(record=True) as w:
                     self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_list_input(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_add_sin", mutates_args=())
@@ -3606,9 +3607,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
 
             @torch.library.custom_op("mylib::my_sin", mutates_args=())
             def my_sin(x: Tensor) -> Tensor:
@@ -3629,17 +3630,18 @@ with warnings.catch_warnings(record=True) as w:
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times_different_devices(self):
         @torch.library.custom_op("mylib::my_sin", mutates_args=())
         def my_sin(x: Tensor) -> Tensor:
             return torch.sin(x)
 
-        # Register autocast for CUDA
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register autocast for the current accelerator
+        device_type = torch.accelerator.current_accelerator().type
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        x1 = torch.randn(3, dtype=torch.float32, device="cuda")
-        with torch.autocast("cuda", dtype=torch.float16):
+        x1 = torch.randn(3, dtype=torch.float32, device=device_type)
+        with torch.autocast(device_type, dtype=torch.float16):
             y1 = my_sin(x1)
         self.assertEqual(y1.dtype, torch.float16)
 
@@ -3651,10 +3653,10 @@ with warnings.catch_warnings(record=True) as w:
             y2 = my_sin(x2)
         self.assertEqual(y2.dtype, torch.float16)
 
-        # Register CUDA autocast for the second time
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register accelerator autocast for the second time
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast(device_type, dtype=torch.float16):
             y3 = my_sin(x1)
         self.assertEqual(y3.dtype, torch.float16)
 
@@ -3664,6 +3666,16 @@ with warnings.catch_warnings(record=True) as w:
         with torch.autocast("cpu", dtype=torch.float16):
             y4 = my_sin(x2)
         self.assertEqual(y4.dtype, torch.float16)
+
+        # Nested autocast: verifies no infinite redispatch when both keys are active.
+        with (
+            torch.autocast("cpu", dtype=torch.float16),
+            torch.autocast(device_type, dtype=torch.float16),
+        ):
+            y5 = my_sin(x1)
+            y6 = my_sin(x2)
+        self.assertEqual(y5.dtype, torch.float16)
+        self.assertEqual(y6.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_autograd(self):
