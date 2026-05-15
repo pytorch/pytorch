@@ -318,7 +318,7 @@ def pre_grad_passes(
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
-                pattern_matcher_pass.apply(gm.graph)
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
                 lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
             )
@@ -333,7 +333,7 @@ def pre_grad_passes(
                 # we support run same pattern multiple times, the default is to run only once
                 counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
                 for _ in range(counter):
-                    pattern_matcher_pass.apply(gm.graph)
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     trace_structured(
                         "artifact",
