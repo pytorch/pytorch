@@ -13,11 +13,7 @@ from torch._inductor.codegen.cutlass.utils import (
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import (
-    IS_SM10X,
-    IS_SM90,
-    SM90OrLater,
-)
+from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
@@ -33,11 +29,7 @@ def _is_cuda_sm90_or_sm10x():
 
 
 def _expect_cuda_evt_key_error():
-    return (
-        GPU_TYPE == "cuda"
-        and bool(IS_SM10X)
-        and int(cutlass_arch(GPU_TYPE)) > 100
-    )
+    return GPU_TYPE == "cuda" and bool(IS_SM10X) and int(cutlass_arch(GPU_TYPE)) > 100
 
 
 if try_import_cutlass():
