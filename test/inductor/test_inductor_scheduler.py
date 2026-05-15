@@ -3,12 +3,14 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
+import sympy
+
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, ReadWrites
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -29,6 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -81,6 +84,117 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+            simple_write = MemoryDep("buf", w0, (w0,), (16,))
+            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+            cases = [
+                (
+                    "quotient broadcast",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128),
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    True,
+                ),
+                (
+                    "quotient tail remains",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    False,
+                ),
+                (
+                    "pure broadcast",
+                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
+                    simple_write,
+                    False,
+                    True,
+                ),
+                (
+                    "dynamic dense",
+                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
+                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
+                    False,
+                    True,
+                ),
+                (
+                    "exact gapped",
+                    exact_gapped,
+                    exact_gapped,
+                    True,
+                    True,
+                ),
+                (
+                    "producer broadcast",
+                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
+                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
+                    False,
+                    False,
+                ),
+                (
+                    "producer alias",
+                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
+                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
+                    False,
+                    False,
+                ),
+            ]
+            for name, read, write, expected_default, expected_relaxed in cases:
+                with self.subTest(name):
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(read, write),
+                        expected_default,
+                    )
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(
+                            read,
+                            write,
+                            allow_index_equivalence=True,
+                        ),
+                        expected_relaxed,
+                    )
+
+            normalized_exact_gapped_read = MemoryDep(
+                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
+            )
+            normalized_exact_gapped_write = MemoryDep(
+                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
+            )
+            with inductor_config.patch(loop_ordering_after_fusion=True):
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                    )
+                )
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                        allow_index_equivalence=True,
+                    )
+                )
+
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
         graph = Mock(sizevars=SizeVarAllocator())
