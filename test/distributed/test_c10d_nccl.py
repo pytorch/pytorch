@@ -1502,31 +1502,47 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_shrink()
-    @requires_world_size(3)
+    @requires_world_size(2)
     def test_shrink_group_multiple_comms(self):
         """Test shrink_group with multiple communicators and subgroup invalidation."""
 
-        # Shrink a subgroup (non-default group)
-        device, shrunk_subgroup = self._perform_shrink_test(
-            ranks_to_exclude=[self.world_size - 1],
-            test_name="Shrinking subgroup",
-            subgroup_ranks=list(range(self.world_size)),
-            with_collective=True,
-            destroy_default_group=False,  # Keep default group for next test
-        )
-        if shrunk_subgroup is not None:
-            c10d.destroy_process_group(shrunk_subgroup)
+        device, pg = self._setup_shrink_test("multiple_comms")
+
+        # Create subgroup [0, 1] and test shrinking it
+        subgroup = c10d.new_group([0, 1])
+        if self.rank <= 1:
+            # Shrink subgroup: exclude rank 1
+            if self.rank == 0:  # Only rank 0 remains
+                shrunk_subgroup = c10d.shrink_group([1], group=subgroup)
+                self.assertEqual(shrunk_subgroup.size(), 1)
+                # Test communication on shrunk subgroup
+                tensor = torch.full((1,), self.rank).cuda(device)
+                c10d.all_reduce(tensor, group=shrunk_subgroup)
+                self.assertEqual(tensor.item(), 0)  # Only rank 0
+                log_test_success(self.rank, "Subgroup shrinking successful")
 
         dist.barrier()  # Sync before default group test
 
         # Shrink default group: exclude last rank
-        self._perform_shrink_test(
-            ranks_to_exclude=[self.world_size - 1],
-            test_name="Shrinking default group",
-            device=device,
-            with_collective=True,
-            destroy_default_group=True,  # Clean up after final test
-        )
+        ranks_to_exclude = [self.world_size - 1]
+        if self.rank not in ranks_to_exclude:
+            shrunk_default = c10d.shrink_group(ranks_to_exclude)
+            expected_size = self.world_size - 1
+            self.assertEqual(shrunk_default.size(), expected_size)
+
+            # Test collective on shrunk default group
+            tensor = torch.full((1,), self.rank).cuda(device)
+            c10d.all_reduce(tensor, group=shrunk_default)
+            expected_sum = sum(
+                range(self.world_size - 1)
+            )  # 0 + 1 + ... + (world_size-2)
+            self.assertEqual(tensor.item(), expected_sum)
+            log_test_success(self.rank, "Default group shrinking successful")
+
+            # Note: After shrinking default group, the old subgroup is invalid
+            # due to global rank reassignment
+
+        dist.destroy_process_group()
 
     def _test_shrink_group_with_flag(self, shrink_flag, flag_name, rank_to_exclude):
         """Helper method to test shrink_group with a specific flag."""
@@ -1821,35 +1837,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         return result
 
     def _perform_shrink_test(
-        self,
-        ranks_to_exclude,
-        test_name,
-        shrink_flags=0,
-        with_collective=True,
-        subgroup_ranks=None,
-        device=None,
-        destroy_default_group=True,
+        self, ranks_to_exclude, test_name, shrink_flags=0, with_collective=True
     ):
         """Complete shrink test flow: setup, shrink, validate, test collective, cleanup.
 
         Consistent API: All ranks perform setup to initialize distributed environment.
         ONLY non-excluded ranks call shrink_group() for both default and non-default groups.
         Excluded ranks perform setup, then exit without calling shrink_group() or waiting.
-
-        Args:
-            ranks_to_exclude: List of ranks to exclude from the group
-            test_name: Name for logging
-            shrink_flags: Flags for shrink operation (SHRINK_DEFAULT or SHRINK_ABORT)
-            with_collective: Whether to test collective operations on shrunk group
-            subgroup_ranks: List of ranks to create a subgroup. If provided, creates and shrinks
-                           a non-default group. If None, shrinks default group. (default: None)
-            device: CUDA device. Required when subgroup_ranks is provided (default: None)
-            destroy_default_group: Whether to destroy default group after shrinking it.
-                                  Set to False to allow multiple calls to this method.
-                                  Only applies when shrinking default group. (default: True)
-
-        Returns:
-            tuple: (device, shrunk_pg) where shrunk_pg is None for excluded ranks
         """
         log_test_info(self.rank, f"{test_name} (world_size={self.world_size})")
 
@@ -1859,23 +1853,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             f"Excluding ranks: {ranks_to_exclude}, am_excluded: {is_excluded}",
         )
 
-        # Perform setup if device not provided (first call)
-        if device is None:
-            device, pg = self._setup_shrink_test(test_name.lower().replace(" ", "_"))
-        else:
-            # Device provided, assume setup already done
-            pg = c10d.distributed_c10d._get_default_group()
-
-        # Determine if we're shrinking a subgroup or default group
-        if subgroup_ranks is not None:
-            # Create and shrink a non-default group (subgroup)
-            log_test_info(self.rank, f"Creating subgroup with ranks: {subgroup_ranks}")
-            group = c10d.new_group(subgroup_ranks)
-            is_default_group = False
-        else:
-            # Shrinking default group
-            group = pg
-            is_default_group = True
+        # All ranks (including excluded ones) perform setup to initialize distributed environment
+        device, pg = self._setup_shrink_test(test_name.lower().replace(" ", "_"))
+        is_default_group = pg == c10d.distributed_c10d._get_default_group()
 
         if is_excluded:
             log_test_info(
@@ -1884,40 +1864,25 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             if shrink_flags & NCCL_SHRINK_ABORT:
                 log_test_info(self.rank, f"Using abort for excluded rank {self.rank}")
-                group._get_backend(torch.device(device)).abort()
+                pg._get_backend(torch.device(device)).abort()
                 log_test_info(
                     self.rank, f"cleanup resources for excluded rank {self.rank}"
                 )
-
-            # Destroy the group being shrunk (could be default or non-default)
-            if is_default_group:
-                if destroy_default_group:
-                    log_test_info(
-                        self.rank, f"Excluded rank {self.rank} destroying default group"
-                    )
-                    dist.destroy_process_group()
-                else:
-                    log_test_info(
-                        self.rank,
-                        f"Excluded rank {self.rank} skipping default group destroy",
-                    )
+                dist.destroy_process_group()
+                log_test_info(self.rank, f"Excluded rank {self.rank} - exit")
             else:
                 log_test_info(
-                    self.rank, f"Excluded rank {self.rank} destroying subgroup"
+                    self.rank, f"Using regular destroy for excluded rank {self.rank}"
                 )
-                c10d.destroy_process_group(group)
-
-            log_test_info(self.rank, f"Excluded rank {self.rank} - exit")
-            return device, None
+                dist.destroy_process_group()
+            return None
 
         # Only non-excluded ranks proceed with shrink
         log_test_info(
             self.rank,
             f"Non-excluded rank calling shrink_group (default_group={is_default_group})",
         )
-        shrunk_pg = c10d.shrink_group(
-            ranks_to_exclude, group=group, shrink_flags=shrink_flags
-        )
+        shrunk_pg = c10d.shrink_group(ranks_to_exclude, shrink_flags=shrink_flags)
         log_test_info(
             self.rank,
             f"Non-excluded rank calling shrink_group (default_group={is_default_group}) done",
@@ -1935,10 +1900,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         else:
             log_test_success(self.rank, f"{test_name} successful (shrink only)")
 
-        if is_default_group and destroy_default_group:
-            dist.destroy_process_group()
-
-        return device, shrunk_pg
+        dist.destroy_process_group()
+        return shrunk_pg
 
     def _get_default_ranks_to_exclude(self):
         """Get default ranks to exclude based on world size."""
