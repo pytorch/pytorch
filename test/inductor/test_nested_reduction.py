@@ -66,6 +66,15 @@ class TestBase(TestCase):
         act = torch.compile(f)(*args)
         self.assertEqual(act, ref, atol=tol, rtol=tol)
 
+    def check_nested_matches_unnested(self, f, args, tol=1e-2):
+        with inductor_config.patch("triton.nested_reduction", False):
+            ref = torch.compile(f)(*args)
+
+        metrics.reset()
+        torch._dynamo.reset()
+        act = torch.compile(f)(*args)
+        self.assertEqual(act, ref, atol=tol, rtol=tol)
+
     def check_fusion(self, expected_kernels=1):
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         if expected_kernels is not None:
@@ -526,7 +535,7 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE)
         w = torch.randn(D, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
+        self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
     def test_grouped_reduction_with_weight_mul(self):
@@ -587,7 +596,7 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE)
         w = torch.randn(D, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
+        self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
     @inductor_config.patch(emulate_precision_casts=True)
@@ -611,7 +620,7 @@ class _NestedReductionBase:
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.check_numeric(f, (x, residual, w))
+        self.check_nested_matches_unnested(f, (x, residual, w))
         self.check_fusion()
 
     @parametrize(
