@@ -3958,6 +3958,7 @@ class TilingSelect:
             )
             call_ranges = tuple(group) + tuple(reduction_group)
 
+            stats = KernelOpStats()
             if config.cpp.enable_tiling_heuristics:
 
                 def _try_get_stride(
@@ -4002,7 +4003,6 @@ class TilingSelect:
                     itervars[:reduction_depth],
                     itervars[reduction_depth:],
                 )
-                stats = KernelOpStats()
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
@@ -4446,6 +4446,7 @@ class CppKernelProxy(CppKernel):
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
+        """Generate scalar and vectorized C++ kernels with tiling for the given functions."""
         assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
         group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
@@ -4499,8 +4500,8 @@ class CppKernelProxy(CppKernel):
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_select = TilingSelect()
-            tiling_factors, tiling_indices, tiling_stats = (
-                tiling_select.select_tiling(fn_list, var_sizes_list)
+            tiling_factors, tiling_indices, tiling_stats = tiling_select.select_tiling(
+                fn_list, var_sizes_list
             )
 
             def _tail_vec_worthwhile(tail_size, tiling_factor) -> bool:
