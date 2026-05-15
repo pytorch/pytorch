@@ -59,6 +59,7 @@ from torch.utils._sympy.functions import (
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .fx_passes.random_utils import FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY
 from .ir import (
     BaseView,
     DtypeView,
@@ -2705,7 +2706,10 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    if config.fallback_random:
+    if (
+        config.fallback_random
+        or _current_node_uses_fallback_random_for_fractional_pool()
+    ):
         return pytree.tree_map(
             TensorBox.create,
             ir.FallbackKernel.create(aten.native_dropout.default, x, p, train),
@@ -2716,7 +2720,11 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device("cpu"), (
+    assert (
+        config.fallback_random
+        or _current_node_uses_fallback_random_for_fractional_pool()
+        or x.get_device() == torch.device("cpu")
+    ), (
         "this should be handled in decomps unless config.fallback_random or the device is CPU"
     )
     x.realize()
@@ -2731,7 +2739,11 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device("cpu"), (
+    assert (
+        config.fallback_random
+        or _current_node_uses_fallback_random_for_fractional_pool()
+        or x.get_device() == torch.device("cpu")
+    ), (
         "this should be handled in decomps unless config.fallback_random or the device is CPU"
     )
     return bernoulli_(clone(x), *args)
@@ -2758,9 +2770,21 @@ fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
+make_fallback(aten.bernoulli.default, override_decomp=True)
+make_fallback(aten.cauchy, override_decomp=True)
+make_fallback(aten.cauchy_, override_decomp=True)
+make_fallback(aten.exponential, override_decomp=True)
+make_fallback(aten.exponential_, override_decomp=True)
+make_fallback(aten.geometric, override_decomp=True)
+make_fallback(aten.geometric_, override_decomp=True)
+make_fallback(aten.log_normal, override_decomp=True)
+make_fallback(aten.log_normal_, override_decomp=True)
+make_fallback(aten.normal, override_decomp=True)
+make_fallback(aten.normal_, override_decomp=True)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.uniform_, override_decomp=True)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -2769,11 +2793,21 @@ make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
 
 
+def _current_node_uses_fallback_random_for_fractional_pool() -> bool:
+    node = V.graph.current_node
+    return bool(
+        node is not None and node.meta.get(FALLBACK_RANDOM_FOR_FRACTIONAL_POOL_KEY)
+    )
+
+
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif (
+        config.fallback_random
+        or _current_node_uses_fallback_random_for_fractional_pool()
+    ):
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2783,7 +2817,10 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif (
+        config.fallback_random
+        or _current_node_uses_fallback_random_for_fractional_pool()
+    ):
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -5956,27 +5993,28 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
 
     def load(prefix, i):
         # Handle indexing for samples tensor correctly for different input dimensions
-        # samples tensor always has shape (N, C, 2) for fractional_max_pool2d where:
-        # - N=1 for 3D inputs (C,H,W), N=batch_size for 4D inputs (N,C,H,W)
+        # samples tensor has shape (N, C, ndim) where:
+        # - N=1 for unbatched inputs, N=batch_size for batched inputs
         # - C=num_channels
-        # - 2 for the two spatial dimensions (height, width)
+        # - ndim is the number of spatial dimensions
         samples_shape = samples.get_size()
+        # Native 2D samples are ordered as W,H while native 3D samples are
+        # ordered as T,H,W.
+        sample_dim = ndims - 1 - dim if ndims == 2 else dim
 
-        if len(samples_shape) == 3:  # Expected: (N, C, 2)
+        if len(samples_shape) == 3:  # Expected: (N, C, ndim)
             if len(prefix) == 1:
-                # 3D input case: prefix=(channel,), samples=(1, C, 2)
-                # Access: samples[0, channel, dim]
-                sample = samples_loader([0, prefix[0], ndims - 1 - dim])
+                # Unbatched input case: prefix=(channel,)
+                sample = samples_loader([0, prefix[0], sample_dim])
             elif len(prefix) >= 2:
-                # 4D+ input case: prefix=(batch, channel, ...), samples=(batch, C, 2)
-                # Access: samples[batch, channel, dim]
-                sample = samples_loader([prefix[0], prefix[1], ndims - 1 - dim])
+                # Batched input case: prefix=(batch, channel, ...)
+                sample = samples_loader([prefix[0], prefix[1], sample_dim])
             else:
                 # Edge case - shouldn't happen for valid fractional pooling
-                sample = samples_loader([0, 0, ndims - 1 - dim])
+                sample = samples_loader([0, 0, sample_dim])
         else:
             # Fallback for unexpected tensor shapes
-            sample = samples_loader([*prefix, ndims - 1 - dim])
+            sample = samples_loader([*prefix, sample_dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
         diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
         out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
