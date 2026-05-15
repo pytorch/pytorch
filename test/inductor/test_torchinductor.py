@@ -6328,6 +6328,7 @@ class CommonTemplate:
     @skip_if_halide  # cpp-only RuntimeError contract
     @skip_if_pallas  # cpp-only RuntimeError contract
     @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
     def test_embedding_out_of_bounds_indices(self):
         if self.device != "cpu":
             raise unittest.SkipTest("CPU bounds check regression")
@@ -8805,6 +8806,81 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )(weights2d)
         self.assertEqual(result2d.shape, torch.Size([4, 3]))
         self.assertTrue((result2d >= 0).all() and (result2d < 8).all())
+
+    def test_bincount(self):
+        # aten.bincount: data-dependent output size; routes to ATen eager kernel.
+        # Output is deterministic, so exact comparison is valid.
+        def fn(x):
+            return torch.bincount(x, minlength=8)
+
+        self.common(fn, (torch.randint(0, 8, (30,), dtype=torch.int64),))
+
+    def test_bincount_with_weights(self):
+        def fn(x, w):
+            return torch.bincount(x, weights=w, minlength=8)
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 8, (30,), dtype=torch.int64),
+                torch.rand(30, dtype=torch.float32),
+            ),
+        )
+
+    def test_unique(self):
+        # aten._unique2: torch.unique() backend; multi-output with data-dependent size.
+        def fn(x):
+            return torch.unique(x, sorted=True, return_inverse=True, return_counts=True)
+
+        self.common(fn, (torch.tensor([3, 1, 2, 1, 3, 3], dtype=torch.int64),))
+
+    def test_unique_dim(self):
+        # aten.unique_dim: torch.unique(dim=N) backend.
+        def fn(x):
+            return torch.unique(
+                x, dim=0, sorted=True, return_inverse=True, return_counts=True
+            )
+
+        self.common(fn, (torch.tensor([[1, 2], [1, 2], [3, 4]], dtype=torch.int64),))
+
+    def test_unique_consecutive(self):
+        # aten.unique_consecutive: runs of identical adjacent elements.
+        def fn(x):
+            return torch.unique_consecutive(x, return_inverse=True, return_counts=True)
+
+        self.common(fn, (torch.tensor([1, 1, 2, 2, 3, 1, 1], dtype=torch.int64),))
+
+    def test_unique_dim_consecutive(self):
+        # aten.unique_dim_consecutive: consecutive unique rows/cols.
+        def fn(x):
+            return torch.unique_consecutive(
+                x, dim=0, return_inverse=True, return_counts=True
+            )
+
+        self.common(
+            fn,
+            (torch.tensor([[1, 2], [1, 2], [3, 4], [3, 4]], dtype=torch.int64),),
+        )
+
+    def test_amp_update_scale(self):
+        # aten._amp_update_scale_: GradScaler update step, routes to ATen eager.
+        def fn(scale, growth_tracker, found_inf):
+            return torch._amp_update_scale_(
+                scale,
+                growth_tracker,
+                found_inf,
+                scale_growth_factor=2.0,
+                scale_backoff_factor=0.5,
+                growth_interval=2000,
+            )
+
+        scale = torch.tensor([1024.0], device=self.device)
+        growth_tracker = torch.tensor([0], dtype=torch.int32, device=self.device)
+        found_inf = torch.tensor([0.0], device=self.device)
+        cfn = torch.compile(fn)
+        result = cfn(scale.clone(), growth_tracker.clone(), found_inf.clone())
+        expected = fn(scale.clone(), growth_tracker.clone(), found_inf.clone())
+        self.assertEqual(result, expected)
 
     def test_long_tensor(self):
         def fn(a):
@@ -15207,6 +15283,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
         self.assertEqual(eager_out, compiled_out)
 
+    @requires_cuda
+    def test_lazy_conv_zero_in_channels_backward(self):
+        for dim in (1, 2, 3):
+            conv_cls = getattr(torch.nn, f"LazyConv{dim}d")
+            model = conv_cls(2, kernel_size=1).eval().to(GPU_TYPE)
+            x = torch.randn(1, 0, *([8] * dim), device=GPU_TYPE)
+
+            y = torch.compile(model)(x)
+            self.assertEqual(y.shape, torch.Size([1, 0, *([8] * dim)]))
+
+            y.sum().backward()
+            self.assertEqual(model.weight.shape, torch.Size([2, 0, *([1] * dim)]))
+            self.assertEqual(model.weight.grad.shape, model.weight.shape)
+            self.assertEqual(model.bias.shape, torch.Size([2]))
+            self.assertEqual(model.bias.grad.shape, model.bias.shape)
+            self.assertEqual(model.bias.grad, torch.zeros_like(model.bias))
+
     @requires_gpu()
     @config.patch(fallback_random=True)
     def test_mix_device_index(self):
@@ -18630,6 +18723,160 @@ if RUN_GPU:
             self.assertEqual(result.shape, torch.Size([3]))
             self.assertTrue(result.min() >= 0)
             self.assertTrue(result.max() < 8)
+
+        def test_bincount_lowering_no_graph_break(self):
+            # aten.bincount has a registered make_fallback; must compile graph-break-free.
+            def fn(x):
+                y = x + 1  # ensures x participates in the compiled graph
+                return torch.bincount(y, minlength=10)
+
+            inp = torch.randint(0, 9, (30,), device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for bincount, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result, expected)
+
+        def test_unique_lowering_no_graph_break(self):
+            # aten._unique2 has a registered make_fallback; must compile graph-break-free.
+            def fn(x):
+                y = x * 2
+                vals, inverse, counts = torch.unique(
+                    y, sorted=True, return_inverse=True, return_counts=True
+                )
+                return vals, inverse, counts
+
+            inp = torch.randint(0, 5, (20,), device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for unique, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+            torch.testing.assert_close(result[2], expected[2])
+
+        def test_unique_consecutive_lowering_no_graph_break(self):
+            # aten.unique_consecutive has a registered make_fallback.
+            def fn(x):
+                y = x.abs()
+                vals, inverse, counts = torch.unique_consecutive(
+                    y, return_inverse=True, return_counts=True
+                )
+                return vals, inverse, counts
+
+            inp = torch.tensor([1, 1, 2, 2, 3, 1, 1], device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for unique_consecutive, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+            torch.testing.assert_close(result[2], expected[2])
+
+        def test_unique_dim_lowering_no_graph_break(self):
+            # aten.unique_dim has a registered make_fallback.
+            def fn(x):
+                y = x * 2
+                vals, inverse, counts = torch.unique(
+                    y, dim=0, sorted=True, return_inverse=True, return_counts=True
+                )
+                return vals, inverse, counts
+
+            inp = torch.tensor([[1, 2], [1, 2], [3, 4]], device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for unique(dim=0), got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+            torch.testing.assert_close(result[2], expected[2])
+
+        def test_unique_dim_consecutive_lowering_no_graph_break(self):
+            # aten.unique_dim_consecutive has a registered make_fallback.
+            def fn(x):
+                y = x.abs()
+                vals, inverse, counts = torch.unique_consecutive(
+                    y, dim=0, return_inverse=True, return_counts=True
+                )
+                return vals, inverse, counts
+
+            inp = torch.tensor([[1, 2], [1, 2], [3, 4], [3, 4]], device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for unique_consecutive(dim=0), got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+            torch.testing.assert_close(result[2], expected[2])
+
+        def test_amp_update_scale_lowering_no_graph_break(self):
+            # aten._amp_update_scale_ has a registered make_fallback.
+            def fn(scale, growth_tracker, found_inf):
+                # scalar op before to ensure it's inside the compiled graph
+                s = scale * 1.0
+                return torch._amp_update_scale_(
+                    s,
+                    growth_tracker,
+                    found_inf,
+                    scale_growth_factor=2.0,
+                    scale_backoff_factor=0.5,
+                    growth_interval=2000,
+                )
+
+            scale = torch.tensor([1024.0], device=GPU_TYPE)
+            growth_tracker = torch.tensor([0], dtype=torch.int32, device=GPU_TYPE)
+            found_inf = torch.tensor([0.0], device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(
+                scale.clone(), growth_tracker.clone(), found_inf.clone()
+            )
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for _amp_update_scale_, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(
+                scale.clone(), growth_tracker.clone(), found_inf.clone()
+            )
+            expected = fn(scale.clone(), growth_tracker.clone(), found_inf.clone())
+            torch.testing.assert_close(result, expected)
 
         def test_sort_dynamic(self):
             def fn(a):
