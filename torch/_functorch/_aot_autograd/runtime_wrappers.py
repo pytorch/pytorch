@@ -1990,7 +1990,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 base_expr = f"args[{first_orig}]._base"
             else:
                 indices_str = ", ".join(str(i) for i in group)
-                indices_check = f"any(args[_i]._base is not None for _i in [{indices_str}])"
+                indices_check = (
+                    f"any(args[_i]._base is not None for _i in [{indices_str}])"
+                )
                 base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
             lines.append(f"""\
     if {indices_check}:
@@ -3311,7 +3313,6 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
-
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
