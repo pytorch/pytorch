@@ -13512,7 +13512,7 @@ if __name__ == '__main__':
 
     def test_celu_alpha_zero_raises(self, device):
         x = torch.tensor([-2.0], device=device)
-  
+
         def f(x):
             return torch.nn.functional.celu(x, alpha=0.0)
 
