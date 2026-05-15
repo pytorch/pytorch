@@ -476,8 +476,13 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             self.assertIsInstance(idx, CSEVariable)
             self.assertIsInstance(neg_result, CSEVariable)
             self.assertIsInstance(add_result, CSEVariable)
-            self.assertEqual(str(getattr(idx, "index_expr", None)), "ModularIndexing(idx_in, 1, 2)")
-            self.assertEqual(str(getattr(add_result, "index_expr", None)), "(ModularIndexing(idx_in, 1, 2)) + 1")
+            self.assertEqual(
+                str(getattr(idx, "index_expr", None)), "ModularIndexing(idx_in, 1, 2)"
+            )
+            self.assertEqual(
+                str(getattr(add_result, "index_expr", None)),
+                "(ModularIndexing(idx_in, 1, 2)) + 1",
+            )
             body = kernel.body.getvalue()
             self.assertIn("tmp0 = (idx_in % 2)", body)
             self.assertIn("tmp1 = (-tmp0)", body)
