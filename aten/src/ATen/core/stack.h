@@ -122,7 +122,7 @@ inline std::vector<IValue> pop(Stack& stack, size_t n) {
   return result;
 }
 
-// variadic pop:
+// variadic pop (prefer the tuple-returning overload below for new code):
 // int64_t a; at::Tensor b;
 // pop(stack, a, b);
 // equivalent to:

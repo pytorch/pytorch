@@ -185,14 +185,10 @@ void createTensorFromList(Stack& stack) {
   // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
   // we use the template arg to distinguish between these two cases
   bool requires_grad = false;
-  IValue data;
-  IValue dtype;
-  IValue device;
-  if (if_set_requires_grad) {
-    pop(stack, data, dtype, device, requires_grad);
-  } else {
-    pop(stack, data, dtype, device);
+  if constexpr (if_set_requires_grad) {
+    requires_grad = pop(stack).toBool();
   }
+  auto [data, dtype, device] = pop<IValue, IValue, IValue>(stack);
   auto elem_type = data.type();
   while (elem_type->isSubtypeOf(AnyListType::get())) {
     elem_type = elem_type->containedType(0);
@@ -261,11 +257,8 @@ RegisterOperators reg({
           " t, *, ScalarType? dtype=None, Device? device=None"                  \
           ", bool requires_grad=False) -> Tensor"),                             \
       [](Stack& stack) {                                                        \
-        c_type scalar_val;                                                      \
-        IValue dtype;                                                           \
-        IValue device;                                                          \
-        bool requires_grad;                                                     \
-        pop(stack, scalar_val, dtype, device, requires_grad);                   \
+        auto [scalar_val, dtype, device, requires_grad] =                       \
+            pop<c_type, IValue, IValue, bool>(stack);                           \
         auto tensor = tensor_creation_op;                                       \
         tensor = castTensorTo(tensor, dtype, device);                           \
         tensor.set_requires_grad(requires_grad);                                \
@@ -277,10 +270,8 @@ RegisterOperators reg({
               "aten::as_tensor." #operator_type "(" #operator_type              \
               " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor"), \
           [](Stack& stack) {                                                    \
-            c_type scalar_val;                                                  \
-            IValue dtype;                                                       \
-            IValue device;                                                      \
-            pop(stack, scalar_val, dtype, device);                              \
+            auto [scalar_val, dtype, device] =                                  \
+                pop<c_type, IValue, IValue>(stack);                             \
             auto tensor = tensor_creation_op;                                   \
             tensor = castTensorTo(tensor, dtype, device);                       \
             push(stack, std::move(tensor));                                     \
@@ -338,11 +329,8 @@ RegisterOperators reg({
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor"),
         [](Stack& stack) {
-          at::Tensor weight;
-          at::Tensor input;
-          double max_norm = 0;
-          double norm_type = 0;
-          pop(stack, weight, input, max_norm, norm_type);
+          auto [weight, input, max_norm, norm_type] =
+              pop<at::Tensor, at::Tensor, double, double>(stack);
 
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -405,13 +393,10 @@ RegisterOperators reg({
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
-          at::Tensor tensor;
           std::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
-          double a = 0;
-          double b = 0;
-          pop(stack, tensor, a, b);
+          auto [tensor, a, b] = pop<at::Tensor, double, double>(stack);
           push(stack, tensor.uniform_(a, b, generator));
         },
         aliasAnalysisFromSchema()),
@@ -422,13 +407,10 @@ RegisterOperators reg({
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
-          at::Tensor tensor;
-          double mean = 0;
-          double std = 0;
           std::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
-          pop(stack, tensor, mean, std);
+          auto [tensor, mean, std] = pop<at::Tensor, double, double>(stack);
           push(stack, tensor.normal_(mean, std, generator));
         },
         aliasAnalysisFromSchema()),
@@ -439,9 +421,7 @@ RegisterOperators reg({
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
-          at::Tensor tensor;
-          double val = 0;
-          pop(stack, tensor, val);
+          auto [tensor, val] = pop<at::Tensor, double>(stack);
           push(stack, at::fill_(tensor, val));
         },
         aliasAnalysisFromSchema()),
