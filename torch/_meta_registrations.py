@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_channels_last_contiguous_or_false,
     make_contiguous_strides_for,
     Number,
     NumberType,
@@ -2672,22 +2673,36 @@ def meta_miopen_batch_norm(
     exponential_average_factor: float,
     epsilon: float,
 ):
-    # In batch norm the output is of the same shape as the input
-    out_shape = input_tensor.shape
-
     # If tensor is provided for running_mean and running_var then use this. If these are not
     # provided then we return the shape of weight tensor. Similar to how this is handled in the decomposition
     save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
     save_var_shape = running_var.shape if running_var is not None else weight.shape
 
-    def pick_memory_format():
-        if is_channels_last(input_tensor):
-            return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        return torch.contiguous_format
+    # Pick the output memory format the same way eager does (suggest_memory_format),
+    # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
+    # the input is channels_last contiguous, fall back to plain contiguous.
+    if is_channels_last_contiguous_or_false(input_tensor):
+        fmt = (
+            torch.channels_last
+            if input_tensor.dim() == 4
+            else torch.channels_last_3d
+        )
+    else:
+        fmt = torch.contiguous_format
 
-    out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
+    # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
+    # instead of silently producing an output with the wrong strides.
+    # Use the symbolic, DDE-safe entry point (returns a SymBool built from
+    # _compute_contiguous_sym / _compute_channels_last_contiguous_*_sym in
+    # c10/core/Contiguity.h) rather than the eager bool-returning is_contiguous.
+    torch._check(
+        torch.ops.aten.sym_is_contiguous.default(
+            input_tensor, memory_format=fmt
+        ),
+        lambda: f"miopen_batch_norm: input must be contiguous in {fmt}",
+    )
+
+    out = torch.empty_like(input_tensor, memory_format=fmt)
 
     if training:
         save_mean = weight.new_empty(save_mean_shape)
