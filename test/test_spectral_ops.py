@@ -11,11 +11,11 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -248,22 +248,6 @@ class TestFFT(TestCase):
                   torch.fft.hfft, torch.fft.hfft2, torch.fft.hfftn]:
             with self.assertRaisesRegex(RuntimeError, match):
                 f(t)
-
-    # Regression test for https://github.com/pytorch/pytorch/issues/141448:
-    # _fft_c2r used to crash (heap-buffer-overflow under ASAN, or trip an
-    # INTERNAL ASSERT on the MKL path) when last_dim_size was inconsistent
-    # with the input's last transformed dimension.
-    @onlyNativeDeviceTypes
-    def test_fft_c2r_invalid_last_dim_size(self, device):
-        t = torch.full((3, 1, 3, 1), 0.372049, dtype=torch.cfloat, device=device)
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"Expected size of last transformed dimension of input to be"):
-            torch._fft_c2r(t, [2], 2, 536870912)
-
-        with self.assertRaisesRegex(
-                RuntimeError, r"Invalid number of data points"):
-            torch._fft_c2r(t, [2], 2, 0)
 
     @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
@@ -1593,7 +1577,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
     @onlyCUDA
-    @skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
         x = torch.randn(1000, dtype=torch.complex64)

@@ -11,6 +11,8 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+
+import functools
 import inspect
 import os
 import pkgutil
@@ -156,7 +158,6 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
-    "llm_disabled": os.environ.get("CI") and os.environ.get("WITH_PUSH") != "true",
     "llm_generate_full": "false",
     "icon_links": [
         {
@@ -342,17 +343,11 @@ coverage_ignore_functions = [
     "module_contains_param",
     "module_to_fqn",
     "swap_module",
-    # torch.ao.quantization.backend_config.executorch
-    "get_executorch_backend_config",
-    # torch.ao.quantization.backend_config.fbgemm
-    "get_fbgemm_backend_config",
     # torch.ao.quantization.backend_config.native
     "get_native_backend_config",
     "get_native_backend_config_dict",
     "get_test_only_legacy_native_backend_config",
     "get_test_only_legacy_native_backend_config_dict",
-    # torch.ao.quantization.backend_config.onednn
-    "get_onednn_backend_config",
     # torch.ao.quantization.backend_config.qnnpack
     "get_qnnpack_backend_config",
     # torch.ao.quantization.backend_config.tensorrt
@@ -400,16 +395,10 @@ coverage_ignore_functions = [
     "fold_bn_weights_into_conv_node",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
-    "get_default_qat_qconfig",
     "get_default_qat_qconfig_dict",
-    "get_default_qconfig",
     "get_default_qconfig_dict",
-    "qconfig_equals",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_fx
-    "attach_preserved_attrs_to_model",
-    "convert_to_reference_fx",
     # torch.ao.quantization.quantize_jit
     "convert_dynamic_jit",
     "convert_jit",
@@ -446,15 +435,11 @@ coverage_ignore_functions = [
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
-    # torch.backends.xeon.run_cpu
-    "create_args",
     # torch.cuda.amp.autocast_mode
     "custom_bwd",
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.mtia.memory
-    "reset_peak_memory_stats",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -463,37 +448,10 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
-    # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
-    "hook_with_zero_step",
-    "hook_with_zero_step_interleaved",
-    # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
-    "post_localSGD_hook",
-    # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
-    "quantization_perchannel_hook",
-    "quantization_pertensor_hook",
-    # torch.distributed.algorithms.model_averaging.utils
-    "average_parameters",
-    "average_parameters_or_parameter_groups",
-    "get_params_to_average",
     # torch.distributed.checkpoint.default_planner
-    "create_default_global_load_plan",
-    "create_default_global_save_plan",
     "create_default_local_load_plan",
-    "create_default_local_save_plan",
-    # torch.distributed.checkpoint.optimizer
-    "load_sharded_optimizer_state_dict",
-    # torch.distributed.checkpoint.planner_helpers
-    "create_read_items_for_chunk_list",
-    # torch.distributed.checkpoint.state_dict_loader
-    "load_state_dict",
-    # torch.distributed.checkpoint.state_dict_saver
-    "save_state_dict",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -547,28 +505,16 @@ coverage_ignore_functions = [
     "configure",
     "expires",
     # torch.distributed.elastic.utils.api
-    "get_env_variable_or_raise",
     "get_socket_with_port",
     # torch.distributed.elastic.utils.distributed
     "create_c10d_store",
-    "get_free_port",
     "get_socket_with_port",
-    # torch.distributed.elastic.utils.log_level
-    "get_log_level",
-    # torch.distributed.elastic.utils.logging
-    "get_logger",
     # torch.distributed.elastic.utils.store
     "barrier",
     "get_all",
     "synchronize",
     "store_timeout",
     # torch.distributed.fsdp.wrap
-    "always_wrap_policy",
-    "enable_wrap",
-    "lambda_auto_wrap_policy",
-    "size_based_auto_wrap_policy",
-    "transformer_auto_wrap_policy",
-    "wrap",
     # torch.distributed.nn.functional
     "all_to_all",
     "all_to_all_single",
@@ -580,12 +526,9 @@ coverage_ignore_functions = [
     "get_remote_module_template",
     # torch.distributed.optim.utils
     "as_functional_optim",
-    "register_functional_optim",
     # torch.distributed.rendezvous
-    "register_rendezvous_handler",
     "rendezvous",
     # torch.distributed.rpc.api
-    "get_worker_info",
     "method_factory",
     "new_method",
     "remote",
@@ -593,48 +536,29 @@ coverage_ignore_functions = [
     "rpc_sync",
     "shutdown",
     # torch.distributed.rpc.backend_registry
-    "backend_registered",
     "construct_rpc_backend_options",
     "init_backend",
-    "register_backend",
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.api
-    "parallelize_module",
-    # torch.distributed.tensor.parallel.input_reshard
-    "input_reshard",
-    # torch.distributed.tensor.parallel.loss
-    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
-    # torch.fx.passes.annotate_getitem_nodes
-    "annotate_getitem_nodes",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
-    "get_size_of_all_nodes",
-    "get_size_of_node",
     "get_tensor_meta",
     # torch.fx.passes.split_module
     "split_module",
+    "split_module_simple",
     # torch.fx.passes.split_utils
     "getattr_recursive",
-    "split_by_tags",
-    # torch.fx.passes.splitter_base
-    "generate_inputs_for_submodules",
     # torch.fx.passes.tools_common
     "get_acc_ops_name",
     "get_node_target",
     "legalize_graph",
-    # torch.fx.passes.utils.common
-    "lift_subgraph_as_module",
     # torch.fx.passes.utils.fuser_utils
-    "fuse_as_graphmodule",
     "fuse_by_partitions",
     "insert_subgm",
-    # torch.fx.passes.utils.source_matcher_utils
-    "get_source_partitions",
     # torch.fx.proxy
     "assert_fn",
     # torch.fx.traceback
@@ -648,6 +572,11 @@ coverage_ignore_functions = [
     "set_grad_fn_seq_nr",
     "set_stack_trace",
     "get_current_replay_node",
+    # torch.fx.experimental.proxy_tensor
+    "wrap_key",
+    "wrapper_and_args_for_make_fx",
+    # torch.fx.experimental.sym_node
+    "wrap_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
@@ -747,8 +676,6 @@ coverage_ignore_functions = [
     "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
     "apply_permutation",  # deprecated
-    # torch.nn.modules.utils
-    "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
     "broadcast",
     "broadcast_coalesced",
@@ -974,10 +901,6 @@ coverage_ignore_functions = [
     "verify_aten_graph",
     # torch.overrides
     "enable_reentrant_dispatch",
-    # torch.profiler.profiler
-    "schedule",
-    "supported_activities",
-    "tensorboard_trace_handler",
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
@@ -1001,32 +924,23 @@ coverage_ignore_functions = [
     "hann",
     "kaiser",
     "nuttall",
-    # torch.utils.backend_registration
-    "generate_methods_for_privateuse1_backend",
-    "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
-    "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
     # torch.utils.benchmark.utils.common
     "ordered_unique",
-    "select_unit",
     "set_torch_threads",
-    "trim_sigfig",
     "unit_to_english",
     # torch.utils.benchmark.utils.compare
     "optional_min",
     # torch.utils.benchmark.utils.compile
-    "bench_all",
     "bench_loop",
-    "benchmark_compile",
     # torch.utils.benchmark.utils.cpp_jit
     "compile_callgrind_template",
     "compile_timeit_template",
     "get_compat_bindings",
     # torch.utils.benchmark.utils.fuzzer
     "dtype_size",
-    "prod",
     # torch.utils.benchmark.utils.timer
     "timer",
     # torch.utils.benchmark.utils.valgrind_wrapper.timer_interface
@@ -1042,10 +956,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    "set_checkpoint_early_stop",
-    "set_device_states",
-    # torch.utils.cpp_backtrace
-    "get_cpp_backtrace",
     # torch.utils.cpp_extension
     "check_compiler_is_gcc",
     "check_compiler_ok_for_platform",
@@ -1086,21 +996,13 @@ coverage_ignore_functions = [
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
-    "validate_input_col",
     "validate_pathname_binary_tuple",
     # torch.utils.data.datapipes.utils.decoder
     "audiohandler",
-    "basichandlers",
     "extension_extract_fn",
-    "handle_extension",
     "imagehandler",
     "mathandler",
     "videohandler",
-    # torch.utils.data.dataset
-    "random_split",
-    # torch.utils.data.graph
-    "traverse",
-    "traverse_dps",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
@@ -1108,7 +1010,6 @@ coverage_ignore_functions = [
     "apply_shuffle_settings",
     "get_all_graph_pipes",
     # torch.utils.hooks
-    "unserializable_hook",
     "warn_if_has_hooks",
     # torch.utils.jit.log_extract
     "extract_ir",
@@ -1120,7 +1021,6 @@ coverage_ignore_functions = [
     # torch.utils.mkldnn
     "to_mkldnn",
     # torch.utils.mobile_optimizer
-    "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",
@@ -1143,8 +1043,6 @@ coverage_ignore_functions = [
     "tensor_proto",
     "text",
     "video",
-    # torch.utils.throughput_benchmark
-    "format_time",
 ]
 
 coverage_ignore_classes = [
@@ -2197,6 +2095,36 @@ master_doc = "index"
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
+@functools.cache
+def _add_docstr_source_lines(module_file):
+    pattern = re.compile(r"^([A-Za-z_]\w*)\s*=\s*_add_docstr\(")
+    source_lines = {}
+    try:
+        with open(module_file, encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                match = pattern.match(line)
+                if match is not None:
+                    source_lines[match.group(1)] = lineno
+    except OSError:
+        return {}
+
+    return source_lines
+
+
+def _find_add_docstr_source(module, fullname):
+    if "." in fullname or not re.match(r"^[A-Za-z_]\w*$", fullname):
+        return None
+
+    module_file = getattr(module, "__file__", None)
+    if module_file is None or not module_file.endswith(".py"):
+        return None
+
+    lineno = _add_docstr_source_lines(module_file).get(fullname)
+    if lineno is None:
+        return None
+    return module_file, lineno
+
+
 def linkcode_resolve(domain, info):
     if domain != "py":
         return None
@@ -2205,15 +2133,21 @@ def linkcode_resolve(domain, info):
 
     try:
         module = __import__(info["module"], fromlist=[""])
+    except Exception:
+        return None
+
+    try:
         obj = module
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
-        # Get the source file and line number
         obj = inspect.unwrap(obj)
         fn = inspect.getsourcefile(obj)
         source, lineno = inspect.getsourcelines(obj)
     except Exception:
-        return None
+        resolved = _find_add_docstr_source(module, info["fullname"])
+        if resolved is None:
+            return None
+        fn, lineno = resolved
 
     # Determine the tag based on the torch_version
     if RELEASE:
@@ -2508,28 +2442,6 @@ def setup(app):
 
     Builder._read_parallel = _serial_read_ignoring_nproc
 
-    # Skip pickling doctrees to disk for the HTML builder. This is only used
-    # for incremental rebuilds which don't apply in CI clean builds. Saves
-    # ~2 minutes by avoiding serializing large autodoc-generated doctrees.
-    # Other builders (doctest, coverage) may need doctrees on disk.
-    from sphinx.builders.html import StandaloneHTMLBuilder
-
-    def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
-        # Still do the cleanup and in-memory caching, just skip the disk I/O
-        doctree.reporter = None
-        doctree.transformer = None
-        doctree.settings = doctree.settings.copy()
-        doctree.settings.warning_stream = None
-        doctree.settings.env = None
-        from docutils.utils import DependencyList
-
-        doctree.settings.record_dependencies = DependencyList()
-        if _cache:
-            self.env._write_doc_doctree_cache[docname] = doctree
-
-    StandaloneHTMLBuilder.write_doctree = _write_doctree_no_disk
-
-    _skip_git_dates_on_ci(app)
     _fix_katex_server_race(app)
 
     return {"version": "0.1", "parallel_read_safe": True}
@@ -2590,29 +2502,14 @@ def _fix_katex_server_race(app):
     KaTeXServer.start_server_process = _start_with_retry
 
 
-def _skip_git_dates_on_ci(app):
-    """Skip git date lookups on non-release CI builds.
-
-    The pytorch theme runs 2 git subprocess calls per page to display
-    "Created/Updated" dates. On CI preview builds this is wasteful (dates
-    aren't needed) and problematic (treeless clones make git log slow).
-    Release builds (WITH_PUSH=true) keep the original behavior so dates
-    appear in published docs.
-    """
-    if not os.environ.get("CI") or os.environ.get("WITH_PUSH") == "true":
-        return
-
-    try:
-        import pytorch_sphinx_theme2
-    except ImportError:
-        return
-
-    pytorch_sphinx_theme2.get_git_dates = lambda path: ("Unknown", "Unknown")
-
-
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
     if pagename.startswith("generated/"):
         context["theme_use_edit_page_button"] = False
+        # Limit sidebar depth and collapse inactive sections for generated
+        # API pages to avoid embedding ~300 KB of navigation markup per page.
+        # Only the active section's children are shown.
+        context["theme_navigation_depth"] = 2
+        context["theme_collapse_navigation"] = "true"
 
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and

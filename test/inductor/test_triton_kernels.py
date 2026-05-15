@@ -114,6 +114,24 @@ if HAS_GPU:
             )
             return x.to(idtype, bitcast=True)
 
+    # Kernel with dunder name for name-mangling regression test (issue #170398).
+    @triton.jit
+    def __dunder_add_kernel(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
 
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
@@ -136,6 +154,34 @@ class KernelTests(torch._inductor.test_case.TestCase):
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
+
+    @requires_gpu
+    def test_triton_kernel_dunder_name_no_name_mangling(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/170398
+        # Triton kernels whose names start with ``__`` must not trigger
+        # Python class-based name mangling in the generated code.
+        # Use globals() to reference the dunder-named kernel without triggering
+        # name mangling inside this class body.
+        kernel = globals()["__dunder_add_kernel"]
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x, y)
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x, y)
+        self.assertEqual(compiled_out, eager_out)
+        # Match as a standalone identifier; substrings inside other names
+        # (e.g. cpp_wrapper's `call__dunder_add_kernel_0`) are harmless C++
+        # identifiers and aren't subject to Python name mangling.
+        import re as _re
+
+        self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
+        self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
@@ -2748,6 +2794,32 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(expected, actual)
 
     @requires_gpu
+    def test_triton_kernel_constexpr_arg(self):
+        @triton.jit
+        def kernel(in_ptr, out_ptr, n, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 0:
+                out = tl.abs(x)
+            else:
+                out = x * x
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+            grid = (triton.cdiv(n, 1024),)
+            kernel[grid](x, out, n, MODE=CONSTANT_C, BLOCK_SIZE=1024)
+            return out
+
+        x = torch.randn(2048, device=GPU_TYPE)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(expected, actual)
+
+    @requires_gpu
     @unittest.skipIf(
         not triton_version_uses_attrs_dict(),
         "Test is only valid for new triton versions where attrs is represented by a raw dict",
@@ -5199,6 +5271,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         cls._stack = contextlib.ExitStack()
         torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
 
+    @classmethod
+    def tearDownClass(cls):
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = False
+        super().tearDownClass()
+
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
         from torch._inductor import config
 
@@ -5272,6 +5349,33 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
     @requires_cuda_and_triton
+    def test_fusion_with_unused_buffer(self):
+        @triton.jit
+        def kernel_unused_tensor(
+            X,
+            Y,
+            unused,
+            n: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            idx = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = idx < n
+            x = tl.load(X + idx, mask=mask)
+            tl.store(Y + idx, x * 2, mask=mask)
+
+        def fn(a):
+            out = torch.empty_like(a)
+            unused = torch.empty(a.numel(), device="cuda")
+            kernel_unused_tensor[(1,)](a, out, unused, a.numel(), BLOCK_SIZE=16)
+            return out.relu()
+
+        a = torch.randn(10, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a)
+        self.assertEqual(out, fn(a))
+        self.check_code(code[0], num_kernels=1, num_allocs=2, num_deallocs=2)
+
+    @requires_cuda_and_triton
     def test_fusion_with_ordering_constraints(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -5331,12 +5435,15 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
     def test_fusion_custom_kernel_with_linebreaks(self):
         # we do AST manipulation / string manipulation of the kernel source code
         # so we wanna make sure to correctly handle edge cases with tricky line breaks
+        # which `ast.parse`-`ast.unparse` roundtrip does not recover
         @triton.jit
         def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
             offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offs < n_elements
             x = tl.load(in_ptr0 + offs, mask=mask)
+            # forcing newlines before `tl.store`
+
             tl.store(
                 out_ptr + offs,
                 # forcing the `value` arg to be written in multiple lines

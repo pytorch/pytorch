@@ -21,9 +21,11 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
+    _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
@@ -56,15 +58,17 @@ class Sortable(typing.Protocol):
 @dataclasses.dataclass
 class FusionScore:
     template_score: int
-    node_type_score: bool
+    node_type_score: int
     memory_score: int
     buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
-        node_type_score has higher priority than memory_score unless
-        the memory_score differs too much.
+        node_type_score orders same-kind fusions above mixed-kind fusions unless
+        the memory_score differs too much. Nested reduction candidates use -1
+        so they rank below ordinary mixed-kind fusions; mix-order reductions
+        are still scored through memory_score.
 
         buffer_overlap_score is prioritized below memory_score so that
         strict global memory savings (exact dep matches) are preferred
@@ -234,15 +238,7 @@ class InductorChoices:
         adjusted_choices: list[KernelTemplateChoice],
         op_name: str,
     ) -> bool:
-        """
-        Check if we need to fix the layout instead of keeping it flexible
-
-        Args:
-            ktc: KernelTemplateChoice object
-
-        Returns:
-            True if we need to fix the layout, False otherwise
-        """
+        """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -253,6 +249,11 @@ class InductorChoices:
             ]:
                 return True
 
+        # Origami requires fixed layouts (grid/workgroup mappings depend on exact
+        # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
+        # doesn't disable flexible layouts unnecessarily.
+        if _origami_enabled() and IS_ROCM:
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
@@ -679,11 +680,25 @@ class InductorChoices:
                 and memory_score > 0
             )
 
-        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        node_type_score = int(
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        )
+        if (
+            config.triton.nested_reduction
+            and node1.is_reduction()
+            and node2.is_reduction()
+            and node1.get_operation_names() & node2.ancestors
+        ):
+            # Mix-order reductions are sibling reductions. Only dependent
+            # cross-reduction-size reductions get the lower nested score here.
+            _, (_, rnumel1) = node1.group
+            _, (_, rnumel2) = node2.group
+            if not V.graph.sizevars.statically_known_equals(rnumel1, rnumel2):
+                node_type_score = -1
 
         return FusionScore(
             template_score,
-            type_score,
+            node_type_score,
             memory_score,
             buffer_overlap_score,
             proximity_score,

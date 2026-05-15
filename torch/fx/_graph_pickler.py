@@ -123,6 +123,8 @@ class GraphPickler(pickle.Pickler):
         # pickle so that duplicates and views are properly handled.
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
+    _PASSTHROUGH_TYPES = frozenset({int, float, str, bytes, bool, type(None)})
+
     @override
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -145,6 +147,9 @@ class GraphPickler(pickle.Pickler):
 
         # These are the types that need special handling. See the individual
         # *PickleData classes for details on pickling that particular type.
+        if type(obj) in self._PASSTHROUGH_TYPES:
+            return NotImplemented
+
         if isinstance(obj, FakeTensor):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
@@ -158,9 +163,13 @@ class GraphPickler(pickle.Pickler):
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
-            # FakeScriptObjects wrap opaque traced objects (e.g. DeviceMesh,
-            # ProcessGroup) that can't be default-pickled. Reduce to None
-            # since they aren't meaningful after deserialization.
+            from torch._library.opaque_object import is_opaque_value_type
+
+            real_obj = object.__getattribute__(obj, "real_obj")
+            if real_obj is not None and is_opaque_value_type(type(real_obj)):
+                # Use default pickling; value-type opaques are picklable.
+                return NotImplemented
+            # Reference-type FakeScriptObjects can't be default-pickled.
             return (_unpickle_as_none, ())
         elif isinstance(obj, weakref.ref):
             # Serialize weakrefs properly: if the referent is alive,

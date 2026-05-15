@@ -78,40 +78,6 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
-struct EnableHermeticPyObject {
-  EnableHermeticPyObject()
-      : old_(c10::impl::HermeticPyObjectTLS::get_state()),
-        old_excluded_python_(
-            c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python)),
-        old_python_(
-            c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
-        old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
-            at::DispatchKey::PythonTLSSnapshot)) {
-    c10::impl::HermeticPyObjectTLS::set_state(true);
-    c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
-    c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::PythonTLSSnapshot, false);
-  }
-  ~EnableHermeticPyObject() {
-    c10::impl::HermeticPyObjectTLS::set_state(old_);
-    c10::impl::tls_set_dispatch_key_excluded(
-        at::DispatchKey::Python, old_excluded_python_);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::Python, old_python_);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
-  }
-  EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
-  EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
-  EnableHermeticPyObject& operator=(const EnableHermeticPyObject&) = delete;
-  EnableHermeticPyObject& operator=(EnableHermeticPyObject&&) = delete;
-  bool old_;
-  bool old_excluded_python_;
-  bool old_python_;
-  bool old_python_snapshot_;
-};
-
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
@@ -156,12 +122,10 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // means it's a nontrivial tensor subclass)
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter =
-            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-        if (interpreter &&
-            ivalue.unsafeToTensorImpl()->key_set().has(
-                at::DispatchKey::Python)) {
-          (*interpreter)
+        auto* impl = ivalue.unsafeToTensorImpl();
+        if (impl->pyobj_slot()->load_pyobj() &&
+            impl->key_set().has(at::DispatchKey::Python)) {
+          (*c10::impl::getGlobalPyInterpreter())
               ->python_op_registration_trampoline(
                   op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
           return;
@@ -173,11 +137,10 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (nv.isNone()) {
             continue;
           }
-          auto* interpreter =
-              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-          if (interpreter &&
-              nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-            (*interpreter)
+          auto* impl = nv.unsafeToTensorImpl();
+          if (impl->pyobj_slot()->load_pyobj() &&
+              impl->key_set().has(at::DispatchKey::Python)) {
+            (*c10::impl::getGlobalPyInterpreter())
                 ->python_op_registration_trampoline(
                     op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
             return;
