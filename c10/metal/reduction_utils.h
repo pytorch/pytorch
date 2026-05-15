@@ -127,24 +127,34 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
   return simd_broadcast(val, 0);
 }
 
+// Fill value for shuffle_and_fill_down must be the op's identity (the fill
+// is contributed by lanes whose shuffle target is past simdgroup_size).
+//
+// NOTE: callers with fewer than simdgroup_size active lanes still risk
+// corruption -- an active lane reading from an in-range but inactive lane
+// gets undefined data (0 in practice on Apple Silicon), not the fill.
+// Round up the dispatched thread count to a multiple of simdgroup_size
+// and have padding threads load the op identity before calling this.
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::lowest());
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val = ::metal::max(
         val,
-        as_type<T>(::metal::simd_shuffle_and_fill_down(
-            as_type<int2>(val), int2(0), i)));
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
   }
   return simd_broadcast(val, 0);
 }
 
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::max());
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val = ::metal::min(
         val,
-        as_type<T>(::metal::simd_shuffle_and_fill_down(
-            as_type<int2>(val), int2(0), i)));
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
   }
   return simd_broadcast(val, 0);
 }
