@@ -1010,7 +1010,17 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
           [ce setComputePipelineState:ps1];
           mtl_setArgs(ce, input, partials, params1);
-          auto tpg1 = std::min(MAX_THREADGROUP_SIZE, elems_per_group);
+          // Round both passes' TG sizes up to a full simdgroup. Required
+          // because c10::metal::simd_max/min<long> emulates 64-bit simd
+          // via simd_shuffle_and_fill_down, and inactive lanes (when active
+          // count < 32) return undefined data (in practice 0) instead of
+          // the op's identity — corrupting min/max of all-positive or
+          // all-negative longs. The fill value itself is fixed in
+          // reduction_utils.h, but the fill only applies to past-end
+          // shuffles, not to inactive-lane reads within the simdgroup.
+          // Padding threads here skip the load loop (tid >= rsize) and
+          // contribute Op::identity().
+          auto tpg1 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(elems_per_group, 32u));
           [ce dispatchThreads:MTLSizeMake(num_groups * tpg1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg1, 1, 1)];
           getMPSProfiler().endProfileKernel(ps1);
 
@@ -1018,7 +1028,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           getMPSProfiler().beginProfileKernel(ps2, opts.prefix + "reduction_pass2", {partials});
           [ce setComputePipelineState:ps2];
           mtl_setArgs(ce, partials, output, params2);
-          auto tpg2 = std::min(MAX_THREADGROUP_SIZE, num_groups);
+          auto tpg2 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(num_groups, 32u));
           [ce dispatchThreads:MTLSizeMake(tpg2, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg2, 1, 1)];
           getMPSProfiler().endProfileKernel(ps2);
         }

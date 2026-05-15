@@ -732,7 +732,7 @@ struct MaxOp {
   template <
       typename T,
       ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
-  static inline T identity() {
+  static inline constexpr T identity() {
     return ::metal::numeric_limits<T>::lowest();
   }
   // Float identity is -INFINITY (not -FLT_MAX): max(-INF, x) = x for any
@@ -741,7 +741,7 @@ struct MaxOp {
   template <
       typename T,
       ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
-  static inline T identity() {
+  static inline constexpr T identity() {
     return T(-INFINITY);
   }
   template <typename T>
@@ -766,13 +766,13 @@ struct MinOp {
   template <
       typename T,
       ::metal::enable_if_t<!is_floating_point_v<T>, bool> = true>
-  static inline T identity() {
+  static inline constexpr T identity() {
     return ::metal::numeric_limits<T>::max();
   }
   template <
       typename T,
       ::metal::enable_if_t<is_floating_point_v<T>, bool> = true>
-  static inline T identity() {
+  static inline constexpr T identity() {
     return T(INFINITY);
   }
   template <typename T>
