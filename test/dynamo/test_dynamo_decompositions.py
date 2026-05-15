@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -25,7 +26,8 @@ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
 
     @skipIfCrossRef
     def test_addcmul_inplace_decomposition_enabled(self):
-        """With decompositions enabled, addcmul_ should decompose into mul, fma, and copy_."""
+        """With decompositions enabled, addcmul_ should decompose into
+        addcmul prim and copy_."""
 
         def fn(x, tensor1, tensor2, value):
             return x.addcmul_(tensor1, tensor2, value=value)
@@ -51,12 +53,146 @@ class GraphModule(torch.nn.Module):
         l_tensor2_ = L_tensor2_
         l_value_ = L_value_
 
-        mul: "f32[4]" = torch.mul(l_tensor1_, l_tensor2_);  l_tensor1_ = l_tensor2_ = None
-        fma_default: "f32[4]" = torch.ops.prims.fma.default(mul, l_value_, l_x_);  mul = l_value_ = None
-        copy_: "f32[4]" = l_x_.copy_(fma_default);  l_x_ = fma_default = None
+        inductor_addcmul_default: "f32[4]" = torch.ops.prims.inductor_addcmul.default(l_x_, l_tensor1_, l_tensor2_, l_value_);  l_tensor1_ = l_tensor2_ = l_value_ = None
+        copy_: "f32[4]" = l_x_.copy_(inductor_addcmul_default);  l_x_ = inductor_addcmul_default = None
         return (copy_,)
 """,
         )
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_inplace_decomposition_preserves_value_scalar_check(self):
+        def fn(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=value)
+
+        cases = (
+            (
+                torch.randn(8),
+                torch.randn(8),
+                torch.randn(8),
+                torch.randn(8),
+                "TypeError when making fake tensor call",
+            ),
+            (
+                torch.randn(8),
+                torch.randn(8),
+                torch.randn(8),
+                torch.tensor(0.5, requires_grad=True),
+                "TypeError when making fake tensor call",
+            ),
+            (
+                torch.randn(8),
+                torch.randn(8),
+                torch.randn(8),
+                torch.tensor(1 + 2j),
+                "Unsupported addcmul_ decomposition",
+            ),
+            (
+                torch.ones(8, dtype=torch.bool),
+                torch.ones(8, dtype=torch.bool),
+                torch.ones(8, dtype=torch.bool),
+                torch.tensor(1),
+                "Unsupported addcmul_ decomposition",
+            ),
+            (
+                torch.ones(8, dtype=torch.int32),
+                torch.randn(8),
+                torch.randn(8),
+                torch.tensor(1),
+                "Unsupported addcmul_ decomposition",
+            ),
+        )
+
+        for x, tensor1, tensor2, value, expected_error in cases:
+            with self.assertRaisesRegex(Unsupported, expected_error):
+                torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_inplace_decomposition_real_complex_scalar_value(self):
+        def fn(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=value)
+
+        x = torch.randn(8)
+        tensor1 = torch.randn(8)
+        tensor2 = torch.randn(8)
+        value = 1 + 0j
+        expected = fn(x.clone(), tensor1, tensor2, value)
+
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
+        self.assertEqual(expected, actual, atol=0, rtol=0)
+
+        with self.assertRaisesRegex(Unsupported, "Unsupported addcmul_ decomposition"):
+            torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value + 1j)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_inplace_decomposition_complex_tensor_value(self):
+        def fn(x, tensor1, tensor2, value):
+            return x.addcmul_(tensor1, tensor2, value=value)
+
+        x = torch.randn(8, dtype=torch.cfloat)
+        tensor1 = torch.randn(8)
+        tensor2 = torch.randn(8)
+        value = torch.tensor(0.5 + 0.25j)
+
+        expected = fn(x.clone(), tensor1, tensor2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
+        self.assertEqual(expected, actual, atol=0, rtol=0)
+
+    @skipIfCrossRef
+    def test_inductor_addcmul_tensor_value_autograd(self):
+        from torch._inductor import inductor_prims
+
+        torch.manual_seed(42)
+        x0 = torch.randn(2, 4)
+        t10 = torch.randn(2, 4)
+        t20 = torch.randn(2, 4)
+        value0 = torch.randn(1, 4)
+
+        def run(fn):
+            x = x0.clone().detach().requires_grad_()
+            t1 = t10.clone().detach().requires_grad_()
+            t2 = t20.clone().detach().requires_grad_()
+            value = value0.clone().detach().requires_grad_()
+            loss = fn(x, t1, t2, value).sum()
+            loss.backward()
+            return x.grad, t1.grad, t2.grad, value.grad
+
+        def eager_fn(x, t1, t2, value):
+            return x + value * t1 * t2
+
+        expected_grads = run(eager_fn)
+        actual_grads = run(inductor_prims.addcmul)
+        for expected, actual in zip(expected_grads, actual_grads):
+            self.assertEqual(expected, actual, atol=0, rtol=0)
+
+    @skipIfCrossRef
+    def test_inductor_addcmul_mixed_complex_autograd(self):
+        from torch._inductor import inductor_prims
+
+        torch.manual_seed(42)
+        x0 = torch.randn(2, 4, dtype=torch.cfloat)
+        t10 = torch.randn(2, 4)
+        t20 = torch.randn(2, 4)
+        value0 = torch.randn(1, 4)
+
+        def run(fn):
+            x = x0.clone().detach().requires_grad_()
+            t1 = t10.clone().detach().requires_grad_()
+            t2 = t20.clone().detach().requires_grad_()
+            value = value0.clone().detach().requires_grad_()
+            loss = fn(x, t1, t2, value).real.sum()
+            loss.backward()
+            return x.grad, t1.grad, t2.grad, value.grad
+
+        def eager_fn(x, t1, t2, value):
+            return x + value * t1 * t2
+
+        expected_grads = run(eager_fn)
+        actual_grads = run(inductor_prims.addcmul)
+        for expected, actual in zip(expected_grads, actual_grads):
+            self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
     def test_addcmul_inplace_decomposition_disabled(self):
@@ -582,11 +718,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcmul_tensor_value_numerics(self, device):
-        """Compiled addcmul_ with tensor value matches eager.
-
-        Not bitwise on CPU: inductor may decompose fma to mul+add rather
-        than emitting a hardware fma instruction.
-        """
+        """Compiled addcmul_ with tensor value matches eager."""
 
         def fn(x, tensor1, tensor2, value):
             return x.addcmul_(tensor1, tensor2, value=value)
@@ -702,7 +834,68 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
         expected = fn(x.clone(), t1, t2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
-        self.assertEqual(expected, actual)
+        if device == "cpu":
+            self.assertEqual(expected, actual, atol=0, rtol=0)
+        else:
+            self.assertEqual(expected, actual)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_tensor_value_non_leaf_autograd(self, device):
+        if device != "cpu":
+            self.skipTest("CPU regression test")
+
+        torch.manual_seed(42)
+        x0 = torch.randn(64, 64, device=device)
+        t10 = torch.randn(64, 64, device=device)
+        t20 = torch.randn(64, 64, device=device)
+        value = torch.tensor(0.5, device=device)
+
+        def fn(x, t1, t2, value):
+            y = x + 0
+            return y.addcmul_(t1, t2, value=value).sum()
+
+        def run(fn):
+            x = x0.clone().detach().requires_grad_()
+            t1 = t10.clone().detach().requires_grad_()
+            t2 = t20.clone().detach().requires_grad_()
+            loss = fn(x, t1, t2, value)
+            loss.backward()
+            return x.grad, t1.grad, t2.grad
+
+        expected_grads = run(fn)
+        actual_grads = run(torch.compile(fn, fullgraph=True))
+        for expected, actual in zip(expected_grads, actual_grads):
+            self.assertEqual(expected, actual, atol=0, rtol=0)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_tensor_value_mixed_complex_autograd(self, device):
+        if device != "cpu":
+            self.skipTest("CPU regression test")
+
+        torch.manual_seed(42)
+        x0 = torch.randn(64, 64, dtype=torch.cfloat, device=device)
+        t10 = torch.randn(64, 64, device=device)
+        t20 = torch.randn(64, 64, device=device)
+        value = torch.tensor(0.5, device=device)
+
+        def fn(x, t1, t2, value):
+            y = x + 0
+            return y.addcmul_(t1, t2, value=value).real.sum()
+
+        def run(fn):
+            x = x0.clone().detach().requires_grad_()
+            t1 = t10.clone().detach().requires_grad_()
+            t2 = t20.clone().detach().requires_grad_()
+            loss = fn(x, t1, t2, value)
+            loss.backward()
+            return x.grad, t1.grad, t2.grad
+
+        expected_grads = run(fn)
+        actual_grads = run(torch.compile(fn, fullgraph=True))
+        for expected, actual in zip(expected_grads, actual_grads):
+            self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)

@@ -1699,12 +1699,80 @@ class TensorVariable(VariableTracker):
         value: Any | None = None,
     ) -> Any | None:
         if value is not None and config.enable_dynamo_decompositions:
+
+            def unsupported_addcmul_decomposition(reason: str) -> NoReturn:
+                unimplemented(
+                    gb_type="Unsupported addcmul_ decomposition",
+                    context=f"call_method {self} addcmul_ with {reason}",
+                    explanation=(
+                        "Dynamo's addcmul_ decomposition only supports cases "
+                        "that pass eager in-place addcmul_ validation."
+                    ),
+                    hints=[],
+                )
+
+            if not isinstance(tensor1, TensorVariable) or not isinstance(
+                tensor2, TensorVariable
+            ):
+                return None
+            if self.dtype is torch.bool:
+                unsupported_addcmul_decomposition("bool self")
+
+            result_dtype = torch.promote_types(
+                torch.promote_types(self.dtype, tensor1.dtype), tensor2.dtype
+            )
+            if not torch.can_cast(result_dtype, self.dtype):
+                unsupported_addcmul_decomposition(
+                    "result dtype not castable to self dtype"
+                )
+
+            self_fake = self.proxy.node.meta.get("example_value")
+            tensor1_fake = tensor1.proxy.node.meta.get("example_value")
+            tensor2_fake = tensor2.proxy.node.meta.get("example_value")
+            if isinstance(value, TensorVariable):
+                if value.ndim != 0 or value.requires_grad:
+                    return None
+                value_fake = value.proxy.node.meta.get("example_value")
+                validation_value = value_fake
+                if value.dtype.is_complex:
+                    if not result_dtype.is_complex:
+                        unsupported_addcmul_decomposition(
+                            "data-dependent complex tensor value conversion"
+                        )
+                    validation_value = 1j
+            elif isinstance(value, VariableTracker) and value.is_python_constant():
+                value_fake = value.as_python_constant()
+                if isinstance(value_fake, complex) and not result_dtype.is_complex:
+                    if value_fake.imag != 0:
+                        unsupported_addcmul_decomposition(
+                            "complex scalar value conversion"
+                        )
+                    value_fake = value_fake.real
+                    value = ConstantVariable.create(value_fake)
+                validation_value = value_fake
+            else:
+                return None
+
+            if self_fake is None or tensor1_fake is None or tensor2_fake is None:
+                return None
+
+            try:
+                with (
+                    torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                    tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    if tx.fake_mode and tx.fake_mode.shape_env
+                    else nullcontext(),
+                ):
+                    self_fake.clone().addcmul_(
+                        tensor1_fake, tensor2_fake, value=validation_value
+                    )
+            except Exception as exc:
+                unsupported_addcmul_decomposition(f"eager validation failure: {exc}")
+
             from torch._inductor import inductor_prims
 
-            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
-            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
-            product = mul_var.call_function(tx, [tensor1, tensor2], {})
-            result = fma_var.call_function(tx, [product, value, self], {})
+            addcmul_var = variables.TorchInGraphFunctionVariable(inductor_prims.addcmul)
+            result = addcmul_var.call_function(tx, [self, tensor1, tensor2, value], {})
             return self.call_method(tx, "copy_", [result], {})
         return None
 

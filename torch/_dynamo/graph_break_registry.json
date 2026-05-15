@@ -160,6 +160,14 @@
       ]
     }
   ],
+  "GB1500": [
+    {
+      "Gb_type": "Unsupported addcmul_ decomposition",
+      "Context": "call_method {self} addcmul_ with {reason}",
+      "Explanation": "Dynamo's addcmul_ decomposition only supports cases that pass eager in-place addcmul_ validation.",
+      "Hints": []
+    }
+  ],
   "GB0013": [
     {
       "Gb_type": "Attempted to represent unregistered RemovableHandle",
