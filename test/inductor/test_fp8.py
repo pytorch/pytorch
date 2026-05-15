@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
     skipIfXpu,
     xfailIf,
@@ -490,8 +491,12 @@ class TestFP8Lowering(TestCase):
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
         # input and output dtypes of _scaled_mm do not need to be the same, but
         # typically in a model they are
-        x = torch.randn(M, K, dtype=dtype, device=device)
-        w = torch.randn(N, K, dtype=dtype, device=device)
+        x = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=dtype, device=device, reduction_dim=-1
+        )
+        w = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=dtype, device=device, reduction_dim=-1
+        )
         bias = None
         if has_bias:
             bias = torch.randn(N, device=device, dtype=torch.bfloat16)
