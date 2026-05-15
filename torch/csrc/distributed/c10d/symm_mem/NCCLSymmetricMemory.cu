@@ -36,12 +36,14 @@ static StoreExchange storeExchange = StoreExchange("NCCLAllocation");
 
 struct NCCLAllocation {
   // Combined ncclMemAlloc region. Layout:
-  //   [0, buffer_size)                            - user buffer
-  //   [buffer_size, buffer_size + signal_pad_size) - signal pad
-  // Total allocation size is round_up(buffer_size + signal_pad_size, 16).
+  //   [0, buffer_size)                                       - user buffer
+  //   [aligned_buffer_size, aligned_buffer_size + get_signal_pad_size()) - signal pad
+  // aligned_buffer_size is buffer_size rounded up to 16 bytes so the signal
+  // pad start is 16-byte aligned. Total allocation size is
+  // aligned_buffer_size + get_signal_pad_size().
   void* ptr;
   size_t buffer_size;
-  size_t signal_pad_size;
+  size_t aligned_buffer_size;
   int device_idx;
   std::mutex mutex;
   // Map of group name to peer alloc info
@@ -51,11 +53,11 @@ struct NCCLAllocation {
   NCCLAllocation(
       void* ptr,
       size_t buffer_size,
-      size_t signal_pad_size,
+      size_t aligned_buffer_size,
       int device_idx)
       : ptr(ptr),
         buffer_size(buffer_size),
-        signal_pad_size(signal_pad_size),
+        aligned_buffer_size(aligned_buffer_size),
         device_idx(device_idx) {}
 
   ~NCCLAllocation() {
@@ -180,9 +182,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
           rank_));
 
     // Signal pad lives in the same ncclMemAlloc region as the buffer,
-    // starting immediately after it; no additional ncclMemAlloc is needed.
-    signal_pad_ptr_ = static_cast<char*>(allocation->ptr) + buffer_size_;
-    const size_t signal_pad_size = allocation->signal_pad_size;
+    // starting at aligned_buffer_size (buffer_size rounded up to 16 bytes for
+    // alignment); no additional ncclMemAlloc is needed.
+    signal_pad_ptr_ = static_cast<char*>(allocation->ptr) +
+        allocation->aligned_buffer_size;
+    const size_t signal_pad_size = get_signal_pad_size();
     C10D_NCCL_CHECK(
     ncclCommWindowRegister(comm_, signal_pad_ptr_, signal_pad_size, &signal_handle_, NCCL_WIN_COLL_SYMMETRIC),
     c10::str(
@@ -204,11 +208,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     //   [0, arr_size)            - buffers_dev_
     //   [arr_size, 2 * arr_size) - signal_pads_dev_
     const size_t arr_size = sizeof(void*) * world_size_;
-    peer_ptrs_dev_ = reinterpret_cast<void**>(
+    buffers_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size * 2));
-    buffers_dev_ = peer_ptrs_dev_;
     signal_pads_dev_ = reinterpret_cast<void**>(
-        reinterpret_cast<char*>(peer_ptrs_dev_) + arr_size);
+        reinterpret_cast<char*>(buffers_dev_) + arr_size);
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
@@ -296,8 +299,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     // signal_pad_ptr_ is part of the owning NCCLAllocation's combined
     // ncclMemAlloc region; freeing the buffer there releases it too.
-    if (peer_ptrs_dev_ != nullptr) {
-      c10::cuda::CUDACachingAllocator::raw_delete(peer_ptrs_dev_);
+    // buffers_dev_ owns the combined allocation that also backs
+    // signal_pads_dev_; a single raw_delete frees both halves.
+    if (buffers_dev_ != nullptr) {
+      c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
     }
   }
 
@@ -308,10 +313,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   int world_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
-  // Single CUDACachingAllocator allocation that backs both buffers_dev_ and
-  // signal_pads_dev_. buffers_dev_ aliases peer_ptrs_dev_; signal_pads_dev_
-  // is offset arr_size into the same buffer.
-  void** peer_ptrs_dev_{nullptr};
+  // buffers_dev_ owns a single CUDACachingAllocator allocation of
+  // 2 * arr_size bytes. The first half holds the peer buffer pointers;
+  // signal_pads_dev_ points at the second half (offset arr_size).
   void** buffers_dev_{nullptr};
   void** signal_pads_dev_{nullptr};
   std::string group_name_;
@@ -465,10 +469,26 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     c10::cuda::CUDAGuard guard(device_idx);
     // Allocate buffer + signal pad together in a single ncclMemAlloc call.
-    // Buffer occupies [0, size); signal pad starts at offset `size`; the
-    // total allocation is rounded up to 16 bytes for alignment.
-    const size_t signal_pad_size = get_signal_pad_size();
-    const size_t total_size = at::round_up(size + signal_pad_size, 16UL);
+    // Buffer occupies [0, size); signal pad starts at aligned_buffer_size.
+    // The signal pad start must be aligned to NCCL's window registration
+    // granularity (the CUDA VMM allocation granularity, typically 2MB on
+    // Hopper) — `ncclCommWindowRegister` rejects sub-allocation addresses
+    // that aren't aligned to that granularity.
+    size_t window_alignment = 16UL;
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+    {
+      CUmemAllocationProp prop = {};
+      prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+      prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      prop.location.id = device_idx;
+      auto driver_api = c10::cuda::DriverAPI::get();
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
+          &window_alignment, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+    }
+#endif
+    const size_t aligned_buffer_size = at::round_up(size, window_alignment);
+    const size_t total_size = aligned_buffer_size + get_signal_pad_size();
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, total_size), "ncclMemAlloc");
     {
@@ -476,7 +496,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       allocations_.emplace(
           ptr,
           std::make_unique<NCCLAllocation>(
-              ptr, size, signal_pad_size, device_idx));
+              ptr, size, aligned_buffer_size, device_idx));
     }
     return ptr;
   }
