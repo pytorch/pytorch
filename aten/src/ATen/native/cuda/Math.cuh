@@ -204,7 +204,7 @@ const auto gcd_string = jiterator_stringify(
 
 const auto lcm_string = jiterator_stringify(
   template <typename T>
-  T gcd(const T a_in, const T b_in) {
+  T lcm(const T a_in, const T b_in) {
     T a = abs(a_in);
     T b = abs(b_in);
 
