@@ -25,7 +25,9 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
-    is_channels_last_contiguous_or_false,
+    is_channels_last_contiguous_or_false_2d,
+    is_channels_last_contiguous_or_false_3d,
+    make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
     NumberType,
@@ -2662,6 +2664,22 @@ def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
 
+def _suggest_memory_format_or_contiguous(
+    t: torch.Tensor,
+) -> torch.memory_format:
+    """DDE-safe equivalent of t.suggest_memory_format() for the channels-last
+    family. Returns torch.channels_last for canonical 4D NHWC, torch.channels_last_3d
+    for canonical 5D NDHWC, otherwise torch.contiguous_format. For unbacked symbolic
+    strides where contiguity can't be statically decided, returns contiguous_format
+    (consistent with the ``_or_false`` helper semantics).
+    """
+    if is_channels_last_contiguous_or_false_2d(t):
+        return torch.channels_last
+    if is_channels_last_contiguous_or_false_3d(t):
+        return torch.channels_last_3d
+    return torch.contiguous_format
+
+
 @register_meta(aten.miopen_batch_norm.default)
 def meta_miopen_batch_norm(
     input_tensor: torch.Tensor,
@@ -2681,10 +2699,7 @@ def meta_miopen_batch_norm(
     # Pick the output memory format the same way eager does (suggest_memory_format),
     # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
     # the input is channels_last contiguous, fall back to plain contiguous.
-    if is_channels_last_contiguous_or_false(input_tensor):
-        fmt = torch.channels_last if input_tensor.dim() == 4 else torch.channels_last_3d
-    else:
-        fmt = torch.contiguous_format
+    fmt = _suggest_memory_format_or_contiguous(input_tensor)
 
     # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
     # instead of silently producing an output with the wrong strides.
@@ -7965,30 +7980,40 @@ def meta_pixel_shuffle(self, upscale_factor):
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
     )
 
-    def is_channels_last(ten):
-        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
-
     def pick_memory_format():
-        if is_channels_last(self):
-            if device_hint(self) == "cuda":
-                return torch.contiguous_format
-            else:
-                return torch.channels_last
-        elif self.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif self.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
+        # DDE-safe variant of the original eager-style picker.
+        # Eager dispatch for pixel_shuffle (native_functions.yaml:4720):
+        #   CPU  -> pixel_shuffle_cpu: at::empty({0}, self.options()).resize_(
+        #           out_sizes, self.suggest_memory_format())  -> preserves NHWC/NDHWC
+        #   MPS  -> pixel_shuffle_mps: at::empty(out_shape, self.options())
+        #           self.options() does NOT carry a memory_format, so this is
+        #           always plain contiguous regardless of input layout.
+        #   else -> math_pixel_shuffle: clone(MemoryFormat::Contiguous) -> contiguous
+        # So only CPU preserves channels_last; everything else is contiguous.
+        fmt = _suggest_memory_format_or_contiguous(self)
+        if (
+            fmt is torch.channels_last or fmt is torch.channels_last_3d
+        ) and device_hint(self) == "cpu":
+            return fmt
+        return torch.contiguous_format
 
     C = self.shape[-3] // (upscale_factor * upscale_factor)
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)
 
-    out = self.new_empty(out_shape)
+    # Build the output tensor with the right strides directly. We avoid
+    # `new_empty(...).to(memory_format=...)` because `Tensor.to(memory_format=...)`
+    # internally calls the eager `is_contiguous(memory_format=...)` predicate to
+    # decide whether to no-op, and that predicate can DDE on unbacked sizes.
     fmt = pick_memory_format()
-    if fmt is not None and fmt is not torch.contiguous_format:
-        out = out.to(memory_format=fmt)  # type: ignore[call-overload]
-    return out
+    if fmt is torch.channels_last or fmt is torch.channels_last_3d:
+        out_strides = make_channels_last_strides_for(out_shape)
+    else:
+        out_strides = make_contiguous_strides_for(out_shape)
+    return torch.empty_strided(
+        out_shape, out_strides, dtype=self.dtype, device=self.device
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer_backward.default)
