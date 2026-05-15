@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import typing
 from collections.abc import Callable
@@ -386,7 +387,7 @@ class SubprocMain:
 
     def _quiesce(self) -> None:
         if self.pool is not None:
-            self.pool.shutdown(wait=False)
+            self.pool.shutdown(wait=True)
             self.pool = None
 
     def _shutdown(self) -> None:
@@ -490,6 +491,23 @@ def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
 
 class TestException(RuntimeError):
     pass
+
+
+def _touch_test_file(path: str) -> None:
+    with open(path, "wb"):
+        pass
+
+
+def _wait_for_test_file_barrier(
+    started_path: str, release_path: str, timeout: float
+) -> bool:
+    _touch_test_file(started_path)
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(release_path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 def raise_testexc() -> Never:

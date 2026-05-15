@@ -2,10 +2,13 @@
 import operator
 import os
 import tempfile
+import time
 from threading import Event
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
+    _touch_test_file,
+    _wait_for_test_file_barrier,
     raise_testexc,
     SubprocException,
     SubprocPool,
@@ -14,6 +17,15 @@ from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
+
+
+def _wait_for_path(path, timeout):
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 class TestCompileWorker(TestCase):
@@ -100,6 +112,32 @@ class TestCompileWorker(TestCase):
             try:
                 pool.submit(operator.add, 100, 1)
                 self.assertEqual(os.path.exists(temp_log.name), True)
+            finally:
+                pool.shutdown()
+
+
+class TestCompileWorkerQuiesceOrdering(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce_drains_inflight_work_before_wakeup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            started_path = os.path.join(tmpdir, "started")
+            release_path = os.path.join(tmpdir, "release")
+            pool = SubprocPool(2)
+            try:
+                slow = pool.submit(
+                    _wait_for_test_file_barrier,
+                    started_path,
+                    release_path,
+                    1.0,
+                )
+                self.assertTrue(_wait_for_path(started_path, 10.0))
+
+                pool.quiesce()
+                pool.wakeup()
+                fast = pool.submit(_touch_test_file, release_path)
+
+                self.assertFalse(slow.result(timeout=10.0))
+                self.assertIsNone(fast.result(timeout=10.0))
             finally:
                 pool.shutdown()
 
