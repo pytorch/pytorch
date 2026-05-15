@@ -15783,13 +15783,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @staticmethod
     def _is_triggering_buffer_reuse(fn, *inputs):
+        marker = re.compile(r"(?:#|//) reuse\b")
+
+        def reuse_count(code: str) -> int:
+            return sum(1 for line in code.splitlines() if marker.search(line))
+
         with config.patch(allow_buffer_reuse=True):
             _, (code_allowed,) = run_and_get_code(fn, *inputs)
         with config.patch(allow_buffer_reuse=False):
             _, (code_disallowed,) = run_and_get_code(fn, *inputs)
-        code_allowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_allowed)
-        code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
-        return code_allowed != code_disallowed
+        return reuse_count(code_allowed) != reuse_count(code_disallowed)
 
     # If matmul is implemented by triton there is more reuse
     @config.patch(
