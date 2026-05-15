@@ -63,6 +63,8 @@ class _ZesDeviceInfo:
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
+# Interval between two HW counter reads; must be >=100ms for fresh data.
+_zes_sample_interval_ms = 150
 
 
 def _is_compiled() -> bool:
@@ -1042,8 +1044,7 @@ def power_draw(device: Device = None) -> float:
 
     import time
 
-    # 100ms is well above the hardware energy-counter update granularity.
-    time.sleep(0.1)
+    time.sleep(_zes_sample_interval_ms / 1000.0)
 
     counter_end = pyzes.zes_power_energy_counter_t()
     _zes_check(
@@ -1092,6 +1093,10 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None),
         "Can't get Level Zero Sysman engine group count.",
     )
+    # TODO: zesDeviceEnumEngineGroups does not return
+    # ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
+    # instead it succeeds with count=0. Treat that as an error with a
+    # helpful hint about elevated privileges.
     if engine_count.value == 0:
         raise RuntimeError(
             "No Level Zero Sysman engine groups found. The GPU may not support engine monitoring, or try running with elevated privileges (e.g. sudo)."
@@ -1169,8 +1174,7 @@ def utilization(device: Device = None) -> float:
 
     import time
 
-    # 100ms is well above the hardware activity-counter update granularity.
-    time.sleep(0.1)
+    time.sleep(_zes_sample_interval_ms / 1000.0)
 
     stats_end = pyzes.zes_engine_stats_t()
     _zes_check(
