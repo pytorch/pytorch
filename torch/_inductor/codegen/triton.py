@@ -76,6 +76,7 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     Placeholder,
+    prefix_is_pointwise,
     prefix_is_reduction,
     sympy_dot,
     sympy_product,
@@ -293,30 +294,17 @@ class TritonSymbols:
             ):
                 var_shape = ()
             else:
-                symbol_matches = [
-                    symt for symt in cls.block_types if symbol_is_type(var, symt)
-                ]
-                assert len(symbol_matches) == 1, f"Ambiguous type: {var.name}"
-
-                sym = symbol_matches[0]
+                node = V.kernel.range_tree_nodes.get(var)
+                assert node is not None, f"Unregistered range symbol: {var.name}"
+                tree = node.root
                 ndim = V.kernel.triton_tensor_ndim()
                 shape = ["1"] * ndim
-
-                tree_match = [
-                    tree
-                    for tree in V.kernel.active_range_trees()
-                    if prefix_str[sym] == tree.prefix
-                ]
-                assert len(tree_match) == 1, "# of Match expected to 1"
-
-                if tree_match[0].tensor_dim is None:
+                if tree.tensor_dim is None:
                     # tree has no tensor dimension (e.g. no_x_dim mode),
                     # treat as scalar
                     var_shape = ()
                 else:
-                    shape[tree_match[0].tensor_dim] = str(
-                        cls.get_block_size(tree_match[0])
-                    )
+                    shape[tree.tensor_dim] = str(cls.get_block_size(tree))
                     var_shape = tuple(shape)
 
             # Union current variable shape
@@ -327,12 +315,41 @@ class TritonSymbols:
         return expr_shape
 
     @classmethod
-    def get_block_size(cls, tree: IterationRanges) -> sympy.Symbol:
-        return cls.block_sizes[tree.symt]
+    def get_block_size(cls, tree: IterationRanges) -> sympy.Expr:
+        return tree.root.block_size()
 
     @classmethod
-    def get_block_offset(cls, tree: IterationRanges) -> sympy.Symbol:
-        return cls.block_offsets[tree.symt]
+    def get_block_offset(cls, tree: IterationRanges) -> sympy.Expr:
+        return tree.root.block_offset()
+
+    @classmethod
+    def mask_name_for_symbol(
+        cls, kernel: TritonKernel, symbol: sympy.Symbol
+    ) -> str | None:
+        # Prefer the owning range-tree entry when one exists instead of
+        # reconstructing xmask/rmask from the symbol prefix.
+        if (node := kernel.range_tree_nodes.get(symbol)) is not None:
+            return node.root.mask_name()
+        for symt in cls.block_types:
+            if symbol_is_type(symbol, symt):
+                return f"{prefix_str[symt]}mask"
+        return None
+
+    @classmethod
+    def is_reduction_index_symbol(
+        cls, kernel: TritonKernel, symbol: sympy.Symbol
+    ) -> bool:
+        if (node := kernel.range_tree_nodes.get(symbol)) is not None:
+            return node.root.is_reduction
+        return symbol_is_type(symbol, cls.reduction_types)
+
+    @classmethod
+    def has_reduction_index_symbol(cls, kernel: TritonKernel, expr: sympy.Expr) -> bool:
+        """Return whether any symbol in a composite block shape is reduction-owned."""
+        return any(
+            cls.is_reduction_index_symbol(kernel, symbol)
+            for symbol in expr.free_symbols
+        )
 
 
 @dataclasses.dataclass
@@ -357,7 +374,13 @@ class IndexingOptions:
         return any(str(mask).startswith("tmp") for mask in self.mask_vars)
 
     def has_rmask(self) -> bool:
-        return any(str(mask).startswith("r") for mask in self.mask_vars)
+        # Outside the reduction loop we ignore reduction-tree masks, matching
+        # the set of axes that indexing generation treats as active.
+        return any(
+            isinstance(mask, str) and tree.is_reduction and tree.owns_mask(mask)
+            for tree in V.kernel.active_range_trees()
+            for mask in self.mask_vars
+        )
 
     @property
     def mask_str(self) -> str:
@@ -446,6 +469,35 @@ class BlockDescriptorOptions:
         # Drop singleton dimensions from the block descriptor.
         params = params.remove_dims(singleton_dims)
 
+        # Compute the final shape, adjusting for special kernel types.
+        final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
+        if V.kernel.no_x_dim:
+            assert range_trees[0].prefix == "x"
+            final_shape.pop(0)
+
+        # Check to see which of the final shape dimensions are included in this parameter
+        # e.g. if block shape is [XBLOCK // 2, XBLOCK % 2], but the kernel shape
+        # is [XBLOCK, R0_BLOCK], we need to expand the final shape to add reduction dims.
+        # We do this before broadcasting dimensions are removed so that the check
+        # below that compares the number of included dimensions to the kernel numels
+        # is correct
+        included_final_shape_dims = OrderedSet()
+        for expr in params.block_shape:
+            if isinstance(expr, sympy.Expr):
+                for sym in expr.free_symbols:
+                    sym_str = str(sym).lower()
+                    if prefix_is_reduction(sym_str) or prefix_is_pointwise(sym_str):
+                        included_final_shape_dims.add(sym)
+
+        reduction_ndim = V.kernel.num_reduction_dims
+        if (
+            not V.kernel.inside_reduction
+            and len(included_final_shape_dims) == len(V.kernel.numels) - reduction_ndim
+            and V.kernel.features.is_reduction()
+        ):
+            # Need to expand rank to match the rank used inside the reduction loop
+            final_shape += [sympy.S.One] * reduction_ndim
+
         # Maybe reorder dimensions based on strides
         # with tl.trans applied at load / store time
         params, stride_sorter = params.maybe_sort_with_stride_order(
@@ -465,21 +517,6 @@ class BlockDescriptorOptions:
 
         # Drop broadcasting dims from the block descriptor.
         params = params.remove_dims(broadcasting_dims)
-
-        # Compute the final shape, adjusting for special kernel types.
-        final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
-        if V.kernel.no_x_dim:
-            assert range_trees[0].prefix == "x"
-            final_shape.pop(0)
-
-        reduction_ndim = V.kernel.num_reduction_dims
-        if (
-            not V.kernel.inside_reduction
-            and len(params.strides) == len(V.kernel.numels) - reduction_ndim
-            and V.kernel.features.is_reduction()
-        ):
-            # Need to expand rank to match the rank used inside the reduction loop
-            final_shape += [sympy.S.One] * reduction_ndim
 
         try:
             # Get permutation to sort strides in ascending order.
@@ -578,7 +615,7 @@ class BlockDescriptorOptions:
 
     def has_rindex(self) -> bool:
         return any(
-            free_symbol_is_type(expr, TritonSymbols.reduction_types)
+            TritonSymbols.has_reduction_index_symbol(V.kernel, expr)
             for expr in self.block_shape
         )
 
@@ -1136,10 +1173,10 @@ class TritonCSEVariable(CSEVariable):
                 # most of the time index vars don't need masks associated with them
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
-                for symt in TritonSymbols.block_types:
-                    if symbol_is_type(arg, symt):
-                        self.mask_vars.update([f"{prefix_str[symt]}mask"])
-                        break
+                if (
+                    mask_name := TritonSymbols.mask_name_for_symbol(V.kernel, arg)
+                ) is not None:
+                    self.mask_vars.add(mask_name)
 
 
 def get_dtype_handler() -> DtypePropagationOpsHandler:
@@ -1499,9 +1536,7 @@ class TritonOverrides(OpOverrides):
         def where_cond(var):
             default = ir.Reduction.default_value("dot", var.dtype)
             reduction_mask = [
-                f"{tree.prefix}mask"
-                for tree in V.kernel.range_trees
-                if tree.is_reduction
+                tree.mask_name() for tree in V.kernel.range_trees if tree.is_reduction
             ]
 
             assert len(reduction_mask) == 1, "don't tile reduction when native matmul"
@@ -2878,6 +2913,37 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
 
+    def triton_tensor_ndim(self) -> int:
+        return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
+
+    def indexing_size_str(self, i: int) -> str:
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[i] = ":"
+        return f"[{', '.join(sizes)}]"
+
+    def dense_size_list(self) -> list[str]:
+        sizes = ["1"] * self.triton_tensor_ndim()
+        for tree in self.active_range_trees():
+            if tree.tensor_dim is not None:
+                sizes[tree.tensor_dim] = tree.block_size_str()
+        return sizes
+
+    def dense_size_str(self) -> str:
+        return f"[{', '.join(self.dense_size_list())}]"
+
+    def create_constant_mask(self, entry: IterationRangesRoot) -> str:
+        if entry.tensor_dim is None:
+            return (
+                f"{entry.mask_name()} = tl.full({self.dense_size_str()}, True, tl.int1)"
+            )
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        return (
+            f"{entry.mask_name()} = "
+            f"tl.full([{entry.block_size_str()}], True, tl.int1)[{suffix}]"
+        )
+
     @staticmethod
     def _has_stride1_on_rdim(index) -> bool:
         # These analysis is only needed in deterministic mode so far
@@ -3052,8 +3118,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         mask_vars: OrderedSet[str] = OrderedSet()
         for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
-            has_rindex = has_rindex or symbol_is_type(
-                var, TritonSymbols.reduction_types
+            has_rindex = has_rindex or TritonSymbols.is_reduction_index_symbol(
+                self, var
             )
             if override_mask:
                 pass
@@ -3074,16 +3140,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 pass
             else:
-                # var is one of xN, yN, r0_N or r1_N
-                prefix_matches = [
-                    prefix_str[symt]
-                    for symt in TritonSymbols.block_types
-                    if symbol_is_type(var, symt)
-                ]
-                if len(prefix_matches) == 0:
-                    pass
-                assert len(prefix_matches) == 1, f"Ambiguous type: {var.name}"
-                mask_vars.add(f"{prefix_matches[0]}mask")
+                if (
+                    mask_name := TritonSymbols.mask_name_for_symbol(self, var)
+                ) is not None:
+                    mask_vars.add(mask_name)
 
         need_dense = (
             config.triton.dense_indexing
@@ -3100,7 +3160,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 have_loop_vars = True
             else:
                 have_dense = False
-            dense_mask_vars.add(f"{tree.prefix}mask")
+            dense_mask_vars.add(tree.mask_name())
 
         if (
             (
@@ -3369,7 +3429,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
                 )
-                if options_class == TensorDescriptorOptions:
+                if issubclass(options_class, TensorDescriptorOptions):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -3418,7 +3478,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config or self.is_combo_kernel or mask_constant_index:
                 mask_vars = OrderedSet(
-                    f"{tree.prefix}mask"
+                    tree.mask_name()
                     for tree in self.range_trees
                     if not tree.is_reduction and not self._has_constant_mask(tree)
                 )
@@ -3463,9 +3523,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if self._load_mask:
                     mask_shape.add(self._load_mask)
 
-                xyzr = OrderedSet(["xmask", "ymask", "zmask", "r0_mask"])
-                while not mask_shape.issubset(xyzr):
-                    tmp_masks = mask_shape.difference(xyzr)
+                axis_masks = OrderedSet(
+                    tree.mask_name() for tree in self.active_range_trees()
+                )
+                while not mask_shape.issubset(axis_masks):
+                    tmp_masks = mask_shape.difference(axis_masks)
                     tmp = tmp_masks.pop()
                     assert isinstance(tmp, TritonCSEVariable)
                     mask_shape.discard(tmp)
@@ -3476,7 +3538,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 for mask in mask_shape:
                     assert isinstance(mask, str)
                     for tree in self.active_range_trees():
-                        if mask.startswith(tree.prefix):
+                        if tree.owns_mask(mask):
                             dim = tree.tensor_dim
                             assert isinstance(dim, int)
                             expand_list[dim] = self.dense_size_list()[dim]
@@ -3628,12 +3690,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
+        # If the strides have a non-trivial sort, then the broadcasting dims
+        # need to be reverted for the store
+        # Also see indexing.codegen_broadcast_and_reshape
+        broadcast_shape = indexing.broadcast_shape
+        broadcasting_dims = indexing.broadcasting_dims
+        if not indexing.stride_sorter.is_identity:
+            broadcast_shape = indexing.stride_sorter.revert(broadcast_shape)
+            broadcasting_dims = indexing.stride_sorter.revert(broadcasting_dims)
+
         # These dims no longer need broadcasting.
         for idx, (dim, broadcast_dim) in enumerate(
-            zip(indexing.final_shape, indexing.broadcast_shape)
+            zip(indexing.final_shape, broadcast_shape)
         ):
             if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                indexing.broadcasting_dims[idx] = False
+                broadcasting_dims[idx] = False
+
+        if not indexing.stride_sorter.is_identity:
+            indexing.broadcasting_dims = indexing.stride_sorter.sort(broadcasting_dims)
+        else:
+            indexing.broadcasting_dims = broadcasting_dims
 
         value = indexing.codegen_broadcast_and_reshape(
             value,
@@ -3803,7 +3879,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self,
                 dtype,
                 for_store=False,
-                force=False,
+                force=getattr(self, "tma_load_for_template_epilogue", False),
             ),
         )
 
@@ -4227,7 +4303,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dtype = torch.float32 if should_upcast(dtype) else dtype
 
         assert self.inside_reduction
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet(tree.mask_name() for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         if self._load_mask:
@@ -5002,7 +5078,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet(tree.mask_name() for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
@@ -5127,7 +5203,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet(tree.mask_name() for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
@@ -5671,6 +5747,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
+        if self.min_xblock is not None:
+            out["min_xblock"] = self.min_xblock
+        if self.min_rblock is not None:
+            out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
         if self.add_persistent_rblock:
@@ -6150,7 +6230,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and entry.is_reduction
         ):
             suffix = f"{suffix} + rsplit_start"
-        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{suffix}"
+        return f"tl.arange(0, {self.kexpr(entry.block_size())}){size}{suffix}"
 
     def iteration_ranges_scalar_code(
         self, entry: IterationRangesRoot, value: Any
@@ -6201,6 +6281,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
+        if not tree.supports_constant_mask():
+            return False
+
         if self.is_native_matmul:
             # tl.dot requires the shape to be >= 16,
             # so when matmul shape is smaller than 16, we always keep the mask.
@@ -6267,9 +6350,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
-                mask_vars.discard(f"{tree.prefix}mask")
+                mask_vars.discard(tree.mask_name())
 
-        # can be added as an override_mask
         mask_vars.discard("None")
 
     @cache_on_self
@@ -6290,7 +6372,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
         rn_blocks = [
-            TritonSymbols.block_sizes[tree.symt]
+            TritonSymbols.get_block_size(tree)
             for tree in self.range_trees
             if tree.is_reduction
         ]
@@ -6341,8 +6423,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
     def iteration_ranges_codegen_header(
-        self, entry: IterationRangesRoot, code: IndentedBuffer
+        self,
+        entry: IterationRangesRoot,
+        code: IndentedBuffer,
     ) -> None:
+        if entry.has_custom_codegen_header():
+            assert not (
+                self.cooperative_reduction
+                and self.persistent_reduction
+                and entry.is_reduction
+            ), "derived reduction roots do not support cooperative reductions"
+            for sym, expr, constexpr in entry.named_constants():
+                annotation = ": tl.constexpr" if constexpr else ""
+                code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")
+            code.writeline(
+                f"{entry.name} = {self.index_to_str(entry.block_offset())} + "
+                f"{self.iteration_ranges_ranges_code(entry)}"
+            )
+            code.writeline(
+                f"{entry.mask_name()} = {entry.name} < {self.index_to_str(entry.numel)}"
+            )
+            return
+
         x = entry.prefix
         if entry.is_loop:
             code.writeline(f"{entry.name} = {x}offset + {x}base")
@@ -6369,7 +6471,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(self.create_constant_mask(entry))
         elif not (x == "x" and self.mix_order_reduction):
             # mix order reduction should generate xmask inside the loop
-            code.writeline(f"{x}mask = {entry.name} < {x}numel")
+            code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
 
 
 class FusedUserDefinedTritonKernel(TritonKernel):
@@ -6798,7 +6900,7 @@ class TritonScheduling(SIMDScheduling):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
             # Cannot use persistent reduction with unknown dynamic rnumel
             assert not kernel_kwargs.get("override_persistent_reduction")
             kernel_kwargs["override_persistent_reduction"] = False

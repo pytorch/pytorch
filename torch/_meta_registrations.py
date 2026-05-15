@@ -2465,6 +2465,11 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            a.dtype == b.dtype,
+            lambda: f"expected mat1 and mat2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
+        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -6074,11 +6079,14 @@ def alloc_with_matching_layout(
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
         )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+        strides = [0] * len(dim_order)
+        stride = 1
+        for idx in reversed(dim_order):
+            strides[idx] = stride
+            stride *= res_shape[idx]
+        res = torch.empty_strided(
+            res_shape, strides, dtype=query.dtype, device=query.device
+        )
 
     return res
 

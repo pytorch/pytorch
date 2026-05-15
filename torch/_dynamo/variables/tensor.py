@@ -147,6 +147,17 @@ def is_bound_tensor_method(value: object) -> bool:
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
+def _is_sym_arith_operand(vt: VariableTracker) -> bool:
+    """True if vt can be the other operand of a SymNode arithmetic op
+    (add/sub). Accepts SymNode-like values plus float ConstantVariable —
+    arithmetic with float promotes to SymFloat, unlike bitwise ops."""
+    if vt.is_symnode_like():
+        return True
+
+    # mirror sym_node.py::binary_magic_impl
+    return isinstance(vt, ConstantVariable) and isinstance(vt.value, (float, int, bool))
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 

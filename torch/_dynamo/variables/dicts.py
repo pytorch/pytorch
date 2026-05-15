@@ -1412,6 +1412,26 @@ class DunderDictVariable(ConstDictVariable):
             self.items[name] = value
             return value
 
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ConstDictVariable(
+                dict(self.items), mutation_type=ValueMutationNew(), source=None
+            )
+        return super().call_method(tx, name, args, kwargs)
+
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
     def install_dict_keys_match_guard(self) -> None:

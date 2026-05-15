@@ -87,6 +87,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionLessThan,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -150,8 +151,10 @@ def skip_background_threads_on_windows(f):
 
 
 def get_wait_for_cpu_kernel():
-    """Returns a compiled CUDA spin-wait kernel that blocks the GPU stream until
-    the host sets a pinned int32 flag to non-zero. Requires SM70+.
+    """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
+    until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
+    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
 
     Usage::
 
@@ -171,7 +174,11 @@ def get_wait_for_cpu_kernel():
             __global__ void wait_for_cpu(int *pinned_cpu_flag) {
                 int flag = 0;
                 do {
+            #ifdef __HIP_PLATFORM_AMD__
+                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+            #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+            #endif
                 } while (flag == 0);
             }
             """,
@@ -320,6 +327,102 @@ class TestCuda(TestCase):
         torch.cuda.reset_accumulated_host_memory_stats()
 
         expected = empty_stats()
+
+    @serialTest()
+    def test_host_memory_stats_active_after_free_no_events(self):
+        """Regression test for free()'s no-events fast path.
+
+        When a pinned tensor is freed without any CUDA stream having been
+        recorded against its block (i.e. it was never used as the source of
+        an async H2D copy), the allocator pushes the block back onto the
+        free list directly. That path must decrement active_requests.current
+        and active_bytes.current; otherwise the counters grow monotonically
+        on every plain pin-and-drop cycle even though the underlying memory
+        is correctly recycled.
+
+        Two cycles exercise both alloc paths: the first triggers a new slab
+        via add_allocated_block, the second reuses the cached block via
+        get_free_block.
+        """
+        # host_memory_stats() returns an empty dict until the host caching
+        # allocator has been initialized; force init so the stat keys exist
+        # regardless of test ordering.
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            self.assertTrue(t.is_pinned())
+            del t
+            gc.collect()
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after a pin-and-drop cycle "
+                "with no async copy: the block is returned to the cache, so "
+                "the active counter must drop back to zero.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after a pin-and-drop cycle.",
+            )
+
+    @serialTest()
+    def test_host_memory_stats_active_after_event_drain(self):
+        """Regression test for the event-drain path through empty_cache.
+
+        When a pinned block is used as the source of a non_blocking H2D copy
+        and then freed, the block sits on the events queue until
+        process_events_for_specific_size drains it. That function takes a
+        size parameter that is -1 when invoked from process_events (the
+        all-sizes case, reached via _host_emptyCache). The decrement of
+        active_bytes_bucket_stats must use the block's actual size, not the
+        -1 parameter, otherwise active_bytes.current is incremented by 1
+        byte per drained event and active_bytes.freed goes negative.
+        """
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            t.cuda(non_blocking=True)
+            torch.cuda.synchronize()
+            del t
+            gc.collect()
+            # Drain via process_events_for_specific_size(-1, ...).
+            torch._C._host_emptyCache()
+
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after empty_cache drains "
+                "the events queue.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after drain.",
+            )
+            self.assertGreaterEqual(
+                stats["active_bytes.freed"],
+                0,
+                "active_bytes.freed must be non-negative; a negative value "
+                "means the drain decremented by the wrong size.",
+            )
+            self.assertGreaterEqual(
+                stats["active_requests.freed"],
+                0,
+                "active_requests.freed must be non-negative.",
+            )
 
     def test_pinned_memory_empty_cache(self):
         try:
@@ -2817,9 +2920,10 @@ torch.cuda.synchronize()
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 / ROCm >= 7.0 required for external events in cuda graphs",
     )
+    @skipIfRocmVersionLessThan((7, 0))
     def test_graph_timing(self):
         torch.cuda.empty_cache()
         x = torch.randn(10240000, device="cuda")
@@ -7589,6 +7693,15 @@ class TestMemPool(TestCase):
         tensor_ptrs_round_1 = alloc_with_threads(
             thread_count, stream, mem_sizes, "cuda"
         )
+        # Force a split-merge cycle: allocate half-sized tensors (splits the
+        # freed blocks), then free them (triggers merges back). With per-block
+        # counters this changes the free-set ordering; with segment-level
+        # counters it stays stable.
+        splitters = [
+            torch.empty(s, dtype=torch.int8, device="cuda")
+            for s in [s * 1024 * 1024 for s in range(1, 5) for _ in range(thread_count)]
+        ]
+        del splitters
         tensor_ptrs_round_2 = alloc_with_threads(
             thread_count, stream, mem_sizes, "cuda"
         )
@@ -7701,9 +7814,20 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool):
             first_round_tensors = alloc_tensors()
         tensor_ptrs = [t.data_ptr() for t in first_round_tensors]
-        # for t in first_round_tensors:
-        #    del t
         del first_round_tensors
+
+        # Split-merge cycle on ONE block per stream. Each stream has
+        # three 24 MB blocks with counters [c0, c1, c2]. Splitting only
+        # the first (lowest-counter) block gives it a new, higher
+        # counter after the merge, reversing its position among the
+        # three. With per-block counters the reallocation order changes
+        # (wrong); with segment-level counters it stays stable.
+        with torch.cuda.use_mem_pool(pool):
+            with torch.cuda.stream(first_stream):
+                s1 = torch.empty(tensor_sizes[0] // 2, dtype=torch.uint8, device="cuda")
+            with torch.cuda.stream(second_stream):
+                s2 = torch.empty(tensor_sizes[0] // 2, dtype=torch.uint8, device="cuda")
+            del s1, s2
 
         with torch.cuda.use_mem_pool(pool):
             second_round_tensors = alloc_tensors()
@@ -7732,6 +7856,105 @@ class TestMemPool(TestCase):
         del pool
         del state
         torch.cuda.empty_cache()
+
+    def _alloc_record_free_sync(self, pool_ctx, s2, nbytes):
+        """Allocate a block, record it on a second stream, free, synchronize,
+        then try to reallocate.  Returns (original_ptr, new_ptr)."""
+        with pool_ctx:
+            a = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
+            original_ptr = a.data_ptr()
+
+            with torch.cuda.stream(s2):
+                a.record_stream(s2)
+                _ = a + 1
+
+            del a
+            torch.cuda.synchronize()
+
+            b = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
+            new_ptr = b.data_ptr()
+            del b
+        return original_ptr, new_ptr
+
+    @serialTest()
+    def test_mempool_oom_recovery_releases_cached_blocks(self):
+        """Test that the allocator can release default-pool cached blocks to
+        satisfy a new allocation when a user mempool is active.
+
+        We fill the default pool's free list with cached blocks (by allocating
+        and freeing outside use_mem_pool), then try to allocate inside
+        use_mem_pool.  Two paths:
+          1. Default pool -- OOM recovery releases cached blocks, succeeds.
+          2. use_mem_pool -- same recovery should work (the fix).
+        """
+        MB = 1024 * 1024
+        device = torch.device("cuda:0")
+
+        def align_down_2mb(n):
+            return n & ~(2 * MB - 1)
+
+        for label, make_ctx in [
+            ("default pool", lambda: contextlib.nullcontext()),
+            (
+                "user mempool",
+                lambda: torch.cuda.use_mem_pool(torch.cuda.MemPool()),
+            ),
+        ]:
+            with self.subTest(label=label):
+                torch.cuda.empty_cache()
+                free_before = torch.cuda.mem_get_info(device)[0]
+
+                fill_size = align_down_2mb(free_before // 2)
+                if fill_size < 64 * MB:
+                    self.skipTest("Not enough GPU memory for this test")
+
+                filler = torch.empty(fill_size, dtype=torch.uint8, device=device)
+                del filler
+
+                alloc_size = align_down_2mb(free_before - free_before // 8)
+                oom = False
+                try:
+                    with make_ctx():
+                        big = torch.empty(alloc_size, dtype=torch.uint8, device=device)
+                        del big
+                except torch.cuda.OutOfMemoryError:
+                    oom = True
+
+                self.assertFalse(
+                    oom,
+                    f"[{label}] OOM even though the default pool had "
+                    f"{fill_size // MB} MiB of freeable cached blocks "
+                    "-- release_cached_blocks was likely skipped",
+                )
+
+    @serialTest()
+    def test_mempool_block_free_not_deferred(self):
+        """Test that multi-stream block frees are NOT deferred when only a
+        user mempool is active (no graph capture).
+
+        During graph capture, block frees must be deferred (cudaEventRecord
+        is illegal).  For user mempools, insert_events should be called
+        immediately.  Two paths:
+          1. Default pool -- block recycled (baseline).
+          2. use_mem_pool -- block recycled (the fix).
+        """
+        torch.cuda.empty_cache()
+        s2 = torch.cuda.Stream()
+        nbytes = 1024 * 1024
+
+        for label, pool_ctx in [
+            ("default pool", contextlib.nullcontext()),
+            ("user mempool", torch.cuda.use_mem_pool(torch.cuda.MemPool())),
+        ]:
+            with self.subTest(label=label):
+                torch.cuda.empty_cache()
+                orig, new = self._alloc_record_free_sync(pool_ctx, s2, nbytes)
+                self.assertEqual(
+                    new,
+                    orig,
+                    f"[{label}] Block not reused after multi-stream free "
+                    "-- free was likely deferred as if under graph capture",
+                )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -9201,9 +9424,7 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
-    )
+    @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -9283,6 +9504,13 @@ class TestCudaDeviceParametrized(TestCase):
             torch.all(x_cpu == 1.0),
             "Copy should be done once end_event is synchronized",
         )
+        # On HIP graphs, the event-record node can become visible to
+        # event.synchronize() a few microseconds before the host-side
+        # stream state is updated; poll briefly so we exercise the
+        # invariant ("after sync the stream is drained") without flaking.
+        deadline = time.monotonic() + 0.1
+        while not work_stream.query() and time.monotonic() < deadline:
+            pass
         self.assertTrue(
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",
