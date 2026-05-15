@@ -138,6 +138,20 @@ def call_backward(
     return grads
 
 
+def call_backward_boxed(
+    backward_c_function: torch.autograd.function.BackwardCFunction,
+    saved_tensors: list[torch.Tensor],
+    grads: list[Any],
+) -> torch.Tensor | tuple[torch.Tensor, ...]:
+    fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
+    grad_inputs = fake._forward_cls.backward(fake, grads)
+
+    if not isinstance(grad_inputs, tuple):
+        grad_inputs = (grad_inputs,)
+
+    return grad_inputs
+
+
 def normalize_as_list(x: Any) -> list[Any]:
     if isinstance(x, tuple):
         return list(x)

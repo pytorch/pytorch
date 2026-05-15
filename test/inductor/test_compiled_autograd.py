@@ -1791,6 +1791,60 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_custom_fn_boxed_grads(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                boxed_grads_call = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x * 2, x * 3
+
+                @staticmethod
+                def backward(ctx, grads):
+                    gO_1, gO_2 = grads
+                    grads.clear()
+                    (x,) = ctx.saved_tensors
+                    return gO_1 * (x * 0 + 2) + gO_2 * (x * 0 + 3)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out1, out2 = MyFn.apply(x)
+                loss = (out1 + out2).sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn)
+
+    def test_custom_fn_boxed_grads_multiple_inputs(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                boxed_grads_call = True
+
+                @staticmethod
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    return x * y, x + y
+
+                @staticmethod
+                def backward(ctx, grads):
+                    grad_mul, grad_add = grads
+                    grads.clear()
+                    x, y = ctx.saved_tensors
+                    return grad_mul * y + grad_add, grad_mul * x + grad_add
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = torch.arange(1.0, i + 1, requires_grad=True)
+                out1, out2 = MyFn.apply(x, y)
+                loss = out1.sum() + (out2 * 2).sum()
+                loss.backward()
+                yield x.grad
+                yield y.grad
+
+        self.check_output_and_recompiles(fn)
+
     def test_custom_fn_non_variable_input(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -5224,6 +5278,13 @@ known_graph_breaks_tests = {
     "test_saved_variables_deprecated",  # warnings.warn
     "test_autograd_node_isinstance",  # assertIsInstance
     "test_set_materialize_non_diff_grads",  # assertIsNone
+    "test_custom_function_boxed_grads",  # assertIsInstance in backward
+    "test_custom_function_boxed_grads_multi_output",  # assertIsInstance in backward
+    "test_custom_function_boxed_grads_cleanup_on_error",  # raises in backward
+    "test_custom_function_boxed_grads_chain",  # mutates a list in backward
+    "test_custom_function_boxed_grads_none_grads",  # assertIsNone in backward
+    "test_custom_function_boxed_grads_materialize_grads",  # assertIsNotNone in backward
+    "test_custom_function_boxed_grads_direct_apply",  # mutates a list in backward
     "test_backward_dict_grad_for_nontensor",  # torch/_custom_op/autograd.py in skip files
     "test_backward_dict_invalid_keys",  # torch/_custom_op/autograd.py in skip files
     "test_backward_dict_requires_keys_for_input_optional_tensors",  # torch/_custom_op/autograd.py in skip files
@@ -5441,16 +5502,11 @@ skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
 
-# boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
-skipped_tests.add("test_custom_function_boxed_grads")
-skipped_tests.add("test_custom_function_boxed_grads_multi_output")
+# The compiled-autograd graph keeps graph-local references to gradients while
+# calling Python, so it cannot match eager PyNode::apply's no-extra-ref check.
 skipped_tests.add("test_custom_function_boxed_grads_no_extra_refs")
-skipped_tests.add("test_custom_function_boxed_grads_cleanup_on_error")
-skipped_tests.add("test_custom_function_boxed_grads_chain")
-skipped_tests.add("test_custom_function_boxed_grads_none_grads")
-skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
-skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
-skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
+# test_custom_function_boxed_grads_single_list_arg exercises direct
+# grad_fn.apply() and is already covered by its @skipIfTorchDynamo decorator.
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
