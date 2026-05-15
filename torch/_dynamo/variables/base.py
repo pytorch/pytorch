@@ -599,6 +599,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        raise NotImplementedError(f"reconstruct_pycode not implemented for {self}")
+
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
@@ -726,6 +729,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[],
         )
 
+    def sq_contains(self, tx: Any, item: VariableTracker) -> VariableTracker:
+        """Called when sq_contains is not implemented."""
+        unimplemented(
+            gb_type="missing sq_contains",
+            context=f"sq_contains not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -754,6 +766,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
             return self.tp_iternext_impl(tx)
+        elif name == "__contains__" and not kwargs:
+            if len(args) != 1:
+                msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            return self.sq_contains(tx, args[0])
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -767,6 +785,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_int_impl(tx)
         elif name == "__float__" and not args and not kwargs:
             return self.nb_float_impl(tx)
+        elif name == "__get__" and len(args) in (1, 2) and not kwargs:
+            # Route to tp_descr_get_impl if the VT implements it.
+            # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
+            # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
+            if hasattr(self, "tp_descr_get_impl"):
+                obj = args[0]
+                owner = args[1] if len(args) > 1 else obj.var_getattr(tx, "__class__")
+                return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1228,6 +1254,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             context=f"{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
             explanation=f"The type {self.python_type_name()} has an nb_negative C slot but "
             "the corresponding VariableTracker doesn't implement nb_negative_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_positive slot.
+
+        Called when type_implements_nb_positive returns True for this type.
+        Subclasses override to provide the actual positive.
+        """
+        unimplemented(
+            gb_type="nb_positive_impl not implemented",
+            context=f"{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_positive C slot but "
+            "the corresponding VariableTracker doesn't implement nb_positive_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 

@@ -6,7 +6,7 @@ namespace at::native {
 
 class QLinearOnednn final {
  public:
-  C10_API static Tensor run_pointwise_tensor(
+  TORCH_API static Tensor run_pointwise_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
@@ -21,7 +21,7 @@ class QLinearOnednn final {
       c10::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm);
 
-C10_API static Tensor run_pointwise_binary_tensor(
+  TORCH_API static Tensor run_pointwise_binary_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
@@ -42,7 +42,7 @@ C10_API static Tensor run_pointwise_binary_tensor(
       std::string_view unary_post_op_algorithm);
 };
 
-C10_API Tensor _weight_int4pack_mm_cpu_tensor(
+TORCH_API Tensor _weight_int4pack_mm_cpu_tensor(
     const Tensor& A,
     const Tensor& B,
     const Tensor& qGroupSize,

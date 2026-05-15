@@ -2,7 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import random
 import re
+import threading
 import unittest
 import warnings
 
@@ -26,11 +28,20 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    np,
+    run_tests,
+    SEED,
+    suppress_warnings,
+    TEST_NUMPY,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
     validate_sharding_rule_sample,
+    validate_sharding_rule_sample_backward,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import _OpCall, DebugMode
@@ -250,15 +261,8 @@ dtensor_fails = {
 }
 
 dtensor_multi_threaded_fails = {
-    xfail("index_fill"),
-    xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
-    xfail("nn.functional.huber_loss"),
-    skip("nn.functional.max_unpool1d", "grad"),
-    skip("nn.functional.max_unpool2d", "grad"),
-    xfail("nn.functional.max_unpool3d", "grad"),
-    xfail("nn.functional.threshold"),
     skip("nn.functional.multi_head_attention_forward"),
     xfail("multinomial"),
 }
@@ -309,9 +313,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.max_unpool1d"),
-    xfail("nn.functional.max_unpool2d"),
-    xfail("nn.functional.max_unpool3d"),
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
@@ -322,22 +323,10 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
-    xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.logsigmoid"),
-    # Miscellaneous runtime crashes (e.g. index out of bounds).
-    xfail("gather"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_reduce", "amax"),
-    xfail("index_reduce", "amin"),
-    xfail("index_reduce", "mean"),
-    xfail("index_reduce", "prod"),
-    xfail("index_select"),
-    xfail("lu_unpack"),
     xfail("scatter"),
-    xfail("scatter_add"),
     xfail("take_along_dim"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
@@ -352,9 +341,12 @@ dtensor_numeric_only_fails = {
     xfail("eye"),
     xfail("full"),
     xfail("full_like"),
+    xfail("index_fill"),
     xfail("linspace"),
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
     xfail("nn.functional.threshold"),
@@ -503,13 +495,46 @@ class TestDTensorOps(TestCase):
 
             yield args, kwargs
 
-    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
+    def run_opinfo_test(
+        self, dtype, op, requires_grad=True, sample_filter=None, sample_lock=None
+    ):
         self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
+        def valid_samples():
+            return self.iter_valid_samples(
+                op,
+                dtype,
+                requires_grad=requires_grad,
+                sample_filter=sample_filter,
+            )
+
+        def iter_samples():
+            if sample_lock is None:
+                yield from valid_samples()
+                return
+
+            # Threaded ranks share process-global RNG state. Materialize samples
+            # with a fixed RNG state so non-tensor args match across ranks.
+            with sample_lock:
+                python_rng_state = random.getstate()
+                numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
+                try:
+                    with freeze_rng_state():
+                        torch.manual_seed(SEED)
+                        random.seed(SEED)
+                        if TEST_NUMPY:
+                            np.random.seed(SEED)
+                        samples = list(valid_samples())
+                finally:
+                    random.setstate(python_rng_state)
+                    if numpy_rng_state is not None:
+                        np.random.set_state(numpy_rng_state)
+
+            dist.barrier()
+            yield from samples
+
         def test():
-            for args, kwargs in self.iter_valid_samples(
-                op, dtype, requires_grad=requires_grad, sample_filter=sample_filter
-            ):
+            for args, kwargs in iter_samples():
                 self.run_dtensor_crossref(op.op, args, kwargs)
 
         self.check_dtensor_func(test, op)
@@ -699,6 +724,7 @@ class TestDTensorOps(TestCase):
 
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
+    _op_db_sample_lock = threading.Lock()
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
@@ -709,7 +735,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         dtensor_fails | dtensor_multi_threaded_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, op)
+        self.run_opinfo_test(dtype, op, sample_lock=self.__class__._op_db_sample_lock)
 
     def test_mean(self):
         self.run_mean()
@@ -1125,8 +1151,21 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: {input_placements} -> {tuple(output_placements)} failed",
+                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
+
+            bwd = validate_sharding_rule_sample_backward(
+                aten_op,
+                full_args,
+                full_kwargs,
+                input_placements,
+                mesh,
+            )
+            if bwd is not None:
+                self.assertTrue(
+                    bwd,
+                    f"{op.name}: backward {input_placements} failed",
+                )
 
 
 class TestCompiledDTensorOps(TestDTensorOps):

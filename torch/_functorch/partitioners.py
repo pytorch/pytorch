@@ -1364,6 +1364,8 @@ def default_partition(
             continue
         if node.target in (
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
             # Profiler record_function ops are technically impure (they set up
             # profiling spans), but they're safe to duplicate during AC recompute.
             # We skip both enter and exit to keep profiling spans balanced.
@@ -1500,12 +1502,15 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, (list, tuple)):
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for _, n in val.items())
+            return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr" or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and len(node.target._schema.returns) == 0
+    ):
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."

@@ -343,7 +343,7 @@ class TestCompilerBisector(TestCase):
         from unittest.mock import patch
 
         from torch._dynamo.utils import counters
-        from torch._inductor.compiler_bisector import get_env_val, reset_counters
+        from torch._inductor.compiler_bisector import get_env_val
 
         def foo(x):
             return x + 1
@@ -359,7 +359,7 @@ class TestCompilerBisector(TestCase):
 
         with patch.dict(os.environ, env):
             get_env_val.cache_clear()
-            reset_counters()
+            CompilerBisector.reset_counters()
             torch._dynamo.reset()
             counters.clear()
             CompilerBisector.bisection_enabled = True
@@ -375,6 +375,38 @@ class TestCompilerBisector(TestCase):
             finally:
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
+
+    def test_bisect_run_debuginfo(self):
+        import os
+        import subprocess
+        from pathlib import Path
+        from unittest.mock import patch
+
+        test_file = (
+            Path(__file__).resolve().parent / "_test_compiler_bisector_run_helper.py"
+        )
+        # Minimize test runtime by searching only the subsystem that's broken.
+        with patch.dict(
+            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+        ):
+            output = subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "torch._inductor.compiler_bisector",
+                    "run",
+                    "python",
+                    str(test_file),
+                ],
+                stdout=subprocess.PIPE,
+                check=True,
+                text=True,
+                timeout=300,
+            )
+        expected_result = (
+            "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
+        )
+        self.assertIn(expected_result, output.stdout)
 
 
 if __name__ == "__main__":

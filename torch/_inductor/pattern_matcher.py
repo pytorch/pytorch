@@ -75,6 +75,7 @@ from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
+from ..fx.experimental import _config as exp_config
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
@@ -1870,6 +1871,7 @@ def gen_register_replacement(
 
 
 @functorch_config.patch(functionalize_rng_ops=False)  # type: ignore[misc]
+@exp_config.patch(skip_dtype_check_in_meta_registrations=True)
 def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
