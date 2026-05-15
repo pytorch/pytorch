@@ -146,8 +146,13 @@ if(WIN32)
   # Override them all with GNU-style rules for clang++.
 
   # Compile: use GNU-style flags (-o, -isystem) instead of MSVC-style.
+  # Force -O3 on the compile line. The per-config CMAKE_HIP_FLAGS_RELEASE
+  # values do not reliably reach <FLAGS> here, so HIP code silently fell back
+  # to clang++'s -O0 default and caused a 99% conv2d perf regression on
+  # Windows ROCm (TheRock#5157). Putting -O3 directly in the compile rule
+  # guarantees it.
   set(CMAKE_HIP_COMPILE_OBJECT
-    "<CMAKE_HIP_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -x hip -c <SOURCE>")
+    "<CMAKE_HIP_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -O3 -o <OBJECT> -x hip -c <SOURCE>")
   set(CMAKE_INCLUDE_SYSTEM_FLAG_HIP "-isystem ")
   set(CMAKE_HIP_DEPFILE_FORMAT gcc)
   set(CMAKE_DEPFILE_FLAGS_HIP "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
