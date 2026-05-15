@@ -23,7 +23,10 @@
             h="h_idx",
             m="q_idx",
             n="kv_idx",
-            out="tSrS_ssa"
+            out="tSrS_ssa",
+            vector_load_vec_size=SCORE_MOD_VEC_SIZE,
+            vector_load_index="kv_idx",
+            vector_load_dim=-1
         ) | indent_except_first(2) }}
         return tSrS_ssa
     {{ set_cute_hash("score_mod", "score") }}
