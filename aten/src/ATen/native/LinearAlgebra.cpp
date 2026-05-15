@@ -2118,39 +2118,50 @@ static Tensor _matmul_impl(
   } else {
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
     // We track m1 vs m2 separately even though they must match for nicer error messages
-    const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
-    const int64_t m1 = tensor1.sizes().back();
-    auto batch_tensor1 = tensor1.sizes().slice(0, std::max<int64_t>(dim_tensor1 - 2, 0LL));
-    const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().front();
-    const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
-    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
-                                    std::max<int64_t>(dim_tensor2 - 2, 0LL));
+    const auto tensor1_sizes = tensor1.sym_sizes();
+    const auto tensor2_sizes = tensor2.sym_sizes();
+    const c10::SymInt n = dim_tensor1 > 1 ? tensor1_sizes[dim_tensor1 - 2] : c10::SymInt(1);
+    const c10::SymInt m1 = tensor1_sizes[dim_tensor1 - 1];
+    const c10::SymInt m2 = dim_tensor2 > 1 ? tensor2_sizes[dim_tensor2 - 2] : tensor2_sizes[0];
+    const c10::SymInt p = dim_tensor2 > 1 ? tensor2_sizes[dim_tensor2 - 1] : c10::SymInt(1);
+    c10::SymDimVector batch_tensor1(
+        tensor1_sizes.begin(),
+        tensor1_sizes.begin() + std::max<int64_t>(dim_tensor1 - 2, 0LL));
+    c10::SymDimVector batch_tensor2(
+        tensor2_sizes.begin(),
+        tensor2_sizes.begin() + std::max<int64_t>(dim_tensor2 - 2, 0LL));
 
     // Same optimization for the gradients as that in should_fold
     // If we're going to broadcast we force it to go through the should_fold branch
-    if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
-      if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+    if (dim_tensor1 == 3 && dim_tensor2 == 3 &&
+        TORCH_GUARD_OR_TRUE(batch_tensor1[0].sym_ne(batch_tensor2[0]))) {
+      if (TORCH_GUARD_OR_FALSE(batch_tensor1[0].sym_eq(1)) &&
+          (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
         return _matmul_impl(out, tensor1.squeeze(0), tensor2);
       }
-      if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+      if (TORCH_GUARD_OR_FALSE(batch_tensor2[0].sym_eq(1)) &&
+          (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
         return _matmul_impl(out, tensor1, tensor2.squeeze(0));
       }
     }
 
-    auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
-    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
+    auto output_shape = infer_size_symdimvector(batch_tensor1, batch_tensor2);
+    const c10::SymInt expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
-                                                             ret.append({n, m1});
-                                                             return ret; }();
-    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                         .reshape({expand_batch_product, n, m1});
+    const auto tensor1_expand_size = [&output_shape, n, m1]{
+      c10::SymDimVector ret(output_shape);
+      ret.append({n, m1});
+      return ret;
+    }();
+    const auto tensor1_expanded = tensor1
+                                      .expand_symint(tensor1_expand_size)
+                                      .reshape_symint({expand_batch_product, n, m1});
     // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      DimVector ret(output_shape);
+      c10::SymDimVector ret(output_shape);
       if (vector_rhs) {
         ret.push_back(m2);
       } else {
@@ -2158,11 +2169,17 @@ static Tensor _matmul_impl(
       }
       return ret;
     }();
-    auto tensor2_expanded = tensor2.expand(tensor2_expand_size);
+    auto tensor2_expanded = tensor2.expand_symint(tensor2_expand_size);
     if (vector_rhs) {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2}).unsqueeze(2);
+      tensor2_expanded = tensor2_expanded
+                             .reshape_symint({expand_batch_product, m2})
+                             .unsqueeze(2);
     } else {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2, p});
+      tensor2_expanded = tensor2_expanded.reshape_symint({
+          expand_batch_product,
+          m2,
+          p,
+      });
     }
 
     if (dim_tensor1 > 1) {
@@ -2174,19 +2191,22 @@ static Tensor _matmul_impl(
 
     if (!has_out) {
       if (vector_rhs) {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
+        return at::_unsafe_view_symint(
+            tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
       } else {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+        return at::_unsafe_view_symint(
+            tensor1_expanded.bmm(tensor2_expanded), output_shape);
       }
     } else {
-      at::native::resize_output(out, output_shape);
-      auto reshaped_out = out.reshape({expand_batch_product, n, p});
+      at::native::resize_output_symint(out, output_shape);
+      auto reshaped_out = at::reshape_symint(
+          out, c10::SymDimVector{expand_batch_product, n, p});
       at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
       if (vector_rhs) {
         reshaped_out = reshaped_out.squeeze(-1);
       }
       if (!reshaped_out.is_alias_of(out)) {
-        out.copy_(reshaped_out.view_as(out));
+        out.copy_(reshaped_out.view_symint(out.sym_sizes()));
       }
       return out;
     }
