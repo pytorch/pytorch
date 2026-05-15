@@ -880,6 +880,7 @@ class MemTracker(TorchDispatchMode):
 
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
+            self._entered_under_fake_mode = active_fake_mode() is not None
             self._register_global_optimizer_hook()
             self._mod_tracker.register_user_hooks(
                 self._pre_fw_hook,
@@ -925,16 +926,19 @@ class MemTracker(TorchDispatchMode):
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
-        # If we are tracking an optimizer state, we use the optimizer reference type.
-        # If we are in backward region and not in AC region, we use the backward reference type.
-        # Else we use the forward reference type.
-        if self._in_opt:
-            reftype = _MemRefType.OPT
-        elif self._mod_tracker.is_bw and not self._in_ac:
-            reftype = _MemRefType.TEMP
-        else:
-            reftype = _MemRefType.ACT
-        tree_map_only(torch.Tensor, partial(self._track, reftype), res)
-        peak_state = _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
-        self._update_peak_stats(peak_state)
+        if self._entered_under_fake_mode or not active_fake_mode():
+            # If we are tracking an optimizer state, we use the optimizer reference type.
+            # If we are in backward region and not in AC region, we use the backward reference type.
+            # Else we use the forward reference type.
+            if self._in_opt:
+                reftype = _MemRefType.OPT
+            elif self._mod_tracker.is_bw and not self._in_ac:
+                reftype = _MemRefType.TEMP
+            else:
+                reftype = _MemRefType.ACT
+            tree_map_only(torch.Tensor, partial(self._track, reftype), res)
+            peak_state = (
+                _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
+            )
+            self._update_peak_stats(peak_state)
         return res
