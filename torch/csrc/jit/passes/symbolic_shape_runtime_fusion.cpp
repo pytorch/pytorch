@@ -608,7 +608,13 @@ static RegisterOperators reg_guard({
                   flattened_input_dims,
                   flattened_input_striding,
                   num_symbolic_dims](Stack& stack) {
-            at::ArrayRef<IValue> inputs = last(stack, num_inputs);
+            // Copy inputs out before dropping. drop() = stack.erase(...),
+            // which destroys the IValues; iterating last(stack, num_inputs)
+            // afterwards dereferences destroyed elements (Tensor refcount
+            // use-after-free; ASAN flags it as container-overflow at the
+            // toTensor() call below).
+            // TODO - smallvector here ?
+            std::vector<IValue> inputs(stack.end() - num_inputs, stack.end());
             drop(stack, num_inputs);
             // each invocation we need to reset what value of each symbolic
             // symbol is.
