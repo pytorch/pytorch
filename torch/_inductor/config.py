@@ -494,19 +494,19 @@ use_experimental_benchmarker: bool = Config(
 )
 
 # Number of iterations to run the callable during runtime estimation in the experimental benchmarker
-inductor_experimental_benchmarker_estimation_iters: int = int(
+experimental_benchmarker_estimation_iters: int = int(
     os.environ.get("TORCHINDUCTOR_EXPERIMENTAL_BENCHMARKER_ESTIMATION_ITERS", 5)
 )
 # Number of iterations to flush the L2 cache before starting benchmarking in the experimental benchmarker
-inductor_experimental_benchmarker_memory_warmup_iters: int = int(
+experimental_benchmarker_memory_warmup_iters: int = int(
     os.environ.get("TORCHINDUCTOR_EXPERIMENTAL_BENCHMARKER_MEMORY_WARMUP_ITERS", 100)
 )
 # Number of iterations to run the callable during the benchmarking in the experimental benchmarker
-inductor_experimental_benchmarker_benchmark_iters: int = int(
+experimental_benchmarker_benchmark_iters: int = int(
     os.environ.get("TORCHINDUCTOR_EXPERIMENTAL_BENCHMARKER_BENCHMARK_ITERS", 100)
 )
 # Maximum duration of the benchmarking in milliseconds in the experimental benchmarker
-inductor_experimental_benchmarker_max_duration: int = int(
+experimental_benchmarker_max_duration: int = int(
     os.environ.get("TORCHINDUCTOR_EXPERIMENTAL_BENCHMARKER_MAX_DURATION", 25)
 )
 

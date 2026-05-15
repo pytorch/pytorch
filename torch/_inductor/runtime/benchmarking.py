@@ -252,10 +252,22 @@ class Benchmarker:
                 return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
             if use_experimental_benchmarker:
-                kwargs.setdefault("estimation_iters", inductor_config.inductor_experimental_benchmarker_estimation_iters)
-                kwargs.setdefault("memory_warmup_iters", inductor_config.inductor_experimental_benchmarker_memory_warmup_iters)
-                kwargs.setdefault("benchmark_iters", inductor_config.inductor_experimental_benchmarker_benchmark_iters)
-                kwargs.setdefault("max_benchmark_duration", inductor_config.inductor_experimental_benchmarker_max_duration)
+                kwargs.setdefault(
+                    "estimation_iters",
+                    inductor_config.experimental_benchmarker_estimation_iters,
+                )
+                kwargs.setdefault(
+                    "memory_warmup_iters",
+                    inductor_config.experimental_benchmarker_memory_warmup_iters,
+                )
+                kwargs.setdefault(
+                    "benchmark_iters",
+                    inductor_config.experimental_benchmarker_benchmark_iters,
+                )
+                kwargs.setdefault(
+                    "max_benchmark_duration",
+                    inductor_config.experimental_benchmarker_max_duration,
+                )
 
             return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
