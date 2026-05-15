@@ -822,14 +822,31 @@ class BlockPtrOptions(BlockDescriptorOptions):
         return advance
 
 
+def triton_shape_dims(shape: Sequence[sympy.Expr | int | str]) -> list[str]:
+    """Format mixed symbolic and pre-rendered Triton shape dimensions.
+
+    Nested-reduction codegen builds reshape/broadcast shapes from both sympy
+    expressions and already-rendered block-size strings.
+    """
+    return [
+        dim if isinstance(dim, str) else V.kernel.index_to_str(dim) for dim in shape
+    ]
+
+
+def triton_shape_str(shape: Sequence[sympy.Expr | int | str]) -> str:
+    return f"[{', '.join(triton_shape_dims(shape))}]"
+
+
 def triton_reshape(
-    value: str, old_shape: Sequence[sympy.Expr], new_shape: Sequence[sympy.Expr]
+    value: str,
+    old_shape: Sequence[sympy.Expr | int | str],
+    new_shape: Sequence[sympy.Expr | int | str],
 ) -> str:
     """Workaround https://github.com/triton-lang/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
-    old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
-    new_shape_str = [V.kernel.index_to_str(shape) for shape in new_shape]
+    old_shape_str = triton_shape_dims(old_shape)
+    new_shape_str = triton_shape_dims(new_shape)
 
     if old_shape_str == new_shape_str:
         return value
@@ -2849,7 +2866,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     triton kernel programmatically
     """
 
-    overrides = TritonKernelOverrides
+    overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
@@ -3429,7 +3446,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
                 )
-                if options_class == TensorDescriptorOptions:
+                if issubclass(options_class, TensorDescriptorOptions):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -3690,12 +3707,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
+        # If the strides have a non-trivial sort, then the broadcasting dims
+        # need to be reverted for the store
+        # Also see indexing.codegen_broadcast_and_reshape
+        broadcast_shape = indexing.broadcast_shape
+        broadcasting_dims = indexing.broadcasting_dims
+        if not indexing.stride_sorter.is_identity:
+            broadcast_shape = indexing.stride_sorter.revert(broadcast_shape)
+            broadcasting_dims = indexing.stride_sorter.revert(broadcasting_dims)
+
         # These dims no longer need broadcasting.
         for idx, (dim, broadcast_dim) in enumerate(
-            zip(indexing.final_shape, indexing.broadcast_shape)
+            zip(indexing.final_shape, broadcast_shape)
         ):
             if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                indexing.broadcasting_dims[idx] = False
+                broadcasting_dims[idx] = False
+
+        if not indexing.stride_sorter.is_identity:
+            indexing.broadcasting_dims = indexing.stride_sorter.sort(broadcasting_dims)
+        else:
+            indexing.broadcasting_dims = broadcasting_dims
 
         value = indexing.codegen_broadcast_and_reshape(
             value,
@@ -4009,7 +4040,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars
+        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -4204,13 +4235,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{sorter_ptr}, {sorter_stride}, "
             f"{sorter_indices}, "
             ")",
-            dtype=indexing_dtype,
+            dtype=indexing_dtype,  # type: ignore[attr-defined]
             shape=values.shape,
         )
         self._handle_pdl_after_load(self.compute, result)
 
         masks = self._combine_masks(values, boundary_indices, sorter_indices)
-        result.mask_vars = masks
+        result.mask_vars = masks  # type: ignore[attr-defined]
 
         return result
 
@@ -4987,6 +5018,73 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         exit_stack.close()
 
+    def emit_reshape(
+        self,
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> CSEVariable:
+        """Emit a tl.reshape into a new tile shape, returning a CSE var."""
+        return self.cse.generate(
+            self.compute,
+            self._reshape_expr(value, shape),
+            dtype=dtype,
+            shape=shape,
+        )
+
+    def emit_reduce(
+        self,
+        value: CSEVariable,
+        reduction_type: str,
+        axis: int,
+        dtype: torch.dtype,
+        shape: Sequence[Any],
+    ) -> CSEVariable:
+        """Emit a Triton reduction primitive along `axis`, returning a CSE var."""
+        reduce_fn = get_triton_reduction_function(reduction_type)
+        return self.cse.generate(
+            self.compute,
+            f"{reduce_fn}({value}, {axis})",
+            dtype=dtype,
+            shape=shape,
+        )
+
+    def emit_broadcast_via_reshape(
+        self,
+        value: CSEVariable,
+        pre_broadcast_shape: Sequence[sympy.Expr | int | str],
+        broadcast_shape: Sequence[sympy.Expr | int | str],
+        final_shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+        out_shape: Sequence[Any],
+    ) -> CSEVariable:
+        """reshape(broadcast_to(reshape(value, pre_broadcast), broadcast), final).
+
+        Used for nested-reduction broadcasts that lift a reduced-resolution
+        value (one element per group) to full or half resolution.
+        """
+        reshaped = self._reshape_expr(value, pre_broadcast_shape)
+        broadcasted = (
+            f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
+        )
+        line = triton_reshape(broadcasted, list(broadcast_shape), list(final_shape))
+        return self.cse.generate(
+            self.compute,
+            line,
+            dtype=dtype,
+            shape=out_shape,
+        )
+
+    @staticmethod
+    def _reshape_expr(
+        value: CSEVariable,
+        shape: Sequence[sympy.Expr | int | str],
+    ) -> str:
+        old_shape = getattr(value, "shape", None)
+        if old_shape is None:
+            return f"tl.reshape({value}, {triton_shape_str(shape)})"
+        return triton_reshape(str(value), list(old_shape), list(shape))
+
     def _lift_helper(
         self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
     ) -> str:
@@ -5124,7 +5222,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -5222,13 +5320,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_vars = [
                 self.cse.newvar(dtype=dtype, shape=value.shape)
                 for dtype, value in zip(dtypes, broadcasted_values)
-            ]
+            ]  # type: ignore[attr-defined]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -5245,7 +5343,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError("Unhandled sort")
 
         for result_var, input_var in zip(result_vars, values):
-            result_var.mask_vars = masks
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
             result_var.bounds = input_var.bounds
 
         return tuple(result_vars)
@@ -5511,7 +5609,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint_with_override(
@@ -5956,7 +6054,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in equal_1_arg_indices(signature):
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
@@ -6657,7 +6755,7 @@ class TritonScheduling(SIMDScheduling):
 
         if kernel_name:
             debug_handle = set_kernel_post_grad_provenance_tracing(
-                node_schedule,
+                node_schedule,  # type: ignore[arg-type]
                 kernel_name,
             )
             wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
