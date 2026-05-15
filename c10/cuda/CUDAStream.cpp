@@ -8,7 +8,16 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 namespace c10::cuda {
 
@@ -22,6 +31,15 @@ constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 constexpr int kStreamTypeBits = 4;
 
 int max_stream_priorities;
+
+// Forward declarations for the stream pool diagnostics defined further down
+// in this anonymous namespace. initSingleStream below uses them at file scope
+// before their definitions.
+inline bool diag_enabled();
+inline long diag_tid();
+inline uint64_t diag_ts_ns();
+inline uint64_t diag_seq();
+__attribute__((format(printf, 1, 2))) void diag_logf(const char* fmt, ...);
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -209,6 +227,21 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
+  if (diag_enabled()) {
+    diag_logf(
+        "seq=%lu ts=%lu tid=%ld op=initSingleStream dev=%d pri_idx=%d "
+        "slot_i=%d hipstream=%p gpu_trace_set=%d "
+        "counter_after=%u\n",
+        static_cast<unsigned long>(diag_seq()),
+        static_cast<unsigned long>(diag_ts_ns()),
+        diag_tid(),
+        static_cast<int>(device_index),
+        p,
+        i,
+        reinterpret_cast<void*>(stream),
+        interp != nullptr ? 1 : 0,
+        priority_counters[p][device_index].load(std::memory_order_relaxed));
+  }
 }
 
 // Creates the low and high priority stream pools for the specified device
@@ -252,10 +285,98 @@ inline void check_gpu(DeviceIndex device_index) {
       ")");
 }
 
+// =============================================================================
+// Stream pool diagnostics.
+//
+// One log file per process is written to
+//   ${PYTORCH_STREAM_POOL_DIAG_DIR:-/tmp}/pytorch_stream_pool_diag.<pid>.log
+// The directory env var is an optional override; absent that, /tmp is used.
+//
+// Each line is self-describing key=value with a monotonic sequence number, a
+// steady_clock nanosecond timestamp, and the OS thread id. The format is
+// stable enough to diff across processes.
+// =============================================================================
+
+FILE* diag_file_init() {
+  const char* dir = std::getenv("PYTORCH_STREAM_POOL_DIAG_DIR");
+  if (dir == nullptr || *dir == '\0') {
+    dir = "/tmp";
+  }
+#if defined(__linux__)
+  const int pid = static_cast<int>(::getpid());
+#else
+  const int pid = 0;
+#endif
+  char path[512];
+  std::snprintf(
+      path, sizeof(path), "%s/pytorch_stream_pool_diag.%d.log", dir, pid);
+  FILE* f = std::fopen(path, "w");
+  if (f != nullptr) {
+    // Line-buffered so each fprintf call flushes a full record.
+    std::setvbuf(f, nullptr, _IOLBF, 0);
+    std::fprintf(
+        f,
+        "# stream_pool_diag pid=%d kStreamsPerPool=%d "
+        "max_compile_time_stream_priorities=%d sizeof_cudaStream_t=%zu\n",
+        pid,
+        kStreamsPerPool,
+        c10::cuda::max_compile_time_stream_priorities,
+        sizeof(cudaStream_t));
+  }
+  return f;
+}
+
+FILE* diag_file() {
+  static FILE* fp = diag_file_init();
+  return fp;
+}
+
+// Returns false only if the log file failed to open (e.g., the target
+// directory is not writable). Always-on otherwise.
+inline bool diag_enabled() {
+  return diag_file() != nullptr;
+}
+
+inline long diag_tid() {
+#if defined(__linux__) && defined(SYS_gettid)
+  return ::syscall(SYS_gettid);
+#else
+  return 0;
+#endif
+}
+
+inline uint64_t diag_ts_ns() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+inline uint64_t diag_seq() {
+  static std::atomic<uint64_t> s{0};
+  return s.fetch_add(1, std::memory_order_relaxed);
+}
+
+__attribute__((format(printf, 1, 2))) void diag_logf(const char* fmt, ...) {
+  FILE* fp = diag_file();
+  if (fp == nullptr) {
+    return;
+  }
+  std::va_list ap;
+  va_start(ap, fmt);
+  // POSIX fprintf is internally locked per FILE*, so concurrent calls from
+  // multiple threads will not interleave bytes within one fprintf.
+  std::vfprintf(fp, fmt, ap);
+  va_end(ap);
+}
+
 // Helper to determine the index of the stream to return
 // Note: Streams are returned round-robin (see note in CUDAStream.h)
-uint32_t get_idx(std::atomic<uint32_t>& counter) {
+uint32_t get_idx(std::atomic<uint32_t>& counter, uint32_t* raw_out = nullptr) {
   auto raw_idx = counter++;
+  if (raw_out != nullptr) {
+    *raw_out = raw_idx;
+  }
   return raw_idx % kStreamsPerPool;
 }
 
@@ -352,20 +473,64 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
       device_flags[device_index], initDeviceStreamState, device_index);
 #endif
   auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
-  const auto idx = get_idx(priority_counters[pri_idx][device_index]);
+  uint32_t raw_idx = 0;
+  const auto idx = get_idx(priority_counters[pri_idx][device_index], &raw_idx);
   StreamIdType id_type = StreamIdType(pri_idx + 1);
+  if (diag_enabled()) {
+    diag_logf(
+        "seq=%lu ts=%lu tid=%ld op=getStreamFromPool dev=%d priority_arg=%d "
+        "pri_idx=%d raw_counter=%u idx=%u counter_after=%u "
+        "stream_id_type=%d caller=%p\n",
+        static_cast<unsigned long>(diag_seq()),
+        static_cast<unsigned long>(diag_ts_ns()),
+        diag_tid(),
+        static_cast<int>(device_index),
+        priority,
+        pri_idx,
+        raw_idx,
+        idx,
+        priority_counters[pri_idx][device_index].load(
+            std::memory_order_relaxed),
+        static_cast<int>(id_type),
+        __builtin_return_address(0));
+  }
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 }
 
 CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initCUDAStreamsOnce();
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
+  if (diag_enabled()) {
+    diag_logf(
+        "seq=%lu ts=%lu tid=%ld op=getStreamFromPool_bool "
+        "isHighPriority=%d translated_priority=%d "
+        "dev_arg=%d max_stream_priorities=%d caller=%p\n",
+        static_cast<unsigned long>(diag_seq()),
+        static_cast<unsigned long>(diag_ts_ns()),
+        diag_tid(),
+        isHighPriority ? 1 : 0,
+        priority,
+        static_cast<int>(device),
+        max_stream_priorities,
+        __builtin_return_address(0));
+  }
   return getStreamFromPool(priority, device);
 }
 
 CUDAStream getStreamFromExternal(
     cudaStream_t ext_stream,
     DeviceIndex device_index) {
+  if (diag_enabled()) {
+    diag_logf(
+        "seq=%lu ts=%lu tid=%ld op=getStreamFromExternal dev=%d "
+        "ext_stream=%p caller=%p\n",
+        static_cast<unsigned long>(diag_seq()),
+        static_cast<unsigned long>(diag_ts_ns()),
+        diag_tid(),
+        static_cast<int>(device_index),
+        reinterpret_cast<void*>(ext_stream),
+        __builtin_return_address(0));
+  }
   // The stream pointer will be the actual id
   return CUDAStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
 }
@@ -392,6 +557,22 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
+  if (diag_enabled()) {
+    StreamId sid = stream.id();
+    StreamIdType st = streamIdType(sid);
+    size_t si = streamIdIndex(sid);
+    diag_logf(
+        "seq=%lu ts=%lu tid=%ld op=setCurrentCUDAStream dev=%d "
+        "stream_id=%lld stream_id_type=%d si=%zu caller=%p\n",
+        static_cast<unsigned long>(diag_seq()),
+        static_cast<unsigned long>(diag_ts_ns()),
+        diag_tid(),
+        static_cast<int>(stream.device_index()),
+        static_cast<long long>(sid),
+        static_cast<int>(st.getStreamType()),
+        si,
+        __builtin_return_address(0));
+  }
   current_streams[stream.device_index()] = stream.id();
 }
 
