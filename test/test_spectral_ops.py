@@ -358,13 +358,6 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
-        # complex32 (chalf) is now promoted to complex64 on CUDA/XPU
-        # (via promote_type_fft / _promote_type_fft), so it no longer hits the
-        # "cuFFT only supports powers of two" constraint.  Only float16 (half)
-        # still has that constraint; skip chalf on CUDA/XPU.
-        device_type = torch.device(device).type
-        if dtype == torch.chalf and device_type in ('cuda', 'xpu'):
-            return
         t = make_tensor(13, 13, device=device, dtype=dtype)
         err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
         with self.assertRaisesRegex(RuntimeError, err_msg):

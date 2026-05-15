@@ -76,11 +76,6 @@ namespace {
 // * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
-    // complex32 ("chalf") has no native FFT kernel on CUDA/XPU.
-    // Upcast to complex64 so the downstream kernel can execute.
-    if (type == kComplexHalf) {
-      return kComplexFloat;
-    }
     return type;
   }
   // Promote integral to default float type
