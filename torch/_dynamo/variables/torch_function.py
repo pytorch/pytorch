@@ -166,7 +166,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.value = value
         # needed for BC with calling enter from CM code
         self.cm_obj = value  # type: ignore[assignment]
-        self.source = source
+        self.source = source  # type: ignore[assignment]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
@@ -195,7 +195,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     ) -> VariableTracker:
         return call_torch_function(
             tx,
-            get_torch_function_fn(tx, self),
+            get_torch_function_fn(tx, self),  # type: ignore[arg-type]
             fn,
             types,
             args,
