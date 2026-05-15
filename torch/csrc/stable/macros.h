@@ -118,6 +118,8 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
       torch_shim_bc_const_char_ptr, torch_exception_get_what);
   if (error_msg) {
     std::cerr << "] Exception across libtorch C API boundary:" << error_msg;
+  } else {
+    std::cerr << "] API call failed: " << call << error_msg;
   }
 
   throw std::runtime_error(ss.str());
