@@ -1360,21 +1360,17 @@ test_unbacked_parity_smoketest() {
 }
 
 test_inductor_set_cpu_affinity(){
-  # Probe topology BEFORE exporting LD_PRELOAD: libiomp5's constructor runs at
-  # .so load time and, when KMP_AFFINITY is set, calls sched_setaffinity() to
-  # pin the process to a "compact" topology subset. That mask then propagates
-  # to every binary the shell runs after the export — including /usr/bin/nproc.
-  # On a sparse cgroup cpuset (e.g. a k8s pod sharing a node where Karpenter
-  # packed other pods around it), the compact subset can be a fraction of the
-  # real allocation, so nproc reports ~1/4 of the actual cores and
-  # OMP_NUM_THREADS gets sized down to match. Use nproc instead of lscpu so
-  # the cgroup slice is honored.
-  cpus=$(nproc)
-  thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
-  cores=$((cpus / thread_per_core))
-  start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
-  # Leaving one physical CPU for other tasks
-  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
+  # DEBUG: pause here so we can kubectl exec into the pod and inspect why
+  # nproc reports fewer CPUs than the pod's cpu request. Remove before merge.
+  echo "::group::[DEBUG] CPU allocation snapshot"
+  echo "hostname: $(hostname)"
+  echo "nproc: $(nproc)"
+  echo "cpuset.cpus.effective: $(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null || echo 'n/a')"
+  echo "cpu.max: $(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo 'n/a')"
+  echo "sched_getaffinity: $(python -c 'import os; a=sorted(os.sched_getaffinity(0)); print(len(a), a)')"
+  echo "::endgroup::"
+  echo "[DEBUG] Sleeping 7200s — kubectl exec into the pod to investigate."
+  sleep 7200
 
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
@@ -1388,7 +1384,17 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   fi
 
+  # Use nproc here instead of lscpu because it takes into account cgroups slice
+  cpus=$(nproc)
+  thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
+  cores=$((cpus / thread_per_core))
+
   export OMP_NUM_THREADS=$cores
+
+  # Handle cgroups slice start and end CPU
+  start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
+  # Leaving one physical CPU for other tasks
+  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
   export TASKSET="taskset -c $start_cpu-$end_cpu"
 }
 
