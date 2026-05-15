@@ -2682,11 +2682,7 @@ def meta_miopen_batch_norm(
     # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
     # the input is channels_last contiguous, fall back to plain contiguous.
     if is_channels_last_contiguous_or_false(input_tensor):
-        fmt = (
-            torch.channels_last
-            if input_tensor.dim() == 4
-            else torch.channels_last_3d
-        )
+        fmt = torch.channels_last if input_tensor.dim() == 4 else torch.channels_last_3d
     else:
         fmt = torch.contiguous_format
 
@@ -2696,9 +2692,7 @@ def meta_miopen_batch_norm(
     # _compute_contiguous_sym / _compute_channels_last_contiguous_*_sym in
     # c10/core/Contiguity.h) rather than the eager bool-returning is_contiguous.
     torch._check(
-        torch.ops.aten.sym_is_contiguous.default(
-            input_tensor, memory_format=fmt
-        ),
+        torch.ops.aten.sym_is_contiguous.default(input_tensor, memory_format=fmt),
         lambda: f"miopen_batch_norm: input must be contiguous in {fmt}",
     )
 
