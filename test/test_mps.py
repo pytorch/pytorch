@@ -2082,6 +2082,21 @@ class TestMPS(TestCaseMPS):
         # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
         outputs.sum().backward()
 
+    def test_layer_norm_backward_no_input_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/183825
+        x = torch.randn(2, 4)
+
+        def grads(device):
+            w = torch.ones(4, device=device, requires_grad=True)
+            b = torch.zeros(4, device=device, requires_grad=True)
+            torch.nn.functional.layer_norm(x.to(device), (4,), w, b).sum().backward()
+            return w.grad, b.grad
+
+        cpu_w, cpu_b = grads("cpu")
+        mps_w, mps_b = grads("mps")
+        self.assertEqual(mps_w.cpu(), cpu_w)
+        self.assertEqual(mps_b.cpu(), cpu_b)
+
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
         b = a.reshape((3, 3))
