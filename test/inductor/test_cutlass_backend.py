@@ -14,13 +14,12 @@ from enum import Enum
 from pathlib import Path
 
 import torch
-
-_CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
+from torch._inductor_env_vars import CUTLASS_DIR_ENV_VAR
 
 
 def _maybe_set_cutlass_dir_env_from_checkout() -> None:
     # Set this before importing torch._inductor.config below.
-    if _CUTLASS_DIR_ENV_VAR in os.environ:
+    if CUTLASS_DIR_ENV_VAR in os.environ:
         return
 
     default_cutlass_dir = (
@@ -33,7 +32,7 @@ def _maybe_set_cutlass_dir_env_from_checkout() -> None:
         Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
     )
     if (checkout_cutlass_dir / "python").is_dir():
-        os.environ[_CUTLASS_DIR_ENV_VAR] = str(checkout_cutlass_dir)
+        os.environ[CUTLASS_DIR_ENV_VAR] = str(checkout_cutlass_dir)
 
 
 _maybe_set_cutlass_dir_env_from_checkout()
@@ -335,7 +334,7 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(
             try_import_cutlass(),
             "CUTLASS backend is required by this test but could not be imported. "
-            "Set TORCHINDUCTOR_CUTLASS_DIR to a valid CUTLASS checkout; "
+            f"Set {CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
             f"current cutlass_dir={cutlass_dir!r}.",
         )
 

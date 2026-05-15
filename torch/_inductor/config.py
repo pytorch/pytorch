@@ -5,6 +5,7 @@ from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 import torch._inductor.custom_graph_pass
+import torch._inductor_env_vars as inductor_env_vars
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
@@ -2340,7 +2341,7 @@ class cutlass:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
-            "TORCHINDUCTOR_CUTLASS_DIR",
+            inductor_env_vars.CUTLASS_DIR_ENV_VAR,
             os.path.join(
                 os.path.dirname(torch.__file__),
                 "../third_party/cutlass/",
@@ -2496,7 +2497,9 @@ class xpu(cutlass):
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
 
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+    cutlass_dir = os.path.realpath(
+        os.environ.get(inductor_env_vars.CUTLASS_DIR_ENV_VAR, "")
+    )
 
 
 class rocm:
