@@ -1409,6 +1409,7 @@ class ExportedProgram:
             )
 
         additional_inputs = []
+        gm_state_dict = None
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
@@ -1428,9 +1429,9 @@ class ExportedProgram:
                     # Nested invoke_subgraph tracing can leave a lifted tensor
                     # constant in the subgraph submodule's state rather than
                     # the top-level state_dict or constants.
-                    additional_inputs.append(
-                        self.graph_module.state_dict()[input_.target]
-                    )
+                    if gm_state_dict is None:
+                        gm_state_dict = self.graph_module.state_dict()
+                    additional_inputs.append(gm_state_dict[input_.target])
             elif input_.kind in (
                 InputKind.CONSTANT_TENSOR,
                 InputKind.CUSTOM_OBJ,

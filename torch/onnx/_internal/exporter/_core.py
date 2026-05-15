@@ -837,7 +837,12 @@ def _translate_fx_graph(
                     if tensor_value is None:
                         tensor_value = node.meta.get("example_value", None)
                     if not isinstance(tensor_value, torch.Tensor):
-                        raise KeyError(node.target)
+                        raise KeyError(
+                            f"get_attr node {node.name!r} is neither an owned "
+                            f"subgraph nor a materializable tensor constant "
+                            f"(target={node.target!r}, meta val type="
+                            f"{type(tensor_value).__name__})"
+                        )
                     value = ir.Value(name=node.name)
                     value.const_value = TorchTensor(tensor_value, name=node.name)
                     _set_shape_type(

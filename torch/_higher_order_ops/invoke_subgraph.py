@@ -284,9 +284,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             candidate = subgraph
         else:
             candidate = None
-        if candidate is not None and any(
-            isinstance(buf, FunctionalTensor) for buf in candidate.buffers()
-        ):
+        bufs = list(candidate.buffers()) if candidate is not None else []
+        if bufs and all(isinstance(buf, FunctionalTensor) for buf in bufs):
             gm = candidate
         if gm is None:
             gm = materialize_as_graph(

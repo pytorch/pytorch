@@ -4314,16 +4314,24 @@ class GraphModule(torch.nn.Module):
             ),
             f"Expected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
         )
-        self.assertNotIn(buffer_names[0], ep.state_dict)
-        self.assertNotIn(buffer_names[0], ep.constants)
+        # Use the first buffer that actually matches the expected naming pattern
+        # so the subsequent assertions are meaningful rather than checking an
+        # arbitrary first element.
+        nested_buf = next(
+            name
+            for name in buffer_names
+            if name.startswith("repeated_subgraph") and "._tensor_constant" in name
+        )
+        self.assertNotIn(nested_buf, ep.state_dict)
+        self.assertNotIn(nested_buf, ep.constants)
 
         # named_buffers must resolve the constant through the subgraph's
         # submodule state rather than raising KeyError. After decomposition
         # the buffer is a FakeTensor, so just check the metadata.
         resolved = dict(ep.named_buffers())
-        self.assertIn(buffer_names[0], resolved)
-        self.assertEqual(resolved[buffer_names[0]].shape, torch.Size([4]))
-        self.assertEqual(resolved[buffer_names[0]].dtype, torch.float32)
+        self.assertIn(nested_buf, resolved)
+        self.assertEqual(resolved[nested_buf].shape, torch.Size([4]))
+        self.assertEqual(resolved[nested_buf].dtype, torch.float32)
 
         # Verification must pass despite the buffer not being in state_dict.
         from torch._export.verifier import _verify_exported_program_signature
