@@ -4405,6 +4405,20 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=(1,))
 
+
+def sample_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    for si in sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+        inp: torch.Tensor = si.input
+        weight: torch.Tensor | None = si.kwargs.get("weight", None)
+        bias: torch.Tensor | None = si.kwargs.get("bias", None)
+        N: int = inp.shape[0]
+        C: int = inp.shape[1]
+        HxW: int = math.prod(inp.shape[2:])
+        group: int = si.args[0]
+        eps: float = si.kwargs.get("eps", 1e-5)
+        yield SampleInput(inp, weight, bias, N, C, HxW, group, eps)
+
+
 def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_group_norm(
         op_info, device, dtype, requires_grad, **kwargs)
@@ -4440,6 +4454,19 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
                 **kwargs
             }
             yield SampleInput(input_tensor, num_groups, **kwargs)
+
+
+def reference_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    for si in reference_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+        inp: torch.Tensor = si.input
+        weight: torch.Tensor | None = si.kwargs.get("weight", None)
+        bias: torch.Tensor | None = si.kwargs.get("bias", None)
+        N: int = inp.shape[0]
+        C: int = inp.shape[1]
+        HxW: int = math.prod(inp.shape[2:])
+        group: int = si.args[0]
+        eps: float = si.kwargs.get("eps", 1e-5)
+        yield SampleInput(inp, weight, bias, N, C, HxW, group, eps)
 
 
 def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -12181,25 +12208,35 @@ def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weig
     return Y.reshape(*inp.shape)
 
 
-def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
-    inp_view = inp
-    if np.prod(inp.shape) != 0:
-        inp_view = inp.reshape((inp.shape[0], num_groups, -1))
-    mean = inp_view.mean(axis=-1, keepdims=True)
-    var = inp_view.var(axis=-1, ddof=0, keepdims=True)
-    Y = (inp_view - mean) / np.sqrt(var + eps)
-    Y = Y.reshape(inp.shape)
+def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, bias: npt.NDArray | None, N: int, C: int, HxW: int, group: int, eps: float) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    if math.prod(input.shape) == 0:
+        return (
+            np.empty_like(input),
+            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+        )
+
+    input_view = input.reshape((N, group, C // group * HxW))
+    mean = input_view.mean(axis=-1, keepdims=True)
+    var = input_view.var(axis=-1, ddof=0, keepdims=True)
+    rsqrt = np.power(var + eps, -0.5)
+    Y = (input_view - mean) * rsqrt
+    Y = Y.reshape(input.shape)
     if weight is not None:
         # weight is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
+            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(input.ndim - 2)])
         Y = Y * weight
     if bias is not None:
         # bias is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
+            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(input.ndim - 2)])
         Y = Y + bias
-    return Y
+    return Y, mean.squeeze(-1), rsqrt.squeeze(-1)
+
+
+def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
+    return reference_native_group_norm(inp, weight, bias, inp.shape[0], inp.shape[1], math.prod(inp.shape[2:]), num_groups, eps)[0]
 
 
 # using a custom reference function since numpy only has a string side arg (instead of right and side) and doesn't
@@ -15849,6 +15886,40 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
+    OpInfo(
+        "native_group_norm",
+        assert_jit_shape_analysis=True,
+        aten_name="native_group_norm",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
+        ref=reference_native_group_norm,
+        reference_inputs_func=reference_inputs_native_group_norm,
+        sample_inputs_func=sample_inputs_native_group_norm,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
+            # native_group_norm expects contiguous inputs
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
+            # composite compliance fails with "performing in-place operation add_"
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
+            # not implemented for integer dtypes
+            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_match", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
+            # native_group_norm grad doesn't support expanded weights, although the
+            # forward pass does
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_mean"),
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_sum"),
+            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weights_per_sample_grad_input_no_grad"),
+            # tensor-likes are not close
+            DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            # lazy dispatch failure
+            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
+        ),
+        supports_expanded_weight=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+    ),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
@@ -26301,6 +26372,18 @@ python_ref_db = [
                 dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
             ),
         )
+    ),
+    PythonRefInfo(
+        "_refs.native_group_norm",
+        skips=(
+            # The torch implementation does not return a view, while the reference does
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_meta", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
+        ),
+        torch_opinfo_name="native_group_norm",
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
