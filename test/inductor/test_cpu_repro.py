@@ -196,6 +196,13 @@ class CPUReproTests(TestCase):
 
             self.assertTrue(conv_seen)
 
+    def test_conv2d_flattened_view_bias(self):
+        def fn(x):
+            b = x.to(torch.bool).float()
+            return F.conv2d(b, b, b.flatten(), stride=1, padding=0)
+
+        self.common(fn, (torch.full((1, 1, 1, 1), 3.5),))
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
