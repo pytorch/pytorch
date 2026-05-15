@@ -210,8 +210,13 @@ class NestedCounters(OpaqueBase):
 
     def __getitem__(self, idx):
         counter = self.c[idx]
-        # Create a new counter to match device mesh's __getitem__
-        return Counter(counter.start, counter.end)
+        # This test helper creates a derived reference opaque from an already
+        # guarded member. Hide that intentional construction from tracing so it
+        # does not trip the general mid-trace construction guard.
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+        with unset_fake_temporarily():
+            return Counter(counter.start, counter.end)
 
 
 class AddModule(OpaqueBase, torch.nn.Module):
@@ -353,6 +358,91 @@ register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
 register_opaque_type(Color, typ="reference")
 register_opaque_type(ColorWithDescriptor, typ="reference")
+
+
+class Issue175968Meta(OpaqueBase):
+    pass
+
+
+register_opaque_type(Issue175968Meta, typ="reference")
+
+
+@torch.library.custom_op("_issue_175968_base::apply", mutates_args=())
+def issue_175968_apply(data: torch.Tensor, meta: Issue175968Meta) -> torch.Tensor:
+    if meta is None:
+        raise RuntimeError("opaque object is None at runtime")
+    return data * 2
+
+
+@issue_175968_apply.register_fake
+def _(data: torch.Tensor, meta: Issue175968Meta) -> torch.Tensor:
+    return torch.empty_like(data)
+
+
+issue_175968_apply.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2, None),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+@torch.library.custom_op("_issue_175968::call", mutates_args=())
+def issue_175968_call(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@issue_175968_call.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+issue_175968_call.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2,),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+class Issue175968Tensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, data):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data):
+        self._data = data
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return Issue175968Tensor(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(t):
+            return t._data if isinstance(t, Issue175968Tensor) else t
+
+        out = func(
+            *pytree.tree_map(unwrap, args),
+            **pytree.tree_map(unwrap, kwargs or {}),
+        )
+        return pytree.tree_map(
+            lambda t: Issue175968Tensor(t) if isinstance(t, torch.Tensor) else t,
+            out,
+        )
+
+
+@issue_175968_call.register_torch_dispatch(Issue175968Tensor)
+def _(mode, func, types, args, kwargs):
+    x = args[0]
+    meta = Issue175968Meta()
+    out_data = torch.ops._issue_175968_base.apply(x._data, meta)
+    return Issue175968Tensor(out_data)
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -3107,6 +3197,17 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+    def test_reference_opaque_errors_on_custom_op_dispatch_creation(self):
+        def fn(x):
+            return torch.ops._issue_175968.call(x)
+
+        x = Issue175968Tensor(torch.randn(4, requires_grad=True))
+        self.assertRaisesRegex(
+            RuntimeError,
+            "created during tracing",
+            lambda: torch.compile(fn, fullgraph=True, backend="aot_eager")(x),
+        )
 
     def test_hoisted_value_type_make_fx(self):
         def foo(x, hoisted_str):

@@ -4,6 +4,26 @@ _FakeScriptObject_cls: type | None = None
 
 
 class OpaqueBaseMeta(type):
+    def __call__(cls, *args, **kwargs):
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        if is_opaque_reference_type(cls):
+            from torch._guards import active_fake_mode
+
+            if active_fake_mode() is not None:
+                from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+                if get_proxy_mode() is not None:
+                    raise RuntimeError(
+                        f"A reference-type opaque object ({cls.__name__}) was "
+                        "created during tracing. This would bake the object "
+                        "into the compiled graph as a constant with no guards, "
+                        "and can cause silent correctness errors on subsequent "
+                        "calls with different inputs. Create the opaque object "
+                        "before torch.compile and pass it as an argument."
+                    )
+        return super().__call__(*args, **kwargs)
+
     def __instancecheck__(cls, instance):
         # When checking against OpaqueBase itself (not a concrete subclass),
         # delegate to the registration system which correctly covers all
