@@ -344,9 +344,7 @@ class TestBasicGEMM(TestCase):
         out = torch.empty((2, 3), dtype=dtype, device=device)
         self.assertEqual(
             torch.full((2, 3), beta * value, dtype=dtype, device=device),
-            torch.addmm(
-                input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta
-            ),
+            torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta),
         )
         self.assertEqual(
             torch.full((2, 3), beta * value, dtype=dtype, device=device),
