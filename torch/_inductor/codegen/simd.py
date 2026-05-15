@@ -2086,6 +2086,18 @@ class SIMDScheduling(BaseScheduling):
                         (numel1, 1),
                         (numel2, rnumel2, 1),
                     )
+                    if (
+                        not is_reduction_tiling_valid
+                        and SIMDKernelFeatures.is_compatible_online_softmax_epilogue(
+                            node1.get_nodes(), node2.get_nodes()
+                        )
+                    ):
+                        # T5 attention recomputes scores + position_bias in the
+                        # softmax epilogue.  The non-contiguous bias read is the
+                        # same access used by an otherwise coalesced reduction,
+                        # so standalone pointwise tiling should not force a
+                        # separate epilogue kernel.
+                        is_reduction_tiling_valid = True
                     if not is_reduction_tiling_valid:
                         why("invalid tiling for reduction")
                     return is_reduction_tiling_valid

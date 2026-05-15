@@ -15,6 +15,7 @@ from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
+from ..ir import ComputedBuffer
 from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
@@ -166,6 +167,16 @@ class SIMDKernelFeatures:
             ):
                 reduction_hint_val = ReductionHint.DEFAULT
 
+            if (
+                reduction_hint_val != ReductionHint.INNER
+                and self.has_compatible_online_softmax_epilogue()
+                and (
+                    tiling_scores is None
+                    or self._tiling_scores_prefer_inner(tiling_scores)
+                )
+            ):
+                reduction_hint_val = ReductionHint.INNER
+
             # Upgrade DEFAULT to INNER for inner reductions based on tiling scores
             if (
                 reduction_hint_val == ReductionHint.DEFAULT
@@ -197,12 +208,111 @@ class SIMDKernelFeatures:
 
         return dict(read_counts)  # Convert defaultdict to regular dict
 
-    def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
-        pointwise_nodes = [
+    @staticmethod
+    def _is_online_softmax_reduction(node: SchedulerNode) -> bool:
+        return (
+            node.is_reduction()
+            and isinstance(node.node, ComputedBuffer)
+            and node.node.get_reduction_type() == "online_softmax_reduce"
+        )
+
+    @staticmethod
+    def _deps_match(dep1: MemoryDep, dep2: MemoryDep) -> bool:
+        if dep1 == dep2:
+            return True
+        if dep1.name != dep2.name:
+            return False
+        if dep1.num_vars == dep2.num_vars:
+            return (
+                dep1.normalize_with_stride_order() == dep2.normalize_with_stride_order()
+            )
+        return dep1.normalize() == dep2.normalize()
+
+    @staticmethod
+    def _is_non_contiguous_dep(dep: Dep) -> bool:
+        return (
+            isinstance(dep, MemoryDep)
+            and not dep.is_contiguous()
+            and not isinstance(dep.index, (sympy.Integer, int))
+            and not dep.stride1_for_last_dim()
+        )
+
+    @staticmethod
+    def _has_coalesced_reduction_read(reads: Sequence[MemoryDep]) -> bool:
+        return any(dep.stride1_for_last_dim(False) for dep in reads)
+
+    @staticmethod
+    def _tiling_scores_prefer_inner(tiling_scores: dict[str, int]) -> bool:
+        if "x" not in tiling_scores or "r0_" not in tiling_scores:
+            return False
+
+        from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
+
+        r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+        return r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+
+    @classmethod
+    def _is_compatible_recomputed_read(
+        cls, dep: MemoryDep, reduction_reads: Sequence[MemoryDep]
+    ) -> bool:
+        return any(cls._deps_match(dep, read) for read in reduction_reads)
+
+    @classmethod
+    def is_compatible_online_softmax_epilogue(
+        cls,
+        pointwise_nodes: Iterable[SchedulerNode],
+        reduction_nodes: Iterable[SchedulerNode],
+    ) -> bool:
+        reduction_reads = [
+            dep
+            for node in reduction_nodes
+            if cls._is_online_softmax_reduction(node)
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep)
+        ]
+        if not reduction_reads or not cls._has_coalesced_reduction_read(
+            reduction_reads
+        ):
+            return False
+
+        for node in pointwise_nodes:
+            if node.is_reduction():
+                return False
+            for dep in node.read_writes.reads:
+                if cls._is_non_contiguous_dep(dep) and not (
+                    isinstance(dep, MemoryDep)
+                    and cls._is_compatible_recomputed_read(dep, reduction_reads)
+                ):
+                    return False
+            if any(cls._is_non_contiguous_dep(dep) for dep in node.read_writes.writes):
+                return False
+        return True
+
+    def pointwise_nodes_in_reduction_kernel(self) -> list[SchedulerNode]:
+        return [
             n
             for n in self.scheduler_nodes()
             if not n.is_reduction()
             and n.group[1][0] == self.numel * self.reduction_numel
+        ]
+
+    def has_compatible_online_softmax_epilogue(self) -> bool:
+        return self.is_compatible_online_softmax_epilogue(
+            self.pointwise_nodes_in_reduction_kernel(), self.reduction_nodes()
+        )
+
+    def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
+        reduction_nodes = self.reduction_nodes()
+        pointwise_nodes = self.pointwise_nodes_in_reduction_kernel()
+        ignore_recomputed_reads = self.is_compatible_online_softmax_epilogue(
+            pointwise_nodes, reduction_nodes
+        )
+        reduction_reads = [
+            dep
+            for node in reduction_nodes
+            if self._is_online_softmax_reduction(node)
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep)
         ]
         for node in pointwise_nodes:
             # An index can be an integer when loading a random seed.
@@ -211,6 +321,11 @@ class SIMDKernelFeatures:
                 or dep.is_contiguous()
                 or isinstance(dep.index, (sympy.Integer, int))
                 or dep.stride1_for_last_dim()
+                or (
+                    ignore_recomputed_reads
+                    and dep in node.read_writes.reads
+                    and self._is_compatible_recomputed_read(dep, reduction_reads)
+                )
                 for dep in itertools.chain(
                     node.read_writes.reads, node.read_writes.writes
                 )
