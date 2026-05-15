@@ -2130,6 +2130,11 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
+        # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
+        # launchers use SYCL kernels stored in PyCapsules.
+        if self.device_props.type not in ("cuda", "hip"):
+            return None
+
         try:
             from torch._C import _FastCudaLauncher
         except ImportError:
