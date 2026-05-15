@@ -838,7 +838,7 @@ force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0"
 # creating duplicate buffers when the same tensor feeds multiple SDPA positions
 # (e.g., key=value in simplified PMA attention).
 cache_sdpa_constraint = (
-    os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "1") == "1"
 )
 
 
