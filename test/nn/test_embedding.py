@@ -1,7 +1,6 @@
 # Owner(s): ["module: nn"]
 import itertools
 import random
-import unittest
 from itertools import product
 
 import torch
@@ -13,8 +12,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyNativeDeviceTypes,
-    onlyOn,
     skipCUDAIf,
     skipMeta,
     skipXPUIf,
@@ -31,35 +30,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_XPU,
-)
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
 class TestEmbeddingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU unavailable")
-    def test_embedding_max_norm_unsorted_repeating_indices(self):
-        def create_embedding(device):
-            # Seed RNG so we get the same Embedding each time
-            torch.manual_seed(0)
-            return torch.nn.Embedding(
-                num_embeddings=20, embedding_dim=64, max_norm=1.0
-            ).to(device)
-
-        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
-        out_cpu = create_embedding("cpu")(ix)
-
-        ix = ix.to(device_type)
-        out = create_embedding(device_type)(ix)
-        self.assertEqual(out.cpu(), out_cpu)
 
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
@@ -89,12 +65,6 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(embedding.weight.dtype, torch.float16)
         self.assertEqual(embedding.embedding_dim, 3)
         self.assertEqual(embedding.num_embeddings, 10)
-
-        if torch.accelerator.is_available():
-            embedding.to(device_type)
-            self.assertEqual(embedding.weight.device.type, device_type)
-            embedding.to("cpu")
-            self.assertEqual(embedding.weight.device.type, "cpu")
 
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
@@ -189,16 +159,6 @@ class TestEmbeddingNN(NNTestCase):
         res_F = F.embedding(a, embeddings, padding_idx=2)
 
         self.assertEqual(res_old, res_F)
-
-    # https://github.com/pytorch/pytorch/issues/130806
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @largeTensorTest("40GB", device=device_type)
-    def test_large_tensors(self):
-        input = torch.randint(low=0, high=16032, size=[131072], device=device_type)
-        w = torch.randn([16032, 16384], device=device_type)
-        out = torch.nn.functional.embedding(input, w)
-        self.assertEqual(out.dim(), 2)
-        self.assertEqual(out.numel(), 2147483648)
 
     def test_embedding_bag_functional(self):
         a = torch.tensor([[1, 3, 2], [0, 2, 1]], dtype=torch.long)
@@ -296,6 +256,40 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    @onlyAccelerator
+    def test_embedding_max_norm_unsorted_repeating_indices(self, device):
+        def create_embedding(device):
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20, embedding_dim=64, max_norm=1.0
+            ).to(device)
+
+        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding("cpu")(ix)
+
+        ix = ix.to(device)
+        out = create_embedding(device)(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
+    @onlyAccelerator
+    def test_move_sparse_half_embedding(self, device):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        embedding.to(torch.float16)
+        embedding.to(device)
+        self.assertEqual(embedding.weight.device.type, self.device_type)
+        embedding.to("cpu")
+        self.assertEqual(embedding.weight.device.type, "cpu")
+
+    # https://github.com/pytorch/pytorch/issues/130806
+    @onlyAccelerator
+    @largeTensorTest("40GB")
+    def test_large_tensors(self, device):
+        input = torch.randint(low=0, high=16032, size=[131072], device=device)
+        w = torch.randn([16032, 16384], device=device)
+        out = torch.nn.functional.embedding(input, w)
+        self.assertEqual(out.dim(), 2)
+        self.assertEqual(out.numel(), 2147483648)
+
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)
@@ -688,8 +682,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
 
-    @onlyOn(["cuda", "xpu"])
-    @dtypes(
+    @onlyAccelerator
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
             if TEST_WITH_ROCM
@@ -780,8 +775,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
             )
 
-    @onlyOn(["cuda", "xpu"])
-    @dtypes(
+    @onlyAccelerator
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
             if TEST_WITH_ROCM
@@ -881,12 +877,11 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertEqual(weight.grad, reference_grad, atol=0, rtol=0)
                 weight.grad = None
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         torch.bfloat16,
     )
-    @largeTensorTest("80GB", device="cuda")
-    @largeTensorTest("80GB", device="xpu")
+    @largeTensorTest("80GB")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
         Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
@@ -1104,8 +1099,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyOn(["cuda", "xpu"])
-    @dtypes(
+    @onlyAccelerator
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
             if TEST_WITH_ROCM
