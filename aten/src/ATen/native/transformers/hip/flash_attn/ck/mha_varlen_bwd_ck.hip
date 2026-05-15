@@ -12,21 +12,38 @@ namespace pytorch_flash {
 
 fmha_bwd_traits get_ck_fmha_varlen_bwd_traits(const mask_info &mask,
                                               std::string dtype,
-                                              int head_size,
+                                              int seqlen_q,
+                                              int seqlen_k,
+                                              int batch,
+                                              int max_seqlen_q,
+                                              int max_seqlen_k,
+                                              int hdim_q,
+                                              int hdim_v,
+                                              int nhead_q,
+                                              int nhead_k,
                                               bool has_dropout,
                                               bool enable_bias,
                                               bool deterministic,
                                               bool bias_requires_grad)
 {
-    return fmha_bwd_traits{head_size,
-                           head_size,
+    // seqlen_q / seqlen_k match CK group-mode "shape" lengths: cumulative totals
+    // (seqstart back()), i.e. total_q / total_k for varlen tensors.
+    return fmha_bwd_traits{seqlen_q,
+                           seqlen_k,
+                           batch,
+                           max_seqlen_q,
+                           max_seqlen_k,
+                           hdim_q,
+                           hdim_v,
+                           nhead_q,
+                           nhead_k,
                            dtype,
                            true, // is_group_mode
                            mask.type,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
-                           bias_requires_grad,    // has_dbias
+                           bias_requires_grad,
                            has_dropout,
-                           false, // s_randval
+                           false, // is_store_randval
                            deterministic};
 }
 
@@ -139,7 +156,7 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
     ck_tile::index_t batch_stride_dbias = 0;
     // dbias: (batch_size, nheads, seqlen_q, seqlen_k)
     if(bias_requires_grad) {
-        // If bias_requires_grad is true, grad_bias is guaranteed to have a value via line 270
+        // If bias_requires_grad is true, grad_bias is guaranteed (see TORCH_CHECK in mha_varlen_bwd_ck).
         //grad_bias
         auto dbias = grad_bias.value();
         dbias_ptr = dbias.data_ptr();
@@ -162,6 +179,8 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          dv.data_ptr(),
                          dbias_ptr, // dbias
                          dq_acc.data_ptr(), // dq_acc
+                         nullptr, // sink_ptr (LSEDataType log-space sink; nullptr disables)
+                         nullptr, // d_sink_ptr (sink gradient; nullptr disables)
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr, // seqlen_q_ptr
@@ -413,7 +432,15 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         auto traits =
             get_ck_fmha_varlen_bwd_traits(mask,
                                           q_dtype_str,
+                                          total_q,
+                                          total_k,
+                                          batch_size,
+                                          max_seqlen_q,
+                                          max_seqlen_k,
                                           head_size_8x,
+                                          head_size_8x,
+                                          num_heads,
+                                          num_heads_k,
                                           is_dropout,
                                           attn_bias_.has_value(),
                                           deterministic,
