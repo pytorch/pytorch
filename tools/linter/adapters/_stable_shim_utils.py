@@ -46,7 +46,7 @@ class LintMessage(NamedTuple):
 
 class IdentifierUse(NamedTuple):
     """
-    An identifier (name of function, typedef, class etc) that at a particular version.
+    An identifier (name of function, typedef, class etc) that is used at a particular version.
     """
 
     identifier: str

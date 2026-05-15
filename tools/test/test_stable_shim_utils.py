@@ -136,7 +136,7 @@ class TestStableShimUtils(unittest.TestCase):
 
     def test_future_multiple_identifier_accumulator(self):
         # This is a test that implements functionality that is not yet needed, but
-        # ensurse that the API can handle a single section returning multiple
+        # ensures that the API can handle a single section returning multiple
         # identifiers at different versions.
         # In this case it parses a macro called `TO_BE_DETERMINED_MULTI_VERSION_MACRO`
         # with two arguments, where one argument gets the provided version, while the
@@ -193,7 +193,7 @@ class TestStableShimUtils(unittest.TestCase):
 
     def test_identifier_detection(self):
         """
-        This unit tests verifies arbitrary_identifier_matcher, which is used
+        This unit test verifies arbitrary_identifier_matcher, which is used
         to generate matches for all the relevant function names and other
         identifiers by stable_shim_usage_linter's check_file.
         """
