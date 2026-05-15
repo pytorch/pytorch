@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -340,11 +340,11 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.bfloat16])
     def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
-        # bfloat16 inputs should be silently promoted to float32 on CUDA,
+        # bfloat16 inputs should be silently promoted to float32 on CUDA/XPU,
         # producing complex64 output without raising an error.
         # See: promote_type_fft() in SpectralOps.cpp
         sample = first_sample(self, op.sample_inputs(device, dtype))
