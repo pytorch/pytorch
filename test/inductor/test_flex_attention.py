@@ -8354,7 +8354,7 @@ class TestLearnableBiases(InductorTestCase):
                 )
 
                 compiled_flex = torch.compile(
-                    flex_attention, mode="max-autotune-no-cudagraphs"
+                    flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
                 )
 
                 out = compiled_flex(
