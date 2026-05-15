@@ -135,7 +135,7 @@ def _extract_subgraphs_and_args(
                 for n in subgraph.graph.find_nodes(op="placeholder")
             )
 
-        for subgraph in args[4:8]:
+        for subgraph in args[4:9]:
             yield subgraph, get_subgraph_args(subgraph)
     elif node.target is torch.ops.higher_order.flex_ep_backward:
 
@@ -147,7 +147,7 @@ def _extract_subgraphs_and_args(
                 for n in subgraph.graph.find_nodes(op="placeholder")
             )
 
-        for subgraph in args[7:9]:
+        for subgraph in args[8:10]:
             yield subgraph, get_subgraph_args(subgraph)
     elif node.target in (
         torch.ops.higher_order.foreach_map,

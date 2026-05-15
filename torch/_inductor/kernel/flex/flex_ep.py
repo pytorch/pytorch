@@ -30,17 +30,19 @@ def flex_ep(
     topk_idx,
     w13,
     w2,
+    build_dispatch_plan_fn: ir.Subgraph,
     dispatch_fn: ir.Subgraph,
     combine_fn: ir.Subgraph,
     combine_bwd_fn: ir.Subgraph,
     dispatch_bwd_fn: ir.Subgraph,
-    *router_operands,
+    router_operands,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -58,17 +60,27 @@ def flex_ep(
         x_expanded, memory_format=torch.contiguous_format
     )
 
+    plan = process_subgraph_nodes(
+        build_dispatch_plan_fn.graph_module,
+        [
+            topk_idx,
+            router_operands,
+            *_build_dispatch_plan_lifted_args,
+        ],
+    )
     dispatch_out = process_subgraph_nodes(
         dispatch_fn.graph_module,
         [
             x_expanded,
-            topk_idx,
-            *router_operands,
+            plan,
+            router_operands,
             *_dispatch_lifted_args,
         ],
     )
-    recv_x, *tmi_flat = dispatch_out
-    local_experts_start = tmi_flat[6]
+    recv_x = (
+        dispatch_out[0] if isinstance(dispatch_out, (tuple, list)) else dispatch_out
+    )
+    local_experts_start = plan.local_experts_start
     offs = lowerings[aten.slice](local_experts_start, 0, 1, sys.maxsize, 1)
     offs = to_dtype(offs, torch.int32)
 
@@ -88,8 +100,8 @@ def flex_ep(
         combine_fn.graph_module,
         [
             y3,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             *_combine_lifted_args,
         ],
     )
@@ -104,21 +116,22 @@ def flex_ep_backward(
     w13,
     w2,
     offs,
+    token_end,
     combine_bwd_fn: ir.Subgraph,
     dispatch_bwd_fn: ir.Subgraph,
-    *tmi_and_router_operands,
+    plan,
+    router_operands,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ):
-    tmi_flat = tmi_and_router_operands[:8]
-    router_operands = tmi_and_router_operands[8:]
+    del token_end
 
     dy3 = process_subgraph_nodes(
         combine_bwd_fn.graph_module,
         [
             dy,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             *_combine_bwd_lifted_args,
         ],
     )
@@ -154,8 +167,8 @@ def flex_ep_backward(
         dispatch_bwd_fn.graph_module,
         [
             dx_recv,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             *_dispatch_bwd_lifted_args,
         ],
     )

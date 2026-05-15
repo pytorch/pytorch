@@ -4608,19 +4608,66 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         return output.items
 
+    @staticmethod
+    def _require_dispatch_plan_output(
+        tx: "InstructionTranslator",
+        output: VariableTracker,
+        name: str,
+    ) -> tuple[VariableTracker, tuple[VariableTracker, ...]]:
+        from torch._higher_order_ops.flex_ep import FLEX_EP_PLAN_FIELDS
+
+        output = output.realize()
+        items: list[VariableTracker] = []
+        for field_name in FLEX_EP_PLAN_FIELDS:
+            try:
+                item = output.var_getattr(tx, field_name)
+            except Exception as exc:
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch-plan output",
+                    context=f"{name}: missing {field_name}: {exc}",
+                    explanation=(
+                        "flex_ep build_dispatch_plan_fn must return a "
+                        "FlexEPDispatchPlan-compatible dataclass."
+                    ),
+                    hints=[],
+                )
+            if not item.is_tensor():
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch-plan field",
+                    context=f"{name}.{field_name}: {item}",
+                    explanation=(
+                        "flex_ep dispatch-plan dataclass fields must all be "
+                        "tensors."
+                    ),
+                    hints=[],
+                )
+            items.append(item)
+        return output, tuple(items)
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) < 8:
+        if len(args) < 9:
             unimplemented(
                 gb_type="flex_ep: missing arguments",
                 context=f"args: {args}, kwargs: {kwargs}",
-                explanation="flex_ep expects x, topk_idx, w13, w2, and four callables.",
+                explanation="flex_ep expects x, topk_idx, w13, w2, and five callables.",
                 hints=[],
             )
+
+        unimplemented(
+            gb_type="flex_ep: Dynamo unsupported",
+            context="FlexEPDispatchPlan dataclass callback API",
+            explanation=(
+                "FlexEP with Python dataclass dispatch plans is intentionally "
+                "eager-only for now. Dynamo/Inductor support will need a "
+                "separate structured-plan tracing implementation."
+            ),
+            hints=[],
+        )
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
         kwargs = dict(kwargs)
@@ -4660,6 +4707,7 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
             topk_idx,
             w13,
             w2,
+            build_dispatch_plan_fn,
             dispatch_fn,
             combine_fn,
             combine_bwd_fn,
@@ -4683,63 +4731,67 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 x_fake.dtype,
                 x_fake.requires_grad,
             )
+        (
+            build_dispatch_plan_node,
+            build_dispatch_plan_lifted_args,
+            build_dispatch_plan_out,
+        ) = self._trace_flat_callable(
+            tx,
+            build_dispatch_plan_fn,
+            (topk_idx, *router_operands),
+            "flex_ep_build_dispatch_plan",
+        )
+        _, build_dispatch_plan_items = self._require_dispatch_plan_output(
+            tx, build_dispatch_plan_out, "build_dispatch_plan_fn"
+        )
+
+        def static_shape(shape: Sequence[Any]) -> tuple[Any, ...]:
+            return tuple(self._static_dim_or(dim, max_routed_tokens) for dim in shape)
+
+        with discard_graph_changes(tx):
+            from torch._dynamo.variables.user_defined import FrozenDataClassVariable
+            from torch._higher_order_ops.flex_ep import FlexEPDispatchPlan
+
+            fake_plan = FlexEPDispatchPlan(
+                *(_get_fake_value(item) for item in build_dispatch_plan_items)
+            )
+            plan_arg = FrozenDataClassVariable(fake_plan)
+
         dispatch_node, dispatch_lifted_args, dispatch_out = self._trace_flat_callable(
             tx,
             dispatch_fn,
-            (x_expanded, topk_idx, *router_operands),
+            (x_expanded, plan_arg, *router_operands),
             "flex_ep_dispatch",
         )
-        dispatch_items = self._require_tuple_output(dispatch_out, "dispatch_fn")
-        if len(dispatch_items) != 9:
+        dispatch_out = dispatch_out.realize()
+        if isinstance(dispatch_out, (TupleVariable, ListVariable)):
+            dispatch_items = dispatch_out.items
+            if len(dispatch_items) != 1:
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch output",
+                    context=f"num outputs: {len(dispatch_items)}",
+                    explanation=(
+                        "flex_ep dispatch_fn must return recv_x or a "
+                        "single-item tuple/list."
+                    ),
+                    hints=[],
+                )
+            recv = dispatch_items[0]
+        elif dispatch_out.is_tensor():
+            recv = dispatch_out
+        else:
             unimplemented(
                 gb_type="flex_ep: invalid dispatch output",
-                context=f"num outputs: {len(dispatch_items)}",
+                context=str(dispatch_out),
                 explanation=(
-                    "flex_ep dispatch_fn must return recv_x plus 8 flat "
-                    "TokenMappingInfo values."
+                    "flex_ep dispatch_fn must return recv_x or a single-item "
+                    "tuple/list."
                 ),
                 hints=[],
             )
 
-        recv_fake = _get_fake_value(dispatch_items[0])
+        recv_fake = _get_fake_value(recv)
         with discard_graph_changes(tx):
-
-            def static_shape(shape: Sequence[Any]) -> tuple[Any, ...]:
-                return tuple(
-                    self._static_dim_or(dim, max_routed_tokens) for dim in shape
-                )
-
-            def tmi_arg(idx: int) -> VariableTracker:
-                item = dispatch_items[idx]
-                if not item.is_tensor():
-                    if idx == 8:
-                        if item.is_python_constant():
-                            return VariableTracker.build(tx, item.as_python_constant())
-                        return VariableTracker.build(tx, max_tokens)
-                    unimplemented(
-                        gb_type="flex_ep: invalid TokenMappingInfo",
-                        context=f"dispatch output {idx}: {item}",
-                        explanation=(
-                            "flex_ep dispatch_fn must return tensor "
-                            "TokenMappingInfo values except for the final B."
-                        ),
-                        hints=[],
-                    )
-                fake = _get_fake_value(dispatch_items[idx])
-                return self._new_empty(
-                    tx, x, static_shape(fake.shape), fake.dtype, False
-                )
-
-            tmi_args = (
-                tmi_arg(1),
-                tmi_arg(2),
-                tmi_arg(3),
-                tmi_arg(4),
-                tmi_arg(5),
-                tmi_arg(6),
-                tmi_arg(7),
-                tmi_arg(8),
-            )
             y3 = self._new_empty(
                 tx,
                 x,
@@ -4765,19 +4817,19 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_node, combine_lifted_args, combine_out = self._trace_flat_callable(
             tx,
             combine_fn,
-            (y3, *tmi_args, *router_operands),
+            (y3, plan_arg, *router_operands),
             "flex_ep_combine",
         )
         combine_bwd_node, combine_bwd_lifted_args, _ = self._trace_flat_callable(
             tx,
             combine_bwd_fn,
-            (dy, *tmi_args, *router_operands),
+            (dy, plan_arg, *router_operands),
             "flex_ep_combine_bwd",
         )
         dispatch_bwd_node, dispatch_bwd_lifted_args, _ = self._trace_flat_callable(
             tx,
             dispatch_bwd_fn,
-            (dx_recv, *tmi_args, *router_operands),
+            (dx_recv, plan_arg, *router_operands),
             "flex_ep_dispatch_bwd",
         )
 
@@ -4794,6 +4846,7 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         hop_args = (
             *proxied_args[:4],
+            build_dispatch_plan_node,
             dispatch_node,
             combine_node,
             combine_bwd_node,
@@ -4807,6 +4860,7 @@ class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "max_tokens": max_tokens,
             "topk": topk,
             "num_ctas": num_ctas,
+            "_build_dispatch_plan_lifted_args": build_dispatch_plan_lifted_args,
             "_dispatch_lifted_args": dispatch_lifted_args,
             "_combine_lifted_args": combine_lifted_args,
             "_combine_bwd_lifted_args": combine_bwd_lifted_args,

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -28,21 +29,83 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-TMI_FLAT_LEN = 8
-LOCAL_EXPERTS_START_INDEX = 6
+FLEX_EP_PLAN_FIELDS = (
+    "recv_origin_global_token_id",
+    "expert_begin_offset_per_ep",
+    "dest_ranks",
+    "dest_offsets",
+    "local_experts_start",
+    "max_recv_tokens",
+    "recv_total_tokens",
+    "overflow",
+)
+FLEX_EP_PLAN_FLAT_LEN = len(FLEX_EP_PLAN_FIELDS)
+FLEX_EP_PLAN_RECV_ORIGIN_GLOBAL_TOKEN_ID_INDEX = 0
+FLEX_EP_PLAN_EXPERT_BEGIN_OFFSET_PER_EP_INDEX = 1
+FLEX_EP_PLAN_DEST_RANKS_INDEX = 2
+FLEX_EP_PLAN_DEST_OFFSETS_INDEX = 3
+FLEX_EP_PLAN_LOCAL_EXPERTS_START_INDEX = 4
+FLEX_EP_PLAN_MAX_RECV_TOKENS_INDEX = 5
+FLEX_EP_PLAN_RECV_TOTAL_TOKENS_INDEX = 6
+FLEX_EP_PLAN_OVERFLOW_INDEX = 7
+
+
+@dataclass(frozen=True)
+class FlexEPDispatchPlan:
+    recv_origin_global_token_id: torch.Tensor
+    expert_begin_offset_per_ep: torch.Tensor
+    dest_ranks: torch.Tensor
+    dest_offsets: torch.Tensor
+    local_experts_start: torch.Tensor
+    max_recv_tokens: torch.Tensor
+    recv_total_tokens: torch.Tensor
+    overflow: torch.Tensor
+
+    @staticmethod
+    def field_names() -> tuple[str, ...]:
+        return FLEX_EP_PLAN_FIELDS
+
+    def flatten(self) -> tuple[torch.Tensor, ...]:
+        return tuple(getattr(self, name) for name in FLEX_EP_PLAN_FIELDS)
+
+    @classmethod
+    def from_flat(cls, plan_flat: tuple[Any, ...]) -> "FlexEPDispatchPlan":
+        if len(plan_flat) != FLEX_EP_PLAN_FLAT_LEN:
+            raise RuntimeError(
+                f"flex_ep expected {FLEX_EP_PLAN_FLAT_LEN} dispatch-plan values, "
+                f"got {len(plan_flat)}"
+            )
+        for name, value in zip(FLEX_EP_PLAN_FIELDS, plan_flat):
+            if not isinstance(value, torch.Tensor):
+                raise RuntimeError(
+                    f"flex_ep dispatch-plan field {name} must be a tensor"
+                )
+        return cls(*plan_flat)
+
+
+pytree.register_dataclass(FlexEPDispatchPlan)
+
+
+def flatten_dispatch_plan(plan: FlexEPDispatchPlan) -> tuple[torch.Tensor, ...]:
+    return plan.flatten()
+
+
+def unflatten_dispatch_plan(plan_flat: tuple[Any, ...]) -> FlexEPDispatchPlan:
+    return FlexEPDispatchPlan.from_flat(plan_flat)
+
+
+def validate_dispatch_plan(plan: Any) -> Any:
+    for name in FLEX_EP_PLAN_FIELDS:
+        if not hasattr(plan, name):
+            raise RuntimeError(f"flex_ep dispatch plan missing field {name}")
+        value = getattr(plan, name)
+        if not isinstance(value, torch.Tensor):
+            raise RuntimeError(f"flex_ep dispatch-plan field {name} must be a tensor")
+    return plan
 
 
 def _is_int_like(x: Any) -> bool:
     return isinstance(x, (int, torch.SymInt))
-
-
-def _validate_router_operands(router_operands: tuple[Any, ...]) -> None:
-    for i, operand in enumerate(router_operands):
-        if not (isinstance(operand, torch.Tensor) or _is_int_like(operand)):
-            raise TypeError(
-                "flex_ep router_operands must be flat tensors/ints, "
-                f"got {type(operand).__name__} at index {i}"
-            )
 
 
 def _validate_flex_ep_inputs(
@@ -50,7 +113,7 @@ def _validate_flex_ep_inputs(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
-    router_operands: tuple[Any, ...],
+    router_operands: Any,
     *,
     num_experts: int,
     ep_rank: int,
@@ -95,7 +158,6 @@ def _validate_flex_ep_inputs(
         raise ValueError(f"flex_ep expects topk >= 1, got {topk}")
     if num_ctas < 1:
         raise ValueError(f"flex_ep expects num_ctas >= 1, got {num_ctas}")
-    _validate_router_operands(router_operands)
 
 
 def _call_flat_fn(
@@ -118,41 +180,14 @@ def _expand_x_for_topk(x: torch.Tensor, topk: int) -> torch.Tensor:
     return x.unsqueeze(1).expand(-1, topk, -1).contiguous()
 
 
-def _grouped_mm_offsets(tmi_flat: tuple[Any, ...]) -> torch.Tensor:
-    if len(tmi_flat) != TMI_FLAT_LEN:
-        raise RuntimeError(
-            f"flex_ep expected {TMI_FLAT_LEN} TokenMappingInfo values, "
-            f"got {len(tmi_flat)}"
-        )
-    local_experts_start = tmi_flat[LOCAL_EXPERTS_START_INDEX]
-    if not isinstance(local_experts_start, torch.Tensor):
-        raise RuntimeError("flex_ep local_experts_start must be a tensor")
-    return local_experts_start[1:].to(torch.int32)
+def _grouped_mm_offsets(plan: Any) -> torch.Tensor:
+    plan = validate_dispatch_plan(plan)
+    return plan.local_experts_start[1:].to(torch.int32)
 
 
-def _token_end_from_tmi(tmi_flat: tuple[Any, ...]) -> torch.Tensor:
-    if len(tmi_flat) != TMI_FLAT_LEN:
-        raise RuntimeError(
-            f"flex_ep expected {TMI_FLAT_LEN} TokenMappingInfo values, "
-            f"got {len(tmi_flat)}"
-        )
-    local_experts_start = tmi_flat[LOCAL_EXPERTS_START_INDEX]
-    if not isinstance(local_experts_start, torch.Tensor):
-        raise RuntimeError("flex_ep local_experts_start must be a tensor")
-    return local_experts_start[-1:].to(torch.int64)
-
-
-def _split_tmi_and_router_operands(
-    tmi_and_router_operands: tuple[Any, ...],
-) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
-    if len(tmi_and_router_operands) < TMI_FLAT_LEN:
-        raise RuntimeError(
-            f"flex_ep_backward expected at least {TMI_FLAT_LEN} TokenMappingInfo values"
-        )
-    return (
-        tuple(tmi_and_router_operands[:TMI_FLAT_LEN]),
-        tuple(tmi_and_router_operands[TMI_FLAT_LEN:]),
-    )
+def _token_end_from_plan(plan: Any) -> torch.Tensor:
+    plan = validate_dispatch_plan(plan)
+    return plan.local_experts_start[-1:].to(torch.int64)
 
 
 def _swiglu_reference(y1: torch.Tensor) -> torch.Tensor:
@@ -240,11 +275,13 @@ def _flex_ep_forward(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
-    router_operands: tuple[Any, ...],
+    router_operands: Any,
     *,
     topk: int,
+    build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     dispatch_lifted_args: tuple[Any, ...] = (),
     combine_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[
@@ -252,37 +289,42 @@ def _flex_ep_forward(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
-    tuple[Any, ...],
+    Any,
     torch.Tensor,
 ]:
     x_expanded = _expand_x_for_topk(x, topk)
+    plan = validate_dispatch_plan(
+        _call_flat_fn(
+            build_dispatch_plan_fn,
+            (topk_idx, router_operands),
+            build_dispatch_plan_lifted_args,
+        )
+    )
     dispatch_out = _as_tuple(
         _call_flat_fn(
             dispatch_fn,
-            (x_expanded, topk_idx, *router_operands),
+            (x_expanded, plan, router_operands),
             dispatch_lifted_args,
         )
     )
-    if len(dispatch_out) != 1 + TMI_FLAT_LEN:
+    if len(dispatch_out) != 1:
         raise RuntimeError(
-            "flex_ep dispatch_fn must return (recv_x, *tmi_flat) with "
-            f"{TMI_FLAT_LEN} TokenMappingInfo values"
+            "flex_ep dispatch_fn must return recv_x or a single-item tuple/list"
         )
     recv_x = dispatch_out[0]
     if not isinstance(recv_x, torch.Tensor):
         raise RuntimeError("flex_ep dispatch_fn first return must be recv_x tensor")
-    tmi_flat = tuple(dispatch_out[1:])
-    offs = _grouped_mm_offsets(tmi_flat)
-    token_end = _token_end_from_tmi(tmi_flat)
+    offs = _grouped_mm_offsets(plan)
+    token_end = _token_end_from_plan(plan)
     y3, y1, y2 = _moe_block_forward_bf16(recv_x, w13, w2, offs, token_end)
     y = _call_flat_fn(
         combine_fn,
-        (y3, *tmi_flat, *router_operands),
+        (y3, plan, router_operands),
         combine_lifted_args,
     )
     if not isinstance(y, torch.Tensor):
         raise RuntimeError("flex_ep combine_fn must return a tensor")
-    return y, recv_x, y1, y2, tmi_flat, offs
+    return y, recv_x, y1, y2, plan, offs
 
 
 def _flex_ep_backward_impl(
@@ -296,15 +338,15 @@ def _flex_ep_backward_impl(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *tmi_and_router_operands: Any,
+    plan: Any,
+    router_operands: Any,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    tmi_flat, router_operands = _split_tmi_and_router_operands(tmi_and_router_operands)
-    _validate_router_operands(router_operands)
+    plan = validate_dispatch_plan(plan)
     dy3 = _call_flat_fn(
         combine_bwd_fn,
-        (dy, *tmi_flat, *router_operands),
+        (dy, plan, router_operands),
         _combine_bwd_lifted_args,
     )
     if not isinstance(dy3, torch.Tensor):
@@ -321,7 +363,7 @@ def _flex_ep_backward_impl(
     )
     dxpn = _call_flat_fn(
         dispatch_bwd_fn,
-        (dx_recv, *tmi_flat, *router_operands),
+        (dx_recv, plan, router_operands),
         _dispatch_bwd_lifted_args,
     )
     if not isinstance(dxpn, torch.Tensor):
@@ -337,37 +379,41 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
         topk_idx: torch.Tensor,
         w13: torch.Tensor,
         w2: torch.Tensor,
+        build_dispatch_plan_fn: Callable[..., Any],
         dispatch_fn: Callable[..., Any],
         combine_fn: Callable[..., Any],
         combine_bwd_fn: Callable[..., Any],
         dispatch_bwd_fn: Callable[..., Any],
-        router_operands: tuple[Any, ...],
+        router_operands: Any,
         topk: int,
+        build_dispatch_plan_lifted_args: tuple[Any, ...],
         dispatch_lifted_args: tuple[Any, ...],
         combine_lifted_args: tuple[Any, ...],
         combine_bwd_lifted_args: tuple[Any, ...],
         dispatch_bwd_lifted_args: tuple[Any, ...],
     ) -> torch.Tensor:
         with torch.no_grad():
-            y, recv_x, y1, y2, tmi_flat, offs = _flex_ep_forward(
+            y, recv_x, y1, y2, plan, offs = _flex_ep_forward(
                 x,
                 topk_idx,
                 w13,
                 w2,
+                build_dispatch_plan_fn,
                 dispatch_fn,
                 combine_fn,
                 router_operands,
                 topk=topk,
+                build_dispatch_plan_lifted_args=build_dispatch_plan_lifted_args,
                 dispatch_lifted_args=dispatch_lifted_args,
                 combine_lifted_args=combine_lifted_args,
             )
         ctx.dispatch_bwd_fn = dispatch_bwd_fn
         ctx.combine_bwd_fn = combine_bwd_fn
         ctx.router_operands = router_operands
-        ctx.tmi_flat = tmi_flat
+        ctx.plan = plan
         ctx.combine_bwd_lifted_args = combine_bwd_lifted_args
         ctx.dispatch_bwd_lifted_args = dispatch_bwd_lifted_args
-        token_end = _token_end_from_tmi(tmi_flat)
+        token_end = _token_end_from_plan(plan)
         ctx.save_for_backward(
             _clone_valid_prefix(recv_x, token_end),
             y1,
@@ -383,7 +429,7 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
     def backward(ctx, *grad_outputs: Any) -> Any:
         (dy,) = grad_outputs
         recv_x, y1, y2, w13, w2, offs, token_end = ctx.saved_tensors
-        tmi_flat = ctx.tmi_flat
+        plan = ctx.plan
         router_operands = ctx.router_operands
         dx, dw13, dw2 = flex_ep_backward(
             dy,
@@ -396,8 +442,8 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
             token_end,
             ctx.combine_bwd_fn,
             ctx.dispatch_bwd_fn,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             _combine_bwd_lifted_args=ctx.combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args=ctx.dispatch_bwd_lifted_args,
         )
@@ -416,6 +462,8 @@ class _FlexEpAutogradFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
+            None,
         )
 
 
@@ -424,17 +472,19 @@ def _flex_ep_impl(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -458,12 +508,14 @@ def _flex_ep_impl(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
         dispatch_bwd_fn,
         router_operands,
         topk,
+        _build_dispatch_plan_lifted_args,
         _dispatch_lifted_args,
         _combine_lifted_args,
         _combine_bwd_lifted_args,
@@ -490,29 +542,36 @@ class FlexEpHOP(HigherOrderOperator):
             ``[num_local_experts, 2 * intermediate, hidden]`` and BF16 dtype.
         w2: Local expert down projection weights with shape
             ``[num_local_experts, hidden, intermediate]`` and BF16 dtype.
+        build_dispatch_plan_fn: Router subgraph called as
+            ``build_dispatch_plan_fn(topk_idx, router_operands,
+            *_build_dispatch_plan_lifted_args)``. It must return a
+            ``FlexEPDispatchPlan``-compatible dataclass.
         dispatch_fn: Router subgraph called as
-            ``dispatch_fn(x_expanded, topk_idx, *router_operands,
-            *_dispatch_lifted_args)``. It must return ``(recv_x, *tmi_flat)``,
-            where ``tmi_flat`` has ``TMI_FLAT_LEN`` TokenMappingInfo entries.
+            ``dispatch_fn(x_expanded, plan, router_operands,
+            *_dispatch_lifted_args)``. It must return ``recv_x``.
         combine_fn: Router subgraph called as
-            ``combine_fn(y3, *tmi_flat, *router_operands,
+            ``combine_fn(y3, plan, router_operands,
             *_combine_lifted_args)``. It must return the HOP output tensor.
         combine_bwd_fn: Backward router subgraph called as
-            ``combine_bwd_fn(dy, *tmi_flat, *router_operands,
+            ``combine_bwd_fn(dy, plan, router_operands,
             *_combine_bwd_lifted_args)``. It must return the gradient for the
             local expert output ``y3``.
         dispatch_bwd_fn: Backward router subgraph called as
-            ``dispatch_bwd_fn(dx_recv, *tmi_flat, *router_operands,
+            ``dispatch_bwd_fn(dx_recv, plan, router_operands,
             *_dispatch_bwd_lifted_args)``. It must return expanded input
             gradients with shape ``[num_tokens, topk, hidden]``.
-        router_operands: Flat tensor/int operands captured by the router
-            subgraphs, such as workspace tensors, offsets, and EP rank metadata.
+        router_operands: Python object captured by the router subgraphs, such
+            as a dataclass containing workspace tensors, offsets, and EP rank
+            metadata.
         num_experts: Total number of global experts.
         ep_rank: This rank within the expert-parallel group.
         ep_size: Number of ranks in the expert-parallel group.
         max_tokens: Maximum local token count used for router buffer sizing.
         topk: Number of selected experts per token.
         num_ctas: CTA count used by backend router kernels.
+        _build_dispatch_plan_lifted_args: Extra operands appended to
+            ``build_dispatch_plan_fn`` after ``router_operands`` when graph
+            transforms lift closed-over values.
         _dispatch_lifted_args: Extra operands appended to ``dispatch_fn`` after
             ``router_operands`` when graph transforms lift closed-over values.
         _combine_lifted_args: Extra operands appended to ``combine_fn``.
@@ -523,7 +582,7 @@ class FlexEpHOP(HigherOrderOperator):
 
     def __init__(self) -> None:
         super().__init__("flex_ep", cacheable=True)
-        self.subgraph_indexes = [4, 5, 6, 7]
+        self.subgraph_indexes = [4, 5, 6, 7, 8]
 
     def __call__(
         self,
@@ -531,17 +590,19 @@ class FlexEpHOP(HigherOrderOperator):
         topk_idx: torch.Tensor,
         w13: torch.Tensor,
         w2: torch.Tensor,
+        build_dispatch_plan_fn: Callable[..., Any],
         dispatch_fn: Callable[..., Any],
         combine_fn: Callable[..., Any],
         combine_bwd_fn: Callable[..., Any],
         dispatch_bwd_fn: Callable[..., Any],
-        *router_operands: Any,
+        router_operands: Any,
         num_experts: int,
         ep_rank: int,
         ep_size: int,
         max_tokens: int,
         topk: int,
         num_ctas: int = 152,
+        _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
         _dispatch_lifted_args: tuple[Any, ...] = (),
         _combine_lifted_args: tuple[Any, ...] = (),
         _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -552,17 +613,19 @@ class FlexEpHOP(HigherOrderOperator):
             topk_idx,
             w13,
             w2,
+            build_dispatch_plan_fn,
             dispatch_fn,
             combine_fn,
             combine_bwd_fn,
             dispatch_bwd_fn,
-            *router_operands,
+            router_operands,
             num_experts=num_experts,
             ep_rank=ep_rank,
             ep_size=ep_size,
             max_tokens=max_tokens,
             topk=topk,
             num_ctas=num_ctas,
+            _build_dispatch_plan_lifted_args=_build_dispatch_plan_lifted_args,
             _dispatch_lifted_args=_dispatch_lifted_args,
             _combine_lifted_args=_combine_lifted_args,
             _combine_bwd_lifted_args=_combine_bwd_lifted_args,
@@ -590,7 +653,8 @@ class FlexEpBackwardHOP(HigherOrderOperator):
         token_end: torch.Tensor,
         combine_bwd_fn: Callable[..., Any],
         dispatch_bwd_fn: Callable[..., Any],
-        *tmi_and_router_operands: Any,
+        plan: Any,
+        router_operands: Any,
         _combine_bwd_lifted_args: tuple[Any, ...] = (),
         _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -605,7 +669,8 @@ class FlexEpBackwardHOP(HigherOrderOperator):
             token_end,
             combine_bwd_fn,
             dispatch_bwd_fn,
-            *tmi_and_router_operands,
+            plan,
+            router_operands,
             _combine_bwd_lifted_args=_combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args=_dispatch_bwd_lifted_args,
         )
@@ -626,7 +691,8 @@ def flex_ep_backward_dense(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *tmi_and_router_operands: Any,
+    plan: Any,
+    router_operands: Any,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -641,7 +707,8 @@ def flex_ep_backward_dense(
         token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *tmi_and_router_operands,
+        plan,
+        router_operands,
         _combine_bwd_lifted_args=_combine_bwd_lifted_args,
         _dispatch_bwd_lifted_args=_dispatch_bwd_lifted_args,
     )
@@ -659,22 +726,23 @@ def _trace_flex_ep_backward_proxy(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    tmi_and_router_operands: tuple[Any, ...],
+    plan: Any,
+    router_operands: Any,
     kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    tmi_flat, router_operands = _split_tmi_and_router_operands(tmi_and_router_operands)
+    plan = validate_dispatch_plan(plan)
     if not isinstance(combine_bwd_fn, torch.fx.GraphModule):
         combine_bwd_fn = _maybe_reenter_make_fx(combine_bwd_fn)(
             dy,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             *kwargs["_combine_bwd_lifted_args"],
         )
     if not isinstance(dispatch_bwd_fn, torch.fx.GraphModule):
         dispatch_bwd_fn = _maybe_reenter_make_fx(dispatch_bwd_fn)(
             recv_x,
-            *tmi_flat,
-            *router_operands,
+            plan,
+            router_operands,
             *kwargs["_dispatch_bwd_lifted_args"],
         )
     example_out = flex_ep_backward(
@@ -688,7 +756,8 @@ def _trace_flex_ep_backward_proxy(
         token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *tmi_and_router_operands,
+        plan,
+        router_operands,
         **kwargs,
     )
     if not isinstance(mode.tracer, torch.fx.Tracer):
@@ -713,7 +782,8 @@ def _trace_flex_ep_backward_proxy(
         token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *tmi_and_router_operands,
+        plan,
+        router_operands,
     )
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, node_args)  # type: ignore[attr-defined]
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)  # type: ignore[attr-defined]
@@ -745,7 +815,8 @@ def flex_ep_backward_proxy_torch_dispatch_mode(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *tmi_and_router_operands: Any,
+    plan: Any,
+    router_operands: Any,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -761,7 +832,8 @@ def flex_ep_backward_proxy_torch_dispatch_mode(
         token_end,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        tmi_and_router_operands,
+        plan,
+        router_operands,
         {
             "_combine_bwd_lifted_args": _combine_bwd_lifted_args,
             "_dispatch_bwd_lifted_args": _dispatch_bwd_lifted_args,
@@ -782,7 +854,8 @@ def flex_ep_backward_fake_tensor_mode(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *tmi_and_router_operands: Any,
+    plan: Any,
+    router_operands: Any,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -798,7 +871,8 @@ def flex_ep_backward_fake_tensor_mode(
             token_end,
             combine_bwd_fn,
             dispatch_bwd_fn,
-            *tmi_and_router_operands,
+            plan,
+            router_operands,
             _combine_bwd_lifted_args=_combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args=_dispatch_bwd_lifted_args,
         )
@@ -817,7 +891,8 @@ def flex_ep_backward_functionalize(
     token_end: torch.Tensor,
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *tmi_and_router_operands: Any,
+    plan: Any,
+    router_operands: Any,
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
     _dispatch_bwd_lifted_args: tuple[Any, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -833,7 +908,8 @@ def flex_ep_backward_functionalize(
             w2,
             offs,
             token_end,
-            tmi_and_router_operands,
+            plan,
+            router_operands,
             _combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args,
         ),
@@ -847,7 +923,8 @@ def flex_ep_backward_functionalize(
         w2,
         offs,
         token_end,
-        tmi_and_router_operands,
+        plan,
+        router_operands,
         combine_bwd_lifted_args,
         dispatch_bwd_lifted_args,
     ) = unwrapped
@@ -866,7 +943,8 @@ def flex_ep_backward_functionalize(
             token_end,
             functional_combine_bwd_fn,
             functional_dispatch_bwd_fn,
-            *tmi_and_router_operands,
+            plan,
+            router_operands,
             _combine_bwd_lifted_args=combine_bwd_lifted_args,
             _dispatch_bwd_lifted_args=dispatch_bwd_lifted_args,
         )
@@ -884,17 +962,19 @@ def flex_ep_dense(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -905,17 +985,19 @@ def flex_ep_dense(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *router_operands,
+        router_operands,
         num_experts=num_experts,
         ep_rank=ep_rank,
         ep_size=ep_size,
         max_tokens=max_tokens,
         topk=topk,
         num_ctas=num_ctas,
+        _build_dispatch_plan_lifted_args=_build_dispatch_plan_lifted_args,
         _dispatch_lifted_args=_dispatch_lifted_args,
         _combine_lifted_args=_combine_lifted_args,
         _combine_bwd_lifted_args=_combine_bwd_lifted_args,
@@ -929,17 +1011,19 @@ def flex_ep_autograd(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -950,17 +1034,19 @@ def flex_ep_autograd(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *router_operands,
+        router_operands,
         num_experts=num_experts,
         ep_rank=ep_rank,
         ep_size=ep_size,
         max_tokens=max_tokens,
         topk=topk,
         num_ctas=num_ctas,
+        _build_dispatch_plan_lifted_args=_build_dispatch_plan_lifted_args,
         _dispatch_lifted_args=_dispatch_lifted_args,
         _combine_lifted_args=_combine_lifted_args,
         _combine_bwd_lifted_args=_combine_bwd_lifted_args,
@@ -974,11 +1060,12 @@ def _trace_flex_ep_proxy(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    router_operands: tuple[Any, ...],
+    router_operands: Any,
     kwargs: dict[str, Any],
 ) -> torch.Tensor:
     example_out = flex_ep(
@@ -986,11 +1073,12 @@ def _trace_flex_ep_proxy(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *router_operands,
+        router_operands,
         **kwargs,
     )
     if not isinstance(mode.tracer, torch.fx.Tracer):
@@ -998,6 +1086,7 @@ def _trace_flex_ep_proxy(
             f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(mode.tracer)}"
         )
     for name, fn in (
+        ("flex_ep_build_dispatch_plan", build_dispatch_plan_fn),
         ("flex_ep_dispatch", dispatch_fn),
         ("flex_ep_combine", combine_fn),
         ("flex_ep_combine_bwd", combine_bwd_fn),
@@ -1011,11 +1100,12 @@ def _trace_flex_ep_proxy(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
         dispatch_bwd_fn,
-        *router_operands,
+        router_operands,
     )
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, node_args)  # type: ignore[attr-defined]
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)  # type: ignore[attr-defined]
@@ -1041,17 +1131,19 @@ def flex_ep_proxy_torch_dispatch_mode(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -1063,6 +1155,7 @@ def flex_ep_proxy_torch_dispatch_mode(
         topk_idx,
         w13,
         w2,
+        build_dispatch_plan_fn,
         dispatch_fn,
         combine_fn,
         combine_bwd_fn,
@@ -1075,6 +1168,7 @@ def flex_ep_proxy_torch_dispatch_mode(
             "max_tokens": max_tokens,
             "topk": topk,
             "num_ctas": num_ctas,
+            "_build_dispatch_plan_lifted_args": _build_dispatch_plan_lifted_args,
             "_dispatch_lifted_args": _dispatch_lifted_args,
             "_combine_lifted_args": _combine_lifted_args,
             "_combine_bwd_lifted_args": _combine_bwd_lifted_args,
@@ -1090,17 +1184,19 @@ def flex_ep_fake_tensor_mode(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -1125,10 +1221,12 @@ def flex_ep_fake_tensor_mode(
             topk_idx,
             w13,
             w2,
+            build_dispatch_plan_fn,
             dispatch_fn,
             combine_fn,
             router_operands,
             topk=topk,
+            build_dispatch_plan_lifted_args=_build_dispatch_plan_lifted_args,
             dispatch_lifted_args=_dispatch_lifted_args,
             combine_lifted_args=_combine_lifted_args,
         )
@@ -1142,17 +1240,19 @@ def flex_ep_functionalize(
     topk_idx: torch.Tensor,
     w13: torch.Tensor,
     w2: torch.Tensor,
+    build_dispatch_plan_fn: Callable[..., Any],
     dispatch_fn: Callable[..., Any],
     combine_fn: Callable[..., Any],
     combine_bwd_fn: Callable[..., Any],
     dispatch_bwd_fn: Callable[..., Any],
-    *router_operands: Any,
+    router_operands: Any,
     num_experts: int,
     ep_rank: int,
     ep_size: int,
     max_tokens: int,
     topk: int,
     num_ctas: int = 152,
+    _build_dispatch_plan_lifted_args: tuple[Any, ...] = (),
     _dispatch_lifted_args: tuple[Any, ...] = (),
     _combine_lifted_args: tuple[Any, ...] = (),
     _combine_bwd_lifted_args: tuple[Any, ...] = (),
@@ -1167,6 +1267,7 @@ def flex_ep_functionalize(
             w13,
             w2,
             router_operands,
+            _build_dispatch_plan_lifted_args,
             _dispatch_lifted_args,
             _combine_lifted_args,
             _combine_bwd_lifted_args,
@@ -1179,6 +1280,7 @@ def flex_ep_functionalize(
         w13,
         w2,
         router_operands,
+        build_dispatch_plan_lifted_args,
         dispatch_lifted_args,
         combine_lifted_args,
         combine_bwd_lifted_args,
@@ -1186,6 +1288,9 @@ def flex_ep_functionalize(
     ) = unwrapped
     with ctx.redispatch_to_next():
         with suspend_functionalization(), disable_proxy_modes_tracing():
+            functional_build_dispatch_plan_fn = ctx.functionalize(
+                build_dispatch_plan_fn
+            )
             functional_dispatch_fn = ctx.functionalize(dispatch_fn)
             functional_combine_fn = ctx.functionalize(combine_fn)
             functional_combine_bwd_fn = ctx.functionalize(combine_bwd_fn)
@@ -1195,17 +1300,19 @@ def flex_ep_functionalize(
             topk_idx,
             w13,
             w2,
+            functional_build_dispatch_plan_fn,
             functional_dispatch_fn,
             functional_combine_fn,
             functional_combine_bwd_fn,
             functional_dispatch_bwd_fn,
-            *router_operands,
+            router_operands,
             num_experts=num_experts,
             ep_rank=ep_rank,
             ep_size=ep_size,
             max_tokens=max_tokens,
             topk=topk,
             num_ctas=num_ctas,
+            _build_dispatch_plan_lifted_args=build_dispatch_plan_lifted_args,
             _dispatch_lifted_args=dispatch_lifted_args,
             _combine_lifted_args=combine_lifted_args,
             _combine_bwd_lifted_args=combine_bwd_lifted_args,
@@ -1891,8 +1998,10 @@ def _clone_valid_prefix_impl(
         and token_end.dtype == torch.int64
         and token_end.numel() == 1
         and input.is_contiguous()
+        and token_end.is_contiguous()
     ):
         return op(input, token_end)
+    del token_end
     return input.clone()
 
 
@@ -1906,18 +2015,21 @@ def _clone_valid_prefix_fake(
 
 
 @torch.library.impl(_flex_ep_lib, "zfill_ranges_inplace", "CompositeExplicitAutograd")
-def _zfill_ranges_inplace(
+def _zfill_ranges_inplace_impl(
     input: torch.Tensor,
     begin_ofs: torch.Tensor,
     end_ofs: torch.Tensor,
     max_values_per_batch: int,
 ) -> torch.Tensor:
     op = _inductor_router_op("zfill_ranges_inplace")
-    if op is not None:
+    if op is not None and input.is_cuda:
         op(input, begin_ofs, end_ofs, max_values_per_batch)
         return input
-    for start, end in zip(begin_ofs.cpu().tolist(), end_ofs.cpu().tolist()):
-        input[start:end].zero_()
+    del max_values_per_batch
+    if begin_ofs.numel() != end_ofs.numel():
+        raise ValueError("zfill_ranges_inplace begin/end offsets must match.")
+    for begin, end in zip(begin_ofs.tolist(), end_ofs.tolist(), strict=True):
+        input[begin:end].zero_()
     return input
 
 
@@ -1933,7 +2045,9 @@ def _zfill_ranges_inplace_fake(
 
 
 @torch.library.impl(_flex_ep_lib, "fill_i64_inplace", "CompositeExplicitAutograd")
-def _fill_i64_inplace(input: torch.Tensor, value: int) -> torch.Tensor:
+def _fill_i64_inplace_impl(input: torch.Tensor, value: int) -> torch.Tensor:
+    if input.dtype != torch.int64:
+        raise ValueError("fill_i64_inplace expects an int64 tensor.")
     input.fill_(value)
     return input
 
