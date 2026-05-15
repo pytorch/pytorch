@@ -426,9 +426,9 @@ def _unique(
 
         if dim is None:
             if unique_consecutive:
-                arg.unique_consecutive_memo = nnz
+                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
             else:
-                arg.unique_memo = nnz
+                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -439,15 +439,19 @@ def _unique(
 
     return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
-        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
+        inverse = arg.new_empty(
+            arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
+        )
     else:
-        inverse = arg.new_empty(0)
+        inverse = arg.new_empty(0, dtype=torch.int64)
     ret.append(inverse)
 
     if return_counts or return_if_dim_and_cpu:
-        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+        counts = arg.new_empty(
+            ret[0].shape if dim is None else (ret[0].shape[dim],), dtype=torch.int64
+        )
     else:
-        counts = arg.new_empty(0)
+        counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
     return tuple(ret)
@@ -638,24 +642,178 @@ def _compute_stride(
     return new_stride
 
 
+def _optimization_hint_or_none(value: Any) -> int | None:
+    if type(value) is int:
+        return value
+    if isinstance(value, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+        return optimization_hint(value, fallback=None)
+    return None
+
+
+def _hinted_eq(lhs: Any, rhs: Any) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(lhs == rhs):
+        return True
+
+    lhs_hint = _optimization_hint_or_none(lhs)
+    rhs_hint = _optimization_hint_or_none(rhs)
+    if lhs_hint is None or rhs_hint is None or lhs_hint != rhs_hint:
+        return False
+
+    # Hints are not shape semantics. They only show that the equality is true
+    # for the traced example, so record the symbolic equality required for the
+    # view rather than specializing either side to a concrete value.
+    torch._check(lhs == rhs)
+    return True
+
+
+def _is_contiguous_with_hinted_checks(a: torch.Tensor) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
+
+    if guard_or_false(a.numel() < 2):
+        return True
+
+    numel_hint = _optimization_hint_or_none(a.numel())
+    if numel_hint is None:
+        return False
+    if numel_hint < 2:
+        torch._check(a.numel() < 2)
+        return True
+
+    expected_stride = 1
+    expected_stride_max = 1
+    for size, stride in reversed(tuple(zip(a.shape, a.stride()))):
+        if guard_or_false(size == 1):
+            continue
+
+        size_hint = _optimization_hint_or_none(size)
+        if size_hint == 1:
+            torch._check(size == 1)
+            continue
+
+        if not _hinted_eq(stride, expected_stride) and not _hinted_eq(
+            stride, expected_stride_max
+        ):
+            return False
+
+        expected_stride_max *= size if is_nested_int(size) else torch.sym_max(size, 1)
+        expected_stride *= size
+
+    return True
+
+
 def _view_has_unbacked_input(
     a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
-    from torch.fx.experimental.symbolic_shapes import has_hint
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
     shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     return (
-        any(not has_hint(s) for s in a.size())
-        or any(not has_hint(s) for s in a.stride())
-        or any(not has_hint(s) for s in shape)
+        any(not has_guarding_hint(s) for s in a.size())
+        or any(not has_guarding_hint(s) for s in a.stride())
+        or any(not has_guarding_hint(s) for s in shape)
     )
+
+
+def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
+    """
+    Collect candidate (x, y) pairs whose runtime hints match (so they
+    *could* be equal), then test whether substituting them into the
+    view's numel equation makes the equation symbolically zero.
+    Only commit the equalities (adds the real Eq guards via bool(x == y)
+    which triggers set_replacement) if the substitution actually solves
+    the view validity check.
+
+    This avoids polluting the shape env with spurious guards from probing.
+
+    Returns True if at least one equality was committed.
+
+    Conservative: only considers SymInts that appear as a top-level dim of
+    the input or target (skipping the -1 marker), and skips already-equal
+    pairs, and skips unbacked symbols.
+    """
+    import operator
+    from functools import reduce
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    def _atomic_syms(dims) -> list[torch.SymInt]:
+        """Keep only SymInts whose expr is a single bare *backed* symbol."""
+        out: list[torch.SymInt] = []
+        for s in dims:
+            if not isinstance(s, torch.SymInt):
+                continue
+            expr = s.node.expr
+            free = expr.free_symbols
+            if len(free) != 1 or expr not in free:
+                continue
+            if free_unbacked_symbols(expr):
+                continue
+            out.append(s)
+        return out
+
+    import sympy
+
+    a_syms = _atomic_syms(a.size())
+    target_syms = _atomic_syms(shape)
+    if not a_syms or not target_syms:
+        return False
+
+    # 1) Bucket symbols by hint, deduplicated by sympy expr (one SymInt per
+    #    unique expr per hint).  Each non-trivial bucket is a duck-equality
+    #    class: every member of the class will be set equal to the bucket's
+    #    canonical symbol.  This keeps `subs` and `candidates` perfectly in
+    #    sync so the numel check exactly reflects what we'll commit.
+    from collections import defaultdict
+
+    buckets: dict[int, dict[sympy.Expr, torch.SymInt]] = defaultdict(dict)
+    for s in list(a_syms) + list(target_syms):
+        # setdefault keeps the *first* SymInt seen for each (hint, expr).
+        buckets[s.node.hint].setdefault(s.node.expr, s)
+
+    candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
+    for members in buckets.values():
+        canonical, *rest = members.values()
+        for m in rest:
+            candidates.append((canonical, m))
+
+    if not candidates:
+        return False
+
+    # `subs` is derived from `candidates`, so they cannot drift.
+    subs: dict[sympy.Expr, sympy.Expr] = {
+        m.node.expr: c.node.expr for c, m in candidates
+    }
+
+    # 2) Symbolic test: does the substitution make the view's numel match?
+    def _expr_of(s):
+        return s.node.expr if isinstance(s, torch.SymInt) else s
+
+    try:
+        a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
+        shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
+        diff = sympy.simplify((a_numel - shape_numel).subs(subs))
+        if diff != 0:
+            return False
+    except (TypeError, ValueError, AttributeError, sympy.SympifyError):
+        return False
+
+    # 3) Commit the equalities for real (adds Eq guards, triggers set_replacement).
+    for c, m in candidates:
+        torch._check(c == m)
+    return True
 
 
 def _view_unbacked_meta(
     a: torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
+    allow_copy: bool = False,
+    tried_duck_specialize: bool = False,
 ) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
@@ -719,7 +877,40 @@ def _view_unbacked_meta(
         torch.fx.experimental._config.backed_size_oblivious
         or _view_has_unbacked_input(a, shape)
     ):
-        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
+        # Heuristic: before falling through to the specializing recursion
+        # (which often emits Eq(s, 1) via eval_eager), try to discover
+        # cross-symbol equalities between input and target shape symbols.
+        # If a pair (x, y) is True at the runtime hint, the shape env will
+        # record Eq(x, y) and set_replacement unifies them — letting the
+        # size-oblivious view path succeed without specialization on x==1.
+        # But with potential duck specializations which are more general.
+        if (
+            torch.fx.experimental._config.unify_view_symbols_bso_meta
+            and not tried_duck_specialize
+            and try_duck_specialization_first(a, shape)
+        ):
+            return _view_unbacked_meta(
+                a,
+                shape,
+                size_oblivious_enabled=True,
+                allow_copy=allow_copy,
+                tried_duck_specialize=True,
+            )
+
+        if _is_contiguous_with_hinted_checks(a):
+            strides = make_contiguous_strides_for(shape)
+            return a.as_strided(shape, strides)  # type: ignore[return-value]
+
+        return _view_unbacked_meta(
+            a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
+        )
+
+    # When allow_copy=True (i.e., view_copy), define unbacked semantics
+    # as "materialize": clone the input to break aliasing, then reshape.
+    if allow_copy:
+        strides = make_contiguous_strides_for(shape)
+        # pyrefly: ignore[bad-return]
+        return a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
@@ -755,14 +946,18 @@ def _view_meta(
     func: OpOverload,
     a: FakeTensor,
     *shape: Any,
+    allow_copy: bool = False,
 ) -> FakeTensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return typing_cast(FakeTensor, _view_unbacked_meta(a, shape))
+        return typing_cast(
+            FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
+        )
     else:
         return typing_cast(
-            FakeTensor, torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+            FakeTensor,
+            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
         )
 
 
@@ -774,7 +969,10 @@ def _view_meta_copy(
     *shape: IntLikeType,
     out: FakeTensor | None = None,
 ) -> FakeTensor:
-    result = _view_meta(fake_mode, func, a, *shape)
+    # view_copy is the non-aliasing counterpart of view. Eager may succeed on
+    # cases where a pure view is impossible (e.g. expand -> flatten) by
+    # materializing the result. Match eager by allowing copy-if-needed in meta.
+    result = _view_meta(fake_mode, func, a, *shape, allow_copy=True)
 
     if out is not None:
         return result
@@ -888,7 +1086,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz
+        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
@@ -906,7 +1104,7 @@ def _padded_dense_to_jagged_forward(
             f"Only one jagged dim is supported, got {len(offsets)} offsets"
         )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -944,6 +1142,11 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
         return 0
     elif guard_or_false(index > size):
         return size
+    elif guard_or_false(index >= 0):
+        return torch.sym_min(index, size)
+    elif guard_or_false(index < 0):
+        return torch.sym_max(index + size, 0)
+
     return None
 
 
@@ -988,6 +1191,12 @@ def slice_forward(
             new_size = (end_index - start_index + step - 1) // step
         elif guard_or_false(start_index >= end_index):
             new_size = 0
+        else:
+            # Both indices are resolved but we can't statically determine their
+            # ordering (e.g., when they involve Min/Max). Compute the size via
+            # max(end - start, 0) to avoid creating an unbacked symint.
+            diff = torch.sym_max(end_index - start_index, 0)
+            new_size = (diff + step - 1) // step
 
     # create unbacked if case unknown
     if new_size is None:
@@ -1225,7 +1434,7 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
-# takes in multiple-devices, dont default to default device handling
+# takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -1312,17 +1521,31 @@ def conv(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    device = new_kwargs["input"].fake_device
+    input_ = new_kwargs["input"]
+    weight = new_kwargs["weight"]
+    # Internal passes such as Inductor freezing may run fake propagation over
+    # folded convs that do not need to match eager's public input checks.
+    if (
+        func is aten.convolution.default
+        and input_.fake_device.type == "cuda"
+        and input_.dtype != weight.dtype
+        and not fake_mode.allow_non_fake_inputs
+    ):
+        raise RuntimeError(
+            f"Input type ({input_.dtype}) and weight type "
+            f"({weight.dtype}) should be the same"
+        )
+    device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
-        # if the input is unsqueezed is done in Convolution.cpp we get segfault
-        k = new_kwargs["weight"].ndim
+        # if the input is unsqueezed in Convolution.cpp we get segfault
+        k = weight.ndim
 
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import has_hint
+        from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
-        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
-            has_hint(s) for s in new_kwargs["weight"].shape
+        all_hinted = all(has_guarding_hint(s) for s in input_.shape) and all(
+            has_guarding_hint(s) for s in weight.shape
         )
 
         if not all_hinted:
@@ -1330,53 +1553,33 @@ def conv(
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
         else:
-            if func is aten.convolution.default:
-                conv_backend = torch._C._select_conv_backend(**new_kwargs)
-            else:
-                conv_backend = torch._C._select_conv_backend(
-                    new_kwargs["input"],
-                    new_kwargs["weight"],
-                    bias=None,
-                    stride=new_kwargs["stride"],
-                    padding=new_kwargs["padding"],
-                    dilation=new_kwargs["dilation"],
-                    transposed=new_kwargs["transposed"],
-                    output_padding=new_kwargs["output_padding"],
-                    groups=new_kwargs["groups"],
-                    bias_sizes=new_kwargs["bias_sizes"],
-                )
+            # convolution has "bias" but not "bias_sizes"; convolution_backward
+            # has "bias_sizes" but not "bias". .get() handles both with one call.
+            bias = new_kwargs.get("bias")
+            select_kwargs: dict[str, object] = dict(
+                stride=new_kwargs["stride"],
+                padding=new_kwargs["padding"],
+                dilation=new_kwargs["dilation"],
+                transposed=new_kwargs["transposed"],
+                output_padding=new_kwargs["output_padding"],
+                groups=new_kwargs["groups"],
+                bias=bias,
+            )
+            if bias is None:
+                select_kwargs["bias_sizes"] = new_kwargs.get("bias_sizes")
+            conv_backend = torch._C._select_conv_backend(
+                input_, weight, **select_kwargs
+            )
             # Expand 1d -> 2d.
             # Note: Avoid expanding before calling _select_conv_backend,
             # as the function handles 2D expansion internally.
-            if (
-                k == 3
-                and not new_kwargs["input"].is_mkldnn
-                and not new_kwargs["input"].is_xpu
-            ):
+            if k == 3 and not input_.is_mkldnn and not input_.is_xpu:
                 # Note: Using input.to(memory_format=contiguous) does not work.
-                new_kwargs["input"] = new_kwargs["input"].contiguous().unsqueeze(2)
-                new_kwargs["weight"] = new_kwargs["weight"].unsqueeze(2)
-                if len(new_kwargs["stride"]) == 1:
-                    new_kwargs["stride"].insert(0, 1)
-                    new_kwargs["padding"].insert(0, 0)
-                    new_kwargs["dilation"].insert(0, 1)
-                    new_kwargs["output_padding"].insert(0, 0)
+                input_ = input_.contiguous().unsqueeze(2)
+                weight = weight.unsqueeze(2)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
-                new_kwargs["input"], new_kwargs["weight"], conv_backend
+                input_, weight, conv_backend
             )
-            # revert 2d -> 1d
-            if (
-                k == 3
-                and not new_kwargs["input"].is_mkldnn
-                and not new_kwargs["input"].is_xpu
-            ):
-                new_kwargs["input"] = new_kwargs["input"].squeeze(2)
-                new_kwargs["weight"] = new_kwargs["weight"].squeeze(2)
-                if len(new_kwargs["stride"]) == 2:
-                    new_kwargs["stride"].pop(0)
-                    new_kwargs["padding"].pop(0)
-                    new_kwargs["dilation"].pop(0)
-                    new_kwargs["output_padding"].pop(0)
 
     def convert(
         t: torch.Tensor | None, mem_fmt: torch.memory_format | None

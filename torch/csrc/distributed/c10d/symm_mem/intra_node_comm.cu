@@ -23,7 +23,7 @@ static void checkInput(const at::Tensor& input, int deviceIdx) {
 }
 
 bool isIntraNodeCommSupported() {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)
   return false;
 #else
   return true;
@@ -46,7 +46,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "", input);
+  op.call(symmMemTensor, "sum", groupName_, input);
   return input;
 }
 
@@ -65,7 +65,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "");
+  op.call(symmMemTensor, "sum", groupName_);
   input.copy_(symmMemTensor);
   return input;
 }

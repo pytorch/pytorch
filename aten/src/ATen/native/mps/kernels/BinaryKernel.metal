@@ -39,13 +39,6 @@ struct lerp_alpha_functor {
   }
 };
 
-struct native_dropout_mask_and_scale_functor {
-  template <typename TI, typename TA>
-  inline TA operator()(const TI a, const TI b, const TA scale) {
-    return static_cast<TA>(a) * static_cast<TA>(b) * scale;
-  }
-};
-
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -63,14 +56,14 @@ struct fmin_functor {
 struct maximum_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return max(a, b);
+    return c10::metal::max(a, b);
   }
 };
 
 struct minimum_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return min(a, b);
+    return c10::metal::min(a, b);
   }
 };
 
@@ -119,6 +112,20 @@ struct logaddexp2_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return c10::metal::logaddexp2(float(a), float(b));
+  }
+};
+
+struct xlogy_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::xlogy(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::xlogy(float(a), float(b));
+  }
+  inline float operator()(const bool a, const bool b) {
+    return (a && !b) ? -INFINITY : 0;
   }
 };
 
@@ -303,6 +310,41 @@ struct mul_functor {
   }
 };
 
+struct bitwise_and_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a & b;
+  }
+};
+
+struct bitwise_or_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a | b;
+  }
+};
+
+struct bitwise_xor_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a ^ b;
+  }
+};
+
+struct bitwise_left_shift_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a << b;
+  }
+};
+
+struct bitwise_right_shift_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a >> b;
+  }
+};
+
 struct div_true_functor {
   template <
       typename T,
@@ -405,6 +447,39 @@ struct gcd_functor {
   }
 };
 
+// eq/ne are defined manually (rather than via DEFINE_BINARY_COMPARISON_FUNCTOR)
+// so they can carry complex overloads: `float2 == float2` returns `bool2` in
+// Metal, which doesn't implicitly convert to bool. The reduction `all(...)` /
+// `any(...)` is the equivalent of componentwise (real && imag) compare.
+struct eq_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a == b;
+  }
+  inline bool operator()(const float2 a, const float2 b) {
+    return all(a == b);
+  }
+  inline bool operator()(const half2 a, const half2 b) {
+    return all(a == b);
+  }
+};
+struct ne_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a != b;
+  }
+  inline bool operator()(const float2 a, const float2 b) {
+    return any(a != b);
+  }
+  inline bool operator()(const half2 a, const half2 b) {
+    return any(a != b);
+  }
+};
+DEFINE_BINARY_COMPARISON_FUNCTOR(lt, <);
+DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
+DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
+DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -431,6 +506,38 @@ struct gcd_functor {
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
+// Comparison ops produce bool but may be invoked with a non-bool `out=`
+// (e.g. `linalg_vector_norm(p=0)` -> `ne_outf(float, 0, float_out)`); each
+// DTYPEI gets the castout variant so the dispatcher can route the non-bool
+// case through `_strided_castout_<bool>_<DTYPEI>`.
+#define REGISTER_COMPARISON_OP(NAME)              \
+  REGISTER_BINARY_OP(NAME, float, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float, bool);  \
+  REGISTER_BINARY_OP(NAME, half, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, half, bool);   \
+  REGISTER_BINARY_OP(NAME, bfloat, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, bfloat, bool); \
+  REGISTER_BINARY_OP(NAME, long, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, long, bool);   \
+  REGISTER_BINARY_OP(NAME, int, bool);            \
+  REGISTER_BINARY_CASTOUT_OP(NAME, int, bool);    \
+  REGISTER_BINARY_OP(NAME, short, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, short, bool);  \
+  REGISTER_BINARY_OP(NAME, uchar, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
+  REGISTER_BINARY_OP(NAME, char, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, bool, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
+
+// Complex variants for eq/ne only -- lt/le/gt/ge are not well-defined on
+// complex numbers.
+#define REGISTER_COMPLEX_EQ_OP(NAME)              \
+  REGISTER_BINARY_OP(NAME, float2, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float2, bool); \
+  REGISTER_BINARY_OP(NAME, half2, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, half2, bool)
+
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);
 REGISTER_INT2FLOAT_BINARY_OP(atan2);
@@ -449,6 +556,8 @@ REGISTER_FLOAT_BINARY_OP(logaddexp);
 REGISTER_INT2FLOAT_BINARY_OP(logaddexp);
 REGISTER_FLOAT_BINARY_OP(logaddexp2);
 REGISTER_INT2FLOAT_BINARY_OP(logaddexp2);
+REGISTER_FLOAT_BINARY_OP(xlogy);
+REGISTER_INT2FLOAT_BINARY_OP(xlogy);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
 REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);
@@ -490,6 +599,19 @@ REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(bitwise_and);
+REGISTER_INTEGER_BINARY_OP(bitwise_or);
+REGISTER_INTEGER_BINARY_OP(bitwise_xor);
+REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
+REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
+REGISTER_COMPARISON_OP(eq);
+REGISTER_COMPLEX_EQ_OP(eq);
+REGISTER_COMPARISON_OP(ne);
+REGISTER_COMPLEX_EQ_OP(ne);
+REGISTER_COMPARISON_OP(lt);
+REGISTER_COMPARISON_OP(le);
+REGISTER_COMPARISON_OP(gt);
+REGISTER_COMPARISON_OP(ge);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
@@ -514,10 +636,6 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
-
-REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, float, float);
-REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
@@ -544,3 +662,176 @@ REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
+
+// lerp with tensor weight: lerp(s, e, w) = fma(w, e - s, s)
+template <typename T>
+inline T lerp_op(T s, T e, T w) {
+  return fma(w, e - s, s);
+}
+
+inline bfloat lerp_op(bfloat s, bfloat e, bfloat w) {
+  return static_cast<bfloat>(fma(float(w), float(e) - float(s), float(s)));
+}
+
+inline long lerp_op(long s, long e, long w) {
+  return s + w * (e - s);
+}
+
+inline float2 lerp_op(float2 s, float2 e, float2 w) {
+  return s + mul(w, e - s);
+}
+
+template <typename T>
+kernel void lerp_tensor_dense(
+    device T* out [[buffer(0)]],
+    device const T* self [[buffer(1)]],
+    device const T* end [[buffer(2)]],
+    device const T* weight [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  out[tid] = lerp_op(self[tid], end[tid], weight[tid]);
+}
+
+// Scalar weight broadcast: self/end/out contiguous, weight is a single element
+template <typename T>
+kernel void lerp_tensor_scalar_weight(
+    device T* out [[buffer(0)]],
+    device const T* self [[buffer(1)]],
+    device const T* end [[buffer(2)]],
+    device const T& weight [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  out[tid] = lerp_op(self[tid], end[tid], weight);
+}
+
+// 2D strided: coordinates from 2D dispatch, no integer division
+template <typename T>
+kernel void lerp_tensor_strided_2d(
+    device void* out_ptr [[buffer(0)]],
+    constant void* self_ptr [[buffer(1)]],
+    constant void* end_ptr [[buffer(2)]],
+    constant void* weight_ptr [[buffer(3)]],
+    constant long* out_strides [[buffer(4)]],
+    constant long* self_strides [[buffer(5)]],
+    constant long* end_strides [[buffer(6)]],
+    constant long* weight_strides [[buffer(7)]],
+    uint2 tid [[thread_position_in_grid]]) {
+  int out_off =
+      int(tid.x) * int(out_strides[0]) + int(tid.y) * int(out_strides[1]);
+  int self_off =
+      int(tid.x) * int(self_strides[0]) + int(tid.y) * int(self_strides[1]);
+  int end_off =
+      int(tid.x) * int(end_strides[0]) + int(tid.y) * int(end_strides[1]);
+  int wt_off =
+      int(tid.x) * int(weight_strides[0]) + int(tid.y) * int(weight_strides[1]);
+  ref_at_offs<T>(out_ptr, long(out_off)) = lerp_op(
+      val_at_offs<T>(self_ptr, long(self_off)),
+      val_at_offs<T>(end_ptr, long(end_off)),
+      val_at_offs<T>(weight_ptr, long(wt_off)));
+}
+
+// 3D strided: coordinates from 3D dispatch, no integer division
+template <typename T>
+kernel void lerp_tensor_strided_3d(
+    device void* out_ptr [[buffer(0)]],
+    constant void* self_ptr [[buffer(1)]],
+    constant void* end_ptr [[buffer(2)]],
+    constant void* weight_ptr [[buffer(3)]],
+    constant long* out_strides [[buffer(4)]],
+    constant long* self_strides [[buffer(5)]],
+    constant long* end_strides [[buffer(6)]],
+    constant long* weight_strides [[buffer(7)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  int out_off = int(tid.x) * int(out_strides[0]) +
+      int(tid.y) * int(out_strides[1]) + int(tid.z) * int(out_strides[2]);
+  int self_off = int(tid.x) * int(self_strides[0]) +
+      int(tid.y) * int(self_strides[1]) + int(tid.z) * int(self_strides[2]);
+  int end_off = int(tid.x) * int(end_strides[0]) +
+      int(tid.y) * int(end_strides[1]) + int(tid.z) * int(end_strides[2]);
+  int wt_off = int(tid.x) * int(weight_strides[0]) +
+      int(tid.y) * int(weight_strides[1]) + int(tid.z) * int(weight_strides[2]);
+  ref_at_offs<T>(out_ptr, long(out_off)) = lerp_op(
+      val_at_offs<T>(self_ptr, long(self_off)),
+      val_at_offs<T>(end_ptr, long(end_off)),
+      val_at_offs<T>(weight_ptr, long(wt_off)));
+}
+
+template <typename T>
+kernel void lerp_tensor_strided(
+    device void* out_ptr [[buffer(0)]],
+    constant void* self_ptr [[buffer(1)]],
+    constant void* end_ptr [[buffer(2)]],
+    constant void* weight_ptr [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* out_strides [[buffer(5)]],
+    constant long* self_strides [[buffer(6)]],
+    constant long* end_strides [[buffer(7)]],
+    constant long* weight_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    uint tid [[thread_position_in_grid]]) {
+  int pos[max_ndim];
+  pos_from_thread_index(int(tid), pos, sizes, ndim);
+  auto self_off = offset_from_coord(pos, self_strides, ndim);
+  auto end_off = offset_from_coord(pos, end_strides, ndim);
+  auto weight_off = offset_from_coord(pos, weight_strides, ndim);
+  auto out_off = offset_from_coord(pos, out_strides, ndim);
+  ref_at_offs<T>(out_ptr, out_off) = lerp_op(
+      val_at_offs<T>(self_ptr, self_off),
+      val_at_offs<T>(end_ptr, end_off),
+      val_at_offs<T>(weight_ptr, weight_off));
+}
+
+#define INSTANTIATE_LERP(DTYPE)                                           \
+  template [[host_name("lerp_tensor_dense_" #DTYPE)]] kernel void         \
+  lerp_tensor_dense<DTYPE>(                                               \
+      device DTYPE * out [[buffer(0)]],                                   \
+      device const DTYPE* self [[buffer(1)]],                             \
+      device const DTYPE* end [[buffer(2)]],                              \
+      device const DTYPE* weight [[buffer(3)]],                           \
+      uint tid [[thread_position_in_grid]]);                              \
+  template [[host_name("lerp_tensor_scalar_weight_" #DTYPE)]] kernel void \
+  lerp_tensor_scalar_weight<DTYPE>(                                       \
+      device DTYPE * out [[buffer(0)]],                                   \
+      device const DTYPE* self [[buffer(1)]],                             \
+      device const DTYPE* end [[buffer(2)]],                              \
+      device const DTYPE& weight [[buffer(3)]],                           \
+      uint tid [[thread_position_in_grid]]);                              \
+  template [[host_name("lerp_tensor_strided_2d_" #DTYPE)]] kernel void    \
+  lerp_tensor_strided_2d<DTYPE>(                                          \
+      device void* out_ptr [[buffer(0)]],                                 \
+      constant void* self_ptr [[buffer(1)]],                              \
+      constant void* end_ptr [[buffer(2)]],                               \
+      constant void* weight_ptr [[buffer(3)]],                            \
+      constant long* out_strides [[buffer(4)]],                           \
+      constant long* self_strides [[buffer(5)]],                          \
+      constant long* end_strides [[buffer(6)]],                           \
+      constant long* weight_strides [[buffer(7)]],                        \
+      uint2 tid [[thread_position_in_grid]]);                             \
+  template [[host_name("lerp_tensor_strided_3d_" #DTYPE)]] kernel void    \
+  lerp_tensor_strided_3d<DTYPE>(                                          \
+      device void* out_ptr [[buffer(0)]],                                 \
+      constant void* self_ptr [[buffer(1)]],                              \
+      constant void* end_ptr [[buffer(2)]],                               \
+      constant void* weight_ptr [[buffer(3)]],                            \
+      constant long* out_strides [[buffer(4)]],                           \
+      constant long* self_strides [[buffer(5)]],                          \
+      constant long* end_strides [[buffer(6)]],                           \
+      constant long* weight_strides [[buffer(7)]],                        \
+      uint3 tid [[thread_position_in_grid]]);                             \
+  template [[host_name("lerp_tensor_strided_" #DTYPE)]] kernel void       \
+  lerp_tensor_strided<DTYPE>(                                             \
+      device void* out_ptr [[buffer(0)]],                                 \
+      constant void* self_ptr [[buffer(1)]],                              \
+      constant void* end_ptr [[buffer(2)]],                               \
+      constant void* weight_ptr [[buffer(3)]],                            \
+      constant long* sizes [[buffer(4)]],                                 \
+      constant long* out_strides [[buffer(5)]],                           \
+      constant long* self_strides [[buffer(6)]],                          \
+      constant long* end_strides [[buffer(7)]],                           \
+      constant long* weight_strides [[buffer(8)]],                        \
+      constant uint& ndim [[buffer(9)]],                                  \
+      uint tid [[thread_position_in_grid]]);
+
+INSTANTIATE_LERP(float);
+INSTANTIATE_LERP(half);
+INSTANTIATE_LERP(bfloat);
+INSTANTIATE_LERP(float2);
+INSTANTIATE_LERP(long);

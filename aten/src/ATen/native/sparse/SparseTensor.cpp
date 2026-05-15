@@ -95,7 +95,6 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 
 bool is_coalesced_default(const Tensor& self) {
   TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
-  return false;
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
@@ -676,7 +675,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
     scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];

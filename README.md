@@ -135,7 +135,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules, or interfacing with PyTorch's Tensor API, was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
@@ -199,7 +199,7 @@ packages (e.g., CUDA, MKL.)
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v9.0 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
@@ -260,15 +260,6 @@ pip install mkl-static mkl-include
 # Run from the pytorch directory after cloning
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
-```
-
-**On MacOS**
-
-```bash
-# Add this package on intel x86 processor machines only
-pip install mkl-static mkl-include
-# Add these packages if torch.distributed is needed
-conda install pkg-config libuv
 ```
 
 **On Windows**
@@ -409,7 +400,7 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built docker image from Docker Hub and run with docker v23.0+
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
@@ -421,11 +412,11 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 #### Building the image yourself
 
-**NOTE:** Must be built with a Docker version > 18.06
+**NOTE:** Must be built with a Docker version >= 23.0
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
+The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+unset to use the default, as the Dockerfile uses system Python.
 
 ```bash
 make -f docker.Makefile
@@ -514,7 +505,7 @@ You can either click through or toggle the accordion to see all of the jobs here
 
 <img width="570" height="611" alt="jobs" src="https://github.com/user-attachments/assets/f62812ca-caee-421b-863c-54f38fd28d46" />
 
-If you click through, youi'll see the doc jobs at the bottom, like this:
+If you click through, you'll see the doc jobs at the bottom, like this:
 
 <img width="354" height="312" alt="View Docs jobs" src="https://github.com/user-attachments/assets/8fadb935-5314-4c4b-a1b5-133781754f03" />
 
@@ -561,7 +552,7 @@ on [our website](https://pytorch.org/get-started/previous-versions).
 
 ## Getting Started
 
-Three pointers to get you started:
+Pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)

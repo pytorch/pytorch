@@ -23,7 +23,7 @@ from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
-    from ...scheduler import BaseSchedulerNode  # noqa: TC004
+    from ...scheduler import BaseSchedulerNode
 else:
     BaseSchedulerNode = Any
 
@@ -56,7 +56,6 @@ class CUTLASSTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         layout: Layout,
         input_reorder: list[int] | None = None,
-        device_type: str = "cuda",
     ) -> None:
         """
         Baseclass for CUTLASS C++ Templates, derived from KernelTemplate.
@@ -74,7 +73,7 @@ class CUTLASSTemplate(KernelTemplate):
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
-        self.device_type = device_type
+        self.device_type = layout.device.type
 
     @classmethod
     @functools.lru_cache(None)
@@ -83,7 +82,7 @@ class CUTLASSTemplate(KernelTemplate):
         return KernelTemplate._template_from_string(source)
 
     @staticmethod
-    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+    def supports_epilogue_fusion(op: GemmOperation, device_type: str) -> bool:
         return False
 
     def make_key(self, name: str, input_key: str, layout_repr: str) -> str:
@@ -133,6 +132,7 @@ class CUTLASSTemplate(KernelTemplate):
             kernel_name=kernel_name,
             runtime_arg_info=self.get_runtime_arg_info(),
             runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+            device_type=self.device_type,
         )
         with patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)):
             code = self.render(kernel=kernel, **kwargs)
@@ -224,7 +224,9 @@ class CUTLASSTemplate(KernelTemplate):
             supports_epilogue_fusion = False
         else:
             # epilogue fusion is only supported for TMA kernels
-            supports_epilogue_fusion = self.supports_epilogue_fusion(op)
+            supports_epilogue_fusion = self.supports_epilogue_fusion(
+                op, self.device_type
+            )
 
         def make_kernel_render(
             template_node: CUTLASSTemplateBuffer,
@@ -237,6 +239,7 @@ class CUTLASSTemplate(KernelTemplate):
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
                 runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+                device_type=self.device_type,
             )
             render = functools.partial(
                 self.render,

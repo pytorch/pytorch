@@ -84,7 +84,7 @@ def lower_cpu(
             "torch.compile on current platform is not supported for CPU."
         )
 
-    fake_buffers: list[Buffer] = []  # noqa: F821
+    fake_buffers: list[Buffer] = []
 
     # [Note] Handle the case where the split sizes are not statically known.
     # The value of cur_qSplitSize and cur_kvSplitSize are decided during runtime.
@@ -289,7 +289,7 @@ def lower_cpu(
         input_nodes += [
             value
             for value in kernel_input_name_to_buffer.values()
-            if not isinstance(value, sympy.Symbol)
+            if not isinstance(value, sympy.Expr)
         ]
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
@@ -328,7 +328,7 @@ def lower_cpu(
         key,
         value,
     ]
-    res = autotune_select_algorithm(
+    res, _ = autotune_select_algorithm(
         "flex_attention",
         _choices,
         inputs_for_autotuning,

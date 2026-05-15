@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <limits>
 #include <ostream>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
@@ -52,6 +53,31 @@ inline size_t elementSize(ScalarType t) {
       TORCH_CHECK(false, "Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
+}
+
+inline ScalarType opaqueScalarType(ScalarType t) {
+  auto esize = elementSize(t);
+  ScalarType result;
+  switch (esize) {
+    case 1:
+      result = kByte;
+      break;
+    case 2:
+      result = kUInt16;
+      break;
+    case 4:
+      result = kUInt32;
+      break;
+    case 8:
+      result = kUInt64;
+      break;
+    case 16:
+      result = kComplexDouble;
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown ScalarType");
+  }
+  return result;
 }
 
 inline bool isIntegralType(ScalarType t, bool includeBool) {
@@ -269,8 +295,10 @@ C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
 
 // Returns a pair of strings representing the names for each dtype.
 // The returned pair is (name, legacy_name_if_applicable)
-C10_API std::pair<std::string, std::string> getDtypeNames(
+C10_API std::pair<std::string_view, std::string_view> getDtypeNames(
     c10::ScalarType scalarType);
+
+C10_API std::string_view getScalarTypeAbbr(ScalarType scalarType);
 
 // Returns a map of string name to dtype.
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();

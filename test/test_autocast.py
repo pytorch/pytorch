@@ -7,7 +7,6 @@ from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
     TestAutocast,
 )
-from torch.testing._internal.common_device_type import expectedFailureMPSPre14
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -353,8 +352,6 @@ class TestAutocastMPS(TestCase):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
 
-    # torch.bfloat16 is only supported on macOS 14 and above.
-    @expectedFailureMPSPre14
     def test_mps_autocast_bfloat16_supported(self):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
             x = torch.randn(2, 3, device="mps")
@@ -543,6 +540,13 @@ class TestTorchAutocast(TestCase):
     def test_autocast_mixed_grad_contexts_cuda(self):
         """Test mixed grad contexts on CUDA"""
         self._test_autocast_mixed_grad_contexts_impl("cuda", torch.float16)
+
+    def test_autocast_called_with_non_callable(self):
+        """Test that autocast gives a clear error when misused as a function wrapper"""
+        x = torch.randn(2, 3)
+        msg = r"autocast\(\)\(func\) requires a callable, but got Tensor"
+        with self.assertRaisesRegex(TypeError, msg):
+            torch.autocast(device_type="cpu")(x)
 
 
 if __name__ == "__main__":

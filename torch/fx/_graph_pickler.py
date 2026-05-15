@@ -4,8 +4,9 @@ import importlib
 import io
 import itertools
 import pickle
+import weakref
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any, NewType, TypeVar
 from typing_extensions import override, Self
 
@@ -14,12 +15,13 @@ from torch.utils._import_utils import import_dill
 
 dill = import_dill()
 if dill is not None:
-    pickle = dill  # noqa: F811
+    pickle = dill
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -64,10 +66,25 @@ class Options:
     node_metadata_key_filter: Callable[[str], bool] | None = (
         _node_metadata_key_filter_safe
     )
+    # If True, raw torch.fx.Node objects encountered during pickling will be
+    # silently replaced with None instead of raising an AssertionError.
+    ignore_raw_node: bool = False
+
+
+def _unpickle_as_none() -> None:
+    return None
+
+
+def _unpickle_as_weakref(referent: object) -> weakref.ref[object]:
+    return weakref.ref(referent)
+
+
+def _unpickle_as_dead_weakref() -> Callable[[], None]:
+    return lambda: None
 
 
 @contextlib.contextmanager
-def patch_pytree_map_over_slice():
+def patch_pytree_map_over_slice() -> Generator[None]:
     if slice in pytree.SUPPORTED_NODES:
         yield
         return
@@ -106,6 +123,8 @@ class GraphPickler(pickle.Pickler):
         # pickle so that duplicates and views are properly handled.
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
+    _PASSTHROUGH_TYPES = frozenset({int, float, str, bytes, bool, type(None)})
+
     @override
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -128,6 +147,9 @@ class GraphPickler(pickle.Pickler):
 
         # These are the types that need special handling. See the individual
         # *PickleData classes for details on pickling that particular type.
+        if type(obj) in self._PASSTHROUGH_TYPES:
+            return NotImplemented
+
         if isinstance(obj, FakeTensor):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
@@ -140,9 +162,29 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, FakeScriptObject):
+            from torch._library.opaque_object import is_opaque_value_type
+
+            real_obj = object.__getattribute__(obj, "real_obj")
+            if real_obj is not None and is_opaque_value_type(type(real_obj)):
+                # Use default pickling; value-type opaques are picklable.
+                return NotImplemented
+            # Reference-type FakeScriptObjects can't be default-pickled.
+            return (_unpickle_as_none, ())
+        elif isinstance(obj, weakref.ref):
+            # Serialize weakrefs properly: if the referent is alive,
+            # serialize it and reconstruct the weakref on unpickle.
+            # If the referent is dead, unpickle as a dead-weakref-like callable.
+            referent = obj()
+            if referent is not None:
+                return (_unpickle_as_weakref, (referent,))
+            else:
+                return (_unpickle_as_dead_weakref, ())
         else:
             # We should never get a raw Node!
             if isinstance(obj, torch.fx.Node):
+                if self.options.ignore_raw_node:
+                    return (_unpickle_as_none, ())
                 raise AssertionError("Unexpected raw Node during pickling")
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
@@ -710,9 +752,9 @@ class _OpPickleData:
         options: Options,
     ) -> "_OpPickleData":
         if (ops_filter := options.ops_filter) and not ops_filter(name):
-            from torch._inductor.codecache import BypassFxGraphCache
+            from torch._inductor.codecache import CacheabilityValidator
 
-            raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
+            CacheabilityValidator.bypass(f"Unable to pickle non-standard op: {name}")
         return datacls(name)
 
     @abstractmethod

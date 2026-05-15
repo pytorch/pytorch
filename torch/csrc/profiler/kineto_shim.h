@@ -108,11 +108,15 @@ struct ActivityTraceWrapper {
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
+using ActivityFilter = std::unordered_map<
+    torch::autograd::profiler::ActivityType,
+    std::unordered_set<std::string>>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
-    const std::string& trace_id = "");
+    const std::string& trace_id = "",
+    const ActivityFilter& activity_filter = {});
 
 void toggleCollectionDynamic(const bool enable);
 void startTrace();
@@ -142,6 +146,8 @@ TORCH_API void addMetadataJson(
     const std::string& value);
 
 TORCH_API void profilerStep();
+
+TORCH_API bool isKinetoStopped();
 
 } // namespace autograd::profiler
 

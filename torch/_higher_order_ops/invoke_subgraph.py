@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import threading
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -97,6 +98,123 @@ def _extract_nested_region_config(fn):
         ):
             return gm_to_compile.meta["nested_region_config"].decompositions
     return None
+
+
+# Per-call id used by downstream graph passes to pair fw and bw
+# invoke_subgraph HOP nodes (e.g. run_joint_graph_passes_on_hops). The
+# autograd Function pushes the id around its fw and bw dispatches; the
+# proxy-mode handler stamps it on the resulting FX nodes via
+# meta["custom"]["call_id"].
+_invoke_subgraph_call_state = threading.local()
+
+
+def _next_invoke_subgraph_call_id() -> int:
+    counter = getattr(_invoke_subgraph_call_state, "counter", 0)
+    _invoke_subgraph_call_state.counter = counter + 1
+    return counter
+
+
+def _current_invoke_subgraph_call_id() -> int | None:
+    return getattr(_invoke_subgraph_call_state, "current", None)
+
+
+@contextlib.contextmanager
+def _set_invoke_subgraph_call_id(call_id: int):
+    prev = getattr(_invoke_subgraph_call_state, "current", None)
+    _invoke_subgraph_call_state.current = call_id
+    try:
+        yield
+    finally:
+        _invoke_subgraph_call_state.current = prev
+
+
+def warn_and_trace_duplicate_backward(
+    identifier: str | None,
+    suffix: int,
+    bw_graph: torch.fx.GraphModule,
+    num_primals: int,
+    tangents: tuple[Any, ...],
+) -> None:
+    if suffix == 0:
+        return
+
+    from torch._dynamo.utils import warn_once
+    from torch._logging import trace_structured
+
+    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+    tangent_summaries: list[dict[str, Any]] = []
+    for idx, tangent in enumerate(tangents):
+        summary: dict[str, Any] = {}
+        backward_input_idx = num_primals + idx
+        if backward_input_idx < len(placeholders):
+            summary["backward_input_name"] = placeholders[backward_input_idx].name
+
+        if not isinstance(tangent, torch.Tensor):
+            summary["type"] = "non-Tensor"
+            tangent_summaries.append(summary)
+            continue
+
+        summary.update(
+            {
+                "shape": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.shape
+                ],
+                "stride": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.stride()
+                ],
+                "dtype": str(tangent.dtype),
+                "device": str(tangent.device),
+            }
+        )
+        tangent_summaries.append(summary)
+
+    warn_once(
+        "invoke_subgraph traced multiple backward graphs for the same forward "
+        f"identifier {identifier!r}. This usually means the incoming backward "
+        "tangent metadata differs across backward invocations. This can happen "
+        "when upstream backward formulas produce gradients with different "
+        "layouts, aliases, or other tensor metadata. This can increase compile "
+        "time and code size. Use tlparse and look for the "
+        "invoke_subgraph_backward_duplicate artifact for tangent details."
+    )
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "invoke_subgraph_backward_duplicate",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {
+            "forward_identifier": identifier,
+            "backward_identifier": f"bw_{identifier}_{suffix}",
+            "new_variant_suffix": suffix,
+            "num_variants_for_identifier": suffix + 1,
+            "new_variant": {
+                "backward_identifier": f"bw_{identifier}_{suffix}",
+                "tangents": tangent_summaries,
+            },
+            "explanation": (
+                "invoke_subgraph caches backward graphs by both the forward "
+                "identifier and tangent metadata. Multiple backward variants "
+                "for one forward identifier usually mean the backward tangents "
+                "have different tensor metadata, commonly stride."
+            ),
+            "common_cause": (
+                "This can happen when equivalent forward invocations receive backward "
+                "tangents from different upstream formulas, or from the same "
+                "formula with different input metadata. For example, an "
+                "upstream backward may return a view, alias, slice, expanded "
+                "tensor, or otherwise non-contiguous gradient whose metadata "
+                "does not match the tangent seen by another use."
+            ),
+            "suggested_action": (
+                "If the duplicate backward graph is undesirable, materialize a "
+                "consistent tangent layout before the nested region backward. "
+                "One model-level workaround is a custom autograd.Function whose "
+                "forward returns the input and whose backward returns "
+                "grad.contiguous()."
+            ),
+        },
+    )
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -252,19 +370,19 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        from torch._higher_order_ops.utils import setup_compilation_env
+        from torch._higher_order_ops.utils import _hop_compile_and_call
 
-        with setup_compilation_env() as backend:
-            return torch.compile(
-                _invoke_subgraph_placeholder_wrapper,
-                backend=backend,
-                fullgraph=True,
-            )(func, args)
+        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
 
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def mark_compile_region(
+    fn=None,
+    options: NestedCompileRegionOptions | None = None,
+    max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -278,6 +396,9 @@ def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = No
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        max_reuse_entries: Maximum number of reuse cache entries per function
+            before raising an error. If this limit is hit, guards keep failing
+            across invocations and hierarchical compilation is not effective.
     """
 
     def wrap(func):
@@ -290,6 +411,8 @@ def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = No
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
+        func.__marked_compile_region_max_reuse_entries__ = max_reuse_entries  # type: ignore[attr-defined]
+        func.__marked_compile_region_reuse_hash_fn__ = reuse_hash_fn  # type: ignore[attr-defined]
 
         return inner
 
@@ -566,6 +689,44 @@ def trace_joint_graph_as_bwd(
                     )(*joint_operands)
 
 
+def get_non_differentiable_indices(subgraph) -> list[int]:
+    """Inspect a subgraph's output node metadata to find outputs that
+    were non-differentiable (requires_grad=False) during Dynamo tracing.
+
+    This uses the example_value stored on each output node, which reflects
+    the correct requires_grad from the original tracing (where inner
+    autograd.Functions DID run and mark_non_differentiable was called).
+
+    InvokeSubgraphAutogradOp runs the subgraph under
+    _AutoDispatchBelowAutograd, which suppresses the autograd key.  Inner
+    autograd.Functions (e.g. FlexAttentionAutogradOp) therefore never call
+    mark_non_differentiable.  The outer autograd engine then sets
+    requires_grad=True on ALL outputs because the inputs require grad.
+    We use the Dynamo-traced example_value to restore the correct
+    non-differentiable status at the outer level.
+    """
+    if not isinstance(subgraph, torch.fx.GraphModule):
+        return []
+
+    output_nodes = [n for n in subgraph.graph.nodes if n.op == "output"]
+    if not output_nodes:
+        return []
+
+    output_args = output_nodes[0].args[0]
+    if not isinstance(output_args, (tuple, list)):
+        output_args = [output_args]
+
+    non_differentiable: list[int] = []
+    for out_idx, arg in enumerate(output_args):
+        if not isinstance(arg, torch.fx.Node):
+            continue
+        example = arg.meta.get("example_value")
+        if isinstance(example, torch.Tensor) and not example.requires_grad:
+            non_differentiable.append(out_idx)
+
+    return non_differentiable
+
+
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
     Saves the subgraph, i.e. original callable, in the forward method. And then
@@ -589,6 +750,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._subgraph = subgraph
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
+        ctx._call_id = _next_invoke_subgraph_call_id()
         # We snapshot the dispatch keys in forward for materializing the
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -596,7 +758,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
         save_values_for_backward(ctx, operands)
 
-        with torch._C._AutoDispatchBelowAutograd():
+        with (
+            torch._C._AutoDispatchBelowAutograd(),
+            _set_invoke_subgraph_call_id(ctx._call_id),
+        ):
             out = invoke_subgraph(
                 subgraph,
                 f"fw_{identifier}",
@@ -610,6 +775,19 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                     raise AssertionError(
                         f"unexpected int output at index {idx}, not in indexes_with_symint"
                     )
+
+        # Propagate non-differentiable status from the inner subgraph.
+        # See get_non_differentiable_indices for details on why this is needed.
+        non_differentiable_indices = get_non_differentiable_indices(subgraph)
+        if non_differentiable_indices:
+            non_differentiable = [
+                out[i]
+                for i in non_differentiable_indices
+                if isinstance(out[i], torch.Tensor)
+            ]
+            if non_differentiable:
+                ctx.mark_non_differentiable(*non_differentiable)
+        ctx._non_differentiable_indices = non_differentiable_indices
 
         return out
 
@@ -627,14 +805,21 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
+        non_differentiable_indices = ctx._non_differentiable_indices
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                if idx not in output_metadata.indexes_with_symint:
+                if (
+                    idx not in output_metadata.indexes_with_symint
+                    and idx not in non_differentiable_indices
+                ):
                     raise AssertionError(
                         f"unexpected None grad_out at index {idx}, not in indexes_with_symint"
                     )
-            elif idx in output_metadata.indexes_with_no_grad:
+            elif (
+                idx in output_metadata.indexes_with_no_grad
+                or idx in non_differentiable_indices
+            ):
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
                 pass
@@ -725,10 +910,14 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
                 identifier, tangent_metadata, bw_graph
             )
+            warn_and_trace_duplicate_backward(
+                identifier, suffix, bw_graph, len(primals), filtered_grad_outs
+            )
 
-        grads = invoke_subgraph(
-            bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
-        )[: -output_metadata.num_fw_outs]
+        with _set_invoke_subgraph_call_id(ctx._call_id):
+            grads = invoke_subgraph(
+                bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
+            )[: -output_metadata.num_fw_outs]
         return None, None, None, *grads
 
 
@@ -924,6 +1113,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                     subgraph, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
 
+        # Propagate nested_region_config from the original subgraph to the
+        # re-traced graph so it's available for regional compilation.
+        if (
+            isinstance(subgraph, torch.fx.GraphModule)
+            and hasattr(subgraph, "meta")
+            and "nested_region_config" in subgraph.meta
+            and "nested_region_config" not in graph.meta
+        ):
+            graph.meta["nested_region_config"] = subgraph.meta["nested_region_config"]
+
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
@@ -981,6 +1180,36 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         "call_function", invoke_subgraph, proxy_args, {}
     )
 
+    # Propagate nested_region_config to the node metadata so the regional
+    # inductor compiler can compile backward invoke_subgraph nodes.
+    # Dynamo sets this for forward nodes during tracing.  For backward
+    # nodes created during joint tracing, the config lives on the subgraph
+    # module (set by InvokeSubgraphAutogradOp.backward) but may be wrapped
+    # by FunctionalizeCtxWrapper — unwrap to find it.
+    nested_config = None
+    orig_subgraph = (
+        subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
+    )
+    for gm in (graph, orig_subgraph):
+        if (
+            isinstance(gm, torch.fx.GraphModule)
+            and hasattr(gm, "meta")
+            and "nested_region_config" in gm.meta
+        ):
+            nested_config = gm.meta["nested_region_config"]
+            break
+
+    call_id = _current_invoke_subgraph_call_id()
+
+    if nested_config is not None or call_id is not None:
+        node = out_proxy.node
+        if "custom" not in node.meta:
+            node.meta["custom"] = {}
+        if nested_config is not None:
+            node.meta["custom"]["nested_region_config"] = nested_config
+        if call_id is not None:
+            node.meta["custom"]["call_id"] = call_id
+
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
@@ -1009,6 +1238,22 @@ def invoke_subgraph_inductor_compile(
 
     if inductor_config_patches is None:
         inductor_config_patches = {}
+
+    # Saved tensors flow across the HOP boundary into a separately-compiled bw
+    # subgraph whose IR was traced with natural (unpadded) strides. Mark every
+    # output of this subgraph as user-visible so Inductor's comprehensive_padding
+    # leaves their strides alone — otherwise the bw's assert_size_stride on the
+    # incoming saved tensor will fire (e.g. F.linear output padded 200008 -> 200064).
+    from torch._inductor.compile_fx import _recursive_record_user_visible_output_idxs
+
+    output_node = next(iter(gm.graph.find_nodes(op="output")))
+    output_node.meta["user_visible_output_idxs"] = [
+        idx
+        for idx in range(len(output_node.args[0]))
+        if isinstance(output_node.args[0][idx], torch.fx.Node)
+    ]
+    _recursive_record_user_visible_output_idxs(gm)
+
     compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
     compiled_fn_inner = compile_fn(gm, example_inputs)
     if not compiled_fn_inner._boxed_call:

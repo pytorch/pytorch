@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -28,7 +28,7 @@ set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/
   # Note: if you want to add ANY dependency to the c10 library, make sure you
   # check with the core PyTorch developers as the dependency will be
   # transitively passed on to all libraries dependent on PyTorch.
-  file(GLOB C10_SRCS
+  file(GLOB C10_SRCS CONFIGURE_DEPENDS
           *.cpp
           core/*.cpp
           core/impl/*.cpp
@@ -36,7 +36,7 @@ set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/
           macros/*.cpp
           util/*.cpp
         )
-  file(GLOB C10_HEADERS
+  file(GLOB C10_HEADERS CONFIGURE_DEPENDS
           *.h
           core/*.h
           core/impl/*.h

@@ -24,6 +24,11 @@ if HAS_GPU:
 
     from torch.library import wrap_triton
     from torch.utils._triton import has_triton
+else:
+
+    def has_triton():
+        return False
+
 
 import torch
 import torch._dynamo as torchdynamo
@@ -564,6 +569,59 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_multi_return_list_tensor_unused(self) -> None:
+        """
+        Make sure serialization handles unused List[Tensor] outputs in
+        multi-return ops. The getitem node for the unused list output is
+        removed by DCE, so the serializer must synthesize names.
+        """
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            lib.define(
+                "tensor_and_list(Tensor x) -> (Tensor, Tensor[])",
+            )
+
+            @torch.library.impl(lib, "tensor_and_list", "CPU")
+            def tensor_and_list_impl(x):
+                return x * 2, [x, x + 1]
+
+            @torch.library.impl(lib, "tensor_and_list", "Meta")
+            def tensor_and_list_meta(x):
+                return x * 2, [x, x + 1]
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    # Only use the first (Tensor) output; the List[Tensor] is unused
+                    return torch.ops.mylib.tensor_and_list(x)[0]
+
+            exported_module = export(MyModule(), (torch.ones(3),), strict=True)
+            # Simulate the scenario where DCE removes the getitem for the
+            # unused List[Tensor] output (as happens in real serialization
+            # pipelines like package_sigmoid_model).
+            exported_module.graph.eliminate_dead_code()
+            exported_module.graph_module.recompile()
+
+            serialized = ExportedProgramSerializer().serialize(exported_module)
+            node = serialized.exported_program.graph_module.graph.nodes[-1]
+            self.assertEqual(node.target, "torch.ops.mylib.tensor_and_list.default")
+            self.assertEqual(len(node.outputs), 2)
+
+            # First output is a single tensor
+            self.assertTrue(node.outputs[0].as_tensor.name != "")
+            # Second output is the unused list -- should still have tensor entries
+            self.assertTrue(len(node.outputs[1].as_tensors) > 0)
+            for t in node.outputs[1].as_tensors:
+                self.assertIn("_unused_", t.name)
+
+            # Roundtrip: deserialize and verify functional correctness
+            deserialized_ep = deserialize(serialize(exported_module))
+            inp = torch.randn(3)
+            self.assertTrue(
+                torch.allclose(
+                    exported_module.module()(inp),
+                    deserialized_ep.module()(inp),
+                )
+            )
+
     def test_rational_ranges(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -674,18 +732,31 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
+            arg_names = []
             kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
+                    arg_names.append(arg.name)
                 elif arg.kind == ArgumentKind.KEYWORD:
                     kwargs[arg.name] = arg.arg
 
             self.assertEqual(len(args), 6)
-            # Always: name, grid, output_indices and num_warps are
+            # Positional args carry kernel parameter names
+            expected_param_names = [
+                "in_ptr0",
+                "in_ptr1",
+                "out_ptr",
+                "n_elements",
+                "fval",
+                "ival",
+            ]
+            self.assertEqual(arg_names, expected_param_names)
+            # Always: name, grid, output_indices, num_warps,
+            # kernel_param_names, kernel_param_types
             # Triton version dependent: num_cpu_threads, shared_memory_bytes
-            self.assertTrue(len(kwargs) >= 4)
+            self.assertTrue(len(kwargs) >= 6)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
@@ -706,6 +777,16 @@ def forward(self, x):
                 self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
             if "shared_memory_bytes" in kwargs:
                 self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
+
+            self.assertIn("kernel_param_names", kwargs)
+            self.assertEqual(
+                kwargs["kernel_param_names"].as_strings, expected_param_names
+            )
+            self.assertIn("kernel_param_types", kwargs)
+            self.assertEqual(
+                len(kwargs["kernel_param_types"].as_strings),
+                len(expected_param_names),
+            )
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
@@ -1235,6 +1316,7 @@ class TestDeserialize(TestCase):
                 if isinstance(orig, torch.Tensor) and orig.dtype not in [
                     torch.float8_e4m3fn,
                     torch.float8_e5m2,
+                    torch.float8_e8m0fnu,
                 ]:
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
@@ -1897,8 +1979,14 @@ def forward(self, x):
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
-    def test_serialize_float8(self):
-        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
+    def test_serialize_dtypes(self):
+        for dtype in [
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
+            torch.float8_e8m0fnu,
+            torch.uint32,
+            torch.uint64,
+        ]:
 
             class MyModule(torch.nn.Module):
                 def forward(self, x):
@@ -2472,6 +2560,96 @@ def forward(self, x):
         ).shape_env
         s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
         self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestPredispatchSerialization(TestCase):
+    def test_predispatch_jvp_serialize_roundtrip(self):
+        """Test that JVP predispatch wrapper functions survive serialization round-trip."""
+        from torch._functorch.predispatch import (
+            _jvp_decrement_nesting,
+            _jvp_increment_nesting,
+        )
+
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        ep = export(JVP(), inp, strict=False)
+
+        graph_str = str(ep.graph)
+        self.assertIn("_jvp_increment_nesting", graph_str)
+        self.assertIn("_jvp_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_jvp_increment_nesting", loaded_graph_str)
+        self.assertIn("_jvp_decrement_nesting", loaded_graph_str)
+
+        # Verify the deserialized targets are the actual functions
+        for node in loaded_ep.graph.nodes:
+            if node.op == "call_function":
+                if "increment" in node.name:
+                    self.assertIs(node.target, _jvp_increment_nesting)
+                elif "decrement" in node.name:
+                    self.assertIs(node.target, _jvp_decrement_nesting)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out[0], actual_out[0]))
+        self.assertTrue(torch.allclose(exp_out[1], actual_out[1]))
+
+    def test_predispatch_vmap_serialize_roundtrip(self):
+        """Test that vmap predispatch wrapper functions survive serialization round-trip."""
+        from torch.export._trace import _export
+
+        class Vmap(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (x * y + 1).sum(dim=0)  # noqa: E731
+                return torch.vmap(f)(x, y).sum(dim=0)
+
+        inp = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
+
+        ep = _export(Vmap(), inp, pre_dispatch=True)
+
+        # Verify predispatch vmap nodes are in the graph
+        graph_str = str(ep.graph)
+        self.assertIn("_vmap_increment_nesting", graph_str)
+        self.assertIn("_vmap_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        # Verify predispatch nodes survive round-trip
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_vmap_increment_nesting", loaded_graph_str)
+        self.assertIn("_vmap_decrement_nesting", loaded_graph_str)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out, actual_out))
 
 
 if __name__ == "__main__":

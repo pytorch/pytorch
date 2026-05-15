@@ -113,7 +113,7 @@ std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
       "'");
 
   auto storage = THPStorage_Unpack(untyped_storage_obj);
-  return std::make_tuple(storage, scalar_type, is_typed_storage);
+  return std::make_tuple(std::move(storage), scalar_type, is_typed_storage);
 }
 
 at::Storage createStorage(PyObject* obj) {

@@ -1791,6 +1791,226 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.recv([recv_tensor], 0, 0).wait()
             self.assertEqual(send_tensor, recv_tensor)
 
+    @requires_gloo()
+    def test_alltoall_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        # Check input tensor list size does not match world size
+        with self.assertRaisesRegex(
+            RuntimeError, "input tensor list size.*does not match world size"
+        ):
+            pg.alltoall([t1] * self.world_size, [t1] * (self.world_size - 1))
+
+        # Check output tensor list size does not match world size
+        with self.assertRaisesRegex(
+            RuntimeError, "output tensor list size.*does not match world size"
+        ):
+            pg.alltoall([t1] * (self.world_size - 1), [t1] * self.world_size)
+
+        # Check invalid tensor type in inputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
+            pg.alltoall([t1] * self.world_size, [t1, t2] + [t1] * (self.world_size - 2))
+
+        # Check invalid tensor size in inputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
+            pg.alltoall([t1] * self.world_size, [t1, t3] + [t1] * (self.world_size - 2))
+
+        # Check invalid tensor type in outputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
+            pg.alltoall([t1, t2] + [t1] * (self.world_size - 2), [t1] * self.world_size)
+
+        # Check invalid tensor size in outputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
+            pg.alltoall([t1, t3] + [t1] * (self.world_size - 2), [t1] * self.world_size)
+
+        # Check input and output tensors must have the same type
+        with self.assertRaisesRegex(
+            RuntimeError, "input and output tensors must have the same type"
+        ):
+            pg.alltoall([t2] * self.world_size, [t1] * self.world_size)
+
+        # Check input and output tensors must have the same size
+        with self.assertRaisesRegex(
+            RuntimeError, "input and output tensors must have the same size"
+        ):
+            pg.alltoall([t3] * self.world_size, [t1] * self.world_size)
+
+    def _test_alltoall_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Preallocate tensors for input/output
+        # Each rank sends tensor with value equal to rank to each other rank
+        input_tensors = [fn(torch.tensor([self.rank])) for _ in range(self.world_size)]
+        output_tensors = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+
+        # Perform all-to-all
+        fut = pg.alltoall(output_tensors, input_tensors).get_future()
+        fut.wait()
+
+        # After alltoall, rank i should have received tensor with value j from rank j
+        # in output_tensors[j]
+        for i in range(self.world_size):
+            self.assertEqual(torch.tensor([i]), output_tensors[i])
+
+    @requires_gloo()
+    def test_alltoall_basics(self):
+        self._test_alltoall_basics(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_alltoall_basics_cuda(self):
+        self._test_alltoall_basics(lambda t: t.clone().cuda())
+
+    def _test_alltoall_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(threads=8)
+        )
+
+        outputs = [
+            [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+            for _ in range(len(inputs))
+        ]
+
+        future_handles = []
+        for i in range(len(inputs)):
+            input_tensors = [fn(inputs[i][j]) for j in range(self.world_size)]
+            fut = pg.alltoall(outputs[i], input_tensors).get_future()
+            future_handles.append(fut)
+
+        for i, future_handle in enumerate(future_handles):
+            future_handle.wait()
+
+            # Verify correctness: output_tensors[j] should contain the value
+            # that rank j sent to this rank (self.rank) at position self.rank in rank j's input.
+            # All ranks construct inputs[i] = [tensor([i * world_size + 0]), ..., tensor([i * world_size + world_size-1])]
+            # So rank j sends inputs[i][self.rank] = tensor([i * world_size + self.rank]) to this rank.
+            # This rank receives that in output_tensors[j].
+            for j in range(self.world_size):
+                expected_value = torch.tensor([i * self.world_size + self.rank])
+                self.assertEqual(
+                    expected_value,
+                    outputs[i][j],
+                    msg=(f"Mismatch in iteration {i:d} from rank {j:d}"),
+                )
+
+    @requires_gloo()
+    def test_alltoall_stress(self):
+        inputs = [
+            [torch.tensor([i * self.world_size + j]) for j in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_alltoall_stress(inputs, lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm
+    def test_alltoall_stress_cuda(self):
+        inputs = [
+            [torch.tensor([i * self.world_size + j]) for j in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_alltoall_stress(inputs, lambda t: t.clone().cuda())
+
+    def _test_alltoall_data_routing(self, fn):
+        """
+        Test that data routing is correct: rank i sends inputTensors[j]
+        to rank j
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Each rank sends unique values to every other rank
+        # Rank i sends tensor with value (i * 100 + j) to rank j
+        input_tensors = []
+        for j in range(self.world_size):
+            value = self.rank * 100 + j
+            input_tensors.append(fn(torch.tensor([value], dtype=torch.float32)))
+
+        output_tensors = [
+            fn(torch.tensor([-1], dtype=torch.float32)) for _ in range(self.world_size)
+        ]
+
+        # Perform all-to-all
+        fut = pg.alltoall(output_tensors, input_tensors).get_future()
+        fut.wait()
+
+        # Verify: rank i should receive tensor with value (j * 100 + i)
+        # from rank j in output_tensors[j]
+        for j in range(self.world_size):
+            expected_value = j * 100 + self.rank
+            actual_value = output_tensors[j].item()
+            self.assertEqual(
+                expected_value,
+                actual_value,
+                msg=(
+                    f"Rank {self.rank}: output_tensors[{j}] = "
+                    f"{actual_value}, expected {expected_value}"
+                ),
+            )
+
+    @requires_gloo()
+    def test_alltoall_data_routing(self):
+        self._test_alltoall_data_routing(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_alltoall_data_routing_cuda(self):
+        self._test_alltoall_data_routing(lambda t: t.clone().cuda())
+
+    def _test_alltoall_multidim(self, fn):
+        """Test alltoall with multi-dimensional tensors."""
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Each rank sends a 3x4 tensor with unique values to each destination
+        # Value pattern: rank * 1000 + dest * 100 + row * 10 + col
+        input_tensors = []
+        for dest in range(self.world_size):
+            t = torch.zeros(3, 4, dtype=torch.float32)
+            for row in range(3):
+                for col in range(4):
+                    t[row, col] = self.rank * 1000 + dest * 100 + row * 10 + col
+            input_tensors.append(fn(t))
+
+        output_tensors = [
+            fn(torch.zeros(3, 4, dtype=torch.float32)) for _ in range(self.world_size)
+        ]
+
+        fut = pg.alltoall(output_tensors, input_tensors).get_future()
+        fut.wait()
+
+        # Verify: output_tensors[src] should contain what rank src sent to us
+        for src in range(self.world_size):
+            expected = torch.zeros(3, 4, dtype=torch.float32)
+            for row in range(3):
+                for col in range(4):
+                    expected[row, col] = src * 1000 + self.rank * 100 + row * 10 + col
+            self.assertEqual(expected, output_tensors[src].cpu())
+
+    @requires_gloo()
+    def test_alltoall_multidim(self):
+        self._test_alltoall_multidim(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_alltoall_multidim_cuda(self):
+        self._test_alltoall_multidim(lambda t: t.clone().cuda())
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -2250,7 +2470,9 @@ class DistributedDataParallelTest(
             self.assertEqual(p_withload, p_withoutload)
             self.assertEqual(p_non_ddp_withload, p_withoutload)
 
-    def _test_sparse_gradients(self, gradient_as_bucket_view=False):
+    def _test_sparse_gradients(
+        self, gradient_as_bucket_view=False, batched_grad_copy=False
+    ):
         process_group = self._get_process_group()
 
         # Ensure initialized weights and inputs are identical across processes
@@ -2261,6 +2483,7 @@ class DistributedDataParallelTest(
             copy.deepcopy(vanilla_model),
             process_group=process_group,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            batched_grad_copy=batched_grad_copy,
         )
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
@@ -2272,6 +2495,61 @@ class DistributedDataParallelTest(
     @requires_gloo()
     def test_sparse_gradients_grad_is_view(self):
         self._test_sparse_gradients(gradient_as_bucket_view=True)
+
+    @requires_gloo()
+    def test_sparse_gradients_batched_grad_copy(self):
+        self._test_sparse_gradients(batched_grad_copy=True)
+
+    @requires_gloo()
+    def test_sparse_gradients_grad_is_view_batched_grad_copy(self):
+        self._test_sparse_gradients(
+            gradient_as_bucket_view=True, batched_grad_copy=True
+        )
+
+    @requires_gloo()
+    def test_static_graph_batched_grad_copy(self):
+        """Test batched_grad_copy with static_graph (delay_all_reduce path)."""
+        process_group = self._get_process_group()
+        torch.manual_seed(42)
+
+        vanilla_model = nn.Linear(2, 4, bias=False).double()
+        model_bat = copy.deepcopy(vanilla_model)
+
+        ddp_bat = DistributedDataParallel(
+            model_bat,
+            process_group=process_group,
+            static_graph=True,
+            batched_grad_copy=True,
+        )
+
+        opt_van = torch.optim.SGD(vanilla_model.parameters(), lr=0.01)
+        opt_bat = torch.optim.SGD(ddp_bat.parameters(), lr=0.01)
+
+        mult = 2
+        # Run multiple iterations to cover both static_graph first iteration
+        # (delay_all_reduce path) and subsequent iterations.
+        for _ in range(3):
+            batch_size = mult * self.world_size
+            input = torch.rand(batch_size, 2, dtype=torch.double)
+
+            # Vanilla model on full batch (mean normalizes by batch size,
+            # matching DDP's allreduce averaging across ranks)
+            opt_van.zero_grad(set_to_none=True)
+            vanilla_model(input).mean().backward()
+
+            # DDP model on partial batch — allreduce averages gradients
+            partial_input = input.split(mult)[self.rank]
+            opt_bat.zero_grad(set_to_none=True)
+            ddp_bat(partial_input).mean().backward()
+
+            for p_van, p_bat in zip(vanilla_model.parameters(), ddp_bat.parameters()):
+                self.assertEqual(p_van.grad, p_bat.grad)
+
+            opt_van.step()
+            opt_bat.step()
+
+        for p_van, p_bat in zip(vanilla_model.parameters(), ddp_bat.parameters()):
+            self.assertEqual(p_van, p_bat)
 
     @requires_gloo()
     def test_ddp_comm_hook_future_passing_cpu(self):
@@ -2630,6 +2908,287 @@ class ReducerTest(TestCase):
             output.backward()
             optimizer.step()
 
+    def _create_reducer(
+        self,
+        model,
+        find_unused_parameters=False,
+        gradient_as_bucket_view=False,
+        batched_grad_copy=False,
+    ):
+        parameters = list(model.parameters())
+        group_by_dtype = groupby(
+            range(len(parameters)), key=lambda i: parameters[i].dtype
+        )
+        buckets = [list(indices) for _, indices in group_by_dtype]
+        return dist.Reducer(
+            parameters,
+            buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in range(len(buckets))],
+            self.process_group,
+            find_unused_parameters=find_unused_parameters,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+            batched_grad_copy=batched_grad_copy,
+        )
+
+    def _run_forward_backward(self, model, reducer, batch_size=10):
+        """Run one forward+backward pass, return loss."""
+        loss_fn = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+        output = loss_fn(model(input), target)
+        reducer.prepare_for_backward(output)
+        output.backward()
+        return output
+
+    @requires_gloo()
+    def test_batched_grad_copy_basic(self):
+        """Verify batched_grad_copy uses _foreach_copy_ and produces grads."""
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer(model, batched_grad_copy=True)
+        reducer.prepare_for_forward()
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof:
+            self._run_forward_backward(model, reducer)
+
+        events = [e.key for e in prof.key_averages()]
+        self.assertIn("aten::_foreach_copy_", events)
+        # mul_out is the per-param copy+div — should NOT appear when batched
+        self.assertNotIn("torch::distributed::reducer::mul_out", events)
+
+        for p in model.parameters():
+            if p.grad is not None:
+                self.assertFalse(torch.all(p.grad == 0))
+
+    @requires_gloo()
+    def test_batched_grad_copy_matches_default(self):
+        """Verify grads are numerically identical with and without batching."""
+        torch.manual_seed(42)
+        model_ref = self._create_mixed_precision_model()
+        model_bat = copy.deepcopy(model_ref)
+
+        input = torch.rand([10, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+        loss_fn = nn.CrossEntropyLoss()
+
+        # Reference: no batching
+        reducer_ref = self._create_reducer(model_ref)
+        reducer_ref.prepare_for_forward()
+        out_ref = loss_fn(model_ref(input), target)
+        reducer_ref.prepare_for_backward(out_ref)
+        out_ref.backward()
+
+        # Batched
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+        reducer_bat.prepare_for_forward()
+        out_bat = loss_fn(model_bat(input), target)
+        reducer_bat.prepare_for_backward(out_bat)
+        out_bat.backward()
+
+        for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+            self.assertEqual(p_ref.grad, p_bat.grad)
+
+    @requires_gloo()
+    def test_batched_grad_copy_with_set_to_none(self):
+        """Multi-iteration with set_to_none=True — the primary use case."""
+        torch.manual_seed(42)
+        model_ref = self._create_mixed_precision_model()
+        model_bat = copy.deepcopy(model_ref)
+
+        opt_ref = torch.optim.SGD(model_ref.parameters(), lr=0.01)
+        opt_bat = torch.optim.SGD(model_bat.parameters(), lr=0.01)
+
+        reducer_ref = self._create_reducer(model_ref)
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+        loss_fn = nn.CrossEntropyLoss()
+
+        for i in range(3):
+            input = torch.rand([10, 2], dtype=torch.double)
+            target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+
+            # set_to_none=True is the default
+            opt_ref.zero_grad(set_to_none=True)
+            opt_bat.zero_grad(set_to_none=True)
+
+            reducer_ref.prepare_for_forward()
+            out_ref = loss_fn(model_ref(input), target)
+            reducer_ref.prepare_for_backward(out_ref)
+            out_ref.backward()
+
+            reducer_bat.prepare_for_forward()
+            out_bat = loss_fn(model_bat(input), target)
+            reducer_bat.prepare_for_backward(out_bat)
+            out_bat.backward()
+
+            for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+                self.assertEqual(p_ref.grad, p_bat.grad)
+
+            opt_ref.step()
+            opt_bat.step()
+
+        # Params should be identical after training
+        for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+            self.assertEqual(p_ref, p_bat)
+
+    @requires_gloo()
+    def test_batched_grad_copy_with_bucket_view(self):
+        """Test batched_grad_copy + gradient_as_bucket_view (alias path)."""
+        torch.manual_seed(42)
+        model_ref = self._create_mixed_precision_model()
+        model_bat = copy.deepcopy(model_ref)
+
+        opt_ref = torch.optim.SGD(model_ref.parameters(), lr=0.01)
+        opt_bat = torch.optim.SGD(model_bat.parameters(), lr=0.01)
+
+        reducer_ref = self._create_reducer(model_ref, gradient_as_bucket_view=True)
+        reducer_bat = self._create_reducer(
+            model_bat,
+            gradient_as_bucket_view=True,
+            batched_grad_copy=True,
+        )
+        loss_fn = nn.CrossEntropyLoss()
+
+        for i in range(3):
+            input = torch.rand([10, 2], dtype=torch.double)
+            target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+
+            # First iteration: grads undefined (set_to_none default).
+            # Subsequent iterations: grads alias bucket views.
+            opt_ref.zero_grad(set_to_none=True)
+            opt_bat.zero_grad(set_to_none=True)
+
+            reducer_ref.prepare_for_forward()
+            out_ref = loss_fn(model_ref(input), target)
+            reducer_ref.prepare_for_backward(out_ref)
+            out_ref.backward()
+
+            reducer_bat.prepare_for_forward()
+            out_bat = loss_fn(model_bat(input), target)
+            reducer_bat.prepare_for_backward(out_bat)
+            out_bat.backward()
+
+            for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+                self.assertEqual(p_ref.grad, p_bat.grad)
+
+            opt_ref.step()
+            opt_bat.step()
+
+        for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+            self.assertEqual(p_ref, p_bat)
+
+    @requires_gloo()
+    def test_batched_grad_copy_with_unused_parameters(self):
+        """Test batched_grad_copy + find_unused_parameters with fc3 unused."""
+        torch.manual_seed(42)
+        model_ref = self._create_mixed_precision_model()
+        model_bat = copy.deepcopy(model_ref)
+
+        reducer_ref = self._create_reducer(model_ref, find_unused_parameters=True)
+        reducer_bat = self._create_reducer(
+            model_bat, find_unused_parameters=True, batched_grad_copy=True
+        )
+        loss_fn = nn.CrossEntropyLoss()
+
+        input = torch.rand([10, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+
+        reducer_ref.prepare_for_forward()
+        out_ref = loss_fn(model_ref(input, use_fc3=False), target)
+        reducer_ref.prepare_for_backward(out_ref)
+        out_ref.backward()
+
+        reducer_bat.prepare_for_forward()
+        out_bat = loss_fn(model_bat(input, use_fc3=False), target)
+        reducer_bat.prepare_for_backward(out_bat)
+        out_bat.backward()
+
+        # fc3 is unused — its grad should remain None in both cases
+        self.assertIsNone(model_ref.fc3.weight.grad)
+        self.assertIsNone(model_bat.fc3.weight.grad)
+
+        # Used parameters should have identical grads
+        for (name_ref, p_ref), (name_bat, p_bat) in zip(
+            model_ref.named_parameters(), model_bat.named_parameters()
+        ):
+            if p_ref.grad is not None:
+                self.assertEqual(p_ref.grad, p_bat.grad, msg=name_ref)
+
+    @requires_gloo()
+    def test_batched_grad_copy_with_create_graph(self):
+        """batched_grad_copy falls back to non-batched path with create_graph=True."""
+        torch.manual_seed(42)
+
+        # Run with batched_grad_copy=False (reference)
+        model_ref = self._create_mixed_precision_model()
+        reducer_ref = self._create_reducer(model_ref)
+        loss_fn = nn.CrossEntropyLoss()
+        input = torch.rand([10, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+
+        reducer_ref.prepare_for_forward()
+        out_ref = loss_fn(model_ref(input), target)
+        reducer_ref.prepare_for_backward(out_ref)
+        ref_error = None
+        try:
+            out_ref.backward(create_graph=True)
+        except RuntimeError as e:
+            ref_error = str(e)
+
+        # Run with batched_grad_copy=True — should fall back to same path
+        torch.manual_seed(42)
+        model_bat = self._create_mixed_precision_model()
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+
+        reducer_bat.prepare_for_forward()
+        out_bat = loss_fn(model_bat(input), target)
+        reducer_bat.prepare_for_backward(out_bat)
+        bat_error = None
+        try:
+            out_bat.backward(create_graph=True)
+        except RuntimeError as e:
+            bat_error = str(e)
+
+        # Both should behave identically (either both succeed or both fail)
+        self.assertEqual(ref_error, bat_error)
+
+    @requires_gloo()
+    def test_batched_grad_copy_with_comm_hook(self):
+        """batched_grad_copy works correctly when a comm_hook is registered."""
+        torch.manual_seed(42)
+        model_ref = self._create_mixed_precision_model()
+        model_bat = copy.deepcopy(model_ref)
+
+        reducer_ref = self._create_reducer(model_ref)
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+
+        # A simple comm hook that just allreduces and divides by world_size.
+        def simple_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.buffer() / state)
+            return fut
+
+        world_size = 1  # single-process test
+        dist._register_comm_hook(reducer_ref, world_size, simple_hook)
+        dist._register_comm_hook(reducer_bat, world_size, simple_hook)
+
+        loss_fn = nn.CrossEntropyLoss()
+        input = torch.rand([10, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(10)])
+
+        reducer_ref.prepare_for_forward()
+        out_ref = loss_fn(model_ref(input), target)
+        reducer_ref.prepare_for_backward(out_ref)
+        out_ref.backward()
+
+        reducer_bat.prepare_for_forward()
+        out_bat = loss_fn(model_bat(input), target)
+        reducer_bat.prepare_for_backward(out_bat)
+        out_bat.backward()
+
+        for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
+            self.assertEqual(p_ref.grad, p_bat.grad)
+
 
 @skip_if_win32()
 class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
@@ -2951,6 +3510,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @requires_gloo()
     def test_new_group_local_sync_duplicate_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_ordered(self):
+        self._test_new_group_ordered(backend="gloo")
 
 
 if __name__ == "__main__":

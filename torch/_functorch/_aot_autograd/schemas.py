@@ -15,7 +15,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._library.opaque_object import OpaqueType
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -186,14 +186,18 @@ class MemoryFormatMeta:
     memory_format: torch.memory_format | None = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> MemoryFormatMeta | None:
+    def from_tensor(
+        t: torch.Tensor, force_use_memory_format: bool = False
+    ) -> MemoryFormatMeta | None:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
+        # 3. force_use_memory_format=True (e.g., local_map where shapes change)
         use_memory_format: bool = (
-            not torch._functorch.config.guess_tangent_strides_as_outputs
+            force_use_memory_format
+            or not torch._functorch.config.guess_tangent_strides_as_outputs
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
@@ -215,6 +219,11 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+
+
+@dataclass
+class OpaqueMeta:
+    pass
 
 
 @dataclass
@@ -247,7 +256,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta | OpaqueMeta]
     outer_size: Iterable[IntLikeType | None]
     outer_stride: Iterable[IntLikeType | None]
     meta: Any
@@ -264,7 +273,7 @@ class SubclassCreationMeta:
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType],
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -280,13 +289,12 @@ class SubclassCreationMeta:
             has_symbolic = any(placeholders)
 
             if has_symbolic:
-                start = curr_start_idx
                 end = start_idx + sum(placeholders)
-                it_args = iter(all_args[start:end])
+                it_args = iter(all_args[start_idx:end])
                 it_placeholders = iter(placeholders)
                 return pytree.tree_map_only(
                     lambda _: next(it_placeholders), lambda _: next(it_args), outer
-                ), start + len(placeholders)
+                ), end
             else:
                 return outer, start_idx
 
@@ -296,16 +304,25 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType],
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors = {}
+        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
+            if isinstance(creation_meta, OpaqueMeta):
+                opaque = all_args[curr_start_idx]
+                if not isinstance(opaque, OpaqueBase):
+                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                inner_tensors[attr] = opaque
+                curr_start_idx += 1
+                continue
             if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
+                if not isinstance(subclass, Tensor):
+                    raise AssertionError("Tensor expected")
                 curr_start_idx += 1
             else:
                 subclass = creation_meta.creation_fn(
@@ -365,7 +382,7 @@ class SubclassCreationMeta:
         # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
         # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
         # is designed to safely ignore this dummy value.
-        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
 
@@ -442,9 +459,6 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
-    # TODO: we should kill this
-    # (need to default it to not break internal)
-    is_train: bool = False
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -479,6 +493,11 @@ class ViewAndMutationMeta:
 
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
+
+    # Input indices that held AsyncCollectiveTensors at compile time.
+    # Used to emit direct trigger_wait() calls at runtime instead of
+    # scanning every arg on every graph invocation.
+    act_input_indices: list[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -1073,6 +1092,30 @@ class AOTAutogradCacheInfo:
 
 
 @dataclass
+class CacheableAOTConfig:
+    """
+    Serializable subset of AOTConfig used by cache keys and cached entries.
+    """
+
+    num_params_buffers: int
+    aot_id: int
+    keep_inference_input_mutations: bool
+    is_export: bool = False
+    no_tangents: bool = False
+    dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
+    enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+    precompile_backend_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.pre_dispatch and not self.is_export:
+            raise AssertionError("Can only have pre_dispatch IR for export.")
+
+
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1111,6 +1154,21 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+
+    def to_cacheable(self) -> CacheableAOTConfig:
+        return CacheableAOTConfig(
+            num_params_buffers=self.num_params_buffers,
+            aot_id=self.aot_id,
+            keep_inference_input_mutations=self.keep_inference_input_mutations,
+            is_export=self.is_export,
+            no_tangents=self.no_tangents,
+            dynamic_shapes=self.dynamic_shapes,
+            aot_autograd_arg_pos_to_source=self.aot_autograd_arg_pos_to_source,
+            static_input_indices=self.static_input_indices,
+            enable_log=self.enable_log,
+            pre_dispatch=self.pre_dispatch,
+            precompile_backend_id=self.precompile_backend_id,
+        )
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:
@@ -1194,7 +1252,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
 
 
 class CompilerWrapper:
@@ -1204,7 +1262,7 @@ class CompilerWrapper:
     us factor these into compositional stages so we can handle each transformation incrementally
     instead of having to do it all at once.
 
-    Since there is a calling convention change, there are two parts to the wrpaper:
+    Since there is a calling convention change, there are two parts to the wrapper:
 
     1. The prologue, which is about compile-time behavior: given this original function, what
        is the new function with modified calling convention that we should trace with AOTAutograd

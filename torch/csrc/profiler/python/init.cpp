@@ -242,6 +242,10 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 
     // parse through kwargs if they exist
     if (self->keyword_values != nullptr && profiler_need_input) {
+      const auto kw_size = PyDict_Size(self->keyword_values);
+      if (kw_size > 0) {
+        kwargs.reserve(static_cast<size_t>(kw_size));
+      }
       Py_ssize_t pos = 0;
       PyObject *key = nullptr, *value = nullptr;
       while (PyDict_Next(self->keyword_values, &pos, &key, &value)) {
@@ -347,7 +351,8 @@ void initPythonBindings(PyObject* module) {
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
           "KINETO_PRIVATEUSE1_FALLBACK",
-          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK)
+      .value("KINETO_PRIVATEUSE1", ProfilerState::KINETO_PRIVATEUSE1);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
@@ -670,9 +675,9 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
-  TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
-  PyModule_AddObject(
-      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
+  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
+    throw python_error();
+  }
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,

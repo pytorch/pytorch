@@ -1,10 +1,11 @@
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, cast, NamedTuple
+from typing import Any, cast, Literal, NamedTuple
 
 import torch
 import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
@@ -32,7 +33,7 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: list[int]
 
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define(
     """
@@ -77,6 +78,36 @@ class ProcessGroupAllocMixin:
         return torch.empty(*size, dtype=dtype, device=device)
 
 
+class SymmMemAllocMixin:
+    def __init__(
+        self,
+        group: dist.ProcessGroup,
+        backend: Literal["NCCL"] = "NCCL",
+        *args: Any,
+        **kwargs: Any,
+    ):
+        self._group = group
+        symm_mem.set_backend(backend)
+        # Force initialization of communicator; otherwise, the rendezvous may
+        # see empty communicator.
+        # TODO: Remove this, maybe by warning user to perform eager dist init.
+        # For now, it is okay since it is just a one-time cost at init.
+        dist.barrier(group=group)
+
+    def allocate(
+        self,
+        size: Sequence[int | torch.SymInt],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        # Leverage MemPool to reuse the symmetric buffer, avoiding allocation
+        # and rendezvous overhead
+        mempool = symm_mem.get_mem_pool(device)
+        with torch.cuda.use_mem_pool(mempool):
+            return torch.empty(size, dtype=dtype, device=device)
+
+
 class DefaultAllGather(DefaultAllocMixin, AllGather):
     def __call__(
         self,
@@ -104,6 +135,35 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None:
+        return dist.all_gather_into_tensor(
+            output_tensor,
+            input_tensor,
+            group=group,
+            async_op=async_op,
+        )
+
+
+class SymmMemAllGather(SymmMemAllocMixin, AllGather):
+    def __init__(
+        self,
+        group: dist.ProcessGroup,
+        backend: Literal["NCCL"] = "NCCL",
+    ) -> None:
+        super().__init__(group, backend)
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        # We are doing inplace all-gather, so we need to rendezvous the output tensor only
+        symm_mem.rendezvous(output_tensor, group=group.group_name)
+        # Calling regular all-gather would already cause libraries like NCCL to
+        # use its optimized all-gather implementation for symmetric memory:
+        # - Copy Engine All-Gather (when zero-CTA policy is enabled)
+        # - Symmetric Kernel All-Gather (when zero-CTA policy is not enabled)
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
@@ -142,6 +202,35 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
         op: _ReduceOp,
         async_op: bool = False,
     ) -> dist.Work:
+        return dist.reduce_scatter_tensor(
+            output=output_tensor,
+            input=input_tensor,
+            group=group,
+            op=op,
+            async_op=async_op,
+        )
+
+
+class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
+    def __init__(
+        self,
+        group: dist.ProcessGroup,
+        backend: Literal["NCCL"] = "NCCL",
+    ) -> None:
+        super().__init__(group, backend)
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        symm_mem.rendezvous(input_tensor, group=group.group_name)
+        symm_mem.rendezvous(output_tensor, group=group.group_name)
+        # Calling regular reduce-scatter would already cause libraries like NCCL to
+        # use its optimized reduce-scatter implementation for symmetric memory
         return dist.reduce_scatter_tensor(
             output=output_tensor,
             input=input_tensor,
@@ -365,8 +454,6 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        # NOTE: Under compile, make sure we always recreate all_gather_outputs
-        # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels,
             all_gather_input_dtypes,
@@ -571,6 +658,14 @@ def foreach_reduce(
                     group=all_reduce_group,
                     op=all_reduce_op,
                 )
+                # Keep refs to the reduce-dtype AR buffer + completion
+                # event so FSDPParamGroup._all_reduce_state can hold them
+                # across layers. This keeps the buffer off the caching
+                # allocator's free list; otherwise the next layer's
+                # reduce-scatter can reuse the same physical block while
+                # this layer's AR is still in flight, causing cross-layer
+                # gradient aliasing under slow AR. See PR #140044,
+                # regression test PR #180900.
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -587,6 +682,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
+        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
+        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
+        # the old reduce-dtype buffer's lifetime: the rebind orders the
+        # cast before the free-event on AR stream, but the freed block
+        # lands on the caching allocator's free list and the next layer's
+        # RS on RS stream can reuse it without waiting for this layer's
+        # AR to finish. The reduce-dtype buffer is held across layers by
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent
+        # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -603,10 +707,28 @@ def foreach_reduce(
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
-                # Only overlap the D2H copy (copying to pinned memory) if not
-                # accumulating gradients since the CPU add kernel depends on
-                # the copy result and we cannot run the add as a callback
-                non_blocking = fsdp_param.pin_memory and not to_accumulate_grad
+                # Only overlap the D2H copy (copying to pinned memory) when no
+                # in-backward CPU consumer of the grad exists. Two such
+                # consumers suppress the overlap:
+                #   - Accumulating grads: the CPU add kernel depends on the
+                #     copy result and we cannot run the add as a callback.
+                #   - Post-accumulate-grad hooks: user code (e.g.
+                #     optimizer-in-backward) reads ``param.grad`` on CPU
+                #     synchronously. With ``non_blocking=True`` the hook would
+                #     observe in-flight pinned memory — silently wrong
+                #     optimizer updates.
+                has_post_acc_grad_hook = bool(
+                    getattr(
+                        fsdp_param.sharded_param,
+                        "_post_accumulate_grad_hooks",
+                        None,
+                    )
+                )
+                non_blocking = (
+                    fsdp_param.pin_memory
+                    and not to_accumulate_grad
+                    and not has_post_acc_grad_hook
+                )
                 # Since the GPU sharded gradient is allocated in the RS stream,
                 # we can free it here by not keeping a ref without waiting for
                 # the D2H copy since future RS-stream ops run after the copy
@@ -722,7 +844,7 @@ def _get_gradient_divide_factors(
         if reduce_scatter_group is not None and factor == reduce_scatter_group.size():
             reduce_scatter_op = ReduceOp.AVG
         else:
-            reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
+            reduce_scatter_op = ReduceOp.PREMUL_SUM(1 / factor)
         return None, None, reduce_scatter_op, ReduceOp.SUM
 
     if factor is None:

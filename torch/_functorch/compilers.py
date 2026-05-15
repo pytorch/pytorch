@@ -334,7 +334,8 @@ with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
-    from foo import FxModule  # pyrefly: ignore[missing-import]
+    # pyrefly: ignore[missing-import, missing-module-attribute]
+    from foo import FxModule
 
     FxModule().cuda()(*inps)
 
@@ -446,8 +447,8 @@ def _save_fx_default(
         if dump_example_input:
             torch.save(
                 args,
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
-            )  # noqa: E501
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",
+            )
 
     def graph_saver_forward(
         gm: fx.GraphModule, example_inputs: list[torch.Tensor]

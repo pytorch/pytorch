@@ -94,6 +94,14 @@ static_assert(
 #define NCCL_HAS_COMM_SHRINK
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+#define NCCL_HAS_COMM_OFFLOAD
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+#define NCCL_HAS_MAX_P2P_PEERS
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
@@ -376,6 +384,13 @@ class NCCLComm {
 
   std::string repr() const;
 
+  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
+  void suspend();
+
+  void resume();
+
+  std::unordered_map<std::string, uint64_t> getMemoryStats();
+
   friend class ProcessGroupNCCL;
 
  protected:
@@ -398,8 +413,9 @@ class NCCLComm {
   // Device index for which the NCCL comm is created
   at::DeviceIndex deviceIndex_{-1};
 #ifdef NCCL_HAS_COMM_REGISTER
-  // Stores handlers for tensors registered by NCCL
-  std::unordered_map<void*, void*> registeredSegmentHandles_;
+  // Stores handlers for tensors registered by NCCL.
+  // Maps ptr -> (handle, is_window_registered).
+  std::unordered_map<void*, std::pair<void*, bool>> registeredSegmentHandles_;
 #endif // NCCL_HAS_COMM_REGISTER
 
  private:

@@ -432,7 +432,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
   auto total_weight = at::empty({0}, self.options());
   at::native::nll_loss2d_forward_out_cpu(
       self, target, weight_opt, reduction, ignore_index, output, total_weight);
-  return std::make_tuple(output, total_weight);
+  return std::make_tuple(std::move(output), std::move(total_weight));
 }
 
 Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,

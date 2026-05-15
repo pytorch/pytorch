@@ -16,6 +16,7 @@
 #include <iostream>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -1051,6 +1052,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void setEnableNanCheck(bool enableNanCheck);
 
+  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
+  void suspend() override;
+
+  void resume() override;
+
+  std::unordered_map<std::string, uint64_t> getMemoryStats() override;
+
  protected:
   uint64_t getWatchdogHeartbt() const;
 
@@ -1340,6 +1348,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // multiple GPUs per process, this part may need to redesigned.
   // TODO: we probably need a separate map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
+
+  // Device used when this PG registered its host ncclComm with
+  // NCCLDevCommManager (for symm_mem). Set on first successful registration.
+  // The destructor uses this to unregister from the correct singleton manager,
+  // since at::cuda::current_device() at destruction time may not match the
+  // device used at registration.
+  std::optional<at::Device> symmMemRegisteredDevice_;
 
   // The NCCL communicators currently in process of being initialized.
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>>

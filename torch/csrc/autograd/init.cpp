@@ -293,6 +293,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "linked_correlation_id",
           [](const KinetoEvent& e) { return e.linkedCorrelationId(); })
+      .def("flow_id", [](const KinetoEvent& e) { return e.flowId(); })
+      .def("flow_type", [](const KinetoEvent& e) { return e.flowType(); })
+      .def("flow_start", [](const KinetoEvent& e) { return e.flowStart(); })
+      .def("external_id", [](const KinetoEvent& e) { return e.externalId(); })
       // compute flops
       .def("flops", [](const KinetoEvent& e) { return e.flops(); })
       // Whether this is async event or not
@@ -307,14 +311,58 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 e.activityType() ==
                 (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
           })
+      .def(
+          "is_python_function",
+          [](const KinetoEvent& e) { return e.isPythonFunction(); })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden
       .def(
           "is_hidden_event",
           [](const KinetoEvent& e) { return e.isHiddenEvent(); })
       // KinetoEvent metadata
-      .def("metadata_json", [](const KinetoEvent& e) {
-        return e.metadataJson();
+      .def(
+          "metadata_json",
+          [](const KinetoEvent& e) { return e.metadataJson(); })
+      .def(
+          "activity_type",
+          [](const KinetoEvent& e) {
+            return libkineto::toString(
+                static_cast<libkineto::ActivityType>(e.activityType()));
+          })
+      .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      // Like shapes/strides, but also contains TensorList input shapes.
+      .def(
+          "structured_input_shapes",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputShapes()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def(
+          "structured_input_strides",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputStrides()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def("python_id", [](const KinetoEvent& e) { return e.pythonId(); })
+      .def(
+          "python_parent_id",
+          [](const KinetoEvent& e) { return e.pythonParentId(); })
+      .def("python_module_id", [](const KinetoEvent& e) {
+        return e.pythonModuleId();
       });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
@@ -339,11 +387,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def(
       "_prepare_profiler",
       prepareProfiler,
+      py::arg("config"),
+      py::arg("activities"),
+      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
       toggleCollectionDynamic,
       py::call_guard<py::gil_scoped_release>());
+  m.def("_is_kineto_stopped", isKinetoStopped);
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -391,11 +443,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     std::set<torch::profiler::impl::ActivityType> activities{
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO)
-#if (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+#if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
-#endif // (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+#endif // defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
@@ -729,6 +781,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
       at::autocast::is_autocast_enabled(at::kIPU) ||
       at::autocast::is_autocast_enabled(at::kXLA) ||
       at::autocast::is_autocast_enabled(at::kHPU) ||
+      at::autocast::is_autocast_enabled(at::kMTIA) ||
       at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
     Py_RETURN_TRUE;
   } else {
@@ -764,7 +817,7 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_cpu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('cpu', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kCPU, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kCPU, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -790,7 +843,7 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_ipu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('ipu', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kIPU, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kIPU, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -816,7 +869,7 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_xla_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('xla', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kXLA, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kXLA, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -967,7 +1020,7 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  at::autocast::set_autocast_cache_enabled(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1011,7 +1064,7 @@ static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1229,9 +1282,50 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_grad_layout_enforcement_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_grad_layout_enforcement_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_grad_layout_enforcement_enabled");
+  }
+  auto enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_grad_layout_enforcement_enabled(
+      enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_grad_layout_enforcement_enabled(
+    PyObject* self,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state()
+          .get_grad_layout_enforcement_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
   } else {
     Py_INCREF(obj);
@@ -1248,8 +1342,7 @@ static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
       c10::AutogradState::get_tls_state().get_graph_exec_group();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
-    Py_INCREF(obj);
-    return obj;
+    return Py_NewRef(obj);
   } else {
     Py_RETURN_NONE;
   }
@@ -1345,7 +1438,7 @@ static PyObject* push_on_torch_function_stack(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg != Py_None) {
+  if (!Py_IsNone(arg)) {
     Py_INCREF(arg);
     at::impl::PythonTorchFunctionTLS::push_onto_stack(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
@@ -1360,8 +1453,7 @@ static PyObject* pop_torch_function_stack(
   HANDLE_TH_ERRORS
   const auto& mode = at::impl::PythonTorchFunctionTLS::pop_stack();
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1378,8 +1470,7 @@ static PyObject* get_function_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1396,7 +1487,7 @@ static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg != Py_None) {
+  if (!Py_IsNone(arg)) {
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
@@ -1430,7 +1521,7 @@ static PyObject* pop_torch_dispatch_stack(
   // When the shared_ptr is destroyed, ~SafePyObject will Py_DECREF, so we must
   // Py_INCREF first to give the caller a valid reference.
   std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> mode;
-  if (maybe_mode_key != Py_None) {
+  if (!Py_IsNone(maybe_mode_key)) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
         c10::impl::TorchDispatchModeTLS::unset_mode(mode_key.value());
@@ -1449,8 +1540,7 @@ static PyObject* pop_torch_dispatch_stack(
   // Note: We cannot use release() here because the SafePyObject may be shared
   // via ThreadLocalState copies, and release() would null out data_ causing
   // other shared_ptr holders to see nullptr.
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1467,14 +1557,13 @@ static PyObject* get_dispatch_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(mode != Py_None);
+  TORCH_CHECK(!Py_IsNone(mode));
 
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
@@ -1494,7 +1583,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
 
 static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(arg != Py_None);
+  TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
@@ -1502,14 +1591,13 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(arg != Py_None);
+  TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
@@ -1517,8 +1605,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1642,6 +1729,14 @@ static PyMethodDef methods[] = {
     {"_is_view_replay_enabled", is_view_replay_enabled, METH_NOARGS, nullptr},
     {"_set_view_replay_enabled",
      castPyCFunctionWithKeywords(set_view_replay_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_grad_layout_enforcement_enabled",
+     is_grad_layout_enforcement_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_grad_layout_enforcement_enabled",
+     castPyCFunctionWithKeywords(set_grad_layout_enforcement_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_set_graph_exec_group", set_graph_exec_group, METH_O, nullptr},

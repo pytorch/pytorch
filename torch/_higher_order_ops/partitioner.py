@@ -65,7 +65,7 @@ class HopPartitionedGraph:
 
         if len(fw_outputs) != self.n_fw_outputs + self.n_intermediates:
             invalid_reasons.append(
-                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"  # noqa: B950
+                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"
             )
 
         bw_phs = list(self.bw_gm.graph.find_nodes(op="placeholder"))
@@ -109,8 +109,7 @@ class HopPartitionedGraph:
         if len(invalid_reasons) > 0:
             newline = "\n"
             raise RuntimeError(
-                "Invalid HopPartitionedGraph. Reasons:\n",
-                f"{newline.join(invalid_reasons)}",
+                f"Invalid HopPartitionedGraph. Reasons:\n{newline.join(invalid_reasons)}"
             )
 
     def _reorder_fw_output(self) -> None:
@@ -122,7 +121,7 @@ class HopPartitionedGraph:
         are inputs that contain symints.
 
         To simplify downstream processing, this graph pass normalizes the output of fw_gm
-        to be consistent with the bacwkard inputs:
+        to be consistent with the backward inputs:
 
         fw_gm:
           - input: fw_args

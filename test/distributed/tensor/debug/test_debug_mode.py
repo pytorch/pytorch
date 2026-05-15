@@ -374,7 +374,7 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
-    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
         )
 
     def test_debug_mode_einsum(self):
@@ -666,6 +666,7 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_nn_module=True) as debug_mode:
             fn(inp)
 
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_nn_module_in_compiled_regions(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -753,7 +754,8 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[4, 4])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
-    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
+    aten::empty_strided([4, 4], [4, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4, 4]
+    aten::copy_(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] enter
     [nn.Mod (compile)] L['self'].bar
       [nn.Mod (compile)] L['self'].bar.l3
@@ -1010,6 +1012,7 @@ class TestDTensorDebugMode(TestCase):
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
@@ -1054,7 +1057,8 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[8, 8])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
-    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
+    aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[8, 8]
+    aten::copy_(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
     torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
     [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
@@ -1066,13 +1070,14 @@ class TestDTensorDebugMode(TestCase):
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
       aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
-    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",  # noqa: B950
+    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",
             ignore_comments=True,
         )
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
@@ -1115,7 +1120,7 @@ class TestDTensorDebugMode(TestCase):
       [annotate] [exit InvokeSubgraph HOP] subgraph_0
       aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] subgraph_1
-    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",
             ignore_comments=True,
         )
 

@@ -76,6 +76,11 @@ test_failures = {
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
 }
 
+if TEST_WITH_ROCM and not torch.cuda.has_magma:
+    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
+        ("cuda",), is_skip=True
+    )
+
 
 class TestSubprocess(TestCase):
     def setUp(self):
@@ -116,8 +121,8 @@ class TestSubprocess(TestCase):
 
         torch._inductor.compile_fx.fx_compile_progressive = True
 
-        x = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
-        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(1152, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
 
         @torch.compile(fullgraph=True, backend="inductor")
         def optimized(x, y):

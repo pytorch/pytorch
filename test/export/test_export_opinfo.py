@@ -22,6 +22,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    IS_WINDOWS,
     run_tests,
     skipIfRocm,
     TestCase,
@@ -152,6 +153,11 @@ class TestExportOnFakeCuda(TestCase):
     # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyCUDA
+    @unittest.skipIf(
+        IS_WINDOWS,
+        'Subprocess with CUDA_VISIBLE_DEVICES="" imports op_db which triggers '
+        "get_device_capability(); 0 devices raises Invalid device id on Windows.",
+    )
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
     def test_fake_export(self, device, dtype, op):
         test_script = f"""\
@@ -218,6 +224,10 @@ for op in ops:
         self.assertEqual(r, "")
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Failing on Windows, device_count() changes from 0 to 1 ",
+    )
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch

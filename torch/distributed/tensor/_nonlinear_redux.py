@@ -1,6 +1,6 @@
 import operator
 from functools import reduce
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -46,7 +46,7 @@ def _prep_arguments(
     torch.Size,
     "torch.distributed.device_mesh.DeviceMesh",
     tuple[Placement, ...],
-    Optional[int],
+    int | None,
     bool,
 ]:
     """
@@ -61,7 +61,7 @@ def _prep_arguments(
         keepdim: Whether to keep the reduced dimension
     """
     input_dtensor = cast(dtensor.DTensor, args[0])
-    dim: Optional[int] = None
+    dim: int | None = None
     keepdim: bool = False
 
     if not isinstance(input_dtensor, dtensor.DTensor):
@@ -94,7 +94,7 @@ def _prep_arguments(
 
 
 def _get_expected_shape(
-    local_tensor: torch.Tensor, dim: Optional[int], keepdim: bool
+    local_tensor: torch.Tensor, dim: int | None, keepdim: bool
 ) -> torch.Size:
     """Compute the expected output shape after reduction."""
     input_shape = list(local_tensor.shape)
@@ -118,7 +118,7 @@ def _collect_shard_mesh_dims(
     op_call_repr: str,
     local_tensor: torch.Tensor,
     placements: tuple[Placement, ...],
-    dim: Optional[int],
+    dim: int | None,
 ) -> list[int]:
     """Collect mesh dimensions that are sharded along the reduction dimension."""
     shard_mesh_dims: list[int] = []
@@ -136,7 +136,7 @@ def _convert_to_global_idxs(
     global_shape: torch.Size,
     device_mesh: "torch.distributed.device_mesh.DeviceMesh",
     placements: tuple[Placement, ...],
-    dim: Optional[int],
+    dim: int | None,
 ) -> tuple[int, torch.Tensor]:
     """Convert local indices to global indices."""
     local_shape, global_offset = compute_local_shape_and_global_offset(
