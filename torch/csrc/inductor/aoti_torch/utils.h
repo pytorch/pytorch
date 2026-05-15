@@ -251,18 +251,17 @@ struct OwningOptionalArrayRef {
   explicit OwningOptionalArrayRef(std::vector<T> v) : storage(std::move(v)) {}
 
   /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return storage
-        ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
-        : c10::OptionalArrayRef<T>(std::nullopt);
+    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+                   : c10::OptionalArrayRef<T>(std::nullopt);
   }
 
   // Some generated shim call sites pass into a parameter of type
   // std::optional<c10::ArrayRef<T>> (rather than c10::OptionalArrayRef<T>),
-  // e.g. at::cpu::_histogramdd_from_bin_cts(..., std::optional<ArrayRef<double>>).
+  // e.g. at::cpu::_histogramdd_from_bin_cts(...,
+  // std::optional<ArrayRef<double>>).
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
-    return storage
-        ? std::make_optional(c10::ArrayRef<T>(*storage))
-        : std::nullopt;
+    return storage ? std::make_optional(c10::ArrayRef<T>(*storage))
+                   : std::nullopt;
   }
 };
 
