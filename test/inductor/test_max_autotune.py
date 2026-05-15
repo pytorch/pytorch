@@ -3950,6 +3950,51 @@ class TestMaxAutotuneSubproc(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    def test_max_autotune_profiler_benchmarker_smoke(self):
+        """
+        Smoke test that a simple max-autotune matmul runs with profiler
+        benchmarker selection enabled through config patching, and records
+        positive autotune benchmark timing.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(64, 32).to(GPU_TYPE)
+        b = torch.randn(32, 64).to(GPU_TYPE)
+
+        import torch._inductor.runtime.benchmarking as inductor_benchmarking
+
+        benchmark_timings_ms = []
+        original_benchmark_gpu = inductor_benchmarking.benchmarker.benchmark_gpu
+
+        def benchmark_gpu_with_capture(*args, **kwargs):
+            timing_ms = original_benchmark_gpu(*args, **kwargs)
+            benchmark_timings_ms.append(timing_ms)
+            return timing_ms
+
+        with config.patch(
+            {"max_autotune": True, "use_torch_profiler_benchmarker": True}
+        ):
+            with mock.patch.object(
+                inductor_benchmarking.benchmarker,
+                "benchmark_gpu",
+                side_effect=benchmark_gpu_with_capture,
+            ):
+                torch.compile(mm)(a, b)
+
+        finite_timings_ms = [t for t in benchmark_timings_ms if math.isfinite(t)]
+        self.assertGreater(
+            len(finite_timings_ms),
+            0,
+            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+        )
+        self.assertGreater(
+            min(finite_timings_ms),
+            0.0,
+            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+        )
+
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, search_space, dynamic=False):
