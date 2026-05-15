@@ -85,10 +85,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -418,14 +418,10 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        if isinstance(other, ConstantVariable):
-            return self.as_python_constant() == other.as_python_constant()
-        # Delegate to other's is_python_equal - this handles cases like
-        # StringFormatVariable which can compare against constants and
-        # install guards for any lazy constants it contains.
-        if isinstance(other, VariableTracker):
-            return other.is_python_equal(self)
-        return False
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
@@ -489,27 +485,6 @@ class ConstantVariable(VariableTracker):
         if result is NotImplemented:
             return ConstantVariable.create(NotImplemented)
         return VariableTracker.build(tx, result)
-
-    def nb_subtract_impl(
-        self,
-        tx: Any,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex define nb_subtract; bool inherits int's.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3819-L3824 (long_sub_method)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L598-L606 (float_sub)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L494-L503 (COMPLEX_BINOP(sub, diff))
-        if not isinstance(self.value, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, v - w)
-        except (TypeError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_negative_impl(
         self,
