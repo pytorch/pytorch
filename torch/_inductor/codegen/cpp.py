@@ -4731,7 +4731,15 @@ class CppKernelProxy(CppKernel):
             self.reduction_suffix = suffix_buf
 
         main_kernel = self.kernels[0]
-        if inner_loop_reduction_outer_not:
+        non_reduction_tail_vec = (
+            outer_loop is not None
+            and isinstance(main_kernel, self.vec_kernel_cls)
+            and len(self.kernels) == 2
+            and isinstance(self.kernels[-1], self.vec_kernel_cls)
+            and main_kernel.reduction_depth is not None
+            and main_kernel.tiling_idx < main_kernel.reduction_depth
+        )
+        if inner_loop_reduction_outer_not or non_reduction_tail_vec:
             assert outer_loop
             aggregate_reduction_prefix_suffix(outer_loop)
         else:
