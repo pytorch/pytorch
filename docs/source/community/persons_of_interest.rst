@@ -13,10 +13,10 @@ Responsibilities
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
-Lead Core Maintainer
+Lead Core Maintainer (BDFL)
 ---------------------------
 
-* Alban Desmaison (`albanD <https://github.com/albanD>`__)
+* Soumith Chintala (`soumith <https://github.com/soumith>`__)
 
 Core Maintainers
 -------------------
@@ -25,6 +25,7 @@ Core Maintainers
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Horace He (`Chillee <https://github.com/Chillee>`__)
