@@ -10,6 +10,7 @@ __all__ = [
     "empty_cache",
     "empty_host_cache",
     "get_memory_info",
+    "is_allocator_enabled",
     "max_memory_allocated",
     "max_memory_reserved",
     "memory_allocated",
@@ -30,6 +31,23 @@ def empty_cache() -> None:
     if not torch._C._accelerator_isAllocatorInitialized():
         return
     torch._C._accelerator_emptyCache()
+
+
+def is_allocator_enabled() -> bool:
+    r"""Whether the caching allocator for the current
+    :ref:`accelerator<accelerators>` is currently active.
+
+    Returns ``False`` if the allocator has been disabled via
+    :func:`torch.cuda.caching_allocator_enable(False)` (or the equivalent
+    on other backends), or via an env-var bypass like
+    ``PYTORCH_NO_CUDA_MEMORY_CACHING`` / ``PYTORCH_NO_HIP_MEMORY_CACHING``.
+
+    .. note:: Returns ``False`` if the memory allocator for the current
+        accelerator has not been initialized.
+    """
+    if not torch._C._accelerator_isAllocatorInitialized():
+        return False
+    return torch._C._accelerator_isAllocatorEnabled()
 
 
 def empty_host_cache() -> None:

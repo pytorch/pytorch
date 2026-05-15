@@ -99,6 +99,11 @@ void initModule(PyObject* module) {
     return at::getDeviceAllocator(device_type)->initialized();
   });
 
+  m.def("_accelerator_isAllocatorEnabled", []() {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    return at::getDeviceAllocator(device_type)->isEnabled();
+  });
+
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
   m.def("_accelerator_emptyHostCache", []() {

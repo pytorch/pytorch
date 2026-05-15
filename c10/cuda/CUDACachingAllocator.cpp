@@ -4604,7 +4604,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   bool isEnabled() const override {
-    return enable_;
+    // Reflects both the user toggle and the
+    // PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING env-var bypass so external callers
+    // (e.g. inductor's cudagraph guard) see a single combined predicate.
+    return enable_ && !forceUncachedAllocator();
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
@@ -4755,7 +4758,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     void (*deleteFunc)(void*) = &local_raw_delete;
     CUDAStream stream = cuda::getCurrentCUDAStream(device);
 
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (!isEnabled()) {
       deleteFunc = &uncached_delete;
       devPtr = uncached_allocate(size);
     } else {
@@ -4771,7 +4774,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (!isEnabled()) {
       return &uncached_delete;
     } else {
       return &local_raw_delete;
@@ -4868,7 +4871,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     void* r = nullptr;
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (!isEnabled()) {
       r = uncached_allocate(nbytes);
     } else {
       c10::DeviceIndex device = 0;
@@ -4883,7 +4886,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     void* r = nullptr;
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (!isEnabled()) {
       r = uncached_allocate(nbytes);
     } else {
       c10::DeviceIndex device = 0;
@@ -4934,7 +4937,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void raw_delete(void* ptr) override {
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (!isEnabled()) {
       uncached_delete(ptr);
     } else {
       this->free(ptr);
