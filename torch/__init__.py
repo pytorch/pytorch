@@ -62,7 +62,6 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.types import Device, IntLikeType
 
 
@@ -2581,7 +2580,6 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: "ShapesSpec | ParamsSpec | None" = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2596,7 +2594,6 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: "ShapesSpec | ParamsSpec | None" = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2612,7 +2609,6 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
-    shapes_spec: "ShapesSpec | ParamsSpec | None" = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2752,13 +2748,6 @@ def compile(
 
         backend = get_default_backend()
 
-    # Auto-wrap ParamsSpec → ShapesSpec for convenience
-    if shapes_spec is not None:
-        from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
-
-        if isinstance(shapes_spec, ParamsSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
-
     # Decorator mode
     if model is None:
 
@@ -2776,7 +2765,6 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
-                shapes_spec=shapes_spec,
             )
 
         return fn
@@ -2835,7 +2823,6 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
     )(model)  # type: ignore[return-value]
 
 
