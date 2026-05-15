@@ -6,7 +6,6 @@
 #include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
@@ -151,10 +150,22 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     auto group = resolve_process_group(group_name_);
     rank_ = group->getRank();
     world_size_ = group->getSize();
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        group->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    comm_ = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    // Look up the host ncclComm by group name in NCCLDevCommManager. Any
+    // backend that owns a NCCL-compatible communicator (ProcessGroupNCCL, or
+    // an external library exposing its ncclComm — torchcomms is one such
+    // example) publishes into this registry at comm-init time, so symm_mem
+    // doesn't need to know which backend the PG is wrapping.
+    auto& mgr = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx_));
+    comm_ = mgr.get_comm(group_name_);
+    TORCH_CHECK(
+        comm_ != nullptr,
+        "NCCL symmetric memory: NCCLDevCommManager returned a null comm for "
+        "group '",
+        group_name_,
+        "'. If you are using ProcessGroups, please make sure its backend has "
+        "been eagerly initialized by filling `device_id` in the "
+        "`init_process_group` call.");
 
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm_, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
@@ -180,10 +191,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         rank_));
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // Register the host-side communicator for device communicator management.
-    // `ncclDevCommCreate` will require it.
-    auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-    manager.register_comm(group_name_, comm_);
+    // (Host comm is already published into NCCLDevCommManager by the
+    // owning backend at comm-init time. The earlier mgr.get_comm() call
+    // above relied on that. No re-register here.)
 
     // Starting from NCCL 2.28, we can get peer pointers.
     const size_t arr_size = sizeof(void*) * world_size_;
