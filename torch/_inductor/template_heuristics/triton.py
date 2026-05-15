@@ -327,6 +327,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
