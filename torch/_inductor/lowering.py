@@ -65,6 +65,7 @@ from .ir import (
     ExpandView,
     IndexingConstant,
     IRNode,
+    is_cpu,
     is_triton,
     MutableBox,
     OnlineSoftmaxReduction,
@@ -6722,7 +6723,14 @@ def _make_reduction_inner(
     if (
         reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
-        and is_triton(x)
+        and (
+            is_triton(x)
+            or (
+                is_cpu(x)
+                and config.cpu_backend == "cpp"
+                and not config.disable_cpp_codegen
+            )
+        )
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True

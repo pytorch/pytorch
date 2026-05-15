@@ -3665,6 +3665,33 @@ class CPUReproTests(TestCase):
                     f"Expected 1 vec kernel, got {metrics.generated_cpp_vec_kernel_count}"
                 )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_argmin_argmax_transpose_logical_index(self):
+        def check(fn, input_fn):
+            for simdlen in (None, 1):
+                with config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    self.common(fn, input_fn())
+
+        def mutated_transpose_argmin(x):
+            x.tan_()
+            return x.t().argmin()
+
+        torch.manual_seed(0)
+        check(mutated_transpose_argmin, lambda: (torch.randn(4, 6),))
+
+        def transpose_argreduce(x):
+            y = x.t()
+            return y.argmin(), y.argmax()
+
+        def argreduce_input():
+            x = torch.zeros(4, 6)
+            x.view(-1)[1] = -10
+            x.view(-1)[7] = 10
+            return (x,)
+
+        check(transpose_argreduce, argreduce_input)
+
     @requires_vectorization
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
