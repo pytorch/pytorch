@@ -152,6 +152,12 @@ class PlaceholderInfo:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class InputStorageMutationInfo:
+    input_idxs: OrderedSet[int]
+    stack_trace: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class WrappedFunction:
     """
     Represents a function that you want to record for CUDA graph replay,
@@ -186,12 +192,13 @@ def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | Non
     return placeholder_info.mutating_use_stack_trace
 
 
-def get_input_storage_mutation_indices(
+def get_input_storage_mutation_info(
     gm: torch.fx.GraphModule,
-) -> OrderedSet[int]:
+) -> InputStorageMutationInfo:
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     placeholder_indices = {node: idx for idx, node in enumerate(placeholders)}
     storage_mutation_input_idxs: OrderedSet[int] = OrderedSet()
+    stack_trace: str | None = None
 
     for node in gm.graph.nodes:
         if (
@@ -201,39 +208,30 @@ def get_input_storage_mutation_indices(
             continue
 
         mutated_arg = node.args[0] if node.args else None
+        # Only direct graph-input set_ rebinds the tensor object that lives
+        # outside this graph. set_ on a temporary view/alias does not rebind the
+        # input TensorImpl and is handled by the usual mutation checks.
         if (
             isinstance(mutated_arg, torch.fx.Node)
             and mutated_arg in placeholder_indices
         ):
             storage_mutation_input_idxs.add(placeholder_indices[mutated_arg])
+            if stack_trace is None:
+                stack_trace = node.meta.get("stack_trace", None)
 
-    return storage_mutation_input_idxs
+    return InputStorageMutationInfo(storage_mutation_input_idxs, stack_trace)
 
 
 def get_input_storage_mutation_reason(
-    gm: torch.fx.GraphModule,
-    storage_mutation_input_idxs: AbstractSet[int] | Sequence[int],
+    storage_mutation_info: InputStorageMutationInfo,
 ) -> str | None:
+    storage_mutation_input_idxs = storage_mutation_info.input_idxs
     if not storage_mutation_input_idxs:
         return None
 
     msg = f"input storage mutation ({len(storage_mutation_input_idxs)} instances)"
-
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    storage_mutation_inputs = tuple(
-        placeholders[idx] for idx in storage_mutation_input_idxs
-    )
-    for node in gm.graph.nodes:
-        if (
-            node.op != "call_function"
-            or node.target not in INPUT_STORAGE_MUTATION_TARGETS
-        ):
-            continue
-
-        mutated_arg = node.args[0] if node.args else None
-        if mutated_arg in storage_mutation_inputs:
-            if stack_trace := node.meta.get("stack_trace", None):
-                return f"{msg}. Found from : \n {stack_trace}"
+    if storage_mutation_info.stack_trace:
+        return f"{msg}. Found from:\n {storage_mutation_info.stack_trace}"
 
     return msg
 
