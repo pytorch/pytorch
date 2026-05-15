@@ -629,6 +629,24 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
 }
 
 template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
+}
+
+template <typename T, int NV, int NI>
 inline IndexValue<T> argmin_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
   constexpr int len = at::vec::VectorizedN<T, NV>::size();

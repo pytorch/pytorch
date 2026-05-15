@@ -1562,10 +1562,11 @@ class Reduction(Loops):
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
             ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
-                return (
-                    inner_fn(index, rindex),
-                    ops.index_expr(flatten_index(rindex), torch.int64),
-                )
+                result = inner_fn(index, rindex)
+                if isinstance(result, tuple):
+                    assert len(result) == 2
+                    return result
+                return (result, ops.index_expr(flatten_index(rindex), torch.int64))
 
             return lambda index: fn(index)[1]
         else:
