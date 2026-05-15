@@ -39,7 +39,7 @@ LINTER_CODE = "EXCEPTION_TRACEBACK"
 ERROR_NAME = "exception-traceback-reference-cycle"
 DESCRIPTION = (
     "Exception stored outside except block without clearing __traceback__. "
-    "Add `{exc_name}.__traceback__ = None` to avoid reference cycles. "
+    "Add `traceback.clear_frames({exc_name}.__traceback__)` to avoid reference cycles. "
     "See https://docs.python.org/3/reference/compound_stmts.html#the-try-statement"
 )
 
@@ -63,7 +63,7 @@ class _TracebackVisitor(ast.NodeVisitor):
         self._check_clear(node)
         self.generic_visit(node)
 
-    # --- detect `e.__traceback__ = None` ----------------------------------
+    # --- detect `e.__traceback__ = None` or `traceback.clear_frames(e.__traceback__)` ---
     def _check_clear(self, node: ast.Assign) -> None:
         for target in node.targets:
             if (
@@ -71,6 +71,29 @@ class _TracebackVisitor(ast.NodeVisitor):
                 and target.attr == "__traceback__"
                 and isinstance(target.value, ast.Name)
                 and target.value.id == self.exc_name
+            ):
+                self.is_cleared = True
+
+    def visit_Expr(self, node: ast.Expr) -> None:
+        # detect `traceback.clear_frames(e.__traceback__)`
+        call = node.value
+        if not isinstance(call, ast.Call):
+            return
+        fn = call.func
+        if not (
+            isinstance(fn, ast.Attribute)
+            and fn.attr == "clear_frames"
+            and isinstance(fn.value, ast.Name)
+            and fn.value.id == "traceback"
+        ):
+            return
+        if len(call.args) == 1:
+            arg = call.args[0]
+            if (
+                isinstance(arg, ast.Attribute)
+                and arg.attr == "__traceback__"
+                and isinstance(arg.value, ast.Name)
+                and arg.value.id == self.exc_name
             ):
                 self.is_cleared = True
 
