@@ -67,7 +67,7 @@ def CDNA3OrLater():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
+    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
