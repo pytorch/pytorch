@@ -674,6 +674,70 @@ class TestLocalMapSpmdTypes(TestCase):
             """Output tensor has no spmd_types annotation but out_placements expects one. Ensure the function's output is derived from annotated inputs or is explicitly annotated.""",
         )
 
+    def test_output_spmd_type_is_stripped(self):
+        from spmd_types._type_attr import _LOCAL_TYPE_ATTR
+
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
+        )
+        outputs = []
+
+        def fn(X):
+            out = X * 2
+            self.assertTrue(hasattr(out, _LOCAL_TYPE_ATTR))
+            outputs.append(out)
+            return out
+
+        wrapped = local_map(
+            fn,
+            out_placements=[Shard(0)],
+            in_placements=([Shard(0)],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+
+        wrapped(X_dt)
+        self.assertFalse(hasattr(outputs[0], _LOCAL_TYPE_ATTR))
+
+    def test_out_spmd_types_to_grad_placements(self):
+        from spmd_types._type_attr import _LOCAL_TYPE_ATTR
+
+        from torch.distributed.tensor.experimental._func_map import (
+            _out_spmd_types_to_grad_placements,
+        )
+
+        outs = (
+            spmd.assert_type(torch.randn(4, 8), {self.tp_axis: spmd.R}),
+            spmd.assert_type(torch.randn(4, 8), {self.tp_axis: spmd.I}),
+            spmd.assert_type(torch.randn(4, 8), {self.tp_axis: spmd.P}),
+            spmd.assert_type(torch.randn(4, 8), {self.tp_axis: spmd.V}),
+            spmd.assert_type(torch.randn(4, 8), {self.tp_axis: spmd.V}),
+        )
+        out_placements = (
+            [Replicate()],
+            [Replicate()],
+            [Partial()],
+            [Shard(0)],
+            [Partial()],
+        )
+
+        self.assertEqual(
+            _out_spmd_types_to_grad_placements(
+                outs,  # pyrefly: ignore [bad-argument-type]
+                out_placements,
+                self.mesh,
+            ),
+            (
+                (Partial(),),
+                (Replicate(),),
+                (Replicate(),),
+                (Shard(0),),
+                (Replicate(),),
+            ),
+        )
+        for out in outs:
+            self.assertFalse(hasattr(out, _LOCAL_TYPE_ATTR))
+
     def test_unsupported_placement_type(self):
         """spmd_types=True should raise for unsupported placement types like _StridedShard."""
         from torch.distributed.tensor.placement_types import _StridedShard
@@ -907,6 +971,48 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
         with CommDebugMode() as comm_mode:
             Y_dt.backward(grad_out)
         self.assertEqual(comm_mode.get_comm_counts()[funcol_py.all_reduce], 1)
+
+        # P output type with P output placement expects Replicate grad, so a
+        # Partial grad_out redistributes via all-reduce.
+        X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+        X_dt = DTensor.from_local(X, device_mesh, [Partial()], run_check=False)
+        wrapped_partial_out = local_map(
+            lambda X: X * 2,
+            out_placements=[Partial()],
+            in_placements=([Partial()],),
+            device_mesh=device_mesh,
+            spmd_types=True,
+        )
+        Y_dt = wrapped_partial_out(X_dt)
+        grad_out = DTensor.from_local(
+            torch.ones_like(Y_dt.to_local()), device_mesh, [Partial()]
+        )
+        with CommDebugMode() as comm_mode:
+            Y_dt.backward(grad_out)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol_py.all_reduce], 1)
+
+        # V output type with S(1) output placement expects S(1) grad, so a
+        # Partial grad_out redistributes via reduce-scatter along dim 1.
+        X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+        X_dt = distribute_tensor(X, device_mesh, [Shard(1)])
+        wrapped_shard1_out = local_map(
+            lambda X: X * 2,
+            out_placements=[Shard(1)],
+            in_placements=([Shard(1)],),
+            device_mesh=device_mesh,
+            spmd_types=True,
+        )
+        Y_dt = wrapped_shard1_out(X_dt)
+        grad_out = DTensor.from_local(
+            torch.ones_like(Y_dt.full_tensor()), device_mesh, [Partial()]
+        )
+        with CommDebugMode() as comm_mode:
+            Y_dt.backward(grad_out)
+        self.assertEqual(
+            comm_mode.get_comm_counts()[funcol_py.reduce_scatter_tensor], 1
+        )
+        self.assertEqual(X_dt.grad.placements, (Shard(1),))
+        self.assertEqual(X_dt.grad.to_local().shape, (4, 4))
 
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")

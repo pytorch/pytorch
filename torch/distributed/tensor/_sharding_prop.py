@@ -406,6 +406,18 @@ class ShardingPropagator:
             aten._unsafe_view.default: 1,
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
+            # upsample backward ops: input_size (arg 2) is the full [N,C,...] shape
+            aten.upsample_nearest1d_backward.default: 2,
+            aten.upsample_nearest2d_backward.default: 2,
+            aten.upsample_nearest3d_backward.default: 2,
+            aten._upsample_nearest_exact1d_backward.default: 2,
+            aten._upsample_nearest_exact2d_backward.default: 2,
+            aten._upsample_nearest_exact3d_backward.default: 2,
+            aten._upsample_bilinear2d_aa_backward.default: 2,
+            aten.upsample_bicubic2d_backward.default: 2,
+            aten.upsample_bilinear2d_backward.default: 2,
+            aten.upsample_linear1d_backward.default: 2,
+            aten.upsample_trilinear3d_backward.default: 2,
         }
         # ops with individual scalar shape args that need local adjustment
         # maps op -> callable(input_specs, schema) -> adjusted schema
@@ -818,13 +830,12 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # shape and stride args need to be modified for
-                # view ops and new factory ops, potentially
+                # Rewrite shape/stride args from global to local when sharded.
+                # Covers view ops, new factory ops, and upsample backward ops
+                # whose shape args refer to global tensor dimensions.
                 if op_schema.op in self.op_to_shape_and_stride_idx:
                     if not isinstance(output_strategy.output_spec, DTensorSpec):
                         raise AssertionError
-                    # It happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
                     if any(
                         isinstance(p, Shard | _StridedShard)
                         for p in output_strategy.output_spec.placements
@@ -1036,8 +1047,7 @@ class ShardingPropagator:
             stride_idx = None
 
         expected_input_schema = list(schema.args_schema)
-        # adjust shape to be the same as that of the _local_tensor
-        # of the DTensor input arg at index 0, which is inferred
+        # rewrite args[shape_idx] from the global output shape to the local output shape
         local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )

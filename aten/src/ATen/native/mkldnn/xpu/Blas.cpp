@@ -381,16 +381,24 @@ Tensor& addmv_out(
 
   bool is_float64 =
       mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
-  bool is_inplace = self.is_same(out);
-  if (is_float64 && is_inplace) {
-    Tensor self_v_copy = self_v.clone();
-    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
-    out.resize_({mat.size(0)});
-    return out;
+  bool need_preserve_strides =
+      out.dim() == 1 && out.stride(0) != 1 && out.numel() > 0;
+
+  if (is_float64 && self.is_same(out) && !need_preserve_strides) {
+    self_v = self_v.clone();
   }
 
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  // addmm_out resizes its output to 2D, destroying stride information.
+  // When out has noncontiguous strides, compute into a temporary and copy back.
+  if (need_preserve_strides) {
+    Tensor tmp = at::empty({mat.size(0)}, out.options());
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
+    tmp.resize_({mat.size(0)});
+    out.copy_(tmp);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+  }
   return out;
 }
 

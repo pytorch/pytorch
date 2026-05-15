@@ -104,8 +104,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.set_state(new_state_tensor);
 
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -153,8 +152,7 @@ static PyObject* THPGenerator_graphSafeSetState(
   std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.graphsafe_set_state(THPGenerator_Unwrap(_state));
 
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -182,8 +180,7 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_current_seed(unsigned_seed);
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -200,8 +197,7 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_offset(unsigned_offset);
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -419,8 +415,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
   }
 
   if (auto obj = pyobj(gen)) {
-    Py_INCREF(obj);
-    return obj;
+    return Py_NewRef(obj);
   }
 
   return THPGenerator_NewWithVar(
