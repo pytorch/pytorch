@@ -48,7 +48,6 @@ ciflow_push_tags:
 - ciflow/tsan
 - ciflow/triton_binaries
 - ciflow/trunk
-- ciflow/trunk-rocm-sandbox
 - ciflow/unstable
 - ciflow/vllm
 - ciflow/win-arm64

@@ -3,7 +3,7 @@ name: trunk-rocm-sandbox
 on:
   push:
     tags:
-      - ciflow/trunk-rocm-sandbox/*
+      - ciflow/trunk/*
   #push:
   #  branches:
   #    - main
