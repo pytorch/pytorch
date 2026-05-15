@@ -13510,6 +13510,16 @@ if __name__ == '__main__':
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
 
+    def test_celu_alpha_zero_raises(self, device):
+        x = torch.tensor([-2.0], device=device)
+  
+        def f(x):
+            return torch.nn.functional.celu(x, alpha=0.0)
+
+        compiled_f = torch.compile(f, backend="inductor")
+        with self.assertRaisesRegex(Exception, "alpha cannot be 0 for CELU"):
+            compiled_f(x)
+
     @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
