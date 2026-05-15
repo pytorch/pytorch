@@ -1723,6 +1723,94 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_custom_fn_clear_saved_tensors_dedup_owner(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                clear_saved_tensors_on_access = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    (x,) = ctx.saved_tensors
+                    return grad_output + x * 0
+
+            x = torch.randn(3, requires_grad=True)
+            y = MyFn.apply(x) + MyFn.apply(x)
+            y.sum().backward()
+            yield x.grad
+
+        self.check_output_and_recompiles(fn)
+
+    def test_custom_fn_clear_saved_tensors_unpack_hook(self):
+        def fn():
+            import weakref
+
+            def pack(x):
+                return x.detach()
+
+            def unpack(x):
+                return x.clone()
+
+            class MyFn(torch.autograd.Function):
+                clear_saved_tensors_on_access = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    (x,) = ctx.saved_tensors
+                    ref = weakref.ref(x)
+                    del x
+                    assert ref() is None  # noqa: S101
+                    return grad_output
+
+            x = torch.randn(3, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                y = MyFn.apply(x)
+                y.sum().backward()
+            yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[1, 0], compiler_fn=make_compiler_fn(backend="ca_eager")
+        )
+
+    def test_custom_fn_clear_saved_tensors_with_none(self):
+        def fn():
+            import weakref
+
+            class MyFn(torch.autograd.Function):
+                clear_saved_tensors_on_access = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x, None)
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    x, none = ctx.saved_tensors
+                    assert none is None  # noqa: S101
+                    ref = weakref.ref(x)
+                    del x
+                    assert ref() is None  # noqa: S101
+                    return grad_output
+
+            x = torch.randn(3, requires_grad=True)
+            y = MyFn.apply(x.clone())
+            y.sum().backward()
+            yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[1, 0], compiler_fn=make_compiler_fn(backend="ca_eager")
+        )
+
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -5384,6 +5472,7 @@ xfail_by_backend = {
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
+        "test_clear_saved_tensors_on_access",  # contains a unittest assertion in backward
         "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
         # Slow tests, these tests are close to CI timeout if we try to torch.compile them
         "test_checkpointing",
@@ -5432,9 +5521,6 @@ if not HAS_CUDA_AND_TRITON:
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")
 
-# clear_saved_tensors_on_access is incompatible with compiled autograd
-skipped_tests.add("test_clear_saved_tensors_on_access")
-skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
 skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
 skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
