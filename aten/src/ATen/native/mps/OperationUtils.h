@@ -670,11 +670,8 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
       if (!iter.is_contiguous()) {
-        mtl_setArgs<2>(computeEncoder,
-                       outputTensor.sizes(),
-                       inputTensor.strides(),
-                       outputTensor.strides(),
-                       inputTensor.ndimension());
+        mtl_setArgs<2>(
+            computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
       }
       detail::mtl_setArg(computeEncoder, params, iter.is_contiguous() ? 2 : 6);
       mtl_dispatch1DJob(computeEncoder, cplState, length);

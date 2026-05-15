@@ -5266,10 +5266,11 @@ def new_full(
 
 @aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 def empty_out(
-    size: TensorLikeType,
+    size: ShapeType,
     out: TensorLikeType,
     memory_format: torch.memory_format | None = None,
 ) -> TensorLikeType:
+    _maybe_resize_out(out, size, memory_format)
     return out
 
 
@@ -5383,6 +5384,7 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64 or integer_args:
+        torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]

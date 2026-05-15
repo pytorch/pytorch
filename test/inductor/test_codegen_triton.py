@@ -9,9 +9,13 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.simd import IterationRangesRoot
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    TritonKernel,
     TritonKernelOverrides,
+    TritonSymbols,
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
@@ -45,6 +49,49 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_range_tree_entry_ownership_uses_root_identity(self):
+        class AlternateR0Root(IterationRangesRoot):
+            def block_size(self):
+                return sympy.Symbol("ALT_R0_BLOCK", integer=True, positive=True)
+
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        x_tree, r_tree = kernel.range_trees
+        alt_r_tree = AlternateR0Root(
+            "alt_r0_index",
+            sympy.Integer(4),
+            "r0_",
+            r_tree.index,
+            kernel,
+            pid_cache=r_tree.pid_cache,
+            is_loop=r_tree.is_loop,
+            tensor_dim=r_tree.tensor_dim,
+            grid_dim=r_tree.grid_dim,
+            has_zdim=r_tree.has_zdim,
+        )
+
+        with V.set_kernel_handler(kernel):
+            parent_entry = r_tree.full_range()
+            alt_entry = alt_r_tree.full_range()
+
+            self.assertEqual(
+                alt_r_tree.vars_and_sizes(parent_entry.symbol() + alt_entry.symbol()),
+                ([alt_entry.symbol()], [alt_r_tree.numel]),
+            )
+            saved_range_trees = kernel.range_trees
+            kernel.range_trees = [x_tree, alt_r_tree]
+            try:
+                self.assertEqual(
+                    TritonSymbols.get_block_shape(parent_entry.symbol()),
+                    (1, "R0_BLOCK"),
+                )
+            finally:
+                kernel.range_trees = saved_range_trees
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
