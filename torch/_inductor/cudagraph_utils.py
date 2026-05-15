@@ -289,13 +289,18 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_caching_allocator_for_cudagraphs() -> str | None:
-    """Skip cudagraphs when the current accelerator's caching allocator is
-    disabled (via runtime toggle or PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING).
-    Cudagraph capture pools allocations through the caching allocator; with
-    it bypassed, capture appears to succeed but pool tracking diverges (see
+    """Skip cudagraphs when the CUDA/HIP caching allocator is disabled
+    (via ``torch.cuda.caching_allocator_enable(False)`` or the env-var
+    bypass ``PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING``). Cudagraph capture
+    pools allocations through the caching allocator; with it bypassed,
+    capture appears to succeed but pool tracking diverges (see
     check_memory_pool in cudagraph_trees.py), surfacing as 'storage data
     ptrs not allocated in pool ...' at replay time."""
-    if not torch.accelerator.is_allocator_enabled():
+    if (
+        torch.cuda.is_available()
+        # pyrefly: ignore [missing-attribute]
+        and not torch._C._cuda_cudaCachingAllocator_is_enabled()
+    ):
         return format_default_skip_message(
             "cudagraph capture requires the caching allocator; "
             "current allocator is uncached"
