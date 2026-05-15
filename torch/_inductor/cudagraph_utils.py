@@ -306,7 +306,10 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return check_caching_allocator_for_cudagraphs() or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    return (
+        check_caching_allocator_for_cudagraphs()
+        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    )
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
