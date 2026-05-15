@@ -928,6 +928,27 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 6)
 
+    def test_recursive_compiled_fn_with_graph_break(self):
+        """Recursive compiled functions should not disable NGB on self-calls.
+
+        When a compiled function recursively calls itself, the inner call
+        should NOT be treated as a nested torch.compile (which would disable
+        NGB). Only calls to a *different* torch.compile wrapper should.
+        """
+
+        def fn(x, n):
+            if n <= 0:
+                return x
+            torch._dynamo.graph_break()
+            return fn(x + 1, n - 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        ref = fn(x, 3)
+        res = opt_fn(x, 3)
+        self.assertEqual(ref, res)
+
     def test_nested_store_attr_graph_break(self):
         class Foo:
             def __setattr__(self, name, value):
