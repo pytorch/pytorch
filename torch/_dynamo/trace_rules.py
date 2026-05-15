@@ -3122,13 +3122,20 @@ def get_tensor_method() -> frozenset[Any]:
     return frozenset(s)
 
 
+def is_tensor_method(obj: Any) -> bool:
+    return obj in get_tensor_method() or (
+        inspect.ismethoddescriptor(obj)
+        and getattr(obj, "__objclass__", None) is torch._C.TensorBase
+    )
+
+
 """
 Return if a torch object is ATen op or torch.Tensor method.
 """
 
 
 def is_aten_op_or_tensor_method(obj: Any) -> bool:
-    return obj in get_tensor_method() or isinstance(
+    return is_tensor_method(obj) or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     )

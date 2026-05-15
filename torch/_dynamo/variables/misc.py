@@ -398,10 +398,9 @@ class SuperVariable(VariableTracker):
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     tx_old
                 )
-        elif (
-            isinstance(inner_fn, types.MethodDescriptorType)
-            and inner_fn in trace_rules.get_tensor_method()
-        ):
+        elif isinstance(
+            inner_fn, types.MethodDescriptorType
+        ) and trace_rules.is_tensor_method(inner_fn):
             # FunctionType but implementation is in C, we support some of these,
             # e.g., tensor ops like `torch.Tensor.to`.
             fn_var = VariableTracker.build(tx, inner_fn, source, realize=True)
