@@ -29,6 +29,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-docker:
     if: github.repository_owner == 'pytorch'

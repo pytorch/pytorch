@@ -4,6 +4,9 @@ on:
   repository_dispatch:
     types: [try-cherry-pick]
 
+permissions:
+  contents: read
+
 jobs:
   cherry-pick:
     name: cherry-pick-pr-${{ github.event.client_payload.pr_num }}

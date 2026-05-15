@@ -4,6 +4,9 @@ on:
   repository_dispatch:
     types: [try-rebase]
 
+permissions:
+  contents: read
+
 jobs:
   do_rebase:
     runs-on: ubuntu-24.04

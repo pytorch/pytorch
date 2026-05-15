@@ -4,6 +4,9 @@ on:
   repository_dispatch:
     types: [try-revert]
 
+permissions:
+  contents: read
+
 jobs:
   do_revert:
     name: try_revert_pr_${{ github.event.client_payload.pr_num }}
