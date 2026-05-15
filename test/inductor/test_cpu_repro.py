@@ -4073,6 +4073,39 @@ class CPUReproTests(TestCase):
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
 
+    @requires_vectorization
+    def test_vertical_reduction_tail_store_uses_tail_width(self):
+        def fn(x, y, z, residual, weight, bias):
+            x = F.leaky_relu(x * y + z)
+            x = x.permute(1, 0).unsqueeze(1)
+            return F.layer_norm(x + residual, (14,), weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(14, 2)
+        y = torch.randn(14, 2)
+        z = torch.randn(14, 2)
+        residual = torch.randn(2, 2, 14)
+        weight = torch.randn(14)
+        bias = torch.randn(14)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        actual, code = run_and_get_cpp_code(opt_fn, x, y, z, residual, weight, bias)
+
+        self.assertTrue(same(fn(x, y, z, residual, weight, bias), actual))
+        self.assertIn("sum_masked_reduce", code)
+        self.assertIn(
+            "tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>(2L));",
+            code,
+        )
+        self.assertIn(
+            "out_ptr0[static_cast<int64_t>(x1 + 2L*x0 + 2L*x0_inner)] = tmpbuf[x0_inner];",
+            code,
+        )
+        self.assertNotIn(
+            ".store(tmpbuf.data(), static_cast<int64_t>(16));",
+            code,
+        )
+
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
             b = a[[0]]
@@ -4703,6 +4736,34 @@ class CPUReproTests(TestCase):
                     FileCheck().check_count(
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
+
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    def test_group_norm_sum_conv1d_tail_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/181618
+        torch.manual_seed(0)
+        m_norm = nn.GroupNorm(1, 9).eval()
+        m_conv1 = nn.Conv1d(9, 1, 3)
+        m_conv2 = nn.Conv1d(1, 7, 3)
+        x = torch.randn(8, 9, 14, 12)
+
+        def model():
+            out = m_norm(x)
+            out = out.sum(dim=3)
+            out = m_conv1(out)
+            return m_conv2(out)
+
+        expected = model()
+        actual, code = run_and_get_cpp_code(torch.compile(model, backend="inductor"))
+
+        torch.testing.assert_close(actual, expected, atol=2e-4, rtol=1e-3)
+        self.assertIn("sum_masked_reduce", code)
+        vec_width = cpu_vec_isa.pick_vec_isa().nelements()
+        tail_width = 9 if vec_width > 9 else 9 % vec_width or vec_width
+        self.assertIn(
+            f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
+            code,
+        )
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
