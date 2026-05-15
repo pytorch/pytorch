@@ -229,6 +229,21 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError
         return member
 
+    def sq_contains(self, tx: InstructionTranslator, item: VariableTracker):
+        """Sequence contains for constants."""
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        return super().sq_contains(tx, item)
+
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
 
@@ -334,17 +349,6 @@ class ConstantVariable(VariableTracker):
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            if kwargs:
-                raise AssertionError(
-                    f"__contains__ does not accept keyword arguments, got {kwargs}"
-                )
-            search = args[0].as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -398,6 +402,9 @@ class ConstantVariable(VariableTracker):
             rest,
             tree_map_kwargs,
         )
+
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
 
     @override
     def call_obj_hasattr(
@@ -488,6 +495,16 @@ class ConstantVariable(VariableTracker):
         # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
         # bool inherits nb_negative from int via slot inheritance.
         return ConstantVariable.create(-self.value)
+
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
+        # bool inherits nb_positive from int via slot inheritance.
+        return ConstantVariable.create(+self.value)
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
