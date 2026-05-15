@@ -23,11 +23,21 @@ def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/", only_
         "autograd/generated/VariableType_2.cpp",
         "autograd/generated/VariableType_3.cpp",
         "autograd/generated/VariableType_4.cpp",
+        "autograd/generated/VariableType_5.cpp",
+        "autograd/generated/VariableType_6.cpp",
+        "autograd/generated/VariableType_7.cpp",
+        "autograd/generated/VariableType_8.cpp",
+        "autograd/generated/VariableType_9.cpp",
         "autograd/generated/TraceType_0.cpp",
         "autograd/generated/TraceType_1.cpp",
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/TraceType_5.cpp",
+        "autograd/generated/TraceType_6.cpp",
+        "autograd/generated/TraceType_7.cpp",
+        "autograd/generated/TraceType_8.cpp",
+        "autograd/generated/TraceType_9.cpp",
         "autograd/generated/ADInplaceOrViewType_0.cpp",
         "autograd/generated/ADInplaceOrViewType_1.cpp",
     ] + ([] if only_type_vars else [
@@ -486,6 +496,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/shim_common.cpp",
+    "torch/csrc/shim_exception_state.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -812,6 +823,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/api/src/mps.cpp",
+    "torch/csrc/api/src/print.cpp",
     "torch/csrc/api/src/serialize.cpp",
     "torch/csrc/api/src/nn/init.cpp",
     "torch/csrc/api/src/nn/module.cpp",

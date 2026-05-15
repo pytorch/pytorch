@@ -129,7 +129,7 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
         raise TypeError(
             "Invalid type for stream argument, must be "
             "`torch.cuda.Stream` or `int` representing a pointer "
-            "to a existing stream"
+            "to an existing stream"
         )
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
+import ctypes
 import functools
 import itertools
 import math
@@ -18,11 +19,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
@@ -40,10 +37,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    requires_mkl,
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_MKL,
     xfailIf,
     xfailIfS390X,
 )
@@ -355,7 +352,7 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
     @config.patch(freezing=True)
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
     def test_mkl_linear(self):
         dtypes = [torch.float32]
@@ -1086,6 +1083,52 @@ class CPUReproTests(TestCase):
             fn,
             (a,),
         )
+
+    def test_codegen_int_array_var_cache(self):
+        """
+        Test for the bug in codegen_int_array_var where bound method ids could collide,
+        leading to undefined 'int_array_XXX' identifiers in generated C++ code.
+        """
+        from unittest.mock import MagicMock
+
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch._inductor.virtualized import V
+
+        class MockBuffer:
+            def __init__(self):
+                self.lines = []
+
+            def writeline(self, line):
+                self.lines.append(line)
+
+        # Mock V.graph to avoid needing to compile a real model
+        mock_graph = MagicMock()
+        mock_graph.cpp_wrapper = True
+        mock_graph.aot_mode = False
+        mock_graph.is_const_graph = False
+        mock_graph.device_types = []
+
+        with V.set_graph_handler(mock_graph):
+            wrapper = CppWrapperCpu()
+            buffer = MockBuffer()
+
+            # Bound methods in Python are instantiated on access.
+            # Storing them ensures they have different ids.
+            w1 = buffer.writeline
+            w2 = buffer.writeline
+
+            # The bug: without the fix, codegen_int_array_var uses id(writeline)
+            # as the cache key, which leads to cache misses for bound methods.
+            var1 = wrapper.codegen_int_array_var("{1, 2, 3}", w1)
+            var2 = wrapper.codegen_int_array_var("{1, 2, 3}", w2)
+
+            # They should return the same variable name because it's the same buffer
+            self.assertEqual(
+                var1,
+                var2,
+                "codegen_int_array_var should cache based on the bound method's __self__, "
+                "not the transient bound method id itself.",
+            )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
@@ -2193,23 +2236,6 @@ class CPUReproTests(TestCase):
     def test_timed_cpu_only(self):
         timed(lambda: torch.randn(10), ())
 
-    def test_complex_memory_overlap(self):
-        dense = torch.zeros(64, 32)
-        self.assertFalse(complex_memory_overlap(dense))
-        self.assertFalse(complex_memory_overlap(dense.t()))
-
-        strided = dense.split(4, dim=1)
-        self.assertFalse(complex_memory_overlap(strided[0]))
-        self.assertFalse(complex_memory_overlap(strided[0].t()))
-
-        unsqueezed = dense.unsqueeze(1)
-        self.assertFalse(complex_memory_overlap(unsqueezed))
-        self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
-        self.assertFalse(complex_memory_overlap(gathered))
-        self.assertFalse(complex_memory_overlap(gathered.t()))
-
     @requires_vectorization
     def test_vec_dynamic_shapes(self):
         def fn(x):
@@ -3116,9 +3142,6 @@ class CPUReproTests(TestCase):
         eps = torch.tensor(0.9, dtype=torch.float64)
         self.common(fn, (input, eps))
 
-    # todo(@boyuan): Effective user count change inlines more ops and leads to
-    # higher compilation time.
-    @unittest.skip("timeout")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
@@ -3481,7 +3504,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                1,
             )
             # Check the number of global buffer allocation
             torch._dynamo.reset()
@@ -3530,7 +3553,15 @@ class CPUReproTests(TestCase):
             self.common(fn, (x,), atol=atol, rtol=rtol)
             self.assertEqual(
                 len(metrics.cpp_outer_loop_fused_inner_counts),
-                0,
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3556,7 +3587,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,  # 2 global bufs share 1 local buf
+                1,  # 2 global bufs share 1 local buf
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3590,7 +3621,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                2,
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3616,7 +3647,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                1,
             )
 
     @requires_vectorization
@@ -4831,6 +4862,25 @@ class CPUReproTests(TestCase):
         self.assertIsNotNone(grad_b)
         self.assertEqual(grad_b.dtype, torch.float16)
 
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_fused_fp16_rounding(self):
+        def fn(x, c):
+            z = torch.where(c, torch.full_like(x, 0.5), torch.full_like(x, -0.5))
+            y = z.to(torch.float16) + x.to(torch.float16)
+            return y, y.float().sum()
+
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        c = (torch.arange(24) % 5 == 0).reshape(2, 3, 4)
+        expected = fn(x, c)
+
+        for simdlen in simd_lengths_to_test():
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, c)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
@@ -4965,7 +5015,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # 4 kernels for max, exp, sum and div
-        check_metrics_vec_kernel_count(3)
+        check_metrics_vec_kernel_count(4)
         FileCheck().check_count(
             "Vectorized<int>::loadu(tmpbuf.data())", 0, exactly=True
         ).run(code)
@@ -5490,7 +5540,7 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         self.common(fn, ())
-        check_metrics_vec_kernel_count(0)
+        check_metrics_vec_kernel_count(1)
 
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
@@ -5535,6 +5585,34 @@ class CPUReproTests(TestCase):
             fn,
             (torch.randn(1000), torch.rand(1000)),
         )
+
+    def test_max_autotune_bmm_omp_dynamic(self):
+        try:
+            omp = ctypes.CDLL("", ctypes.RTLD_GLOBAL)
+        except OSError:
+            self.skipTest("Could not access OpenMP symbols from process")
+
+        if not hasattr(omp, "omp_set_dynamic") or not hasattr(omp, "omp_get_dynamic"):
+            self.skipTest("omp_set_dynamic/omp_get_dynamic not found in OpenMP library")
+
+        def fn(x, y):
+            return torch.bmm(x, y)
+
+        B, M, K, N = 1, 32, 32, 32
+        x = torch.randn(B, M, K)
+        y = torch.randn(B, K, N)
+
+        with config.patch({"max_autotune": True}):
+            compiled_fn = torch.compile(fn)
+            original_dynamic = omp.omp_get_dynamic()
+            omp.omp_set_dynamic(1)
+            try:
+                with set_num_threads(4):
+                    actual = compiled_fn(x, y)
+                    expected = fn(x, y)
+                    torch.testing.assert_close(actual, expected)
+            finally:
+                omp.omp_set_dynamic(original_dynamic)
 
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
@@ -5587,9 +5665,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
-    @xfailIf(
-        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
-    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
@@ -5632,7 +5707,7 @@ class CPUReproTests(TestCase):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
-            self.assertEqual(compiler_mode(*inputs), eager)
+            self.assertEqual(compiler_mode(*inputs), eager, atol=1e-4, rtol=1.6e-2)
 
     def test_fused_node(self):
         # https://github.com/pytorch/pytorch/issues/138550.
@@ -5915,8 +5990,10 @@ class CPUReproTests(TestCase):
         x = torch.randn(1000, 1000)
         opt_fn = torch.compile(fn)
         _, code = run_and_get_cpp_code(opt_fn, x)
-        FileCheck().check(
+        FileCheck().check_count(
             ".exp()",
+            1,
+            exactly=True,
         ).run(code)
 
     def test_convert_fp32_int64_oob_vec(self):

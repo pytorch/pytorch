@@ -78,11 +78,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             1e-5,
         )
 
-        dinput = distribute_tensor(input, device_mesh, [Replicate()])
-        dweight = distribute_tensor(weight, device_mesh, [Replicate()])
-        dbias = distribute_tensor(bias, device_mesh, [Replicate()])
-        drunning_mean = distribute_tensor(running_mean, device_mesh, [Replicate()])
-        drunning_var = distribute_tensor(running_var, device_mesh, [Replicate()])
+        dinput = distribute_tensor(input, device_mesh, [Shard(1)])
+        dweight = distribute_tensor(weight, device_mesh, [Shard(0)])
+        dbias = distribute_tensor(bias, device_mesh, [Shard(0)])
+        drunning_mean = distribute_tensor(running_mean, device_mesh, [Shard(0)])
+        drunning_var = distribute_tensor(running_var, device_mesh, [Shard(0)])
 
         result = torch.ops.aten._native_batch_norm_legit_functional(
             dinput,
@@ -96,8 +96,9 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         )
 
         self.assertEqual(len(result), 5)
-        for output in result:
-            self.assertEqual(output.placements, (Replicate(),))
+        expected_placements = (Shard(1), Shard(0), Shard(0), Shard(0), Shard(0))
+        for output, placements in zip(result, expected_placements):
+            self.assertEqual(output.placements, (placements,))
         for actual, expected_tensor in zip(result, expected):
             self.assertEqual(actual.full_tensor(), expected_tensor)
 

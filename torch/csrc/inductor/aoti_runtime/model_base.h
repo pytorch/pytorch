@@ -572,6 +572,11 @@ class AOTInductorModelBase {
     run_finished_ = true;
 #endif // USE_CUDA
 
+    // Wait for the constant folding kernels to complete. The folded
+    // constants may be read by inference on a different stream after
+    // swap_constant_buffer(), which has no GPU synchronization.
+    wait_for_completion();
+
     return folded_constants;
   }
 

@@ -49,6 +49,7 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._inductor.output_code import OutputCode
+from torch._inductor.remote_cache import cache_stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
@@ -79,7 +80,12 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta
+from .schemas import (
+    AOTAutogradCacheInfo,
+    AOTConfig,
+    CacheableAOTConfig,
+    ViewAndMutationMeta,
+)
 
 
 if TYPE_CHECKING:
@@ -509,7 +515,13 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        self.disable_amp = torch._C._is_any_autocast_enabled()
+        # Include per-device autocast dtype in cache key to avoid reusing
+        # a graph compiled for one autocast dtype (e.g. bfloat16) when
+        # running under a different autocast dtype (e.g. float16).
+        self.autocast_state: dict[str, torch.dtype] = {}
+        for device_type in torch._C._autocast_supported_devices():
+            if torch.is_autocast_enabled(device_type):
+                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
@@ -558,8 +570,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
-        # Return NotImplemented to fall back to default behavior
-        return NotImplemented
+        # Fall back to parent class reducer which handles unpicklable types
+        return super().reducer_override(obj)
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
@@ -660,17 +672,22 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Reduce the config to a stable key for caching.
         """
+        cacheable = aot_config.to_cacheable()
         return (
+            # Cache entries persist the full CacheableAOTConfig, but cache keys
+            # intentionally ignore the debug-only aot_id so equivalent graphs can hit.
             _ident,
             (
-                aot_config.num_params_buffers,
-                aot_config.keep_inference_input_mutations,
-                aot_config.is_export,
-                aot_config.no_tangents,
-                aot_config.dynamic_shapes,
-                aot_config.aot_autograd_arg_pos_to_source,
-                aot_config.enable_log,
-                aot_config.pre_dispatch,
+                cacheable.num_params_buffers,
+                cacheable.keep_inference_input_mutations,
+                cacheable.is_export,
+                cacheable.no_tangents,
+                cacheable.dynamic_shapes,
+                cacheable.aot_autograd_arg_pos_to_source,
+                cacheable.static_input_indices,
+                cacheable.enable_log,
+                cacheable.pre_dispatch,
+                cacheable.precompile_backend_id,
             ),
         )
 
@@ -1104,6 +1121,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_hit_count",
@@ -1114,6 +1132,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "aotautograd_remote_cache_hit_count",
             )
         if local_miss:
+            cache_stats.miss("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_miss_count",
@@ -1290,6 +1309,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
+            cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
@@ -1337,7 +1357,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         indices_of_inps_to_detach: list[int],
         forward_time_taken_ns: int,
         backward_time_taken_ns: int,
-        sanitized_aot_config: AOTConfig,
+        sanitized_aot_config: CacheableAOTConfig,
         guards_expr: str | None,
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,

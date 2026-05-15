@@ -846,9 +846,7 @@ def _clone_schema_info(
             if schema_info.static_kwargkey is not None
             else None
         ),
-        needs_pytree=schema_info.needs_pytree
-        if needs_pytree is None
-        else needs_pytree,
+        needs_pytree=schema_info.needs_pytree if needs_pytree is None else needs_pytree,
     )
 
 
@@ -871,105 +869,204 @@ def _clone_strategy_info(
     )
 
 
-def _find_inplace_variant_overload(base_op: OpOverload) -> OpOverload | None:
+def _canonical_variant_base_name(op: OpOverload) -> tuple[str, str]:
+    """Return the namespace and base name shared by related ATen variants."""
+    namespace, base_name = _op_namespace_and_base_name(op)
+    if base_name.endswith("_functional"):
+        return namespace, base_name.removesuffix("_functional")
+    if op._schema.is_mutable and base_name.endswith("_"):
+        return namespace, base_name.removesuffix("_")
+    return namespace, base_name
+
+
+def _iter_packet_overloads(packet: Any | None) -> list[OpOverload]:
+    """Return overloads from an overload packet, skipping lookup misses."""
+    if packet is None:
+        return []
+    overloads: list[OpOverload] = []
+    for overload_name in packet.overloads():
+        overload = _get_packet_overload(packet, overload_name)
+        if overload is not None:
+            overloads.append(overload)
+    return overloads
+
+
+def _is_explicit_out_arg(arg: Any) -> bool:
+    """Return whether a schema argument is an explicit output argument."""
+    return bool(getattr(arg, "is_out", False))
+
+
+def _schema_non_alias_tensor_output_indices(op: OpOverload) -> list[int]:
+    """Return tensor return indices that are not aliases of mutable inputs."""
+    indices: list[int] = []
+    for idx, ret in enumerate(op._schema.returns):
+        if "Tensor" in str(ret.type) and ret.alias_info is None:
+            indices.append(idx)
+    return indices
+
+
+def _schema_written_tensor_arg_count(op: OpOverload) -> int:
+    """Count Tensor-valued arguments written by an op."""
+    return sum(
+        1
+        for arg in op._schema.arguments
+        if _is_write_arg(arg) and "Tensor" in str(arg.type)
+    )
+
+
+def _functional_variant_tensor_output_count(base_op: OpOverload) -> int:
+    """Return expected tensor outputs for a functionalization variant.
+
+    Mutable ops can have real tensor returns and/or alias returns for mutated
+    inputs. Functionalization returns the real tensor returns plus updated
+    copies of written tensor inputs.
+    """
+    return len(_schema_non_alias_tensor_output_indices(base_op)) + (
+        _schema_written_tensor_arg_count(base_op)
+    )
+
+
+def _find_same_schema_out_of_place_variant_overloads(
+    base_op: OpOverload,
+) -> list[OpOverload]:
+    """Find non-mutating variants that share a mutable trailing-underscore schema."""
+    namespace, base_name = _op_namespace_and_base_name(base_op)
+    if not base_op._schema.is_mutable or not base_name.endswith("_"):
+        return []
+    if _is_foreach_like_op_name(base_op.name()):
+        return []
+    if any(_is_explicit_out_arg(arg) for arg in base_op._schema.arguments):
+        return []
+
+    _, canonical_base_name = _canonical_variant_base_name(base_op)
+    packet = _get_overload_packet(namespace, canonical_base_name)
+    if packet is None:
+        return []
+
+    variants: list[OpOverload] = []
+    for candidate in _iter_packet_overloads(packet):
+        if candidate._schema.is_mutable:
+            continue
+        if _schema_tensor_output_count(candidate) != _schema_tensor_output_count(
+            base_op
+        ):
+            continue
+        if _schema_args_match(base_op._schema.arguments, candidate._schema.arguments):
+            variants.append(candidate)
+    return variants
+
+
+def _find_inplace_variant_overloads(base_op: OpOverload) -> list[OpOverload]:
     """Find an inplace overload that has the same tensor schema as base_op.
 
     Inplace variants can reuse the base strategy only when inputs and outputs
     have the same tensor structure.
     """
-    namespace, base_name = _op_namespace_and_base_name(base_op)
-    if base_op._schema.is_mutable or base_name.endswith("_"):
-        return None
+    namespace, base_name = _canonical_variant_base_name(base_op)
+    if base_op._schema.is_mutable:
+        return []
     if _is_foreach_like_op_name(base_op.name()):
-        return None
+        return []
+    if any(_is_explicit_out_arg(arg) for arg in base_op._schema.arguments):
+        return []
 
     packet = _get_overload_packet(namespace, f"{base_name}_")
     if packet is None:
-        return None
+        return []
 
-    candidate = _get_packet_overload(packet, base_op._overloadname)
-    if candidate is None:
-        return None
-    if not candidate._schema.is_mutable:
-        return None
-    if _schema_tensor_output_count(candidate) != _schema_tensor_output_count(base_op):
-        return None
-    if not _schema_args_match(base_op._schema.arguments, candidate._schema.arguments):
-        return None
-    return candidate
+    variants: list[OpOverload] = []
+    for candidate in _iter_packet_overloads(packet):
+        if not candidate._schema.is_mutable:
+            continue
+        if _schema_tensor_output_count(candidate) != _schema_tensor_output_count(
+            base_op
+        ):
+            continue
+        if _schema_args_match(base_op._schema.arguments, candidate._schema.arguments):
+            variants.append(candidate)
+    return variants
 
 
-def _find_out_variant_overload(
+def _find_out_variant_overloads(
     base_op: OpOverload,
-) -> tuple[OpOverload, tuple[str, ...]] | None:
+) -> list[tuple[OpOverload, tuple[str, ...]]]:
     """Find an out overload and return its written output arg names.
 
     Out variants need extra strategy inputs for the provided output tensors.
     """
-    namespace, base_name = _op_namespace_and_base_name(base_op)
-    if base_op._schema.is_mutable or _is_foreach_like_op_name(base_op.name()):
-        return None
+    namespace, base_name = _canonical_variant_base_name(base_op)
+    if _is_foreach_like_op_name(base_op.name()):
+        return []
+    if base_name.endswith("_functional"):
+        return []
+    if any(_is_explicit_out_arg(arg) for arg in base_op._schema.arguments):
+        return []
 
     base_num_outputs = _schema_tensor_output_count(base_op)
     if base_num_outputs == 0:
-        return None
+        return []
 
     packet = _get_overload_packet(namespace, base_name)
     if packet is None:
-        return None
+        return []
 
-    for overload_name in packet.overloads():
-        candidate = _get_packet_overload(packet, overload_name)
-        if candidate is None or candidate is base_op:
+    variants: list[tuple[OpOverload, tuple[str, ...]]] = []
+    for candidate in _iter_packet_overloads(packet):
+        if candidate is base_op:
             continue
         if not candidate._schema.is_mutable:
             continue
         if _schema_tensor_output_count(candidate) != base_num_outputs:
             continue
 
-        write_args = [arg for arg in candidate._schema.arguments if _is_write_arg(arg)]
-        if len(write_args) != base_num_outputs:
-            continue
-        if not all("Tensor" in str(arg.type) for arg in write_args):
-            continue
-
-        non_write_args = [
-            arg for arg in candidate._schema.arguments if not _is_write_arg(arg)
+        output_args = [
+            arg for arg in candidate._schema.arguments if _is_explicit_out_arg(arg)
         ]
-        if _schema_args_are_same(base_op._schema.arguments, non_write_args):
-            return candidate, tuple(arg.name for arg in write_args)
+        if len(output_args) != base_num_outputs:
+            continue
+        if not all("Tensor" in str(arg.type) for arg in output_args):
+            continue
 
-    return None
+        non_output_args = [
+            arg for arg in candidate._schema.arguments if not _is_explicit_out_arg(arg)
+        ]
+        if _schema_args_are_same(base_op._schema.arguments, non_output_args):
+            variants.append((candidate, tuple(arg.name for arg in output_args)))
+
+    return variants
 
 
-def _find_functional_variant_overload(base_op: OpOverload) -> OpOverload | None:
+def _find_functional_variant_overloads(base_op: OpOverload) -> list[OpOverload]:
     """Find the functional variant generated from a mutable base overload.
 
     Functional variants return updated copies of mutable inputs, so their extra
     outputs must follow the mutated input placements.
     """
     if not any(_is_write_arg(arg) for arg in base_op._schema.arguments):
-        return None
-    namespace, base_name = _op_namespace_and_base_name(base_op)
-    if base_name.endswith("_") or _is_foreach_like_op_name(base_op.name()):
-        return None
+        return []
+    namespace, base_name = _canonical_variant_base_name(base_op)
+    if _is_foreach_like_op_name(base_op.name()):
+        return []
+    if any(_is_explicit_out_arg(arg) for arg in base_op._schema.arguments):
+        return []
 
     packet = _get_overload_packet(namespace, f"{base_name}_functional")
     if packet is None:
-        return None
+        return []
 
-    candidate = _get_packet_overload(packet, base_op._overloadname)
-    if candidate is None or candidate._schema.is_mutable:
-        return None
-    if not _schema_args_match(base_op._schema.arguments, candidate._schema.arguments):
-        return None
-
-    mutable_args = [arg for arg in base_op._schema.arguments if _is_write_arg(arg)]
-    if _schema_tensor_output_count(candidate) != _schema_tensor_output_count(
-        base_op
-    ) + len(mutable_args):
-        return None
-    return candidate
+    variants: list[OpOverload] = []
+    expected_outputs = _functional_variant_tensor_output_count(base_op)
+    for candidate in _iter_packet_overloads(packet):
+        if candidate._schema.is_mutable:
+            continue
+        if not _schema_args_match(
+            base_op._schema.arguments, candidate._schema.arguments
+        ):
+            continue
+        if _schema_tensor_output_count(candidate) != expected_outputs:
+            continue
+        variants.append(candidate)
+    return variants
 
 
 def _find_foreach_variants(base_op: OpOverload) -> list[OpOverload]:
@@ -1046,10 +1143,10 @@ def _strip_output_args_for_base_call(
     return tuple(base_args), base_kwargs
 
 
-def _make_inplace_variant_strategy_fn(
+def _make_same_schema_variant_strategy_fn(
     base_fn: _SingleDimStrategyFunc, base_op: OpOverload
 ) -> _SingleDimStrategyFunc:
-    """Wrap base_fn so an inplace overload uses base_op-specific strategy logic.
+    """Wrap base_fn so a same-schema variant uses base-op strategy logic.
 
     Passing base_op keeps op-sensitive strategy functions on their original
     lookup paths.
@@ -1142,6 +1239,7 @@ def _make_functional_variant_strategy_fn(
         arg.name for arg in base_op._schema.arguments if _is_write_arg(arg)
     }
     base_num_outputs = _schema_tensor_output_count(base_op)
+    non_alias_output_indices = _schema_non_alias_tensor_output_indices(base_op)
 
     def _mutable_input_rule_indices(
         args_schema: ArgsType, kwargs_schema: KwargsType
@@ -1173,10 +1271,16 @@ def _make_functional_variant_strategy_fn(
     ) -> list[list[Placement | _ShardingPlaceholder]]:
         mutable_input_indices = _mutable_input_rule_indices(args_schema, kwargs_schema)
         base_rules = base_fn(base_op, args_schema, kwargs_schema)
-        return [
-            [*rule, *(rule[input_idx] for input_idx in mutable_input_indices)]
-            for rule in base_rules
-        ]
+        rules: list[list[Placement | _ShardingPlaceholder]] = []
+        for rule in base_rules:
+            output_placements = [
+                rule[output_idx] for output_idx in non_alias_output_indices
+            ]
+            output_placements.extend(
+                rule[input_idx] for input_idx in mutable_input_indices
+            )
+            rules.append([*output_placements, *rule[base_num_outputs:]])
+        return rules
 
     return strategy
 
@@ -1198,35 +1302,51 @@ def auto_register_op_variants() -> None:
             base_op
         )
 
-        inplace_op = _find_inplace_variant_overload(base_op)
-        if inplace_op is not None and inplace_op not in already_registered:
+        for out_of_place_op in _find_same_schema_out_of_place_variant_overloads(
+            base_op
+        ):
+            if out_of_place_op in already_registered:
+                continue
+            propagator.register_single_dim_op_strategy(
+                out_of_place_op,
+                _clone_strategy_info(
+                    info, _make_same_schema_variant_strategy_fn(info.func, base_op)
+                ),
+                _clone_schema_info(base_schema_info),
+            )
+            already_registered.add(out_of_place_op)
+
+        for inplace_op in _find_inplace_variant_overloads(base_op):
+            if inplace_op in already_registered:
+                continue
             propagator.register_single_dim_op_strategy(
                 inplace_op,
                 _clone_strategy_info(
-                    info, _make_inplace_variant_strategy_fn(info.func, base_op)
+                    info, _make_same_schema_variant_strategy_fn(info.func, base_op)
                 ),
                 _clone_schema_info(base_schema_info),
             )
             already_registered.add(inplace_op)
 
-        out_variant = _find_out_variant_overload(base_op)
-        if out_variant is not None:
+        for out_variant in _find_out_variant_overloads(base_op):
             out_op, output_arg_names = out_variant
-            if out_op not in already_registered:
-                propagator.register_single_dim_op_strategy(
-                    out_op,
-                    _clone_strategy_info(
-                        info,
-                        _make_out_variant_strategy_fn(
-                            info.func, base_op, out_op, output_arg_names
-                        ),
+            if out_op in already_registered:
+                continue
+            propagator.register_single_dim_op_strategy(
+                out_op,
+                _clone_strategy_info(
+                    info,
+                    _make_out_variant_strategy_fn(
+                        info.func, base_op, out_op, output_arg_names
                     ),
-                    _clone_schema_info(base_schema_info),
-                )
-                already_registered.add(out_op)
+                ),
+                _clone_schema_info(base_schema_info),
+            )
+            already_registered.add(out_op)
 
-        functional_op = _find_functional_variant_overload(base_op)
-        if functional_op is not None and functional_op not in already_registered:
+        for functional_op in _find_functional_variant_overloads(base_op):
+            if functional_op in already_registered:
+                continue
             propagator.register_single_dim_op_strategy(
                 functional_op,
                 _clone_strategy_info(
