@@ -15164,6 +15164,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
         self.assertEqual(eager_out, compiled_out)
 
+    @requires_cuda
+    def test_lazy_conv_zero_in_channels_backward(self):
+        for dim in (1, 2, 3):
+            conv_cls = getattr(torch.nn, f"LazyConv{dim}d")
+            model = conv_cls(2, kernel_size=1).eval().to(GPU_TYPE)
+            x = torch.randn(1, 0, *([8] * dim), device=GPU_TYPE)
+
+            y = torch.compile(model)(x)
+            self.assertEqual(y.shape, torch.Size([1, 0, *([8] * dim)]))
+
+            y.sum().backward()
+            self.assertEqual(model.weight.shape, torch.Size([2, 0, *([1] * dim)]))
+            self.assertEqual(model.weight.grad.shape, model.weight.shape)
+            self.assertEqual(model.bias.shape, torch.Size([2]))
+            self.assertEqual(model.bias.grad.shape, model.bias.shape)
+            self.assertEqual(model.bias.grad, torch.zeros_like(model.bias))
+
     @requires_gpu()
     @config.patch(fallback_random=True)
     def test_mix_device_index(self):
