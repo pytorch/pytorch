@@ -2061,9 +2061,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     f_pool_slices, fullgraph=True, backend="inductor"
                 )
                 pool_compiled = pool.clone()
-                sa, sb = compiled_f(
-                    pool_compiled[1], pool_compiled[3], data_a, data_b
-                )
+                sa, sb = compiled_f(pool_compiled[1], pool_compiled[3], data_a, data_b)
 
                 # Outputs must match eager for BOTH slices, regardless of the
                 # pass's storage-collision identification order.
