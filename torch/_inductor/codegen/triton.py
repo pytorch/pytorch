@@ -2044,7 +2044,7 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        return f"tl_math.log({x})"
+        return f"libdevice.log({x})"
 
     @staticmethod
     @maybe_upcast_float32(convert_output=False)

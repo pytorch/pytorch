@@ -1185,6 +1185,27 @@ class CudaReproTests(TestCase):
         FileCheck().check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
+        def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float16)
+        out, code = run_and_get_code(
+            torch.compile(
+                foo,
+                options={
+                    "deterministic": True,
+                    "fallback_random": True,
+                    "emulate_precision_casts": True,
+                    "eager_numerics.division_rounding": True,
+                    "eager_numerics.disable_ftz": True,
+                    "eager_numerics.use_pytorch_libdevice": True,
+                },
+            ),
+            inp,
+        )
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
     def test_uint_view_copy(self):
         @torch.compile
         def view_copy(target, source):
