@@ -228,7 +228,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
 
 def vec_elems_for(dtype: torch.dtype) -> int:
     """Elements per lane per step (16-byte vector gather)."""
-    return _VEC_BYTES // torch.tensor([], dtype=dtype).element_size()
+    return _VEC_BYTES // dtype.itemsize
 
 
 def vec_scatter_add_into(
