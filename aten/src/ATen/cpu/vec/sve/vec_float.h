@@ -79,8 +79,7 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       const Vectorized<float>& mask_) {
-    svbool_t mask =
-        svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+    svbool_t mask = svcmpne_s32(ptrue, svreinterpret_s32_f32(mask_), ZERO_S32);
     return svsel_f32(mask, b, a);
   }
   template <typename step_t>

@@ -66,7 +66,7 @@ inline namespace CPU_CAPABILITY {
         const Vectorized<int##bit##_t>& a,                                    \
         const Vectorized<int##bit##_t>& b,                                    \
         const Vectorized<int##bit##_t>& mask_) {                              \
-      svbool_t mask = svcmpeq_s##bit(ptrue, mask_, ALL_S##bit##_TRUE_MASK);   \
+      svbool_t mask = svcmpne_s##bit(ptrue, mask_, ZERO_S##bit);              \
       return svsel_s##bit(mask, b, a);                                        \
     }                                                                         \
     /* step sometimes requires a higher precision type (e.g., T=int,          \

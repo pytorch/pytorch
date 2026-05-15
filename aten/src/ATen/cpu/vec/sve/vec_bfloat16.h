@@ -59,8 +59,7 @@ class Vectorized<BFloat16> {
       const Vectorized<BFloat16>& a,
       const Vectorized<BFloat16>& b,
       const Vectorized<BFloat16>& mask_) {
-    svbool_t mask =
-        svcmpeq_s16(ptrue, svreinterpret_s16_bf16(mask_), ALL_S16_TRUE_MASK);
+    svbool_t mask = svcmpne_s16(ptrue, svreinterpret_s16_bf16(mask_), ZERO_S16);
     return svsel_bf16(mask, b, a);
   }
   template <typename step_t>

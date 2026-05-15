@@ -973,6 +973,27 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    @requires_vectorization
+    def test_bool_masked_fill_neg_inf_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/177244
+        def fn(mask):
+            return mask.masked_fill(torch.logical_not(mask), -float("inf")).to(
+                torch.float32
+            )
+
+        mask = torch.ones((16, 16), dtype=torch.bool).tril(diagonal=0)
+        expected = torch.ones_like(mask, dtype=torch.float32)
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            actual, _ = run_and_get_cpp_code(torch.compile(fn, fullgraph=True), mask)
+
+        self.assertEqual(actual, expected)
+        if metrics.generated_cpp_vec_kernel_count < 1:
+            raise AssertionError(
+                f"Expected >= 1 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
+            )
+
     def test_relu_with_inf_value(self):
         # https://github.com/pytorch/pytorch/issues/117544.
 
