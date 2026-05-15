@@ -353,7 +353,13 @@ class TestVarlenAttention(NNTestCase):
                     shape.max_seq_len,
                 )
                 self.assertEqual(actual.data_ptr(), out_buf.data_ptr())
-                self.assertEqual(out_buf, expected)
+                # The allocating path may use cuDNN while the out path uses Flash.
+                self.assertEqual(
+                    out_buf,
+                    expected,
+                    atol=5e-4 if dtype is torch.bfloat16 else 1e-4,
+                    rtol=0.016 if dtype is torch.bfloat16 else 0.001,
+                )
 
             varlen_grad_out = torch.ones_like(output)
 

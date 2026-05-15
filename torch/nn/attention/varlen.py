@@ -35,6 +35,32 @@ def _should_use_cudnn(device_index: int) -> bool:
     return False
 
 
+def _can_use_cudnn(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    max_q: int,
+    window_size: list[int],
+    enable_gqa: bool = False,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
+) -> bool:
+    if not query.is_cuda or not _should_use_cudnn(query.device.index):
+        return False
+    if max_q <= 128:
+        return False
+    if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
+        return False
+    if window_size != [-1, -1]:
+        return False
+    if enable_gqa or query.size(1) != key.size(1):
+        return False
+    if seqused_k is not None or block_table is not None or num_splits is not None:
+        return False
+    return True
+
+
 class AuxRequest(NamedTuple):
     """
     Request which auxiliary outputs to compute from varlen_attn.
@@ -68,29 +94,20 @@ def _varlen_attn(
     This is the internal implementation. Users should use the public varlen_attn function instead.
     """
     window_size = _normalize_window_size(window_size)
-    head_dim_cudnn_ok = query.shape[-1] % 8 == 0 and value.shape[-1] % 8 == 0
-    window_size_cudnn_ok = window_size[0] == -1 and window_size[1] == -1
-    use_cudnn = window_size_cudnn_ok and query.is_cuda and _should_use_cudnn(query.device.index) and head_dim_cudnn_ok
+    use_cudnn = _can_use_cudnn(
+        query,
+        key,
+        value,
+        max_q,
+        window_size,
+        enable_gqa,
+        seqused_k,
+        block_table,
+        num_splits,
+    )
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-        if enable_gqa:
-            # TODO: check this
-            raise RuntimeError("GQA is not supported with the cuDNN backend.")
-        if num_splits is not None:
-            # TODO: check this
-            raise RuntimeError("num_splits is not supported with the cuDNN backend.")
-        if window_size[0] != -1 or window_size[1] != -1:
-            raise RuntimeError(
-                "cuDNN backend does not support window attention. Please use Flash Attention backend."
-            )
-        if seqused_k is not None or block_table is not None:
-            # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
-            # but _cudnn_attention_forward doesn't expose it yet.
-            raise RuntimeError(
-                "seqused_k/block_table is not yet supported with the cuDNN backend."
-            )
-
         result = torch.ops.aten._cudnn_attention_forward(
             query=query,
             key=key,
@@ -353,12 +370,6 @@ def _varlen_attn_out(
     """
     window_size = _normalize_window_size(window_size)
 
-    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
-
-    if use_cudnn:
-        # TODO: look into this
-        raise RuntimeError("cuDNN backend does not support out variant.")
-
     log.info("Using Flash Attention backend for varlen_attn_out")
     softmax_lse = torch.ops.aten._flash_attention_forward_no_dropout_inplace(
         out,
@@ -528,10 +539,7 @@ def _varlen_attn_backward(
 
     unused = torch.empty(0, device=query.device)
 
-    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
-    head_dim_cudnn_ok = query.shape[-1] % 8 == 0 and value.shape[-1] % 8 == 0
-    window_size_cudnn_ok = window_size[0] == -1 and window_size[1] == -1
-    use_cudnn = window_size_cudnn_ok and query.is_cuda and _should_use_cudnn(query.device.index) and head_dim_cudnn_ok
+    use_cudnn = _can_use_cudnn(query, key, value, max_q, window_size)
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")

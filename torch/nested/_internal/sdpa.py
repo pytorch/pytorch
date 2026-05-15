@@ -247,6 +247,17 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
     return True
 
 
+def _check_query_seq_len_cudnn_nested(params: SDPAParams, debug=False) -> bool:
+    if params.query._get_max_seqlen() <= 128:
+        if debug:
+            log.warning(
+                "cuDNN attention does not support nested tensor query sequence "
+                "length <= 128."
+            )
+        return False
+    return True
+
+
 def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
         _check_batch_size_nested,
@@ -263,6 +274,19 @@ def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
         _check_batch_size_nested,
         _check_for_seq_len_0_nested,
+    )
+    for constraint in constraints:
+        if not constraint(params, debug):
+            return False
+    return True
+
+
+def _can_use_cudnn_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+    constraints = (
+        _check_batch_size_nested,
+        _check_head_dim_size_cudnn_nested,
+        _check_for_seq_len_0_nested,
+        _check_query_seq_len_cudnn_nested,
     )
     for constraint in constraints:
         if not constraint(params, debug):
@@ -310,7 +334,9 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
 
     for backend in ordering:
         if backend == SDPBackend.CUDNN_ATTENTION:
-            if can_use_cudnn_attention(params):
+            if can_use_cudnn_attention(params) and _can_use_cudnn_sdpa_jagged(
+                params
+            ):
                 return SDPBackend.CUDNN_ATTENTION
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
@@ -334,6 +360,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
     _can_use_math_sdpa_jagged(params, debug=True)
     log.warning("cuDNN attention kernel not used because:")
     can_use_cudnn_attention(params, debug=True)
+    _can_use_cudnn_sdpa_jagged(params, debug=True)
     return SDPBackend.ERROR
 
 

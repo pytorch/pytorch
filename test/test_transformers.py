@@ -3597,7 +3597,7 @@ class TestSDPACudaOnly(NNTestCase):
             torch.manual_seed(42)
 
             shape = VarlenShape(
-                batch_size=2, max_seq_len=128, embed_dim=32, num_heads=4
+                batch_size=2, max_seq_len=256, embed_dim=32, num_heads=4
             )
 
             attention_block = AttentionBlock(

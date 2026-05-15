@@ -18,6 +18,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 
+#include <algorithm>
+
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
@@ -690,6 +692,36 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   return true;
 }
 
+bool check_cudnn_query_seq_len_nested(sdp_params const& params, bool debug) {
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl =
+      at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  int64_t max_seqlen_q = 0;
+  // This is being called inside SDPA with shape [batch, heads, {seq_len}, dim].
+  for (const auto i : c10::irange(n_tensors)) {
+    max_seqlen_q = std::max(
+        max_seqlen_q, sizes_ptr[(i * size_tensor_stride) + 1]);
+  }
+
+  if (max_seqlen_q <= 128) {
+    if (debug) {
+      TORCH_WARN_ONCE(
+          "cuDNN attention does not support nested tensor query sequence "
+          "length <= 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_cudnn_layout(sdp_params const& params, bool debug) {
   const int64_t h = params.query.size(1);
   const int64_t s_q = params.query.size(2);
@@ -901,6 +933,17 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 
   if (has_only_dense_inputs(params)) {
     for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  constexpr auto nested_constraints =
+      c10::array_of<bool (*)(sdp_params const&, bool)>(
+          check_cudnn_query_seq_len_nested);
+
+  if (has_for_nested_inputs(params)) {
+    for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
       }

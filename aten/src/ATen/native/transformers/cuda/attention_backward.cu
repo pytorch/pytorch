@@ -217,6 +217,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     }
 
     const bool is_nested = cum_seq_q.defined();
+    TORCH_CHECK(
+        !is_nested || max_q > 128,
+        "cuDNN varlen attention does not support query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
