@@ -2306,6 +2306,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_pad_packed_sequence_compile_does_not_error(self):
+        class RaggedTensorExample(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+
+            def forward(self, x, lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x, lengths, batch_first=True, enforce_sorted=False
+                )
+                output, _ = torch.nn.utils.rnn.pad_packed_sequence(
+                    packed, batch_first=True
+                )
+                return self.linear(output)
+
+        model = RaggedTensorExample().eval()
+        compiled_model = torch.compile(model, backend="eager")
+
+        x = torch.randn(3, 5, 10)
+        lengths = torch.tensor([3, 5, 2])
+
+        with torch.no_grad():
+            self.assertEqual(model(x, lengths), compiled_model(x, lengths))
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
