@@ -260,23 +260,6 @@ def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
     )
 
 
-_VALUE_EXPR_REQUIRES_INT64 = "value_expr_requires_int64"
-
-
-def _value_expr_requires_int64(expr: sympy.Expr) -> bool:
-    """
-    Prefer the pre-codegen analysis result when available. The fallback covers
-    direct value_expr callsites and preserves the conservative behavior if a
-    graph reaches codegen without the annotation pass.
-    """
-    node = getattr(V.interpreter, "current_node", None)
-    meta = getattr(node, "meta", None)
-    if isinstance(meta, dict) and _VALUE_EXPR_REQUIRES_INT64 in meta:
-        return bool(meta[_VALUE_EXPR_REQUIRES_INT64])
-
-    return _integer_expr_requires_int64(expr)
-
-
 class OpDtypeSupport:
     """
     Some Triton ops such as libdevice and tl.math only support float32 and float64.
@@ -2280,12 +2263,6 @@ class TritonKernelOverrides(TritonOverrides):
         Like :meth:`index_expr`, but honors ``dtype``. This is the right op when
         the user explicitly requested ``dtype`` (e.g. ``arange(int64)``
         whose result participates in tensor computation).
-
-        Integer expressions may be computed at the kernel indexing dtype when
-        value-range metadata proves that doing so preserves the final value.
-        Otherwise we cast block indices before evaluating the expression, so
-        ``2147483648 * p0`` cannot overflow the kernel's int32 indexing dtype.
-        The returned IR value is still cast to ``dtype`` when needed.
         """
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
@@ -2302,23 +2279,22 @@ class TritonKernelOverrides(TritonOverrides):
         is_predicate = bool(
             getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False)
         )
-        requires_int64 = _value_expr_requires_int64(expr)
         operand_dtype = dtype
-        compute_dtype = dtype
+        result_dtype = dtype
         if is_predicate:
             operand_dtype = (
                 torch.int64
-                if requires_int64
+                if _integer_expr_requires_int64(expr)
                 else V.kernel.get_index_dtype_as_torch_dtype()
             )
-            compute_dtype = torch.bool
-        elif dtype not in (torch.int32, torch.int64) and expr.is_integer:
+            result_dtype = torch.bool
+        elif dtype == torch.bool and expr.is_integer:
             operand_dtype = (
                 torch.int64
-                if requires_int64
+                if _integer_expr_requires_int64(expr)
                 else V.kernel.get_index_dtype_as_torch_dtype()
             )
-            compute_dtype = operand_dtype
+            result_dtype = operand_dtype
 
         index_str = cls._cast_block_vars_to(
             indexing.index, indexing.index_str, operand_dtype
@@ -2331,13 +2307,13 @@ class TritonKernelOverrides(TritonOverrides):
                 V.kernel.compute,
                 index_str,
                 bounds=get_bounds_index_expr(expr),
-                dtype=compute_dtype,
+                dtype=result_dtype,
                 shape=shape,
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
 
-        if compute_dtype != dtype:
+        if result_dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 cls.to_dtype(var, dtype),
@@ -6686,6 +6662,16 @@ class TritonScheduling(SIMDScheduling):
         for node in scheduler.nodes:
             if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
                 node.debug_device_str = debug_triton_code
+
+    def should_convert_index_expr_to_value_expr(self, node_schedule, kernel):
+        # Keep the first version scoped to Triton CUDA, where index_expr's
+        # integer narrowing can change tensor values.
+        for node in node_schedule:
+            if isinstance(node, BaseSchedulerNode):
+                device = node.get_device()
+                if device is not None and device.type == "cuda":
+                    return True
+        return False
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

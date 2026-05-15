@@ -164,12 +164,11 @@ _VALUE_SINK_ARGS: dict[str, tuple[int, ...]] = {
     "store_reduction": (3,),
     "reduction": (4,),
     "partial_accumulate": (3,),
-    "scan": (2,),
-    "sort": (1,),
+    "scan": (3,),
+    "sort": (2,),
     "bucketize": (1,),
 }
 
-_VALUE_EXPR_REQUIRES_INT64 = "value_expr_requires_int64"
 _NON_VALUE_PROPAGATING_TARGETS: OrderedSet[str] = OrderedSet(
     [
         "check_bounds",
@@ -189,6 +188,13 @@ _VALUE_PROPAGATING_TARGETS = OP_NAMES - OrderedSet(_INDEXING_SINK_ARGS) - Ordere
 
 def _is_masked_subblock(node: torch.fx.Node) -> bool:
     return isinstance(node.target, str) and "masked_subblock" in node.target
+
+
+def _loop_body_graphs(loop_body: LoopBody) -> list[torch.fx.Graph]:
+    return [
+        loop_body.root_block.graph,
+        *(block.graph for block in getattr(loop_body, "subblocks", {}).values()),
+    ]
 
 
 def _collect_index_value_sinks(
@@ -238,6 +244,9 @@ def _collect_index_value_sinks(
                     _add(indexing_sinks, node.args[0])
                 if len(node.args) > 1:
                     _add(value_sinks, node.args[1])
+            elif target.startswith("scan"):
+                if len(node.args) > 1:
+                    _add(value_sinks, node.args[1])
 
     return indexing_sinks, value_sinks
 
@@ -265,11 +274,7 @@ def _mark_ancestors(
         target = node.target
         if target == "load" or _is_masked_subblock(node):
             continue
-        if value_flow and (
-            target in _INDEXING_SINK_ARGS
-            or target in _VALUE_SINK_ARGS
-            or target not in _VALUE_PROPAGATING_TARGETS
-        ):
+        if value_flow and target not in _VALUE_PROPAGATING_TARGETS:
             continue
 
         def append_node(n: torch.fx.Node) -> torch.fx.Node:
@@ -281,49 +286,18 @@ def _mark_ancestors(
     return marked
 
 
-def _integer_sympy_expr_requires_int64(
-    sympy_expr: sympy.Expr, replacement_vals: dict[Any, ValueRanges[sympy.Expr]]
-) -> bool:
-    if sympy_expr.is_integer and not range_expressable_in_32_bits(
-        bound_sympy(sympy_expr, replacement_vals)
-    ):
-        return True
-
-    return any(
-        _integer_sympy_expr_requires_int64(arg, replacement_vals)
-        for arg in sympy_expr.args
-        if isinstance(arg, sympy.Expr)
-    )
-
-
-def _node_or_dominated_value_uses_require_int64(
-    node: torch.fx.Node,
-    bounds: dict[torch.fx.Node, ValueRanges[Any]],
-    value_use: OrderedSet[torch.fx.Node],
-    indirect_vars: list[Any],
-    indices: dict[Any, sympy.Expr],
-    replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
-) -> bool:
-    return not _dominated_uses_fit_in_32_bits(
-        node,
-        bounds,
-        indirect_vars,
-        indices,
-        replacement_vals,
-        value_use=value_use,
-    )
-
-
-def _compute_value_expr_requires_int64(
+def _compute_value_expr_dtype(
     loop_body: LoopBody,
     node: torch.fx.Node,
     bounds: dict[torch.fx.Node, ValueRanges[Any]],
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
     value_use: OrderedSet[torch.fx.Node],
-) -> bool | None:
+) -> torch.dtype | None:
     dtype = node.args[2] if len(node.args) > 2 else None
+    if dtype is None:
+        return None
     if dtype == torch.int32:
-        return False
+        return torch.int32
 
     get_index_node = node.args[1] if len(node.args) > 1 else None
     if (
@@ -335,47 +309,44 @@ def _compute_value_expr_requires_int64(
     if not isinstance(sympy_expr, sympy.Expr):
         return None
 
+    if not sympy_expr.is_integer:
+        return dtype
+
+    if dtype == torch.bool:
+        return dtype
+
+    if dtype not in (torch.int32, torch.int64):
+        if range_expressable_in_32_bits(bound_sympy(sympy_expr, replacement_vals)):
+            return dtype
+        return torch.int64
+
+    requires_int64 = not _dominated_uses_fit_in_32_bits(
+        node,
+        bounds,
+        loop_body.indirect_vars,
+        loop_body.indexing_exprs,
+        replacement_vals,
+        value_use=value_use,
+    )
     if dtype == torch.int64:
-        return _node_or_dominated_value_uses_require_int64(
-            node,
-            bounds,
-            value_use,
-            loop_body.indirect_vars,
-            loop_body.indexing_exprs,
-            replacement_vals,
-        )
-
-    # Non-int requested dtypes were already honored by index_expr. Only
-    # request int64 compute when the symbolic integer arithmetic itself
-    # needs it to avoid overflow before the final cast.
-    return _integer_sympy_expr_requires_int64(sympy_expr, replacement_vals)
+        return torch.int64 if requires_int64 else torch.int32
+    return dtype
 
 
-def _apply_value_expr_int64_requirement(
-    node: torch.fx.Node, requires_int64: bool
-) -> None:
-    dtype = node.args[2] if len(node.args) > 2 else None
-    if dtype == torch.int64 and not requires_int64:
-        args = list(node.args)
-        args[2] = torch.int32
-        node.args = tuple(args)
-        node.meta.pop(_VALUE_EXPR_REQUIRES_INT64, None)
-    else:
-        node.meta[_VALUE_EXPR_REQUIRES_INT64] = requires_int64
-
-
-def _annotate_value_expr_int64_requirement(
+def _rewrite_value_expr_dtype(
     loop_body: LoopBody,
     node: torch.fx.Node,
     bounds: dict[torch.fx.Node, ValueRanges[Any]],
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
     value_use: OrderedSet[torch.fx.Node],
 ) -> None:
-    requires_int64 = _compute_value_expr_requires_int64(
+    dtype = _compute_value_expr_dtype(
         loop_body, node, bounds, replacement_vals, value_use
     )
-    if requires_int64 is not None:
-        _apply_value_expr_int64_requirement(node, requires_int64)
+    if dtype is not None:
+        args = list(node.args)
+        args[2] = dtype
+        node.args = tuple(args)
 
 
 def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
@@ -399,76 +370,89 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     ``index_expr`` for value uses. New lowerings should prefer to emit
     ``value_expr`` directly when their intent is a value computation.
     """
-    graph = loop_body.root_block.graph
-    index_expr_nodes = [n for n in graph.nodes if n.target == "index_expr"]
+    graphs = _loop_body_graphs(loop_body)
+    index_expr_nodes = [
+        node for graph in graphs for node in graph.nodes if node.target == "index_expr"
+    ]
     if not index_expr_nodes:
         return
 
-    indexing_sinks, value_sinks = _collect_index_value_sinks(graph)
-    indexing_use = _mark_ancestors(indexing_sinks)
-    value_use = _mark_ancestors(value_sinks, value_flow=True)
-    value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
+    def rewrite_graph(graph: torch.fx.Graph) -> None:
+        indexing_sinks, value_sinks = _collect_index_value_sinks(graph)
+        indexing_use = _mark_ancestors(indexing_sinks)
+        value_use = _mark_ancestors(value_sinks, value_flow=True)
+        value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
 
-    def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
-        # Value-only chains can be rewritten in place. Mixed value/indexing
-        # chains are cloned so indexing users keep the original path.
-        if node.op == "placeholder":
-            return node
-        if node.target == "load" or _is_masked_subblock(node):
-            return node
-        if node.target == "get_index" or node not in value_use:
-            return node
-        if node.target == "index_expr":
-            if node not in indexing_use:
-                node.target = "value_expr"
+        def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
+            # Value-only chains can be rewritten in place. Mixed value/indexing
+            # chains are cloned so indexing users keep the original path.
+            if node.op == "placeholder":
                 return node
+            if node.target == "load" or _is_masked_subblock(node):
+                return node
+            if node.target == "get_index" or node not in value_use:
+                return node
+            if node.target == "index_expr":
+                if node not in indexing_use:
+                    node.target = "value_expr"
+                    return node
+                if node not in value_clones:
+                    with graph.inserting_before(anchor):
+                        clone = graph.call_method(
+                            "value_expr", node.args, dict(node.kwargs)
+                        )
+                    clone.meta = node.meta.copy()
+                    value_clones[node] = clone
+                return value_clones[node]
+
+            if node not in indexing_use:
+                node.args = map_arg(node.args, lambda n: value_version(n, node))
+                node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
+                return node
+
             if node not in value_clones:
                 with graph.inserting_before(anchor):
-                    clone = graph.call_method("value_expr", node.args, dict(node.kwargs))
+                    clone = graph.node_copy(node, lambda n: value_version(n, anchor))
                 clone.meta = node.meta.copy()
                 value_clones[node] = clone
             return value_clones[node]
 
-        if node not in indexing_use:
-            node.args = map_arg(node.args, lambda n: value_version(n, node))
-            node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
-            return node
+        def rewrite_value_arg(arg: Any, anchor: torch.fx.Node) -> Any:
+            return map_arg(arg, lambda n: value_version(n, anchor))
 
-        if node not in value_clones:
-            with graph.inserting_before(anchor):
-                clone = graph.node_copy(node, lambda n: value_version(n, anchor))
-            clone.meta = node.meta.copy()
-            value_clones[node] = clone
-        return value_clones[node]
+        for node in graph.nodes:
+            if node.op == "output":
+                node.args = rewrite_value_arg(node.args, node)
+                continue
 
-    def rewrite_value_arg(arg: Any, anchor: torch.fx.Node) -> Any:
-        return map_arg(arg, lambda n: value_version(n, anchor))
+            if not isinstance(node.target, str):
+                continue
 
-    for node in graph.nodes:
-        if node.op == "output":
-            node.args = rewrite_value_arg(node.args, node)
-            continue
+            value_arg_indices = _VALUE_SINK_ARGS.get(node.target, ())
+            if node.op == "call_module":
+                if _is_masked_subblock(node) or node.target.startswith("scan"):
+                    value_arg_indices = (1,)
+            if not value_arg_indices:
+                continue
+            args = list(node.args)
+            for idx in value_arg_indices:
+                if idx < len(args):
+                    args[idx] = rewrite_value_arg(args[idx], node)
+            node.args = tuple(args)
 
-        if not isinstance(node.target, str):
-            continue
+        graph.lint()
 
-        value_arg_indices = _VALUE_SINK_ARGS.get(node.target, ())
-        if not value_arg_indices:
-            continue
-        args = list(node.args)
-        for idx in value_arg_indices:
-            if idx < len(args):
-                args[idx] = rewrite_value_arg(args[idx], node)
-        node.args = tuple(args)
+    for graph in graphs:
+        rewrite_graph(graph)
 
-    graph.lint()
-    _, value_sinks = _collect_index_value_sinks(graph)
-    value_use = _mark_ancestors(value_sinks, value_flow=True)
     bound_vars = loop_body.bounds()
     bounds = bound_vars.get_bounds()
-    for node in graph.nodes:
-        if node.target == "value_expr":
-            _annotate_value_expr_int64_requirement(
-                loop_body, node, bounds, bound_vars.replacement_vals, value_use
-            )
-    graph.lint()
+    for graph in graphs:
+        _, value_sinks = _collect_index_value_sinks(graph)
+        value_use = _mark_ancestors(value_sinks, value_flow=True)
+        for node in graph.nodes:
+            if node.target == "value_expr":
+                _rewrite_value_expr_dtype(
+                    loop_body, node, bounds, bound_vars.replacement_vals, value_use
+                )
+        graph.lint()
