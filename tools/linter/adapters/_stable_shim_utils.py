@@ -56,12 +56,13 @@ class IdentifierUse(NamedTuple):
 
 class IdentifierMatcher(NamedTuple):
     """
-    Identifier matching using a start and end pattern, and a handler to extract the
+    Identifier matching using a start and optional end pattern, and a handler to extract the
     identifieruse from the accumulated buffer.
+    If the end pattern is empty, the handler is triggered immediately after the start pattern.
     """
 
     start_pattern: str | re.Pattern
-    end_pattern: str | re.Pattern
+    end_pattern: str | re.Pattern | None
     # Handler is a function that takes:
     # - buffer: str -> This is the accumulated buffer between the start and end
     #   pattern, unstripped and possibly containing newlines.
@@ -144,7 +145,7 @@ def arbitrary_identifier_matcher(pattern):
     # if re.search(rf"\b{re.escape(func_name)}\b", line):
     return IdentifierMatcher(
         start_pattern=rf"\b{re.escape(pattern)}\b",
-        end_pattern=".",
+        end_pattern=None,
         handler=extractor,
     )
 
@@ -172,7 +173,7 @@ class MatcherAccumulator:
 
         # Compile all regexes.
         for m in matchers:
-            end_pattern = re.compile(m.end_pattern)
+            end_pattern = re.compile(m.end_pattern) if m.end_pattern else None
             start_pattern = re.compile(m.start_pattern)
             self._matchers.append(
                 IdentifierMatcher(
@@ -192,6 +193,7 @@ class MatcherAccumulator:
         self._buffer = ""
         self._end_token_found = False
         self._active_matcher = None
+        self._found = []
 
     def set_scope_version(self, scope_version: tuple[int, int] | None):
         """
@@ -209,7 +211,7 @@ class MatcherAccumulator:
 
         Returns whether this line is part of an actively being parsed matcher.
         """
-        if self._end_token_found:
+        if self._found:
             self._reset()
 
         # If no matcher is active yet, check if any of them found a start token.
@@ -217,10 +219,17 @@ class MatcherAccumulator:
             for matcher in self._matchers:
                 found_start = matcher.start_pattern.finditer(line)
                 for match in found_start:
-                    self._active_matcher = matcher
-                    line = line[match.start() :]
+                    if matcher.end_pattern is None:
+                        # No end pattern, single match handling, immediately invoke handler on this section.
+                        self._found += matcher.handler(line, self._scope_version)
+                        self._end_token_found = True
+                    else:
+                        # Looking for end pattern, stirp line for addition to buffer and store matcher.
+                        line = line[match.start() :]
+                        self._active_matcher = matcher
                     break
                 if self._active_matcher:
+                    # Only one multi line matcher can be active at one time, stop searching for matches.
                     break
 
         if self._active_matcher:
@@ -232,18 +241,20 @@ class MatcherAccumulator:
             # Ignore the part of the line that is commented because comments may have the end token in them.
             self._buffer += line[: line.find("//") if "//" in line else None]
 
+            # If an end token was found, add it to the found matches.
+            if self._end_token_found:
+                self._found += self._active_matcher.handler(
+                    self._buffer, self._scope_version
+                )
+
         return self._active_matcher is not None
 
-    def identifiers_used(self) -> None | list[IdentifierUse]:
+    def identifiers_used(self) -> list[IdentifierUse]:
         """
-        Returns the identifiers used in the pattern as parsed, identifiers are retrieved only
-        at the end of the pattern, when the next line is processed they are no longer available.
+        Returns the identifiers used in the pattern as parsed, identifiers are retrieved
+        at the end of the pattern, they are cleared when the next line is processed.
         """
-        if not self._end_token_found or not self._active_matcher:
-            return None
-
-        # We found the end token, so we can invoke the handler to extract the entries.
-        return self._active_matcher.handler(self._buffer, self._scope_version)
+        return self._found
 
 
 class PreprocessorTracker:
@@ -380,8 +391,7 @@ class PreprocessorTracker:
         return False
 
     def identifiers_used(self) -> list[IdentifierUse]:
-        found = self._identifier_accumulator.identifiers_used()
-        return found if found is not None else []
+        return self._identifier_accumulator.identifiers_used()
 
 
 def get_current_version() -> tuple[int, int, int]:

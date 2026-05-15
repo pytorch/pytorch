@@ -202,6 +202,8 @@ class TestStableShimUtils(unittest.TestCase):
             [
                 arbitrary_identifier_matcher("primary_path"),
                 arbitrary_identifier_matcher("secondary_path"),
+                arbitrary_identifier_matcher("short1"),
+                arbitrary_identifier_matcher("short2"),
             ]
         )
         expected_version = (2, 8)
@@ -212,11 +214,15 @@ class TestStableShimUtils(unittest.TestCase):
         // lose the line after the first match.
         AOTI_TORCH_EXPORT int primary_path(int arg);
         AOTI_TORCH_EXPORT int secondary_path(int arg);
+
+        // But what about two identifiers on a line?
+        short1(3) + short2(5)
         """
 
         expected = {
             4: ["primary_path"],
             5: ["secondary_path"],
+            8: ["short1", "short2"],
         }
         result = self._run_match_on_sample(sample, matcher, expected_version)
 
