@@ -2,7 +2,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
@@ -10,14 +9,14 @@ sys.path.append(str(REPO_ROOT))
 import re
 
 from tools.linter.adapters._stable_shim_utils import (
-    arbitrary_identifier_matcher,
     FUNCTION_IDENTIFIER_MATCHER,
-    IdentifierMatcher,
-    IdentifierUse,
-    MatcherAccumulator,
     STRUCT_CLASS_IDENTIFIER_MATCHER,
     TYPEDEF_IDENTIFIER_MATCHER,
     USING_IDENTIFIER_MATCHER,
+    IdentifierMatcher,
+    IdentifierUse,
+    MatcherAccumulator,
+    MultilineMatcher,
 )
 
 
@@ -153,7 +152,7 @@ class TestStableShimUtils(unittest.TestCase):
 
         matcher = MatcherAccumulator(
             [
-                IdentifierMatcher(
+                MultilineMatcher(
                     start_pattern=r"\s*TO_BE_DETERMINED_MULTI_VERSION_MACRO",
                     end_pattern=";",
                     handler=bespoke_macro_parser,
@@ -200,8 +199,10 @@ class TestStableShimUtils(unittest.TestCase):
         """
         matcher = MatcherAccumulator(
             [
-                arbitrary_identifier_matcher("primary_path"),
-                arbitrary_identifier_matcher("secondary_path"),
+                IdentifierMatcher.word("primary_path"),
+                IdentifierMatcher.word("secondary_path"),
+                IdentifierMatcher.word("short1"),
+                IdentifierMatcher.word("short2"),
             ]
         )
         expected_version = (2, 8)
@@ -212,11 +213,15 @@ class TestStableShimUtils(unittest.TestCase):
         // lose the line after the first match.
         AOTI_TORCH_EXPORT int primary_path(int arg);
         AOTI_TORCH_EXPORT int secondary_path(int arg);
+
+        // But what about two identifiers on a line?
+        short1(3) + short2(5)
         """
 
         expected = {
             4: ["primary_path"],
             5: ["secondary_path"],
+            8: ["short1", "short2"],
         }
         result = self._run_match_on_sample(sample, matcher, expected_version)
 

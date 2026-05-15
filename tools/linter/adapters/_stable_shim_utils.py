@@ -13,8 +13,7 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,7 +53,7 @@ class IdentifierUse(NamedTuple):
     version: tuple[int, int] | None
 
 
-class IdentifierMatcher(NamedTuple):
+class MultilineMatcher(NamedTuple):
     """
     Identifier matching using a start and end pattern, and a handler to extract the
     identifieruse from the accumulated buffer.
@@ -69,6 +68,23 @@ class IdentifierMatcher(NamedTuple):
     #   buffer is located in, None if outside of a versioning block.
     # It returns a list of IdentifierUse entries.
     handler: Callable[[str, tuple[int, int] | None], list[IdentifierUse]]
+
+
+class IdentifierMatcher(NamedTuple):
+    """
+    Matcher that just searches for the pattern in each line, these patterns are not
+    searched for when a multiline matcher is active.
+    """
+
+    pattern: str | re.Pattern
+    identifier: str
+
+    @staticmethod
+    def word(word: str):
+        return IdentifierMatcher(
+            pattern=rf"\b{re.escape(word)}\b",
+            identifier=word,
+        )
 
 
 def extract_factory(
@@ -102,51 +118,31 @@ def extract_factory(
 # on the regular expressions.
 
 # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
-FUNCTION_IDENTIFIER_MATCHER = IdentifierMatcher(
+FUNCTION_IDENTIFIER_MATCHER = MultilineMatcher(
     start_pattern=r"\s*AOTI_TORCH_EXPORT",
     end_pattern=";",
     handler=extract_factory(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\("),
 )
 
 # Also match typedef function pointers
-TYPEDEF_IDENTIFIER_MATCHER = IdentifierMatcher(
+TYPEDEF_IDENTIFIER_MATCHER = MultilineMatcher(
     start_pattern=r"\s*typedef",
     end_pattern=";",
     handler=extract_factory(r"typedef\s+.*\(\*(\w+)\)"),
 )
 
 # Match using declarations like: using TypeName = ...
-USING_IDENTIFIER_MATCHER = IdentifierMatcher(
+USING_IDENTIFIER_MATCHER = MultilineMatcher(
     start_pattern=r"\s*using",
     end_pattern=";",
     handler=extract_factory(r"using\s+(\w+)\s*="),
 )
 # Match struct/class declarations like: struct StructName or class ClassName
-STRUCT_CLASS_IDENTIFIER_MATCHER = IdentifierMatcher(
+STRUCT_CLASS_IDENTIFIER_MATCHER = MultilineMatcher(
     start_pattern=r"\s*(?:struct|class)",
     end_pattern=";",
     handler=extract_factory(r"(?:struct|class)\s+(\w+)"),
 )
-
-
-def arbitrary_identifier_matcher(pattern):
-    """
-    Create an arbitrary identifier matcher, this is what is used to find the
-    relevant identifiers in normal code.
-    """
-
-    def extractor(
-        buffer: str, current_version: tuple[int, int] | None
-    ) -> list[IdentifierUse]:
-        return [IdentifierUse(identifier=pattern, version=current_version)]
-
-    # Use word boundaries to avoid matching partial names
-    # if re.search(rf"\b{re.escape(func_name)}\b", line):
-    return IdentifierMatcher(
-        start_pattern=rf"\b{re.escape(pattern)}\b",
-        end_pattern=".",
-        handler=extractor,
-    )
 
 
 IDENTIFIER_MATCHERS = [
@@ -163,35 +159,44 @@ class MatcherAccumulator:
     is encountered. When the end pattern is found it triggers the handler to extract the
     identifier(s) used in the buffer.
 
-    After the handler is triggered, the internal state is reset with reset() and it continues
-    scanning lines for new start patterns.
+    It also serves as a matcher for identifiers, and searches each line outside of an active
+    multiline matcher for identifiers.
+
     """
 
-    def __init__(self, matchers: list[IdentifierMatcher]):
-        self._matchers = []
+    def __init__(self, matchers: list[MultilineMatcher | IdentifierMatcher]):
+        self._multi_line_matchers = []
+        self._identifier_matchers = []
 
-        # Compile all regexes.
+        # Compile all regexes and filter the matchers.
         for m in matchers:
-            end_pattern = re.compile(m.end_pattern)
-            start_pattern = re.compile(m.start_pattern)
-            self._matchers.append(
-                IdentifierMatcher(
-                    start_pattern=start_pattern,
-                    end_pattern=end_pattern,
-                    handler=m.handler,
+            if isinstance(m, MultilineMatcher):
+                end_pattern = re.compile(m.end_pattern)
+                start_pattern = re.compile(m.start_pattern)
+                self._multi_line_matchers.append(
+                    MultilineMatcher(
+                        start_pattern=start_pattern,
+                        end_pattern=end_pattern,
+                        handler=m.handler,
+                    )
                 )
-            )
+            elif isinstance(m, IdentifierMatcher):
+                pattern = re.compile(m.pattern)
+                self._identifier_matchers.append(
+                    IdentifierMatcher(pattern=pattern, identifier=m.identifier)
+                )
         # Scope version is not part of reset, it persists through resets.
         self._scope_version = None
-        self._reset()
+        self._reset_accumulation()
 
-    def _reset(self):
+    def _reset_accumulation(self):
         """
         Resets the internal state such that new start patterns are sought.
         """
         self._buffer = ""
         self._end_token_found = False
         self._active_matcher = None
+        self._found_identifiers = []
 
     def set_scope_version(self, scope_version: tuple[int, int] | None):
         """
@@ -210,11 +215,13 @@ class MatcherAccumulator:
         Returns whether this line is part of an actively being parsed matcher.
         """
         if self._end_token_found:
-            self._reset()
+            self._reset_accumulation()
+        # New line, so clear the found identifiers.
+        self._found_identifiers = []
 
         # If no matcher is active yet, check if any of them found a start token.
         if not self._active_matcher:
-            for matcher in self._matchers:
+            for matcher in self._multi_line_matchers:
                 found_start = matcher.start_pattern.finditer(line)
                 for match in found_start:
                     self._active_matcher = matcher
@@ -232,18 +239,29 @@ class MatcherAccumulator:
             # Ignore the part of the line that is commented because comments may have the end token in them.
             self._buffer += line[: line.find("//") if "//" in line else None]
 
+            # Now that the buffer is complete, parse it with the handler.
+            if self._end_token_found:
+                self._found_identifiers = self._active_matcher.handler(
+                    self._buffer, self._scope_version
+                )
+        else:
+            # No matcher active, search using all the identifier matchers.
+            for identifier_matcher in self._identifier_matchers:
+                if identifier_matcher.pattern.search(line):
+                    self._found_identifiers.append(
+                        IdentifierUse(
+                            identifier=identifier_matcher.identifier,
+                            version=self._scope_version,
+                        )
+                    )
+
         return self._active_matcher is not None
 
-    def identifiers_used(self) -> None | list[IdentifierUse]:
+    def identifiers_used(self) -> list[IdentifierUse]:
         """
-        Returns the identifiers used in the pattern as parsed, identifiers are retrieved only
-        at the end of the pattern, when the next line is processed they are no longer available.
+        Returns identifiers found.
         """
-        if not self._end_token_found or not self._active_matcher:
-            return None
-
-        # We found the end token, so we can invoke the handler to extract the entries.
-        return self._active_matcher.handler(self._buffer, self._scope_version)
+        return self._found_identifiers
 
 
 class PreprocessorTracker:

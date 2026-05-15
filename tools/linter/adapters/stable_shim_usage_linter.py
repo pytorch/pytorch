@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
-    arbitrary_identifier_matcher,
     IDENTIFIER_MATCHERS,
+    IdentifierMatcher,
     LintMessage,
     LintSeverity,
     PreprocessorTracker,
@@ -149,7 +149,7 @@ def check_file(
 
     # Generate the matchers from the provided function names.
     matchers = [
-        arbitrary_identifier_matcher(function_name) for function_name in shim_functions
+        IdentifierMatcher.word(function_name) for function_name in shim_functions
     ]
 
     tracker = PreprocessorTracker(matchers)
