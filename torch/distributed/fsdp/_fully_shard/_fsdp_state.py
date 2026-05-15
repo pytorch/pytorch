@@ -159,12 +159,13 @@ class FSDPState(_State):
                 "mtia",
                 torch._C._get_privateuse1_backend_name(),
             ]:
-                with torch.profiler.record_function("FSDP::inputs_to_device"):
-                    args_tuple, kwargs_tuple = _to_kwargs(
-                        args, kwargs, self._device, False
-                    )  # same as DDP
-                args = args_tuple[0] if args_tuple else ()
-                kwargs = kwargs_tuple[0] if kwargs_tuple else {}
+                if args or kwargs:
+                    with torch.profiler.record_function("FSDP::inputs_to_device"):
+                        args_tuple, kwargs_tuple = _to_kwargs(
+                            args, kwargs, self._device, False
+                        )  # same as DDP
+                    args = args_tuple[0]
+                    kwargs = kwargs_tuple[0]
         return args, kwargs
 
     def _lazy_init(self) -> None:
