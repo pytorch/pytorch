@@ -50,7 +50,10 @@ Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
     cp.reduce.async.bulk gmem operand)
 """
 
+import math
+
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
+
 import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
@@ -321,7 +324,7 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     Rounded down to a multiple of ``16 / elem_bytes`` so the final
     partial chunk (if any) still satisfies the 16-byte reduce
     alignment."""
-    elem_bytes = torch_dtype.itemsize
+    elem_bytes = torch.tensor([], dtype=torch_dtype).element_size()
     row_bytes = N * elem_bytes
     chunk_bytes = min(row_bytes, _MAX_CHUNK_BYTES)
     # Ensure chunk_bytes itself is 16-aligned (true for 512, true for
@@ -368,10 +371,11 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
 def min_d_divisor_for(dtype: torch.dtype) -> int:
     """Smallest value D must be divisible by so ``cp.reduce.async.bulk``
     gmem operands stay 16-byte aligned: ``D * sizeof(dtype) % 16 == 0``,
-    i.e. ``D % (16 / sizeof(dtype)) == 0``. fp32: %4, bf16/fp16: %8.
-    Supported dtypes' itemsize divides 16, so plain // suffices.
+    i.e. ``D % (16 / gcd(16, sizeof(dtype))) == 0``. fp32: %4,
+    bf16/fp16: %8.
     """
-    return 16 // dtype.itemsize
+    esize = torch.tensor([], dtype=dtype).element_size()
+    return 16 // math.gcd(16, esize)
 
 
 def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
@@ -384,7 +388,8 @@ def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
     16-aligned). Rows that aren't multiples of ``chunk_elems`` are
     handled via the TMA descriptor's OOB-clamp-to-zero behavior.
     """
-    return (N * dtype.itemsize) % 16 == 0
+    esize = torch.tensor([], dtype=dtype).element_size()
+    return (N * esize) % 16 == 0
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:
