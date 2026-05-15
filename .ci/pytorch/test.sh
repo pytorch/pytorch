@@ -195,8 +195,11 @@ if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'default' ]]; then
-  export CUDA_VISIBLE_DEVICES=0
-  export HIP_VISIBLE_DEVICES=0
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export HIP_VISIBLE_DEVICES=0
+  else
+    export CUDA_VISIBLE_DEVICES=0
+  fi
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -1357,6 +1360,22 @@ test_unbacked_parity_smoketest() {
 }
 
 test_inductor_set_cpu_affinity(){
+  # Probe topology BEFORE exporting LD_PRELOAD: libiomp5's constructor runs at
+  # .so load time and, when KMP_AFFINITY is set, calls sched_setaffinity() to
+  # pin the process to a "compact" topology subset. That mask then propagates
+  # to every binary the shell runs after the export — including /usr/bin/nproc.
+  # On a sparse cgroup cpuset (e.g. a k8s pod sharing a node where Karpenter
+  # packed other pods around it), the compact subset can be a fraction of the
+  # real allocation, so nproc reports ~1/4 of the actual cores and
+  # OMP_NUM_THREADS gets sized down to match. Use nproc instead of lscpu so
+  # the cgroup slice is honored.
+  cpus=$(nproc)
+  thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
+  cores=$((cpus / thread_per_core))
+  start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
+  # Leaving one physical CPU for other tasks
+  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
+
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -1369,17 +1388,7 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   fi
 
-  # Use nproc here instead of lscpu because it takes into account cgroups slice
-  cpus=$(nproc)
-  thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
-  cores=$((cpus / thread_per_core))
-
   export OMP_NUM_THREADS=$cores
-
-  # Handle cgroups slice start and end CPU
-  start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
-  # Leaving one physical CPU for other tasks
-  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
   export TASKSET="taskset -c $start_cpu-$end_cpu"
 }
 
