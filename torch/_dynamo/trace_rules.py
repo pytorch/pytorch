@@ -63,6 +63,7 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
+    HasAttrBuiltinVariable,
     InspectSignatureVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
@@ -73,6 +74,7 @@ from .variables import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
+    SetAttrBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
     TorchInGraphFunctionVariable,
@@ -165,6 +167,7 @@ manual_torch_name_rule_map: dict[
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
+    "torch._C._skip_one_hop_torch_function": TorchInGraphFunctionVariable,
     "torch.jit.is_scripting": TorchInGraphFunctionVariable,
     "torch.jit.is_tracing": TorchInGraphFunctionVariable,
     "torch.jit.annotate": TorchInGraphFunctionVariable,
@@ -398,6 +401,7 @@ manual_torch_name_rule_map: dict[
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
+    "torch._library.capture_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -4036,8 +4040,10 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 BUILTIN_CALLABLES = {
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
+    hasattr: HasAttrBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
+    setattr: SetAttrBuiltinVariable,
 }
 
 

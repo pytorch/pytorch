@@ -594,17 +594,6 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
-# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
-# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
-# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
-# that triton does not use TF32 wherever cublas would not use TF32
-# DEPRECATED. cuBLAS no longer has the above alignment requirements. will remove in the future.
-force_same_precision: bool = Config(
-    justknob="pytorch/compiler:force_same_precision",
-    env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
-    default=False,
-)
-
 # Size hints for multi-kernel dispatch.
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
@@ -648,6 +637,9 @@ nvgemm_supplement_configs: bool = (
 )
 
 
+# Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
+_conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -655,6 +647,15 @@ max_autotune_conv_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# As above, specify candidate backends for conv backward weight autotune.
+max_autotune_conv_bwd_weight_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_WEIGHT_CONV_BACKENDS", _conv_default_backends
+).upper()
+
+# As above, specify candidate backends for conv backward input autotune.
+max_autotune_conv_bwd_input_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_INPUT_CONV_BACKENDS", _conv_default_backends
+).upper()
 
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
@@ -1236,9 +1237,9 @@ class aten_distributed_optimizations:
     bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
-    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
-    # as atomic units with memory-bound runtime estimates.
-    enable_fusion_regions: bool | None = None
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) have their
+    # I/O costs corrected to exclude intermediates that inductor will not materialize.
+    enable_fusion_regions: bool = True
 
     # Default bucketing mode for auto and manual overlap scheduling
     # "default": traced bucketing, fully lowered by inductor during compilation
@@ -1275,6 +1276,9 @@ class aten_distributed_optimizations:
     # Replace NCCL collectives with low-contention variants that use
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
+
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
 
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
@@ -1556,8 +1560,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles. Incompatible with cpp_wrapper.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
-# When True, complex_memory_overlap always reports True
-always_complex_memory_overlap_TESTING_ONLY: bool = False
+# When True, all compiled graphs report a cudagraph fail reason. Used by tests
+# that need to exercise the cudagraph-skip path.
+force_disable_cudagraph_TESTING_ONLY: bool = False
 
 # enable linear binary folding
 enable_linear_binary_folding = (
@@ -2030,6 +2035,10 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Controls TMA load enablement in template epilogues
+    enable_tma_load_for_template_epilogue = (
+        os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
+    )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -2082,6 +2091,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
         == "1"
     )
+
+    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
+    # by per-block amax over a small group dimension like FP8 block size)
+    # into a single kernel with two sequential reduction passes.
+    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2566,6 +2580,33 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    #
+    # When True, the rocm-origami pip package is consulted at GEMM compile time
+    # to pre-select a top-K of Triton configs from the DEFAULT search space,
+    # reducing autotuning cost while keeping runtime within ~5% of full
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
+    # toggling at runtime via config.patch has no effect because the rocm-origami
+    # module import is cached at template_heuristics/triton.py load time.
+    #
+    # Active only when all of these hold:
+    #   - IS_ROCM (torch.version.hip is not None)
+    #   - config.max_autotune
+    #   - config.rocm.origami (this knob)
+    #   - config.max_autotune_gemm_search_space == "DEFAULT"
+    #   - rocm-origami is installed (else the import gate sets it inert)
+    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
+    # one-time warning; the regular config generator runs instead.
+    #
+    # Side-effect: when this is True, choices._need_to_fix_layout() returns True
+    # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
+    # on exact strides and would mis-compile under flexible layouts.
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+
+    # Number of top configs origami selects per GEMM. Read once from
+    # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile
+    # time and runtime within the validated 4-8 range).
+    origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
@@ -2731,7 +2772,7 @@ _cache_config_ignore_prefix: list[str] = [
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
-    "always_complex_memory_overlap_TESTING_ONLY",
+    "force_disable_cudagraph_TESTING_ONLY",
     # timing affects cache structure, not cache content
     "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
