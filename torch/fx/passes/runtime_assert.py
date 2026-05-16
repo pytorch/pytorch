@@ -210,6 +210,8 @@ def insert_deferred_runtime_asserts(
     def _sympy_interp(
         expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
     ) -> fx.Proxy:
+        # Lower a sympy expression into the graph and return the resulting
+        # Proxy (use .node to get the FX node representing ``expr``).
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -527,9 +529,23 @@ def insert_deferred_runtime_asserts(
                             )
                         elif isinstance(keypath[0], DivideByKey):
                             # TODO: need to assert divisibility
+                            divisor = keypath[0].divisor
+                            if isinstance(divisor, torch.SymInt):
+                                divisor_proxy = _sympy_interp(
+                                    expr_to_proxy, divisor.node.expr
+                                )
+                                # _sympy_interp may return a Proxy or a
+                                # plain int/float for constant atoms.
+                                divisor_arg = (
+                                    divisor_proxy.node
+                                    if isinstance(divisor_proxy, fx.Proxy)
+                                    else divisor_proxy
+                                )
+                            else:
+                                divisor_arg = divisor
                             return go(
                                 graph.call_function(
-                                    operator.floordiv, (node, keypath[0].divisor)
+                                    operator.floordiv, (node, divisor_arg)
                                 ),
                                 keypath[1:],
                             )

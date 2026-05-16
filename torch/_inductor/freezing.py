@@ -227,8 +227,14 @@ def enforce_output_layout(gm: torch.fx.GraphModule):
 
             # add a node to enforce eager layout
             ft = n.meta["val"]
+            stride_args: list = []
+            for i, s in enumerate(ft.stride()):
+                if isinstance(s, torch.SymInt):
+                    stride_args.append(gm.graph.create_stride_node(n, i))
+                else:
+                    stride_args.append(s)
             new_node = gm.graph.call_function(
-                prims.inductor_force_stride_order.default, (n, ft.stride())
+                prims.inductor_force_stride_order.default, (n, tuple(stride_args))
             )
 
             # can not call
