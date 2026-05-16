@@ -362,6 +362,8 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """Lower an FX graph into Inductor IR and wrapper code metadata."""
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -1422,37 +1424,9 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug("  via %s", lowerings[target])  # type: ignore[index]
 
             n = self.current_node
-            layout_constraints = maybe_layout_constraints(target)
-            if layout_constraints:
-                old_args, old_kwargs = args, kwargs
-                if layout_constraints is constrain_to_fake_tensors:
-                    # only constrain_to_fake_tensor if this exists.
-                    # otherwise, no constraints at all: the implication is
-                    # that this operator was inserted by a custom pass
-                    # so we'll give them the freedom.
-                    if "eager_input_vals" in n.meta:
-                        fake_args, fake_kwargs = n.meta["eager_input_vals"]
-
-                        # (fake_args, fake_kwargs) might not align with (args, kwargs).
-                        # we need to normalize them based on the schema
-                        assert isinstance(target, torch._ops.OpOverload)
-
-                        def normalize(args: Any, kwargs: Any) -> tuple[Any, Any]:
-                            result = torch.fx.operator_schemas.normalize_function(
-                                target, args, kwargs
-                            )
-                            assert result is not None
-                            return result[0], result[1]
-
-                        fake_args, fake_kwargs = normalize(fake_args, fake_kwargs)
-                        args, kwargs = normalize(args, kwargs)
-                        old_args, old_kwargs = normalize(old_args, old_kwargs)
-
-                        args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
-                        )
-                else:
-                    args, kwargs = layout_constraints(n, *args, **kwargs)
+            args, kwargs, mutation_args = self._apply_layout_constraints(
+                target, n, args, kwargs
+            )
 
             if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
                 "fallback_to_eager"
@@ -1485,10 +1459,11 @@ class GraphLowering(torch.fx.Interpreter):
                             *args, **kwargs
                         )
 
-            if layout_constraints:
+            if mutation_args is not None:
                 # layout_constraints are allowed to make new copies of the inputs.
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
+                old_args, old_kwargs = mutation_args
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
 
             return out
@@ -1504,6 +1479,94 @@ class GraphLowering(torch.fx.Interpreter):
             raise LoweringException(
                 e, target, args, kwargs, stack_trace=stack_trace
             ).with_traceback(e.__traceback__) from None
+
+    @staticmethod
+    def _normalize_args_kwargs(
+        target: torch._ops.OpOverload,
+        args: Any,
+        kwargs: Any,
+    ) -> tuple[Any, Any]:
+        result = torch.fx.operator_schemas.normalize_function(target, args, kwargs)
+        assert result is not None
+        return result[0], result[1]
+
+    @staticmethod
+    def _fx_arg_to_fake_arg(arg: Any) -> Any:
+        if isinstance(arg, torch.fx.Node):
+            return arg.meta.get("val")
+        if isinstance(arg, tuple):
+            return tuple(GraphLowering._fx_arg_to_fake_arg(x) for x in arg)
+        if isinstance(arg, list):
+            return [GraphLowering._fx_arg_to_fake_arg(x) for x in arg]
+        if isinstance(arg, dict):
+            return {
+                key: GraphLowering._fx_arg_to_fake_arg(value)
+                for key, value in arg.items()
+            }
+        return arg
+
+    def _fake_args_kwargs_for_layout_constraints(
+        self,
+        target: torch._ops.OpOverload,
+        node: torch.fx.Node,
+    ) -> tuple[Any, Any]:
+        if "eager_input_vals" in node.meta:
+            fake_args, fake_kwargs = node.meta["eager_input_vals"]
+        else:
+            fake_args, fake_kwargs = node.args, node.kwargs
+            fake_args, fake_kwargs = self._normalize_args_kwargs(
+                target, fake_args, fake_kwargs
+            )
+            return (
+                self._fx_arg_to_fake_arg(fake_args),
+                self._fx_arg_to_fake_arg(fake_kwargs),
+            )
+
+        return self._normalize_args_kwargs(target, fake_args, fake_kwargs)
+
+    @staticmethod
+    def _layout_constraints_for_target(
+        target: Callable[..., Any],
+    ) -> Callable[..., tuple[Any, Any]] | None:
+        layout_constraints = maybe_layout_constraints(target)
+        if layout_constraints is not None:
+            return layout_constraints
+        if isinstance(target, torch._ops.OpOverload):
+            return tag_to_layout_constraint(
+                get_layout_constraint_tag(target, with_default=True)
+            )
+        return None
+
+    def _apply_layout_constraints(
+        self,
+        target: Callable[..., Any],
+        node: torch.fx.Node,
+        args: Any,
+        kwargs: dict[str, Any],
+    ) -> tuple[Any, dict[str, Any], tuple[Any, Any] | None]:
+        layout_constraints = self._layout_constraints_for_target(target)
+        if layout_constraints is None:
+            return args, kwargs, None
+
+        old_args, old_kwargs = args, kwargs
+        if layout_constraints is constrain_to_fake_tensors:
+            if not isinstance(target, torch._ops.OpOverload):
+                return args, kwargs, None
+
+            fake_args, fake_kwargs = self._fake_args_kwargs_for_layout_constraints(
+                target, node
+            )
+            args, kwargs = self._normalize_args_kwargs(target, args, kwargs)
+            old_args, old_kwargs = self._normalize_args_kwargs(
+                target, old_args, old_kwargs
+            )
+            args, kwargs = constrain_to_fake_tensors(
+                args, kwargs, fake_args, fake_kwargs
+            )
+        else:
+            args, kwargs = layout_constraints(node, *args, **kwargs)
+
+        return args, kwargs, (old_args, old_kwargs)
 
     @staticmethod
     def can_inline_constant(t: torch.Tensor) -> bool:
@@ -1866,10 +1929,19 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             ):
                 debug("fallback_handler")
+                args, kwargs, mutation_args = self._apply_layout_constraints(
+                    n.target,
+                    n,
+                    args,  # type: ignore[possibly-undefined]
+                    kwargs,  # type: ignore[possibly-undefined]
+                )
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]
                     **kwargs,  # type: ignore[possibly-undefined]
                 )
+                if mutation_args is not None:
+                    old_args, old_kwargs = mutation_args
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
             elif (
                 n.op == "call_function"
                 and isinstance(
@@ -1880,10 +1952,19 @@ class GraphLowering(torch.fx.Interpreter):
                 # this path supports fallback due to inductor lite mode. It supports
                 # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
                 debug("fallback_handler")
+                args, kwargs, mutation_args = self._apply_layout_constraints(
+                    n.target,
+                    n,
+                    args,  # type: ignore[possibly-undefined]
+                    kwargs,  # type: ignore[possibly-undefined]
+                )
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]
                     **kwargs,  # type: ignore[possibly-undefined]
                 )
+                if mutation_args is not None:
+                    old_args, old_kwargs = mutation_args
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
             elif (
                 n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
