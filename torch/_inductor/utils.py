@@ -3031,6 +3031,23 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
         return torch.float64
 
 
+SYMBOLIC_SCALAR_TYPES = (sympy.Expr, sympy.logic.boolalg.Boolean)
+
+
+def is_symbolic_scalar(
+    expr: object,
+) -> TypeGuard[sympy.Expr | sympy.logic.boolalg.Boolean]:
+    return isinstance(expr, SYMBOLIC_SCALAR_TYPES)
+
+
+def is_sympy_boolean(expr: object) -> TypeGuard[sympy.logic.boolalg.Boolean]:
+    # SymPy Symbols are also Boolean instances at runtime, so keep Exprs on the
+    # integer/float symbolic scalar path.
+    return isinstance(expr, sympy.logic.boolalg.Boolean) and not isinstance(
+        expr, sympy.Expr
+    )
+
+
 @contextlib.contextmanager
 def maybe_profile(should_profile: bool, *args: Any, **kwargs: Any) -> Iterator[Any]:
     if should_profile:

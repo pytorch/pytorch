@@ -35,6 +35,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ConvertIntKey,
     DivideByKey,
     resolve_unbacked_bindings,
+    SympyBoolean,
     SymTypes,
 )
 from torch.fx.node import _get_qualified_name
@@ -58,9 +59,11 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_sympy_boolean,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
+    SYMBOLIC_SCALAR_TYPES,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -1570,8 +1573,31 @@ class PythonWrapperCodegen(CodeGen):
 
     def get_graph_inputs(
         self,
-    ) -> dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr]:
+    ) -> dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | SympyBoolean]:
         return V.graph.graph_inputs
+
+    @cache_on_self
+    def get_symbolic_scalar_graph_input_replacements(
+        self,
+    ) -> dict[sympy.Basic, sympy.Symbol]:
+        replacements: dict[sympy.Basic, sympy.Symbol] = {}
+        for name, value in self.get_graph_inputs().items():
+            # Numeric sympy.Expr inputs are already handled by existing wrapper
+            # paths. Relations backing SymBool placeholders need to be rewritten
+            # to the runtime graph input name so internal unbacked symbols do not
+            # leak into wrapper expressions.
+            if is_sympy_boolean(value) and not value.is_Atom:
+                replacements[value] = sympy.Symbol(name)
+
+        return replacements
+
+    def replace_symbolic_scalar_graph_inputs(
+        self, expr: Expr | SympyBoolean
+    ) -> Expr | SympyBoolean:
+        replacements = self.get_symbolic_scalar_graph_input_replacements()
+        if not replacements:
+            return expr
+        return sympy.sympify(expr).xreplace(replacements)
 
     def get_graph_outputs(self) -> list[IRNode]:
         return V.graph.graph_outputs
@@ -2288,7 +2314,7 @@ class PythonWrapperCodegen(CodeGen):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
-        if isinstance(value, sympy.Expr):
+        if isinstance(value, SYMBOLIC_SCALAR_TYPES):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             code.writeline(f"{value} = {name}")
@@ -2365,13 +2391,20 @@ class PythonWrapperCodegen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+    def codegen_cpp_sizevar(
+        self, x: Expr | SympyBoolean, *, simplify: bool = True
+    ) -> str:
         raise RuntimeError("codegen_cpp_sizevar is only implemented for cpp_wrapper!")
 
-    def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        return pexpr(x, simplify=simplify)
+    def codegen_python_sizevar(
+        self, x: Expr | SympyBoolean, *, simplify: bool = True
+    ) -> str:
+        return pexpr(self.replace_symbolic_scalar_graph_inputs(x), simplify=simplify)
 
-    def codegen_sizevar(self, x: Expr) -> str:
+    def codegen_symbolic_scalar(self, x: Expr | SympyBoolean) -> str:
+        return pexpr(self.replace_symbolic_scalar_graph_inputs(x), simplify=False)
+
+    def codegen_sizevar(self, x: Expr | SympyBoolean) -> str:
         return self.codegen_python_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
@@ -3113,7 +3146,12 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering
     ) -> None:
-        self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
+        expr = (
+            self.codegen_sizevar(arg.inner_expr)
+            if symbol_is_type(arg.inner, SymT.PRECOMPUTED_SIZE)
+            else self.codegen_symbolic_scalar(arg.inner_expr)
+        )
+        self.writeline(f"{arg.inner} = {expr}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
         name = ws.get_name()
@@ -3230,6 +3268,8 @@ class PythonWrapperCodegen(CodeGen):
                 return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
+            elif isinstance(arg, SYMBOLIC_SCALAR_TYPES):
+                return self.codegen_symbolic_scalar(arg)
             else:
                 return pexpr(V.graph.sizevars.simplify(arg))
 
@@ -3589,9 +3629,9 @@ class PythonWrapperCodegen(CodeGen):
             import triton
 
         if isinstance(s, SymTypes):
-            return pexpr(s.node.expr)
-        elif isinstance(s, sympy.Expr):
-            return pexpr(s)
+            return self.codegen_symbolic_scalar(s.node.expr)
+        elif isinstance(s, SYMBOLIC_SCALAR_TYPES):
+            return self.codegen_symbolic_scalar(s)
         elif isinstance(s, (tuple, list)):
 
             @dataclasses.dataclass

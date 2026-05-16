@@ -27,7 +27,13 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, make_codegen_buffer, normalize_name
+from ..utils import (
+    _align,
+    is_symbolic_scalar,
+    make_codegen_buffer,
+    normalize_name,
+    SYMBOLIC_SCALAR_TYPES,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -44,6 +50,8 @@ from .wrapper import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from torch.fx.experimental.symbolic_shapes import SympyBoolean
 
     from ..graph import GraphLowering
 
@@ -73,11 +81,13 @@ class DeferredCpuTritonCallWrapper:
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
         if isinstance(arg_type, torch_dtype):
             return f"const {name}_type_& {name}"
-        elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
-            return f"int64_t {name}"
+        elif arg_type is bool:
+            return f"bool {name}"
         elif arg_type is float:
             return f"float {name}"
-        elif arg_type is bool:
+        elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+            return f"int64_t {name}"
+        elif issubclass(arg_type, sympy.logic.boolalg.Boolean):
             return f"bool {name}"
         else:
             raise ValueError(
@@ -627,7 +637,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         str(sympy.Eq(sym_or_exp, size_symbol)) + " is not solvable"
                     )
 
-        if isinstance(value, sympy.Expr):
+        if is_symbolic_scalar(value):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             if value.is_integer:
@@ -657,6 +667,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
 
         def gen_check(handle_kind, idx, name, tensor):
+            if not isinstance(tensor, ir.TensorBox):
+                return
+
             # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
             self.prefix.writeline_aot(
                 f"ConstantHandle {name} = ConstantHandle({handle_kind}[{idx}]);"
@@ -910,13 +923,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
             # unwrap input tensor back to scalar
-            if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
+            if is_symbolic_scalar(V.graph.graph_inputs[input_key]):
                 from ..graph import may_get_constant_buffer_dtype
 
                 dtype = may_get_constant_buffer_dtype(
                     V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                 )
-                assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
+                assert dtype is not None, (
+                    "Fails to get the dtype of the symbolic scalar input"
+                )
                 self.codegen_tensor_item(
                     dtype, f"inputs[{idx}]", input_key, self.prefix
                 )
@@ -1404,8 +1419,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "#include <torch/csrc/inductor/aoti_runtime/cpu_triton_runtime_wrappers.h>"
         )
 
-    @staticmethod
-    def _stringify_cpu_triton_call_arg(arg: Any) -> str:
+    def _stringify_cpu_triton_call_arg(self, arg: Any) -> str:
         """Render a Triton kernel call argument as a C++ expression."""
         if isinstance(arg, str):
             return arg
@@ -1413,6 +1427,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return "true" if arg else "false"
         if isinstance(arg, (int, float, SymbolicCallArg)):
             return str(arg)
+        if is_symbolic_scalar(arg):
+            return self.codegen_cpp_symbolic_scalar(arg)
         return cexpr(V.graph.sizevars.simplify(arg))
 
     def _define_kernel_helper(
@@ -1863,7 +1879,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         super().add_benchmark_harness(output)
 
     def _extract_divisors_from_expr(
-        self, expr: sympy.Expr
+        self, expr: sympy.Expr | SympyBoolean
     ) -> list[tuple[sympy.Expr, str]]:
         """
         Walk the sympy expression and extract all divisors/modulos from
@@ -1891,7 +1907,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     seen.add(key)
                     divisors.append((divisor, op_name))
 
-        def walk(e: sympy.Expr) -> None:
+        def walk(e: sympy.Expr | SympyBoolean) -> None:
             if isinstance(e, (FloorDiv, CleanDiv)):
                 _, div = e.args
                 maybe_add_divisor(div, "floor division")
@@ -1906,14 +1922,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Recurse into arguments
             if hasattr(e, "args"):
                 for arg in e.args:
-                    if isinstance(arg, sympy.Expr):
+                    if isinstance(arg, SYMBOLIC_SCALAR_TYPES):
                         walk(arg)
 
         walk(expr)
         return divisors
 
-    def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
-        maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
+    def codegen_cpp_sizevar(
+        self, x: sympy.Expr | SympyBoolean, *, simplify: bool = True
+    ) -> str:
+        replaced_x = self.replace_symbolic_scalar_graph_inputs(x)
+        maybe_simplified_x = (
+            V.graph.sizevars.simplify(replaced_x) if simplify else replaced_x
+        )
         # In AOT mode, emit runtime checks for potential division/modulo by zero
         # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
         if V.graph.aot_mode:
@@ -1925,7 +1946,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
         return cexpr(maybe_simplified_x)
 
-    def codegen_sizevar(self, x: sympy.Expr) -> str:
+    def codegen_cpp_symbolic_scalar(self, x: sympy.Expr | SympyBoolean) -> str:
+        return cexpr(self.replace_symbolic_scalar_graph_inputs(x))
+
+    def codegen_symbolic_scalar(self, x: sympy.Expr | SympyBoolean) -> str:
+        return self.codegen_cpp_symbolic_scalar(x)
+
+    def codegen_sizevar(self, x: sympy.Expr | SympyBoolean) -> str:
         return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
@@ -1960,9 +1987,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # its own {} scope block, so we must redeclare the variable each
             # time since prior declarations are no longer visible.
             self.kernel_numel_expr.add((arg.inner, graph))
-            self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
+            self.writeline(
+                f"int64_t {arg.inner} = {self.codegen_cpp_sizevar(arg.inner_expr)};"
+            )
         else:
-            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
+            self.writeline(f"{arg.inner} = {self.codegen_cpp_sizevar(arg.inner_expr)};")
 
     def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -2071,7 +2100,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_input_nan_asserts(self) -> None:
         self.wrapper_call.writeline("// make sure graph inputs are not nan/inf")
         for name, buf in self.get_graph_inputs().items():
-            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+            if is_symbolic_scalar(buf) or isinstance(buf, ir.TorchBindObject):
                 continue
             self.wrapper_call.writeline(
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
@@ -2958,7 +2987,7 @@ if (!custom_op_wrapper) {
                     imag = self.generate_float_value(scalar.imag)
                     return f"PyComplex_FromDoubles({real}, {imag})"
                 if isinstance(scalar, SymTypes):
-                    scalar_var = cexpr(scalar.node.expr)
+                    scalar_var = self.codegen_cpp_symbolic_scalar(scalar.node.expr)
                     if isinstance(scalar, torch.SymBool):
                         return f"PyBool_FromLong({scalar_var})"
                     if isinstance(scalar, torch.SymFloat):
@@ -3353,9 +3382,9 @@ if (!custom_op_wrapper) {
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
         elif isinstance(val, SymTypes):
-            return cexpr(val.node.expr)
-        elif isinstance(val, sympy.Expr):
-            return cexpr(val)
+            return self.codegen_cpp_symbolic_scalar(val.node.expr)
+        elif is_symbolic_scalar(val):
+            return self.codegen_cpp_symbolic_scalar(val)
         else:
             return repr(val)
 

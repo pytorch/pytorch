@@ -10,7 +10,7 @@ import torch._ops
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
-from ..utils import IndentedBuffer, sympy_product
+from ..utils import IndentedBuffer, is_symbolic_scalar, sympy_product
 from ..virtualized import V
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
@@ -65,21 +65,25 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def get_input_cpp_type(input):
         assert config.aot_inductor.use_minimal_arrayref_interface
 
-        if isinstance(input, sympy.Expr):
+        if is_symbolic_scalar(input):
             from ..graph import may_get_constant_buffer_dtype
 
             dtype = may_get_constant_buffer_dtype(input)
-            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            assert dtype is not None, (
+                f"Failed to get the dtype of symbolic scalar input: {input}"
+            )
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
     @staticmethod
     def get_input_element_cpp_type(input):
-        if isinstance(input, sympy.Expr):
+        if is_symbolic_scalar(input):
             from ..graph import may_get_constant_buffer_dtype
 
             dtype = may_get_constant_buffer_dtype(input)
-            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            assert dtype is not None, (
+                f"Failed to get the dtype of symbolic scalar input: {input}"
+            )
             return DTYPE_TO_CPP[dtype]
         return DTYPE_TO_CPP[input.get_dtype()]
 
@@ -96,7 +100,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def codegen_input_numel_asserts(self, indented_buffer=None):
         writer = indented_buffer or self.prefix
         for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
+            if is_symbolic_scalar(buf):
                 continue
 
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -117,12 +121,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
                 input_value
             )
-            if isinstance(input_value, sympy.Expr):
+            if is_symbolic_scalar(input_value):
                 # cond / symint wrappers can surface symbolic scalar inputs here.
                 from ..graph import may_get_constant_buffer_dtype
 
                 dtype = may_get_constant_buffer_dtype(input_value)
-                assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
+                assert dtype is not None, (
+                    "Fails to get the dtype of the symbolic scalar input"
+                )
                 input_tensor = f"{input_key}_arrayref_tensor"
                 code.writeline(
                     f"auto {input_tensor} = torch::aot_inductor::c_to_arrayref_tensor<{input_cpp_type}>(c_inputs[{idx}]);"
@@ -531,14 +537,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         )
                         continue
                     # unwrap input tensor back to scalar
-                    if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
+                    if is_symbolic_scalar(V.graph.graph_inputs[input_key]):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
                         assert dtype is not None, (
-                            "Fails to get the dtype of the sympy.Expr"
+                            "Fails to get the dtype of the symbolic scalar input"
                         )
                         self.codegen_tensor_item(
                             dtype, f"inputs[{idx}]", input_key, self.prefix

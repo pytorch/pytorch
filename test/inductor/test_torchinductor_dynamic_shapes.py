@@ -8,6 +8,8 @@ import sys
 import unittest
 from functools import partial
 
+import sympy
+
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
@@ -124,6 +126,91 @@ if HAS_CPU:
         device = "cpu"
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
+
+    class TestInductorDynamicLowering(TestCase):
+        def _make_graph_with_symbool_input(self):
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            shape_env = ShapeEnv()
+            pred_input = shape_env.create_unbacked_symbool()
+            self.assertIsInstance(pred_input.node.expr, sympy.Equality)
+
+            x_input = torch.randn(2, 3)
+            fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+            with fake_mode:
+                fake_x = fake_mode.from_tensor(x_input)
+                fake_y = torch.ops.aten.neg.default(fake_x)
+
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            pred = graph.placeholder("pred")
+            y = graph.call_function(torch.ops.aten.neg.default, (x,))
+            graph.output((y, pred))
+
+            gm = torch.fx.GraphModule({}, graph)
+            x.meta["val"] = fake_x
+            pred.meta["val"] = pred_input
+            y.meta["val"] = fake_y
+            gm.graph.lint()
+            gm.recompile()
+            return gm, shape_env, fake_mode, x_input, pred_input
+
+        def test_may_get_constant_buffer_dtype_handles_symbool(self):
+            from torch._inductor.graph import may_get_constant_buffer_dtype
+
+            symint = sympy.Symbol("s77", integer=True)
+            symbool = sympy.Eq(sympy.Symbol("u0", integer=True), 1)
+
+            self.assertIs(may_get_constant_buffer_dtype(symint), torch.int64)
+            self.assertIs(may_get_constant_buffer_dtype(symbool), torch.bool)
+
+        def test_aot_cpp_wrapper_accepts_symbool_graph_input(self):
+            from torch._inductor.codegen.cpp_wrapper_cpu import (
+                DeferredCpuTritonCallWrapper,
+            )
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.graph import GraphLowering
+
+            gm, shape_env, fake_mode, x_input, pred_input = (
+                self._make_graph_with_symbool_input()
+            )
+            graph_lowering = GraphLowering(
+                gm,
+                example_inputs=(x_input, pred_input),
+                shape_env=shape_env,
+                cpp_wrapper=True,
+                aot_mode=True,
+            )
+            with (
+                V.set_fake_mode(fake_mode),
+                V.set_graph_handler(graph_lowering),
+                V.set_debug_handler(DebugContext()),
+            ):
+                graph_lowering.run(x_input, pred_input)
+                pred_expr = graph_lowering.graph_inputs["pred"]
+                self.assertIsInstance(pred_expr, sympy.Equality)
+
+                self.assertEqual(
+                    DeferredCpuTritonCallWrapper(
+                        wrapper_name="call_test",
+                        kernel_name="test",
+                        arg_types=[],
+                    )._get_cpp_param_type("pred", type(pred_expr)),
+                    "bool pred",
+                )
+
+                wrapper_code, _ = graph_lowering.codegen_with_cpp_wrapper()
+                self.assertEqual(
+                    graph_lowering.wrapper_code._stringify_cpu_triton_call_arg(
+                        pred_expr
+                    ),
+                    "pred",
+                )
+                self.assertIn(
+                    "aoti_torch_item_bool(inputs[1], &pred)", wrapper_code.value
+                )
+                for symbol in pred_expr.free_symbols:
+                    self.assertNotIn(str(symbol), wrapper_code.value)
 
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
