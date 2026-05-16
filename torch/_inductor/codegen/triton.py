@@ -25,7 +25,7 @@ import torch
 import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import identity, preserve_rng_state
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -6631,6 +6631,102 @@ class TritonScheduling(SIMDScheduling):
         for node in scheduler.nodes:
             if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
                 node.debug_device_str = debug_triton_code
+
+    @staticmethod
+    def _is_canonical_zero(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value is False
+        if isinstance(value, int):
+            return value == 0
+        if isinstance(value, float):
+            return value == 0.0 and math.copysign(1.0, value) > 0.0
+        if isinstance(value, complex):
+            return (
+                value == 0
+                and math.copysign(1.0, value.real) > 0.0
+                and math.copysign(1.0, value.imag) > 0.0
+            )
+        return False
+
+    @staticmethod
+    def _is_zero_fill_node(node: BaseSchedulerNode) -> bool:
+        if not isinstance(node, SchedulerNode):
+            return False
+
+        buffer = node.node
+        if not (
+            isinstance(buffer, ir.ComputedBuffer)
+            and isinstance(buffer.data, ir.Pointwise)
+            and not node.read_writes.reads
+        ):
+            return False
+
+        class ZeroFillHandler(DefaultHandler):
+            def constant(self, value: bool | float | int, dtype: torch.dtype) -> Any:
+                return value, dtype
+
+            def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
+                if sympy.simplify(expr) == 0:
+                    return 0, dtype
+                raise NotImplementedError
+
+            def _default(
+                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+            ) -> Any:
+                raise NotImplementedError
+
+        try:
+            with V.set_ops_handler(ZeroFillHandler()):
+                result = buffer.data.inner_fn(*buffer.data.inner_fn_args())
+        except NotImplementedError:
+            return False
+
+        result = getattr(result, "value", result)
+        if isinstance(result, tuple):
+            result = tuple(getattr(x, "value", x) for x in result)
+        if not (isinstance(result, tuple) and len(result) == 2):
+            return False
+
+        value, dtype = result
+        return dtype == buffer.get_dtype() and TritonScheduling._is_canonical_zero(
+            value
+        )
+
+    def _try_codegen_zero_fill(self, node: FusedSchedulerNode | SchedulerNode) -> bool:
+        assert self.scheduler
+        nodes = [
+            n
+            for n in node.get_nodes()
+            if n.get_name() not in self.scheduler.removed_ops
+        ]
+        if len(nodes) != 1 or not self._is_zero_fill_node(nodes[0]):
+            return False
+
+        (zero_fill_node,) = nodes
+        assert isinstance(zero_fill_node.node, ir.ComputedBuffer)
+        buffer = zero_fill_node.node
+
+        self.codegen_comment([zero_fill_node])
+        zero_fill_node.mark_run()
+        V.graph.wrapper_code.writeline(
+            V.graph.wrapper_code.make_zero_buffer(buffer.get_name())
+        )
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and (origin_node := buffer.get_origin_node()) is not None
+        ):
+            counters["inductor"]["intermediate_hooks"] += 1
+            V.graph.wrapper_code.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {buffer.get_name()})"
+            )
+        self.free_buffers_in_scheduler()
+        return True
+
+    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+        if self._try_codegen_zero_fill(node):
+            return
+        return super().codegen_node(node)
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
