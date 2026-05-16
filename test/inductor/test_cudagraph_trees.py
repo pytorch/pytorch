@@ -2304,6 +2304,29 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
+        def test_grad_accumulation_dealloc_error_message(self):
+            model = torch.nn.Linear(10, 1, device="cuda")
+            compiled_model = torch.compile(
+                model, fullgraph=True, mode="reduce-overhead"
+            )
+
+            def run_iter():
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(
+                    (10,), dtype=torch.float32, requires_grad=True, device="cuda"
+                )
+                loss = compiled_model(x).clone().sum().clone()
+                loss.backward()
+
+            run_iter()
+
+            with self.assertRaises(RuntimeError) as exc:
+                run_iter()
+
+            FileCheck().check("gradient tensor output of CUDAGraphs").check(
+                "gradient accumulation"
+            ).check(".grad tensor").run(str(exc.exception))
+
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
             stack traces even when a post-grad pass strips them from arg nodes
