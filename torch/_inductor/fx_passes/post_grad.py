@@ -1624,6 +1624,18 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    mat1, mat2 = match.args
+    inp_val = inp.meta["val"]
+    mat1_val = mat1.meta["val"]
+    mat2_val = mat2.meta["val"]
+    if inp_val.dtype != mat1_val.dtype or inp_val.dtype != mat2_val.dtype:
+        return False
+    if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
+        return False
+    if inp_val.device.type != "cuda" and match.kwargs["beta"] == 0:
+        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
+        if not is_expandable_to(inp_val.shape, mm_shape):
+            return False
 
     output = match.output_node()
     return all(is_pointwise_use(use) for use in output.users)
@@ -1649,10 +1661,16 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
     ):
         return
 
+    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
+
     def repl(inp, x1, x2, alpha, beta):
+        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
+            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
+        if beta == 0 and drop_input_for_beta_zero:
+            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
