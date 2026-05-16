@@ -4355,20 +4355,51 @@ class CommonTemplate:
             return torch.dot(a, b) + torch.dot(a, b)
 
         fn = torch.vmap(dot_based)
+        bmm_codegen_call = (
+            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
+        )
         for dtype in (torch.float32, torch.float64):
             if not self.is_dtype_supported(dtype):
                 continue
-            with self.subTest(dtype=dtype):
-                a = torch.randn(64, 3, device=self.device, dtype=dtype)
-                b = torch.randn(64, 3, device=self.device, dtype=dtype)
+            for k in (3, 32):
+                with self.subTest(dtype=dtype, k=k):
+                    a = torch.randn(64, k, device=self.device, dtype=dtype)
+                    b = torch.randn(64, k, device=self.device, dtype=dtype)
+
+                    expected = fn(a, b)
+                    actual, code = run_and_get_code(
+                        torch.compile(fn, fullgraph=True), a, b
+                    )
+                    self.assertEqual(actual, expected)
+                    self.assertNotIn(bmm_codegen_call, "\n".join(code))
+
+    @skip_if_cpu
+    @skipIfXpu(msg="CUDA codegen check")
+    @skip_if_not_triton
+    def test_bmm_dot_shape_decompose_threshold(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        bmm_codegen_call = (
+            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
+        )
+        for k, expect_extern_bmm in ((32, False), (33, True)):
+            with self.subTest(k=k):
+                a = torch.randn(4, 1, k, device=self.device)
+                b = torch.randn(4, k, 1, device=self.device)
 
                 expected = fn(a, b)
                 actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
                 self.assertEqual(actual, expected)
-                self.assertNotIn("extern_kernels.bmm", "\n".join(code))
+                code_str = "\n".join(code)
+                if expect_extern_bmm:
+                    self.assertIn(bmm_codegen_call, code_str)
+                else:
+                    self.assertNotIn(bmm_codegen_call, code_str)
 
     @skip_if_cpu
     @skipIfXpu(msg="CUDA integer bmm error preservation")
+    @skip_if_cpp_wrapper("cpp wrapper reports AOTI API call failures")
     @skip_if_not_triton
     def test_bmm_dot_shape_int_preserves_eager_error(self):
         def fn(a, b):
