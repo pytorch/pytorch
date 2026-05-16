@@ -2082,6 +2082,21 @@ class TestMPS(TestCaseMPS):
         # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
         outputs.sum().backward()
 
+    def test_layer_norm_backward_no_input_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/183825
+        x = torch.randn(2, 4)
+
+        def grads(device):
+            w = torch.ones(4, device=device, requires_grad=True)
+            b = torch.zeros(4, device=device, requires_grad=True)
+            torch.nn.functional.layer_norm(x.to(device), (4,), w, b).sum().backward()
+            return w.grad, b.grad
+
+        cpu_w, cpu_b = grads("cpu")
+        mps_w, mps_b = grads("mps")
+        self.assertEqual(mps_w.cpu(), cpu_w)
+        self.assertEqual(mps_b.cpu(), cpu_b)
+
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
         b = a.reshape((3, 3))
@@ -7803,6 +7818,23 @@ class TestMPS(TestCaseMPS):
 
         helper()
         helper(do_add=False)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/170507:
+    # MPS one_hot used to silently return zeros for out-of-bounds indices.
+    def test_one_hot_index_bounds(self):
+        with self.assertRaisesRegex(RuntimeError, "Class values must be smaller than num_classes"):
+            torch.nn.functional.one_hot(torch.tensor([8], device='mps'), num_classes=8)
+
+        with self.assertRaisesRegex(RuntimeError, "Class values must be non-negative"):
+            torch.nn.functional.one_hot(torch.tensor([-1], device='mps'), num_classes=8)
+
+        valid = torch.tensor([3, 4, 1, 0], device='mps')
+        expected = torch.nn.functional.one_hot(valid.cpu(), num_classes=5)
+        self.assertEqual(torch.nn.functional.one_hot(valid, num_classes=5), expected.to('mps'))
+
+        inferred = torch.nn.functional.one_hot(valid)
+        self.assertEqual(inferred.size(-1), 5)
+        self.assertEqual(inferred, expected.to('mps'))
 
     # Test pytorch scatter_reduce
     def test_scatter_reduce(self):
