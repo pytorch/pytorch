@@ -37,6 +37,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    triton_type,
     using_b200,
 )
 from ..virtualized import V
@@ -2395,14 +2396,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     @staticmethod
     def _dtype_to_triton(dtype: torch.dtype) -> str:
         """Convert a torch dtype to a triton type string."""
-        return f"tl.{dtype}".replace("torch.", "")
+        return triton_type(dtype)
 
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype.is_floating_point and dtype.itemsize < torch.float32.itemsize:
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
