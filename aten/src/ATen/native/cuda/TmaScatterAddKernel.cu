@@ -122,12 +122,17 @@ __device__ __forceinline__ void commit_group() {
     asm volatile("cp.async.bulk.commit_group;" ::: "memory");
 }
 
+template <int N>
+__device__ __forceinline__ void wait_group_lt() {
+    asm volatile("cp.async.bulk.wait_group %0;" :: "n"(N) : "memory");
+}
+
 __device__ __forceinline__ void wait_group_lt1() {
-    asm volatile("cp.async.bulk.wait_group 1;" ::: "memory");
+    wait_group_lt<1>();
 }
 
 __device__ __forceinline__ void wait_group_lt0() {
-    asm volatile("cp.async.bulk.wait_group 0;" ::: "memory");
+    wait_group_lt<0>();
 }
 
 __device__ __forceinline__ void bulk_tensor_load_2d(
@@ -243,7 +248,7 @@ __global__ void tma_scatter_add_kernel(
 // Producer-ahead-of-consumer pipeline overlaps the current load with the
 // previous stage's reduces. 2D TMA handles non-contiguous src (D < stride)
 // and OOB tiles (last tile with < K rows) via hardware zero-fill.
-template <typename scalar_t, typename index_t>
+template <typename scalar_t, typename index_t, int NUM_STAGES>
 __global__ void tma_scatter_add_kernel_2d(
     scalar_t* __restrict__ self_data,
     const scalar_t* __restrict__ src_data,
@@ -255,7 +260,6 @@ __global__ void tma_scatter_add_kernel_2d(
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
     constexpr int K = 4;
-    constexpr int NUM_STAGES = 2;
 
     extern __shared__ char smem_raw[];
 
@@ -269,24 +273,24 @@ __global__ void tma_scatter_add_kernel_2d(
     int mbar_offset = (data_region_bytes + 7) & ~7;
 
     scalar_t* my_buf = reinterpret_cast<scalar_t*>(smem_raw) + warp_id * slab_elems;
-    uint64_t* mbar0 = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + warp_id * NUM_STAGES;
-    uint64_t* mbar1 = mbar0 + 1;
-    uint64_t* mbars[NUM_STAGES] = {mbar0, mbar1};
+    uint64_t* mbars = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + warp_id * NUM_STAGES;
 
     if (lane_id == 0) {
-        tma::mbar_init(mbar0, 1u);
-        tma::mbar_init(mbar1, 1u);
+        for (int s = 0; s < NUM_STAGES; s++) {
+            tma::mbar_init(&mbars[s], 1u);
+        }
     }
     __syncwarp();
 
-    int mbar_phase[NUM_STAGES] = {0, 0};
     uint32_t tile_bytes = K * D * sizeof(scalar_t);
 
-    auto drain_tile = [&](int tile, int stage) {
+    auto drain_tile = [&](int tile, int stage, int& parity) {
         while (!tma::mbar_try_wait_parity(
-            mbars[stage],
-            static_cast<uint32_t>(mbar_phase[stage] & 1))) {}
-        mbar_phase[stage]++;
+            &mbars[stage],
+            static_cast<uint32_t>(parity))) {}
+        if (stage == NUM_STAGES - 1) {
+            parity ^= 1;
+        }
 
         if (lane_id == 0) {
             int base_row = tile * K;
@@ -311,45 +315,54 @@ __global__ void tma_scatter_add_kernel_2d(
     };
 
     int n_tiles = at::ceil_div(num_ind, K);
-    int tile_idx = blockIdx.x * warps_per_block + warp_id;
+    int first_tile = blockIdx.x * warps_per_block + warp_id;
     int warp_stride = gridDim.x * warps_per_block;
 
-    int prev_tile_idx = 0;
-    int pair_count = 0;
+    auto issue_load = [&](int tile, int stage) {
+        if (lane_id == 0) {
+            tma::mbar_expect_tx(&mbars[stage], tile_bytes);
+            tma::bulk_tensor_load_2d(
+                my_buf + stage * tile_elems,
+                &tma_desc,
+                0, static_cast<int32_t>(tile * K),
+                &mbars[stage]);
+        }
+    };
+
+    if (first_tile >= n_tiles) {
+        return;
+    }
+
+    // Circular-buffered pipeline with NUM_STAGES smem buffers.
+    // Prolog issues 1 load. Steady-state issues 1 load + 1 drain per
+    // iteration; the load is always 1 step ahead of the drain, cycling
+    // through stages 0..NUM_STAGES-1. A stage is reused NUM_STAGES
+    // iterations after its drain, so wait_group_lt<NUM_STAGES-2> ensures
+    // the async reduce from that drain has finished reading the buffer.
+    int tile = first_tile;
     int phase = 0;
+    int parity = 0;
 
-    while (tile_idx < n_tiles) {
-        int cur = phase & 1;
+    // Prolog: issue first load
+    issue_load(tile, 0);
+    tile += warp_stride;
+    phase++;
 
-        if (phase >= 2 && lane_id == 0) {
-            tma::wait_group_lt0();
+    // Steady-state: load next tile, drain previous tile
+    for (; tile < n_tiles; tile += warp_stride, phase++) {
+        int load_stage = phase % NUM_STAGES;
+
+        if (phase >= NUM_STAGES && lane_id == 0) {
+            tma::wait_group_lt<NUM_STAGES - 2>();
         }
         __syncwarp();
 
-        if (lane_id == 0) {
-            tma::mbar_expect_tx(mbars[cur], tile_bytes);
-            int32_t row_coord = tile_idx * K;
-            tma::bulk_tensor_load_2d(
-                my_buf + cur * tile_elems,
-                &tma_desc,
-                0, row_coord,
-                mbars[cur]);
-        }
-
-        if (pair_count > 0) {
-            drain_tile(prev_tile_idx, (phase - 1) & 1);
-        }
-
-        prev_tile_idx = tile_idx;
-        pair_count++;
-        phase++;
-        tile_idx += warp_stride;
+        issue_load(tile, load_stage);
+        drain_tile(tile - warp_stride, (phase - 1) % NUM_STAGES, parity);
     }
 
-    if (pair_count > 0) {
-        drain_tile(prev_tile_idx, (phase - 1) & 1);
-    }
-
+    // Epilog: drain last tile, wait for all reduces
+    drain_tile(tile - warp_stride, (phase - 1) % NUM_STAGES, parity);
     if (lane_id == 0) {
         tma::wait_group_lt0();
     }
@@ -378,11 +391,8 @@ void tma_scatter_add_kernel_launch(
     int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
 
     if (num_chunks == 1) {
-        // Small-N: load K=4 rows per 2D TMA tile with producer-ahead-of-consumer
-        // double-buffered pipeline. 2D TMA handles non-contiguous src and
-        // OOB tiles (last tile < K rows) via hardware zero-fill.
         constexpr int K = 4;
-        constexpr int NUM_STAGES = 2;
+        constexpr int NUM_STAGES = 3;
         int tile_elems = K * D;
         int slab_elems = tile_elems * NUM_STAGES;
         int data_region_bytes = entries_per_block * slab_elems *
@@ -395,9 +405,6 @@ void tma_scatter_add_kernel_launch(
         int grid_x = at::ceil_div(n_tiles, entries_per_block);
         int num_sms = at::cuda::getCurrentDeviceProperties()
             ->multiProcessorCount;
-        // Fewer CTAs → more tiles per warp → deeper pipeline per warp.
-        // More CTAs → more waves → higher GPU utilization.
-        // 32 CTAs/SM balances both on GB200 (sweep-optimal across shapes).
         grid_x = std::min(grid_x, num_sms * 32);
 
         alignas(128) CUtensorMap desc;
@@ -430,8 +437,13 @@ void tma_scatter_add_kernel_launch(
         dim3 grid = {static_cast<uint32_t>(grid_x), 1, 1};
         int block_size = entries_per_block * threads_per_entry;
 
-        tma_scatter_add_kernel_2d<scalar_t, index_t>
-            <<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
+        auto kernel = tma_scatter_add_kernel_2d<scalar_t, index_t, NUM_STAGES>;
+        if (smem > static_cast<int>(at::cuda::getCurrentDeviceProperties()
+                ->sharedMemPerBlock)) {
+            C10_CUDA_CHECK(cudaFuncSetAttribute(
+                kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
+        }
+        kernel<<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
             self_data, src_data, idx, num_ind, D, self_dim_size,
             self_stride, src_stride, desc);
     } else {
