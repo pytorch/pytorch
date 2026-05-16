@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 import unittest.mock
+import warnings
 import weakref
 from collections.abc import Callable
 from pathlib import Path
@@ -13637,6 +13638,109 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # because bucketize is computationally expensive.
         FileCheck().check("def triton").check("def triton").run(code[0])
 
+    def test_searchsorted_sliced_computed_boundaries(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[:-1], values + 10, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[1:], values, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence, values, out_int32=True, right=True, sorter=sorter[1:]
+            )
+
+        sequence = torch.tensor([4, 0, 8, 2, 6])
+        sorter = torch.tensor([0, 1, 3, 0, 4, 2])
+        values = torch.arange(10, 20)
+
+        self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_boundaries_offset(self):
+        def fn(sequence, values):
+            sequence = sequence + 10
+            return torch.searchsorted(
+                sequence[1:, 1:], values, out_int32=True, right=True
+            )
+
+        sequence = torch.arange(24).reshape(4, 6)
+        values = torch.tensor(
+            [[16, 17, 19, 21, 22], [22, 23, 25, 27, 28], [28, 29, 31, 33, 34]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence[1:, 1:],
+                values,
+                out_int32=True,
+                right=True,
+                sorter=sorter[1:, 1:],
+            )
+
+        sequence = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [99, 5, 1, 4, 2, 3],
+                [99, 15, 11, 14, 12, 13],
+                [99, 25, 21, 24, 22, 23],
+            ]
+        )
+        sorter = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+            ]
+        )
+        values = torch.tensor(
+            [[10, 11, 13, 15, 16], [20, 21, 23, 25, 26], [30, 31, 33, 35, 36]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.searchsorted(
+                base.expand(5), values, out_int32=True, right=True
+            )
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -13709,6 +13813,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries(self):
+        def fn(boundaries, count: int):
+            boundaries = boundaries + 10
+            values = torch.arange(count, device=boundaries.device)
+            return (
+                torch.bucketize(values, boundaries[:-1], out_int32=True, right=True) - 1
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+
+        self.common(fn, (boundaries, 10), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.bucketize(values, boundaries[1:], out_int32=True, right=True)
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_bucketize_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.bucketize(values, base.expand(5), out_int32=True, right=True)
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
 
     def test_bucketize_scalar_various_values(self):
         def fn(boundaries, scalar_val):
