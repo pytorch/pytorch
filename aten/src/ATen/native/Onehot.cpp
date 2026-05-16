@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/DTensorState.h>
+#include <ATen/native/Onehot.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,6 +15,9 @@
 #endif
 
 namespace at::native {
+
+DEFINE_DISPATCH(one_hot_check_bounds_stub);
+REGISTER_NO_CPU_DISPATCH(one_hot_check_bounds_stub)
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
@@ -62,6 +66,13 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
             //for cuda, assert that num_classes is at least 1
             TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
         }
+    }
+
+    // MPS scatter has no device-side index assert, so route through an async
+    // device-side check that surfaces the same errors as CPU and CUDA without
+    // a .item() sync.
+    if (self.device().is_mps()) {
+        one_hot_check_bounds_stub(self.device().type(), self, num_classes);
     }
 
     shape.emplace_back(num_classes);

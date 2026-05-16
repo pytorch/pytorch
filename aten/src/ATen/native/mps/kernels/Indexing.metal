@@ -1025,3 +1025,17 @@ REGISTER_NONZERO_KERNELS(uchar);
 REGISTER_NONZERO_KERNELS(bool);
 REGISTER_NONZERO_KERNELS(float2);
 REGISTER_NONZERO_KERNELS(half2);
+
+kernel void one_hot_check_bounds(
+    constant long* indices [[buffer(0)]],
+    constant long& num_classes [[buffer(1)]],
+    device ErrorMessages* error_buffer [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  const long idx = indices[tid];
+  if (idx < 0) {
+    TORCH_REPORT_ERROR(error_buffer, "Class values must be non-negative.");
+  } else if (idx >= num_classes) {
+    TORCH_REPORT_ERROR(
+        error_buffer, "Class values must be smaller than num_classes.");
+  }
+}

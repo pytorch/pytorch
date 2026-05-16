@@ -16,6 +16,7 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Onehot.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
@@ -1159,7 +1160,30 @@ static void index_fill_mps_kernel(TensorIterator& iter,
   }
 }
 
+static void one_hot_check_bounds_mps(const Tensor& self, int64_t num_classes) {
+  if (self.numel() == 0) {
+    return;
+  }
+  using namespace mps;
+
+  // The kernel reads the raw index buffer in storage order; require
+  // contiguous so a thread-id maps to one element with no stride math.
+  Tensor self_c = self.contiguous();
+  const auto numel = self_c.numel();
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("one_hot_check_bounds");
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, self_c, num_classes, stream->getErrorBuffer());
+      mtl_dispatch1DJob(encoder, pso, numel);
+    }
+  });
+}
+
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
+REGISTER_DISPATCH(one_hot_check_bounds_stub, &one_hot_check_bounds_mps)
 } // namespace at::native
