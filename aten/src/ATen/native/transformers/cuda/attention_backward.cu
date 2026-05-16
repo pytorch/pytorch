@@ -625,9 +625,6 @@ _efficient_attention_backward(
       } else {
         params.varlen_type = VarlenType::None;
       }
-      using aotriton::v2::flash::attn_bwd;
-      using aotriton::v2::flash::attn_bwd_fused;
-      using aotriton::v2::flash::attn_bwd_compact_varlen;
       err = aotriton::v3::flash::attn_bwd(params,
                                           aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
