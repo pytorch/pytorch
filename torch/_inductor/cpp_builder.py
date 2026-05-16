@@ -2541,11 +2541,15 @@ class CppBuilder:
                 if(NOT OBJCOPY_EXECUTABLE)
                     message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
                 endif()
+                find_program(CUDA_FATBINARY_EXECUTABLE fatbinary HINTS "${{CUDAToolkit_BIN_DIR}}")
+                if(NOT CUDA_FATBINARY_EXECUTABLE)
+                    message(FATAL_ERROR "fatbinary not found. Cannot package CUDA kernel binaries")
+                endif()
 
                 set(KERNEL_TARGETS "")
                 set(KERNEL_OBJECT_FILES "")
                 # Function to embed a single kernel
-                function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
+                function(embed_gpu_kernel KERNEL_NAME PTX_FILE CUBIN_FILE)
                     set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
                     set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
                     set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
@@ -2560,13 +2564,13 @@ class CppBuilder:
                     set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
                     set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
 
-                    # --- PTX to FATBIN Command & Target ---
+                    # --- PTX/cubin to FATBIN Command & Target ---
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
-                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
-                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
-                        DEPENDS ${{PTX_FILE}}
+                        COMMAND ${{CUDA_FATBINARY_EXECUTABLE}} --64 --create=${{FATBIN_FILE}}
+                                --image=profile=compute_{current_arch},file=${{PTX_FILE}}
+                                --image=profile=sm_{current_arch},file=${{CUBIN_FILE}}
+                        DEPENDS ${{PTX_FILE}} ${{CUBIN_FILE}}
                     )
 
                     # --- FATBIN to Object File (.o) Command ---
@@ -2648,7 +2652,7 @@ class CppBuilder:
             f.write(f"target_sources({self._target_name} PRIVATE {src_path})\n")
 
     def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
-        # TODO: make this work beyond CUDA
+        # TODO: make this work beyond XPU
         with open(cmake_path, "a") as f:
             for asm_file in asm_files:
                 kernel_name = Path(asm_file).name.split(".")[0]
@@ -2660,6 +2664,26 @@ class CppBuilder:
                 )
                 f.write(contents)
             if asm_files:
+                f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
+                f.write(
+                    f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
+                )
+
+    def save_kernel_files_to_cmake(
+        self, cmake_path: str, kernel_files: list[tuple[str, str]]
+    ) -> None:
+        with open(cmake_path, "a") as f:
+            for asm_file, cubin_file in kernel_files:
+                kernel_name = Path(asm_file).name.split(".")[0]
+                asm_file = f"${{CMAKE_CURRENT_SOURCE_DIR}}/{Path(asm_file).name}"
+                cubin_file = f"${{CMAKE_CURRENT_SOURCE_DIR}}/{Path(cubin_file).name}"
+                contents = textwrap.dedent(
+                    f"""
+                    embed_gpu_kernel({kernel_name} {asm_file} {cubin_file})
+                    """
+                )
+                f.write(contents)
+            if kernel_files:
                 f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
                 f.write(
                     f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
