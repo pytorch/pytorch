@@ -480,10 +480,65 @@ for `numel > 2^32`.
 const uint32_t numel = c10::checked_convert<uint32_t>(iter.numel(), "uint32_t");
 ```
 
-`c10::checked_convert` (`<c10/util/TypeCast.h>`) and `at::native::safe_downcast`
-(`<ATen/native/Pool.h>`) are equivalent; pick whichever the file already
-includes. The point is *some* tripwire so wraparound becomes a `TORCH_CHECK`
-failure instead of a corrupt output.
+Use `c10::checked_convert` (`<c10/util/TypeCast.h>`) so wraparound becomes a
+`TORCH_CHECK` failure instead of a corrupt output.
+
+## Error Reporting from Kernels
+
+**NEVER copy results to CPU for the purposes of error checking.** Any
+`.item()`, `.cpu()`, or other host read on a GPU tensor forces a full
+GPU->CPU sync that drains every in-flight op on the stream — not just the
+reduction you're inspecting. In a realistic pipeline this stalls the
+whole queue, and the cost dwarfs the actual check. Guarding the sync
+behind `is_mps()` doesn't help; the stall happens every time the op runs.
+Validate on-device instead and report errors through the mechanism below.
+
+GPU code can't throw, but kernels can write into a shared error buffer that the
+host raises as `c10::AcceleratorError` on the next sync. Use
+`TORCH_REPORT_ERROR(error_buf, ...)` from `<c10/metal/error.h>`. Variadic
+arguments are concatenated; integers are formatted in base 10. Delivery is
+asynchronous — the failing thread keeps running, and the error surfaces
+whenever `MPSStream::checkLastError()` next runs (after a `synchronize()` or
+the next op that drains the stream), so don't rely on it for control flow
+inside the same dispatch. Crucially, this adds *no* forced sync: the error
+piggybacks on whatever sync the user's code already does.
+
+**Kernel side:** take a `device ErrorMessages* error_buf` argument and call
+`TORCH_REPORT_ERROR` on the bad path. Skip the offending element afterwards so
+you don't also corrupt memory:
+
+```metal
+#include <c10/metal/error.h>
+
+kernel void index_set_1d(
+    device float* self,
+    constant float* values,
+    constant long* indices,
+    constant uint& self_numel,
+    device ::c10::metal::ErrorMessages* error_buf,
+    uint tid [[thread_position_in_grid]]) {
+  long idx = indices[tid];
+  if (idx < 0 || idx >= long(self_numel)) {
+    TORCH_REPORT_ERROR(
+        error_buf, "index ", idx, " out of bounds for size ", long(self_numel));
+    return;
+  }
+  self[idx] = values[tid];
+}
+```
+
+**Host side:** bind the stream's error buffer as the corresponding argument.
+`mtl_setArgs` accepts it directly:
+
+```objc
+auto* stream = getCurrentMPSStream();
+mtl_setArgs(encoder, self, values, indices, uint32_t(self.numel()),
+            stream->getErrorBuffer());
+```
+
+The buffer is owned by `MPSStream`, sized for 30 messages, and reset after
+each `checkLastError()` drain. Only the first message is reported; later ones
+are kept for debugging but the `AcceleratorError` carries `msg[0]`.
 
 ## Checklist
 
