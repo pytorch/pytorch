@@ -83,6 +83,7 @@ class ConvertFrameReturn:
     # also apply frame_exec strategy to future frames with same code
     apply_to_code: bool = True
     guarded_code: GuardedCode | None = None
+    skip_reason: str | None = None
 
 
 def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
