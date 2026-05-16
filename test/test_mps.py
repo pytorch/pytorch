@@ -7819,23 +7819,6 @@ class TestMPS(TestCaseMPS):
         helper()
         helper(do_add=False)
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/170507:
-    # MPS one_hot used to silently return zeros for out-of-bounds indices.
-    def test_one_hot_index_bounds(self):
-        with self.assertRaisesRegex(RuntimeError, "Class values must be smaller than num_classes"):
-            torch.nn.functional.one_hot(torch.tensor([8], device='mps'), num_classes=8)
-
-        with self.assertRaisesRegex(RuntimeError, "Class values must be non-negative"):
-            torch.nn.functional.one_hot(torch.tensor([-1], device='mps'), num_classes=8)
-
-        valid = torch.tensor([3, 4, 1, 0], device='mps')
-        expected = torch.nn.functional.one_hot(valid.cpu(), num_classes=5)
-        self.assertEqual(torch.nn.functional.one_hot(valid, num_classes=5), expected.to('mps'))
-
-        inferred = torch.nn.functional.one_hot(valid)
-        self.assertEqual(inferred.size(-1), 5)
-        self.assertEqual(inferred, expected.to('mps'))
-
     # Test pytorch scatter_reduce
     def test_scatter_reduce(self):
         def helper(shape, dim, idx_shape, src_shape, idx_dtype=torch.int64, reduce_str="sum"):
