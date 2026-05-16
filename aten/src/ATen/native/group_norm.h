@@ -23,6 +23,8 @@ using forward_fn = void (*)(
 
 using backward_fn = void (*)(
     const Tensor& /* dY */,
+    const Tensor& /* dmean */,
+    const Tensor& /* drstd */,
     const Tensor& /* X */,
     const Tensor& /* mean */,
     const Tensor& /* rstd */,

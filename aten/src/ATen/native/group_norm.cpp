@@ -115,6 +115,22 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     int64_t HxW,
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
+  return native_group_norm_backward_multiple_grads(dY, {}, {}, X, mean, rstd, gamma_opt, N, C, HxW, group, grad_input_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const std::optional<Tensor>& gamma_opt,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
@@ -122,6 +138,12 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   TORCH_CHECK(
       X.scalar_type() == dY.scalar_type(),
       "Expected scalar types of X and dY are same.");
+  TORCH_CHECK(
+      mean.scalar_type() == dmean.scalar_type(),
+      "Expected scalar types of mean and dmean are same.");
+  TORCH_CHECK(
+      rstd.scalar_type() == drstd.scalar_type(),
+      "Expected scalar types of rstd and drstd are same.");
   bool mixed_type = is_mixed_type(X, mean, rstd);
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
@@ -162,6 +184,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   GroupNormBackwardKernel(
       X.device().type(),
       dY,
+      dmean,
+      drstd,
       X,
       mean,
       rstd,
