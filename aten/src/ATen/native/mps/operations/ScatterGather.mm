@@ -18,7 +18,7 @@ namespace at::native {
 
 namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& scatterLib = MetalShaderLibrary::getBundledLibrary();
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Scatter_metallib.h>
 #endif
@@ -76,7 +76,7 @@ static void scatter_set_mps_kernel(const Tensor& self,
           inner_size *= output.size(i);
         }
         const int64_t index_dim_size = index.size(dim);
-        auto pso = scatterLib.getPipelineStateForFunc(
+        auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_set_dense_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, output, src, index, inner_size, index_dim_size, output_dim_size, stream->getErrorBuffer());
@@ -84,7 +84,7 @@ static void scatter_set_mps_kernel(const Tensor& self,
       } else {
         auto sizes = index.sizes();
         std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
-        auto pso = scatterLib.getPipelineStateForFunc(
+        auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_set_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder,
