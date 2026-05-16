@@ -17,8 +17,7 @@ struct C10_API AutogradState {
       bool inference_mode,
       bool fw_grad_mode,
       bool multithreading_enabled)
-      : graph_exec_group_(std::nullopt),
-        grad_mode_(grad_mode),
+      : grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
         multithreading_enabled_(multithreading_enabled) {}
