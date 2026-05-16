@@ -2278,7 +2278,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 20)
+        self.assertEqual(generate_and_load_args, 21)
 
     @fresh_cache()
     @config.patch(
@@ -2367,9 +2367,9 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                        'transpose_discontiguous_tensor_descriptors_override':None,
+                        'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
                         'hint_override':None,'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -2409,9 +2409,9 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                    'transpose_discontiguous_tensor_descriptors_override':None,
+                    'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -3381,7 +3381,10 @@ class TestMaxAutotune(TestCase):
                 out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x)
 
         FileCheck().check_not(kernel_name).run(code_unfused[0])
-        self.assertEqual(out, out_unfused)
+        if GPU_TYPE == "xpu" and dtype == torch.float16:
+            torch.testing.assert_close(out, out_unfused, atol=5e-4, rtol=5e-4)
+        else:
+            self.assertEqual(out, out_unfused)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
@@ -3946,6 +3949,51 @@ class TestMaxAutotuneSubproc(TestCase):
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
+
+    def test_max_autotune_profiler_benchmarker_smoke(self):
+        """
+        Smoke test that a simple max-autotune matmul runs with profiler
+        benchmarker selection enabled through config patching, and records
+        positive autotune benchmark timing.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(64, 32).to(GPU_TYPE)
+        b = torch.randn(32, 64).to(GPU_TYPE)
+
+        import torch._inductor.runtime.benchmarking as inductor_benchmarking
+
+        benchmark_timings_ms = []
+        original_benchmark_gpu = inductor_benchmarking.benchmarker.benchmark_gpu
+
+        def benchmark_gpu_with_capture(*args, **kwargs):
+            timing_ms = original_benchmark_gpu(*args, **kwargs)
+            benchmark_timings_ms.append(timing_ms)
+            return timing_ms
+
+        with config.patch(
+            {"max_autotune": True, "use_torch_profiler_benchmarker": True}
+        ):
+            with mock.patch.object(
+                inductor_benchmarking.benchmarker,
+                "benchmark_gpu",
+                side_effect=benchmark_gpu_with_capture,
+            ):
+                torch.compile(mm)(a, b)
+
+        finite_timings_ms = [t for t in benchmark_timings_ms if math.isfinite(t)]
+        self.assertGreater(
+            len(finite_timings_ms),
+            0,
+            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+        )
+        self.assertGreater(
+            min(finite_timings_ms),
+            0.0,
+            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+        )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))

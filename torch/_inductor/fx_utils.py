@@ -3,7 +3,7 @@ import contextlib
 import operator
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Container, Generator, Iterable
+from collections.abc import Callable, Collection, Container, Generator, Iterable
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
@@ -268,31 +268,31 @@ class FakeTensorUpdater:
             if type(new) is not type(old):
                 return False
 
-            if isinstance(new, (list, tuple)):
-                return len(new) == len(old) and all(
-                    is_fake_tensor_same(
-                        new_i,
-                        old_i,
-                        check_strides=check_strides,
-                        check_storage=check_storage,
-                        node=node,
-                    )
-                    for new_i, old_i in zip(new, old)
-                )
-
-            if new is None:
-                return old is None
-
-            if isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)):
-                return (
-                    new.node.shape_env._maybe_evaluate_static(
-                        sympy.Eq(new.node.expr, old.node.expr)
-                    )
-                    == sympy.true
-                )
-
             if not isinstance(new, torch.Tensor):
-                # If this is not an iterable, torch.Sym*, or Tensor, then check for
+                if new is None:
+                    return old is None
+
+                if isinstance(new, Collection):
+                    return len(new) == len(old) and all(
+                        is_fake_tensor_same(
+                            new_i,
+                            old_i,
+                            check_strides=check_strides,
+                            check_storage=check_storage,
+                            node=node,
+                        )
+                        for new_i, old_i in zip(new, old)
+                    )
+
+                if isinstance(new, torch.types.py_sym_types):
+                    return (
+                        new.node.shape_env._maybe_evaluate_static(
+                            sympy.Eq(new.node.expr, old.node.expr)
+                        )
+                        == sympy.true
+                    )
+
+                # If this is not a Collection, a sym-type, or a Tensor, then check for
                 # Python equality.  This should be fairly conservative, since an object
                 # with no implemented __eq__ method will compare IDs.
                 return new == old
@@ -625,6 +625,16 @@ def count_flops_fx(node: torch.fx.Node) -> int | None:
         success, args, kwargs = get_fake_args_kwargs(node)
 
         if success:
+            # flex_attention HOPs have registered formulas, but invoking them
+            # here can require tracing-only context, e.g. TransformGetItemToIndex.
+            if node.target in (
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.flex_attention_backward,
+            ):
+                flop_formula = flop_registry.get(node.target)
+                if flop_formula is not None:
+                    return flop_formula(*args, **kwargs, out_val=node.meta.get("val"))
+
             with torch.utils.flop_counter.FlopCounterMode(
                 display=False
             ) as flop_counter_mode:

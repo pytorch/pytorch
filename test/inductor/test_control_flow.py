@@ -2010,6 +2010,7 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2])
     @parametrize("autograd", [True, False])
+    @torch._inductor.config.patch(shape_padding=False)
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_pytree_in_out(self, device, dynamic, reverse, dim, autograd):
         self._run_test(

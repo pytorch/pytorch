@@ -232,6 +232,8 @@ class SLoc:
         floc = (
             self.framework_loc
             if isinstance(self.framework_loc, str)
+            else ""
+            if self.framework_loc is None
             else format_frame(self.framework_loc)
         )
         if self.maybe_user_loc is not None:

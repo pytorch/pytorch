@@ -552,6 +552,7 @@ endif()
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  target_compile_definitions(caffe2_nvrtc PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
   if(MSVC)
     # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
     set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
@@ -640,6 +641,7 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  target_compile_definitions(caffe2_nvrtc PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
   target_link_libraries(caffe2_nvrtc hip::amdhip64 hiprtc::hiprtc)
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
@@ -1714,7 +1716,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
+  if(USE_KINETO AND KINETO_BACKEND STREQUAL "cuda")
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)

@@ -368,6 +368,22 @@ class Library:
         handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
         self._registration_handles.append(handle)
 
+    def _resolve_op_name(self, op_name, api_name):
+        """Resolve op_name (str or OpOverload) to a name string."""
+        if isinstance(op_name, str):
+            return op_name
+        elif isinstance(op_name, OpOverload):
+            name = op_name._schema.name
+            overload_name = op_name._schema.overload_name
+            if overload_name:
+                name = name + "." + overload_name
+            return name
+        else:
+            raise RuntimeError(
+                f"{api_name} should be passed either a name or an OpOverload object "
+                f"as the first argument, got {type(op_name)}"
+            )
+
     def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
         r"""Register the operator to use the AOTI-compiled implementation.
 
@@ -390,18 +406,7 @@ class Library:
                 f"dispatch_key {dispatch_key} does not have Dense in its keyset"
             )
 
-        if isinstance(op_name, str):
-            name = op_name
-        elif isinstance(op_name, OpOverload):
-            name = op_name._schema.name
-            overload_name = op_name._schema.overload_name
-            if overload_name != "":
-                name = name + "." + overload_name
-        else:
-            raise RuntimeError(
-                "_impl_with_aoti_compile should be passed either a name or an OpOverload object "
-                "as the first argument"
-            )
+        name = self._resolve_op_name(op_name, "_impl_with_aoti_compile")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
@@ -455,17 +460,7 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
-        if isinstance(op_name, str):
-            name = op_name
-        elif isinstance(op_name, OpOverload):
-            name = op_name._schema.name
-            overload_name = op_name._schema.overload_name
-            if overload_name != "":
-                name = name + "." + overload_name
-        else:
-            raise RuntimeError(
-                "impl should be passed either a name or an OpOverload object as the first argument"
-            )
+        name = self._resolve_op_name(op_name, "impl")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if (not allow_override) and key in _impls:
@@ -508,6 +503,39 @@ class Library:
 
         _impls.add(key)
         self._op_impls.add(key)
+
+    def register_symm_mem_args(self, op_name, arg_names):
+        r"""Registers which arguments require symmetric memory allocation for an operator.
+
+        This method allows operators to declaratively specify which arguments need
+        symmetric memory treatment. When used with ``torch.compile``, Inductor
+        automatically allocates these arguments in P2P-accessible NVLink memory
+        (``empty_strided_p2p``), enabling zero-copy inter-GPU communication.
+
+        The operator's schema should include a ``group_name`` (``str``) argument.
+        Inductor's ``FallbackKernel._maybe_realize_symm_mem_args`` extracts
+        ``group_name`` at compile time to allocate P2P buffers for the correct
+        process group. Without ``group_name``, the automatic realization is skipped.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            arg_names: list of argument names that require symmetric memory allocation.
+
+        Example::
+            >>> # xdoctest: +SKIP(reason="illustrative example, not runnable")
+            >>> my_lib = Library("symm_mem", "FRAGMENT")
+            >>> my_lib.define("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor")
+            >>> my_lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
+        """
+        name = self._resolve_op_name(op_name, "register_symm_mem_args")
+        if "::" in name:
+            qualname = name
+        else:
+            qualname = f"{self.ns}::{name}"
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        handle = entry.symm_mem_args.register(arg_names)
+        self._registration_handles.append(handle)
 
     def fallback(self, fn, dispatch_key="", *, with_keyset=False):
         r"""Registers the function implementation as the fallback for the given key.
@@ -1034,11 +1062,12 @@ def register_autocast(
 ):
     r"""Register an autocast dispatch rule for this custom op.
 
-    Valid `device_type` include: "cpu" and "cuda".
+    Valid ``device_type`` values include any device type that supports autocast.
+    See :func:`torch.amp.is_autocast_available` for details.
 
     Args:
         op (str | OpOverload): The operator to register an autocast dispatch rule to.
-        device_type(str):  Device type to use. 'cuda' or 'cpu'.
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu', or any other device type that supports autocast.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
@@ -1067,8 +1096,8 @@ def register_autocast(
 
     """
     op = _resolve_op_for_registration(op, "register_autocast")
-    if device_type not in ["cpu", "cuda"]:
-        raise ValueError(f"Unknown device type: {device_type}")
+    if not torch._C._is_autocast_available(device_type):
+        raise ValueError(f"Device type '{device_type}' does not support autocast.")
 
     if isinstance(op, CustomOpDef):
         return op.register_autocast(device_type, cast_inputs)
@@ -1078,6 +1107,9 @@ def register_autocast(
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     use_lib = _library_for_registration(namespace, lib)
 
+    autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
+    autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
+
     def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
         def inner(kernel):
             if op.has_kernel_for_dispatch_key(dispatch_key):
@@ -1086,15 +1118,13 @@ def register_autocast(
 
         return inner
 
-    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCPU)
-    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCUDA)
+    @_maybe_override_py_impl(_op, autocast_dispatch_key)
     def _autocast_py_impl(*args, **kwargs):
         if len(kwargs) != 0:
             raise AssertionError("Custom ops do not support kwargs yet.")
-        autocast_keyset = torch._C.DispatchKeySet(
-            torch._C.DispatchKey.AutocastCPU
-        ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
-        with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+        with torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(autocast_dispatch_key)
+        ):
             return _op(*_cast(args, device_type, cast_inputs))
 
     def kernel(_, *args, **kwargs):
@@ -1102,11 +1132,7 @@ def register_autocast(
             raise AssertionError("Custom ops do not support kwargs yet.")
         return _autocast_py_impl(*args, **kwargs)
 
-    if device_type == "cuda":
-        return use_lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
-    else:
-        # device_type is "cpu"
-        return use_lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+    return use_lib.impl(opname, kernel, autocast_key, with_keyset=True)
 
 
 def register_fake(

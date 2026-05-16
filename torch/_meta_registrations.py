@@ -2594,6 +2594,30 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+    # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
+    # in aten/src/ATen/native/Convolution.cpp).
+    if not is_transposed:
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        # pyrefly: ignore [bad-index, index-error]
+        padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
+        effective_kernel = [
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
+        ]
+        torch._check(
+            sym_and(
+                *[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]
+            ),
+            lambda: (
+                f"Calculated padded input size per channel: "
+                f"({' x '.join(str(x) for x in padded_input)}). "
+                f"Kernel size: ({' x '.join(str(x) for x in effective_kernel)}). "
+                f"Kernel size can't be greater than actual input size"
+            ),
+        )
+
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
         if output_padding_list:
@@ -6074,11 +6098,14 @@ def alloc_with_matching_layout(
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
         )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+        strides = [0] * len(dim_order)
+        stride = 1
+        for idx in reversed(dim_order):
+            strides[idx] = stride
+            stride *= res_shape[idx]
+        res = torch.empty_strided(
+            res_shape, strides, dtype=query.dtype, device=query.device
+        )
 
     return res
 
@@ -7985,12 +8012,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
