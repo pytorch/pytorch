@@ -7759,7 +7759,8 @@ def _addcmul(self, tensor1, tensor2, *, value=1):
             value_expr = ops.constant(value, dtype)
 
         if use_cpu_fma:
-            return ops.fma(ops.mul(value_expr, t1_val), t2_val, self_val)
+            value_times_t1 = ops.mul(value_expr, t1_val)
+            return ops.addcmul_aten(self_val, value_times_t1, t2_val)
 
         # Match eager CUDA order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first

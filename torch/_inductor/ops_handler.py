@@ -573,6 +573,9 @@ class OpsHandler(Generic[T]):
     def fma(self, x: T, y: T, z: T) -> T:
         raise NotImplementedError
 
+    def addcmul_aten(self, self_value: T, value_times_tensor1: T, tensor2: T) -> T:
+        raise NotImplementedError
+
     def mul_rn(self, x: T, y: T) -> T:
         """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
         raise NotImplementedError

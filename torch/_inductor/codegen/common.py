@@ -1233,6 +1233,14 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+@functools.cache
+def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
+    # ATen's CPU addcmul vector path is written as vector intrinsics:
+    # self_vec + value_vec * t1_vec * t2_vec. GCC contracts the final
+    # multiply-add in that expression, while clang keeps it as mul/mul/add.
+    return "PyTorch built with:\n  - GCC" in torch.__config__.show()
+
+
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
 pointwise_overrides_data: dict[str, OverridesData] = dict(
@@ -1289,6 +1297,19 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         # preserves subnormals and matches eager's FMA precision.
         triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    addcmul_aten=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda self_value, value_times_tensor1, tensor2: (
+            f"std::fma({value_times_tensor1}, {tensor2}, {self_value})"
+        ),
+        cppvec=lambda self_value, value_times_tensor1, tensor2: (
+            f"fmadd({value_times_tensor1}, {tensor2}, {self_value})"
+            if _pytorch_cpu_vec_intrinsics_contract_addcmul()
+            else f"{OpOverrides.paren(self_value)} + "
+            f"{OpOverrides.paren(value_times_tensor1)} * {OpOverrides.paren(tensor2)}"
+        ),
+        name="addcmul_aten",
     ),
     # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
     # compiler from fusing the multiplication with subsequent operations,
