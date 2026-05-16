@@ -29,7 +29,6 @@
         strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
-
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue
     tile_id_c = start_pid - NUM_SMS
@@ -43,17 +42,24 @@
         )
         offs_am = pid_m * BLOCK_M
         offs_bn = pid_n * BLOCK_N
+        offs_am_desc = offs_am.to(tl.int32)
+        offs_bn_desc = offs_bn.to(tl.int32)
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for ki in range(k_tiles):
             offs_k = ki * BLOCK_K
+            offs_k_desc = offs_k.to(tl.int32)
             a = tl.load_tensor_descriptor(
                 a_desc,
-                [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
+                [offs_am_desc, offs_k_desc]
+                if A_ROW_MAJOR
+                else [offs_k_desc, offs_am_desc],
             )
             b = tl.load_tensor_descriptor(
                 b_desc,
-                [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
+                [offs_k_desc, offs_bn_desc]
+                if B_ROW_MAJOR
+                else [offs_bn_desc, offs_k_desc],
             )
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,

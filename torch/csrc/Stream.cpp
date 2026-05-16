@@ -117,10 +117,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_dealloc(THPStream* self) {
+void THPStream_dealloc_common(THPStream* self) {
   PyObject_ClearWeakRefs((PyObject*)self);
   Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+}
+
+static void THPStream_dealloc(THPStream* self) {
+  THPStream_dealloc_common(self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
@@ -166,6 +170,19 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
         .synchronize();
   }
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_is_capturing(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPStream*>(_self);
+
+  return PyBool_FromLong(c10::Stream::unpack3(
+                             self->stream_id,
+                             static_cast<c10::DeviceIndex>(self->device_index),
+                             static_cast<c10::DeviceType>(self->device_type))
+                             .is_capturing());
+
   END_HANDLE_TH_ERRORS
 }
 
@@ -224,7 +241,7 @@ static PyObject* THPStream_record_event(
           &_event)) {
     TORCH_CHECK(false, "parse record_event arg fails");
   }
-  if (_event != Py_None) {
+  if (!Py_IsNone(_event)) {
     // We expect it to be an explicit torch.Event instance.
     TORCH_CHECK(
         Py_TYPE(_event) == THPEventClass,
@@ -281,8 +298,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // Note [Reentrant Stream Context Manager]
@@ -315,8 +331,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
     if (PyList_Append(self->context, Py_None) < 0) {
       throw python_error();
     }
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // If the stream is not on the current device, switch the current device to
@@ -345,8 +360,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   if (PyList_Append(self->context, dict.get()) < 0) {
     throw python_error();
   }
-  Py_INCREF(_self);
-  return _self;
+  return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -366,7 +380,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   PyObject* top = PyList_GET_ITEM(self->context, stack_size - 1);
 
   // Sentinel: this __enter__ was a no-op, nothing to restore.
-  if (top == Py_None) {
+  if (Py_IsNone(top)) {
     if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) <
         0) {
       throw python_error();
@@ -421,7 +435,7 @@ static PyObject* THPStream_richcompare(
     PyObject* other,
     int op) {
   PyObject* result = nullptr;
-  if (other == Py_None) {
+  if (Py_IsNone(other)) {
     result = Py_False;
   } else {
     switch (op) {
@@ -478,6 +492,7 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
+    {"is_capturing", THPStream_is_capturing, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
     {"wait_stream", THPStream_wait_stream, METH_O, nullptr},
     {"record_event",
@@ -537,12 +552,7 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  if (PyType_Ready(&THPStreamType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPStreamType);
-  if (PyModule_AddObject(
-          module, "Stream", reinterpret_cast<PyObject*>(&THPStreamType)) < 0) {
+  if (PyModule_AddType(module, &THPStreamType) < 0) {
     throw python_error();
   }
 }

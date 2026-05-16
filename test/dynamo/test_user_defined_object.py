@@ -297,6 +297,148 @@ class TestSlotsAttrAssignment(TestCase):
 
         dynamo_testing.standard_test(self, fn, nargs=1)
 
+    def test_direct_dict_write_does_not_shadow_data_descriptor(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(t, obj):
+            obj.__dict__["x"] = 99
+            return t + obj.x + obj.__dict__["x"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, Foo()))
+
+    def test_readonly_property_assignment_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            obj.x = 99
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no setter", compiled_fn, Foo())
+
+    def test_delattr_instance_dict_exposes_non_data_descriptor(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                return 5
+
+        class Foo:
+            x = Descriptor()
+
+            def __init__(self):
+                self.x = 7
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertNotIn("x", compiled_obj.__dict__)
+
+    def test_property_deleter(self):
+        class Foo:
+            def __init__(self):
+                self.deleted = False
+                self._x = 4
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.deleter
+            def x(self):
+                self.deleted = True
+                self._x = 0
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x + obj.deleted
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertTrue(compiled_obj.deleted)
+        self.assertEqual(compiled_obj._x, 0)
+
+    def test_property_without_deleter_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no deleter", compiled_fn, Foo())
+
+    def test_slot_and_dict_mutation_same_object(self):
+        class Foo:
+            __slots__ = ("x", "__dict__")
+
+        def fn(t, obj):
+            obj.x = 2
+            obj.__dict__["y"] = 3
+            return t + obj.x + obj.__dict__["y"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.x, 2)
+        self.assertEqual(compiled_obj.__dict__["y"], 3)
+
+    def test_dunder_dict_assignment_updates_attribute_lookup(self):
+        class Foo:
+            __slots__ = ("__dict__",)
+
+        def fn(t):
+            obj = Foo()
+            obj.__dict__ = {"y": 2}
+            return t + obj.y + obj.__dict__["y"]
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_custom_descriptor_shadows_base_slot(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                if obj is None:
+                    return self
+                return obj.y * 2
+
+            def __set__(self, obj, value):
+                obj.y = value + 1
+
+        class Base:
+            __slots__ = ("x", "__dict__")
+
+        class Foo(Base):
+            x = Descriptor()
+
+        def fn(t, obj):
+            obj.x = 4
+            return t + obj.x + obj.y
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.y, 5)
+
     def test_slot_assignment_no_recompile_same_type(self):
         # Calling compiled fn repeatedly with the same slotted object type
         # must not trigger recompilation
@@ -595,6 +737,116 @@ class TestSlotsFromCPython(TestCase):
             return t.sin()
 
         dynamo_testing.standard_test(self, fn, nargs=1)
+
+
+class TestUserDefinedClassDict(TestCase):
+    def test_class_dict_read(self):
+        class MyClass:
+            x = 3
+
+        def fn(t):
+            t = t + MyClass.__dict__["x"]
+            t = t + MyClass.__dict__.get("x", 0)
+            t = t + MyClass.__dict__.get("z", 99)
+            t = t + (1 if "x" in MyClass.__dict__ else 0)
+            t = t + (1 if "z" in MyClass.__dict__ else 0)
+            return t
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_class_dict_via_arg(self):
+        class MyClass:
+            x = 7
+
+        def fn(t, cls):
+            return t + cls.__dict__.get("x", 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        result = compiled(torch.tensor([0.0]), MyClass)
+        self.assertEqual(result, torch.tensor([7.0]))
+
+    def test_class_dict_mutation_recompiles(self):
+        # Mutating a class attribute between calls should trigger recompilation,
+        # and the compiled function should see the updated value.
+        class MyClass:
+            x = 1
+
+        def fn(t):
+            return t + MyClass.__dict__["x"]
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([1.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.x = 10
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([10.0]))
+        # Should have recompiled due to guard failure
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_dict_add_key_recompiles(self):
+        # Adding a new attribute to the class should trigger recompilation
+        # when the compiled code checks for key presence.
+        class MyClass:
+            x = 1
+
+        def fn(t):
+            return t + (1 if "y" in MyClass.__dict__ else 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([0.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.y = 99
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([1.0]))
+        # Should have recompiled
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_dict_delete_key_recompiles(self):
+        # Deleting a class attribute should trigger recompilation.
+        class MyClass:
+            x = 5
+            y = 10
+
+        def fn(t):
+            return t + MyClass.__dict__.get("y", 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([10.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        del MyClass.y
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([0.0]))
+        # Should have recompiled
+        self.assertEqual(cnt.frame_count, 2)
+
+
+class TestClassSetattr(TestCase):
+    def test_setattr_class_attribute(self):
+        class MyModule:
+            x = 10
+
+        def fn():
+            MyModule.x = 20
+            return MyModule.x
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, 20)
+
+        MyModule.x = 10
 
 
 if __name__ == "__main__":

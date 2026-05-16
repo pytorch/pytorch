@@ -844,6 +844,7 @@ def _unflatten_optim_state_dict(
                     continue
 
                 # Reconstruct state for this parameter
+                # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
                 for state_name in optim.state[param]:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
@@ -853,11 +854,13 @@ def _unflatten_optim_state_dict(
                         reconstructed_value = _reconstruct_nested_dict(
                             flattened_state_key, state_dict
                         )
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = (
                             reconstructed_value
                         )
                     else:
                         # Existing keys mean no nesting, directly use the value.
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = state_dict[
                             flattened_state_key
                         ]
@@ -1339,7 +1342,7 @@ def _unflatten_model_state_dict(
         warnings.warn(
             "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"
             "is deprecated and will be removed in 2.5. If you need this "
-            "feature, please preprocessing the model_state_dict to achieve the "
+            "feature, please preprocess the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
             stacklevel=2,

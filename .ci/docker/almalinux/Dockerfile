@@ -19,14 +19,11 @@ RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
 # cmake-3.18.4 from pip
+# NS: Apr 1 2026 3.18.4 is gone, reported here https://github.com/scikit-build/cmake-python-distributions/issues/693
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 RUN rm -rf /usr/local/cuda-*
-
-FROM base as openssl
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
 
 FROM base as patchelf
 # Install patchelf
@@ -84,6 +81,8 @@ RUN yum -y update && \
     yum -y install glibc-langpack-en && \
     yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 RUN git config --global --add safe.directory '*'
+# All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
+RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
 FROM rocm_base as rocm
@@ -109,7 +108,6 @@ COPY --from=cuda13.2  /usr/local/cuda-13.2 /usr/local/cuda-13.2
 # Final step
 FROM ${BASE_TARGET} as final
 ARG DEVTOOLSET_VERSION=13
-COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 

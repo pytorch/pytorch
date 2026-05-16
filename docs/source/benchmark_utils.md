@@ -38,6 +38,34 @@
     :members:
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.examples.op_benchmark
+
+.. autofunction:: assert_dicts_equal
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.fuzzer
+
+.. autofunction:: prod
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.common
+
+.. autofunction:: select_unit
+
+.. autofunction:: trim_sigfig
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.compile
+
+.. autofunction:: bench_all
+
+.. autofunction:: benchmark_compile
+```
+
 # torch.utils.benchmark.examples
 
 ```{eval-rst}

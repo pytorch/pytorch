@@ -4,7 +4,7 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeVar
+from typing import cast, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -62,6 +62,10 @@ class Shard(torch._C._distributed.Shard):
 
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
+
+    .. note:: When checking whether a placement is shard-like, use
+        :func:`_is_shard_like` instead of ``isinstance(p, Shard)`` to also
+        match :class:`_StridedShard`.
     """
 
     def _split_tensor(
@@ -255,7 +259,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
-        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        # pyrefly: ignore [bad-argument-type, bad-return]
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -742,7 +746,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Needed for passing this type as an opaque object input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",
             {},
         )
 
@@ -1174,6 +1178,17 @@ class _StridedShard(torch._C._distributed.StridedShard):
         return local_shard_size, offsets
 
 
+def _is_shard_like(p: "Placement") -> TypeGuard[Shard | _StridedShard]:
+    """Check if a placement is Shard or _StridedShard.
+
+    Use this instead of ``isinstance(p, Shard)`` to avoid silently missing
+    ``_StridedShard``.  When ``_StridedShard`` is unified with ``Shard``
+    (see TODO on the class), this helper can be collapsed to a single
+    ``isinstance`` check.
+    """
+    return isinstance(p, Shard | _StridedShard)
+
+
 class Replicate(torch._C._distributed.Replicate):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
@@ -1521,7 +1536,7 @@ class _MaskPartial(Partial):
         Needed for passing this type as an input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",
             {},
         )
 

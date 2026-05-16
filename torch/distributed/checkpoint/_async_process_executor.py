@@ -275,7 +275,7 @@ class _AsyncCheckpointProcess:
                 # GC can optionally be called manually after each checkpoint
                 gc.disable()
                 logger.info("Disabled automatic garbage collection")
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             logger.error(
                 f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
             )
@@ -337,7 +337,7 @@ class _AsyncCheckpointProcess:
                             )
                             gc.freeze()
                     first_request = False
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     logger.error(
                         f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
                     )

@@ -616,6 +616,20 @@ Available options:
   segment. This allocates a large segment of pinned memory upfront and then uses to allocate
   small size requests. This helps reduce the number of expensive device library calls.
 
+* `pinned_max_round_threshold_mb` option sets the maximum allocation size (in MB)
+  that will be rounded up to the nearest power-of-2. Allocations larger than this threshold
+  will use their exact requested size, which can reduce memory waste for large pinned memory
+  allocations. For example, with a threshold of 128 MB, a 129 MB allocation will use 129 MB
+  instead of being rounded to 256 MB. By default, this option is disabled.
+  Allocations that exceed `pinned_max_cached_size_mb` are never rounded up, regardless
+  of this setting, since rounding is only useful for cached blocks.
+
+* `pinned_max_cached_size_mb` option sets the maximum block size (in MB) that will be cached
+  in the free list for reuse. Blocks larger than this threshold will not be rounded up to
+  power-of-2 and will be freed immediately when no longer in use, rather than being cached.
+  This can help reduce peak memory usage for workloads with large pinned memory allocations
+  that are used infrequently. By default, this option is disabled (all blocks are cached).
+
 * ``graph_capture_record_stream_reuse`` (experimental, default: `False`)
   If set to `True`, the CUDA caching allocator will attempt to reclaim device memory during
   CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
@@ -626,6 +640,24 @@ Available options:
 * ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
   on all the CUDA devices to a specified fraction of the available memory. This is a value
   between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
+* ``throw_on_cudamalloc_oom`` (default: ``False``)
+  When set to ``True``, the allocator will preemptively reject allocations that would
+  exceed the ``per_process_memory_fraction`` limit by throwing an ``OutOfMemoryError``
+  instead of attempting the allocation through the driver, which could trigger a fatal
+  GPU runtime abort (e.g., ``HSA_STATUS_ERROR_OUT_OF_RESOURCES`` on ROCm). The rejected
+  allocation skips the retry chain and throws immediately, allowing the caller to catch
+  the exception and handle it gracefully.
+
+  Example configuration:
+
+  .. code-block:: bash
+
+      PYTORCH_CUDA_ALLOC_CONF=per_process_memory_fraction:0.95,throw_on_cudamalloc_oom:True
+
+  This is particularly useful for inference serving, where a fatal GPU OOM would crash the
+  server process. With this option, the serving framework can catch the ``OutOfMemoryError``
+  and reject the individual request while continuing to serve subsequent requests.
 
 .. note::
 

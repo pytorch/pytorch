@@ -13,10 +13,10 @@ Responsibilities
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
-Lead Core Maintainer (BDFL)
+Lead Core Maintainer
 ---------------------------
 
-* Soumith Chintala (`soumith <https://github.com/soumith>`__)
+* Alban Desmaison (`albanD <https://github.com/albanD>`__)
 
 Core Maintainers
 -------------------
@@ -25,7 +25,6 @@ Core Maintainers
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
--  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Horace He (`Chillee <https://github.com/Chillee>`__)
@@ -346,9 +345,12 @@ ExecuTorch (Edge, Mobile)
 
 -  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
 -  Jacob Szwejbka (`JacobSzwejbka <https://github.com/JacobSzwejbka>`__)
+-  Digant Desai (`digantdesai <https://github.com/digantdesai>`__)
 -  (emeritus) Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
 -  (emeritus) Dave Bort (`dbort <https://github.com/dbort>`__)
 -  (emeritus) Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
+-  (emeritus) Mengwei Liu (`larryliu0820 <https://github.com/larryliu0820>`__)
+-  (emeritus) Chen Lai (`cccclai <https://github.com/cccclai>`__)
 
 TorchCodec
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,21 +1,26 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import unittest
+from unittest.mock import patch
 
 import sympy
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg
+from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.simd import IterationRangesRoot
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    TritonKernel,
     TritonKernelOverrides,
+    TritonSymbols,
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -44,6 +49,49 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_range_tree_entry_ownership_uses_root_identity(self):
+        class AlternateR0Root(IterationRangesRoot):
+            def block_size(self):
+                return sympy.Symbol("ALT_R0_BLOCK", integer=True, positive=True)
+
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4), "r0_": sympy.Integer(512)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        x_tree, r_tree = kernel.range_trees
+        alt_r_tree = AlternateR0Root(
+            "alt_r0_index",
+            sympy.Integer(4),
+            "r0_",
+            r_tree.index,
+            kernel,
+            pid_cache=r_tree.pid_cache,
+            is_loop=r_tree.is_loop,
+            tensor_dim=r_tree.tensor_dim,
+            grid_dim=r_tree.grid_dim,
+            has_zdim=r_tree.has_zdim,
+        )
+
+        with V.set_kernel_handler(kernel):
+            parent_entry = r_tree.full_range()
+            alt_entry = alt_r_tree.full_range()
+
+            self.assertEqual(
+                alt_r_tree.vars_and_sizes(parent_entry.symbol() + alt_entry.symbol()),
+                ([alt_entry.symbol()], [alt_r_tree.numel]),
+            )
+            saved_range_trees = kernel.range_trees
+            kernel.range_trees = [x_tree, alt_r_tree]
+            try:
+                self.assertEqual(
+                    TritonSymbols.get_block_shape(parent_entry.symbol()),
+                    (1, "R0_BLOCK"),
+                )
+            finally:
+                kernel.range_trees = saved_range_trees
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
@@ -189,6 +237,59 @@ class TestCodegenTriton(InductorTestCase):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    def test_config_of_emit_pointer_range_32_enabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(0,),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, (0,))
+        else:
+            self.assertIsInstance(config, dict)
+            self.assertIn(["tt.pointer_range", 32], config[(0,)])
+
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_config_of_emit_pointer_range_32_disabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, ())
+        else:
+            self.assertIsInstance(config, dict)
+            if (0,) in config:
+                self.assertNotIn(["tt.pointer_range", 32], config[(0,)])
+
     @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_pointer_range_in_generated_code(self):
@@ -243,6 +344,57 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(sv.statically_known_multiple_of(s4, 8))
         shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
         self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+    def test_signature_of_fp8_dtypes(self):
+        """fp8 dtypes should produce correct Triton pointer signatures via _type_of."""
+        expected = {
+            torch.float8_e4m3fn: "*fp8e4nv",
+            torch.float8_e5m2: "*fp8e5",
+            torch.float8_e4m3fnuz: "*fp8e4b8",
+            torch.float8_e5m2fnuz: "*fp8e5b16",
+        }
+        for dtype, expected_sig in expected.items():
+            arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
+            sig = triton_utils.signature_of(arg, size_dtype=None)
+            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
+    @patch(
+        "torch._inductor.codegen.triton_utils.device_supports_fp64",
+        return_value=False,
+    )
+    def test_no_fp64_in_kernel_when_device_unsupported(self, mock1, mock2):
+        """Compile a kernel with dynamic shape division to verify fp64 is
+        downgraded to fp32 in the generated Triton kernel body when the device
+        does not support fp64.
+
+        ``x / x.shape[0]`` with dynamic shapes keeps the shape as a sympy
+        symbol, so the int-to-float cast goes through TritonPrinter._print_ToFloat
+        which respects device_supports_fp64().
+        """
+        import re
+
+        def div_by_shape(x):
+            return x / x.shape[0]
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        compiled = torch.compile(div_by_shape, dynamic=True)
+        _, kernels = run_and_get_kernels(compiled, x, remove_quote=True)
+        # Extract only the function body (after ``def triton_...:``) to avoid
+        # matching metadata like ``'has_fp64': True`` in DeviceProperties.
+        matched_kernel_body = False
+        for kernel in kernels:
+            m = re.search(r"def triton_\w+\([^)]*\):\n(.*)", kernel, re.DOTALL)
+            if m:
+                matched_kernel_body = True
+                body = m.group(1)
+                self.assertNotIn("tl.float64", body)
+                self.assertIn("tl.float32", body)
+        self.assertTrue(
+            matched_kernel_body,
+            "Expected at least one generated Triton kernel body to match",
+        )
 
 
 if __name__ == "__main__":

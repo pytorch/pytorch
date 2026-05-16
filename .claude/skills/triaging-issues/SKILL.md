@@ -34,7 +34,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
-**Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, and deprecated labels.
+**Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
 
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
@@ -66,6 +66,7 @@ Use these GitHub MCP tools for triage:
 | `ci-*`, `ci:*` | CI infrastructure controls |
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
+| `actionable` | Requires human decision |
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
@@ -156,7 +157,7 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 **PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
-See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions on which `module:` labels to apply.
+**Every `oncall: pt2` issue MUST have at least one `module:` label.** The PT2 oncall queue is too broad without a module label — the team needs to know which component is affected (e.g., `module: dynamo`, `module: inductor`, `module: helion`, `module: dynamic shapes`). If you cannot determine the specific module, use `module: compile ux` as a fallback, but always try to be specific first. See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed guidance.
 
 ### 3) Redirect to Secondary Oncall
 
@@ -172,7 +173,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | Label | When to use |
 |-------|-------------|
 | `oncall: jit` | TorchScript issues |
-| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining) |
+| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after applying this label, invoke the distributed triage sub-skill (`/distributed-triage` on this issue) for second-level triage — it will route to a sub-oncall, add module labels, and mark triaged. |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |

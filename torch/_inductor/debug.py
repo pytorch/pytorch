@@ -34,7 +34,7 @@ from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
-from . import config, ir  # noqa: F811, this is needed
+from . import config, ir
 from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
@@ -412,9 +412,13 @@ class DebugContext:
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
+            try:
+                os.makedirs(dirname, exist_ok=False)
                 return dirname
+            except FileExistsError:
+                # Another process (e.g. a peer rank with the same debug_dir)
+                # created this counter slot first; advance to the next n.
+                continue
         return None
 
     def __init__(self) -> None:

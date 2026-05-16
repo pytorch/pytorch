@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     iter_indices,
     parametrize,
     run_tests,
@@ -870,6 +871,15 @@ class TestBasicGEMM(TestCase):
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
+    @parametrize("shape", [513, 767])
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
+    def test_matmul_deterministic_mode(self, device, shape, dtype):
+        with DeterministicGuard(True):
+            inp = torch.randn(shape, shape, device=device, dtype=dtype)
+            first = torch.matmul(inp, inp)
+            for _ in range(10):
+                self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
+
     @dtypes(
         torch.int16,
         torch.int32,
@@ -936,6 +946,17 @@ class TestBasicGEMM(TestCase):
                         RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2)
                     )
 
+    @dtypes(torch.float)
+    def test_addmm_expanded_errors(self, device, dtype):
+        mat1 = torch.randn(3, 3, device=device, dtype=dtype)
+        mat2 = torch.randn(3, 3, device=device, dtype=dtype)
+        self_ = torch.randn(3, 3, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "must be greater or equal to the number of dimensions",
+            lambda: torch.addmm(self_.unsqueeze(0), mat1, mat2),
+        )
+
     @precisionOverride(
         {
             torch.float: 1e-4,
@@ -997,6 +1018,33 @@ class TestBasicGEMM(TestCase):
             (False, True), (1, 2), (1, 2), (0, 1)
         ):
             _test(row_major, incx, incy, lda_tail)
+
+    @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off()
+    def test_addmv_out_noncontiguous_preserves_strides(self, device, dtype):
+        M, K = 5, 3
+        mat = torch.randn(M, K, device=device, dtype=dtype)
+        vec = torch.randn(K, device=device, dtype=dtype)
+        bias = torch.randn(M, device=device, dtype=dtype)
+
+        expected = torch.addmv(bias, mat, vec)
+
+        # Create a noncontiguous output tensor (stride != 1)
+        out = make_tensor((M,), device=device, dtype=dtype, noncontiguous=True)
+        original_stride = out.stride()
+        original_ptr = out.data_ptr()
+
+        torch.addmv(bias, mat, vec, out=out)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(
+            out.stride(),
+            original_stride,
+            "addmv out= must preserve noncontiguous strides",
+        )
+        self.assertEqual(
+            out.data_ptr(), original_ptr, "addmv out= must not reallocate storage"
+        )
 
     @precisionOverride(
         {

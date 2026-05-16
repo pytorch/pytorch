@@ -1,17 +1,17 @@
 # Owner(s): ["module: dynamo"]
 
 from collections import namedtuple
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import torch
 import torch._dynamo
 import torch.utils._pytree as python_pytree
+from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
     subtest,
-    TestCase,
 )
 
 
@@ -631,6 +631,37 @@ class TreeMapCompileTests(TestCase):
             self.assertTrue(torch.allclose(result.items[1], torch.zeros(2) + 1))
         finally:
             # Clean up registration
+            python_pytree._deregister_pytree_node(RegisteredContainer)
+
+    def test_registered_custom_type_multiple_trees_with_eq(self) -> None:
+        """Dataclass registrations compare class objects through the metaclass."""
+
+        @dataclass
+        class RegisteredContainer:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        python_pytree.register_pytree_node(
+            RegisteredContainer,
+            lambda c: ([c.x, c.y], None),
+            lambda children, _: RegisteredContainer(*children),
+        )
+
+        try:
+            lhs = RegisteredContainer(torch.zeros(2, 3), torch.ones(2, 3))
+            rhs = RegisteredContainer(torch.ones(2, 3), torch.zeros(2, 3))
+
+            def fn(a, b):
+                return python_pytree.tree_map(lambda x, y: x + y, a, b)
+
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            expected = fn(lhs, rhs)
+            result = compiled(lhs, rhs)
+
+            self.assertIsInstance(result, RegisteredContainer)
+            self.assertEqual(result.x, expected.x)
+            self.assertEqual(result.y, expected.y)
+        finally:
             python_pytree._deregister_pytree_node(RegisteredContainer)
 
     def test_registered_custom_type_falls_back_optree(self) -> None:
