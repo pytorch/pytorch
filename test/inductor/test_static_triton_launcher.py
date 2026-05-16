@@ -671,6 +671,16 @@ class TestFastCudaLauncher(TestCase):
         with self.assertRaises(RuntimeError):
             fast(1, 1, 1, stream, arg0)  # missing arg1
 
+    def test_too_many_args_raises_value_error(self):
+        """Verify _FastCudaLauncher raises ValueError when nArgs > MAX_ARGS (121)."""
+        from torch._C import _FastCudaLauncher
+
+        # Use a dummy CUfunction (0) — construction should fail before launch.
+        # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
+        arg_tys = "O" * 130
+        with self.assertRaises(ValueError):
+            _FastCudaLauncher(0, 1, 0, arg_tys, 0)
+
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
