@@ -2,7 +2,7 @@
 import inspect
 import itertools
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import auto, Enum
 from typing import Any, cast
 
@@ -611,11 +611,27 @@ class FSDPParam:
             storage_offset=0,
         )
         if self._unsharded_dtensor_spec is not None:
+            unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
             unsharded_param = _from_local_no_grad(
-                unsharded_param, self._unsharded_dtensor_spec
+                unsharded_param, unsharded_dtensor_spec
             )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
+        )
+
+    def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("Expected _unsharded_dtensor_spec for DTensor param")
+        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
+        if tensor_meta is None or tensor_meta.dtype == unsharded_param.dtype:
+            return self._unsharded_dtensor_spec
+        return replace(
+            self._unsharded_dtensor_spec,
+            tensor_meta=TensorMeta(
+                tensor_meta.shape,
+                tensor_meta.stride,
+                unsharded_param.dtype,
+            ),
         )
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
