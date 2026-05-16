@@ -21,6 +21,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._functorch import config as functorch_config
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -4168,6 +4169,78 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"BLOCK_M": 16},
         )
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    def test_matching_dtype_codegen_skips_identity_dot_operand_casts(self, device):
+        B, L, H, D = 1, 128, 2, 64
+
+        def mask_mod(b, h, q, kv):
+            return q != kv
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (B, L, H, D),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        q, k, v = (
+            x.transpose(1, 2) for x in (make_tensor(), make_tensor(), make_tensor())
+        )
+        block_mask = create_block_mask(mask_mod, B, H, L, L, device=device)
+
+        with (
+            config.patch(
+                {
+                    "enable_caching_generated_triton_templates": False,
+                    "force_disable_caches": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+            functorch_config.patch({"enable_autograd_cache": False}),
+        ):
+            _, code = run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+            )
+
+        self.assertIn("tl.dot(q, k", code[0])
+        self.assertNotIn("k = k.to(q.dtype)", code[0])
+        self.assertNotIn("v.to(q.dtype)", code[0])
+        self.assertNotIn("fp_downcast_rounding", code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_codegen_keeps_dot_operand_casts(self, device):
+        q = torch.randn((1, 2, 128, 64), device=device, dtype=torch.float32)
+        k = torch.randn((1, 2, 128, 64), device=device, dtype=torch.float16)
+        v = torch.randn((1, 2, 128, 64), device=device, dtype=torch.float16)
+
+        with (
+            config.patch(
+                {
+                    "enable_caching_generated_triton_templates": False,
+                    "force_disable_caches": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+            functorch_config.patch({"enable_autograd_cache": False}),
+        ):
+            _, code = run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+            )
+
+        self.assertIn("k = k.to(q.dtype)", code[0])
+        self.assertIn("v_for_dot = v.to(q.dtype)", code[0])
 
     @supported_platform
     @skip_on_cpu
