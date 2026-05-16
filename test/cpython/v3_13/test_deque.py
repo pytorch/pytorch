@@ -14,6 +14,7 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
     run_tests,
 )
 
@@ -119,6 +120,10 @@ class TestBasic(CPythonTestCase):
             d = deque('abc')
             d.maxlen = 10
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_count(self):
         for s in ('', 'abracadabra', 'simsalabim'*500+'abc'):
             s = list(s)
@@ -169,6 +174,10 @@ class TestBasic(CPythonTestCase):
                 self.assertEqual(x >  y, list(x) >  list(y), (x,y))
                 self.assertEqual(x >= y, list(x) >= list(y), (x,y))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_contains(self):
         n = 200
 
@@ -189,6 +198,10 @@ class TestBasic(CPythonTestCase):
         with self.assertRaises(RuntimeError):
             n in d
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_contains_count_index_stop_crashes(self):
         class A:
             def __eq__(self, other):
@@ -272,6 +285,10 @@ class TestBasic(CPythonTestCase):
         self.assertRaises(IndexError, d.__getitem__, 0)
         self.assertRaises(IndexError, d.__getitem__, -1)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_index(self):
         for n in 1, 2, 30, 40, 200:
 
@@ -526,6 +543,10 @@ class TestBasic(CPythonTestCase):
         d.clear()               # clear an empty deque
         self.assertEqual(list(d), [])
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_remove(self):
         d = deque('abcdefghcij')
         d.remove('c')
