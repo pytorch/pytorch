@@ -2704,9 +2704,6 @@ def meta_miopen_batch_norm(
 
     # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
     # instead of silently producing an output with the wrong strides.
-    # Use the symbolic, DDE-safe entry point (returns a SymBool built from
-    # _compute_contiguous_sym / _compute_channels_last_contiguous_*_sym in
-    # c10/core/Contiguity.h) rather than the eager bool-returning is_contiguous.
     torch._check(
         torch.ops.aten.sym_is_contiguous.default(input_tensor, memory_format=fmt),
         lambda: f"miopen_batch_norm: input must be contiguous in {fmt}",
