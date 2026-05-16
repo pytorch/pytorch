@@ -236,6 +236,34 @@ class CooperativeReductionTests(TestCase):
         self.run_and_check(fn, inps, expect_kernel_count=2)
 
 
+class CooperativeReductionDefaultTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        torch._dynamo.reset()
+
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.multi_kernel": 0,
+        }
+    )
+    def test_multi_scalar_reductions_default_to_one_cooperative_kernel(self):
+        def fn(x):
+            return x.abs().max(), x.abs().mean(), x.square().mean()
+
+        x = torch.randn(1024, 1024, device=GPU_TYPE)
+        expected = fn(x)
+
+        result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        for actual, expected_value in zip(result, expected):
+            assert_close(actual, expected_value, rtol=1e-4, atol=1e-4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        self.assertEqual(source_code.count("tl.load(in_ptr0"), 1)
+
+
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
 class NoPersistCooperativeReductionTests(CooperativeReductionTests):
     pass
