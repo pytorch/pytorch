@@ -201,6 +201,7 @@ def meta__standard_gamma(self, generator=None):
         aten._transformer_encoder_layer_fwd.out,
     ]
 )
+@out_wrapper()
 def meta__transformer_encoder_layer_fwd(
     src: Tensor,
     embed_dim: int,
@@ -211,11 +212,11 @@ def meta__transformer_encoder_layer_fwd(
     proj_bias: Tensor,
     use_gelu: bool,
     norm_first: bool,
-    layer_norm_eps: float,
-    layer_norm_weight_1: Tensor,
-    layer_norm_bias_1: Tensor,
-    layer_norm_weight_2: Tensor,
-    layer_norm_bias_2: Tensor,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
     ffn_weight_1: Tensor,
     ffn_bias_1: Tensor,
     ffn_weight_2: Tensor,
