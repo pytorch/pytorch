@@ -53,11 +53,12 @@
         # consecutive program IDs across XCDs with separate L2 caches. Remap head
         # indices so that consecutive heads land on the same XCD, improving L2
         # reuse for shared K/V data across heads within a batch element.
-        pids_per_xcd = (HQ + NUM_XCDS - 1) // NUM_XCDS
-        remainder = HQ % NUM_XCDS
-        tall_xcds = NUM_XCDS if remainder == 0 else remainder
-        xcd = off_hq % NUM_XCDS
-        local_pid = off_hq // NUM_XCDS
+        num_xcds_i = tl.full([], NUM_XCDS, dtype=INDEX_DTYPE)
+        pids_per_xcd = (HQ + num_xcds_i - 1) // num_xcds_i
+        remainder = HQ % num_xcds_i
+        tall_xcds = tl.where(remainder == 0, num_xcds_i, remainder)
+        xcd = off_hq % num_xcds_i
+        local_pid = off_hq // num_xcds_i
         if xcd < tall_xcds:
             off_hq = xcd * pids_per_xcd + local_pid
         else:
