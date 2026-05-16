@@ -228,16 +228,6 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   return result;
 }
 
-// Utility function to convert a pointer to an optional list of values
-template <class T, class U>
-inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
-    U** ptr,
-    int64_t len) {
-  return ptr
-      ? std::make_optional<c10::ArrayRef<T>>(pointer_to_list<T>(*ptr, len))
-      : std::nullopt;
-}
-
 template <typename T>
 static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   c10::List<T> scalars_list;

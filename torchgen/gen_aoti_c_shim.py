@@ -4,11 +4,20 @@ import difflib
 import os
 import re
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from torchgen.aoti.fallback_ops import aten_shimified_ops, inductor_fallback_ops
-from torchgen.api.types import DispatcherSignature
+from torchgen.api.cpp import default_expr
+from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCType,
+    BaseTypeToCppMapping,
+    CType,
+    DispatcherSignature,
+    ListCType,
+    OptionalCType,
+)
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 from torchgen.context import method_with_native_function
 from torchgen.model import (
@@ -49,29 +58,8 @@ base_type_to_c_type = {
     BaseTy.Generator: "AtenGeneratorHandle",
 }
 
-base_type_to_aten_type = {
-    BaseTy.Tensor: "at::Tensor",
-    BaseTy.bool: "bool",
-    BaseTy.int: "int64_t",
-    BaseTy.SymInt: "c10::SymInt",
-    BaseTy.Scalar: "c10::Scalar",
-    BaseTy.float: "double",
-    BaseTy.str: "::std::string_view",
-    BaseTy.DeviceIndex: "c10::DeviceIndex",
-    BaseTy.Layout: "c10::Layout",
-    BaseTy.MemoryFormat: "c10::MemoryFormat",
-    BaseTy.ScalarType: "c10::ScalarType",
-    BaseTy.Generator: "at::Generator",
-}
-
 base_type_to_callsite_expr = {
     BaseTy.Tensor: "resolve_tensor_dispatch_flags",
-    BaseTy.bool: "",
-    BaseTy.int: "",
-    BaseTy.SymInt: "",
-    BaseTy.Scalar: "",
-    BaseTy.float: "",
-    BaseTy.str: "",
     BaseTy.DeviceIndex: "static_cast<c10::DeviceIndex>",
     BaseTy.Layout: "static_cast<c10::Layout>",
     BaseTy.MemoryFormat: "static_cast<c10::MemoryFormat>",
@@ -80,139 +68,180 @@ base_type_to_callsite_expr = {
 }
 
 
-# convert args to C types, names in declarations, and expressions in function bodies
+@dataclass(slots=True, kw_only=True)
+class ArgConversion:
+    """One arg's conversion from C-shim wire form to receiver-side cpp form.
+
+    c_types/names: parallel lists of the wire parameter type(s) and name(s).
+    callsite_exprs: expression(s) passed to the receiving call.
+    prologue_stmts: statements emitted before the call; used when a
+        callsite_expr is a non-owning view that needs storage to outlive it.
+    """
+
+    c_types: list[str]
+    names: list[str]
+    callsite_exprs: list[str]
+    prologue_stmts: list[str] = field(default_factory=list)
+
+
+def _aten_ctype(typ: Type) -> CType:
+    """Receiver-side CType for a torchgen Type, using torchgen primitives."""
+    match typ:
+        case BaseType(name=tname) if tname in BaseTypeToCppMapping:
+            return BaseCType(BaseTypeToCppMapping[tname])
+        case OptionalType():
+            return OptionalCType(_aten_ctype(typ.elem))
+        case ListType():
+            return ArrayRefCType(_aten_ctype(typ.elem))
+    raise NotImplementedError(f"No aten type for {repr(typ)}")
+
+
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
     is_write: bool = False,
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    if isinstance(typ, BaseType):
-        if typ.name in base_type_to_c_type:
-            if typ.name == BaseTy.Tensor and is_write:
-                # For output tensors, our normal call to resolve_tensor_dispatch_flags
-                # results in an rvalue tensor, which can't be passed to at::Tensor&.
-                # Override this case specifically.
-                callsite_expr = [f"*tensor_handle_to_tensor_pointer({name})"]
-            else:
-                callsite_expr = [
-                    f"{base_type_to_callsite_expr[typ.name]}({name})"
-                    if base_type_to_callsite_expr[typ.name]
-                    else name
-                ]
-
-            return (
-                [base_type_to_c_type[typ.name]],
-                [name],
-                [base_type_to_aten_type[typ.name]],
-                callsite_expr,
+) -> ArgConversion:
+    match typ:
+        case BaseType(name=BaseTy.Tensor) if is_write:
+            # For output tensors, the usual resolve_tensor_dispatch_flags returns
+            # an rvalue Tensor, which can't bind to at::Tensor&. Override here.
+            return ArgConversion(
+                c_types=[base_type_to_c_type[BaseTy.Tensor]],
+                names=[name],
+                callsite_exprs=[f"*tensor_handle_to_tensor_pointer({name})"],
             )
-        elif typ.name == BaseTy.Device:
-            return (
-                ["int32_t", "int32_t"],
-                [name, name + "_index_"],
-                ["c10::Device"],
-                [
+        case BaseType(name=tname) if tname in base_type_to_c_type:
+            cs_prefix = base_type_to_callsite_expr.get(tname, "")
+            return ArgConversion(
+                c_types=[base_type_to_c_type[tname]],
+                names=[name],
+                callsite_exprs=[f"{cs_prefix}({name})" if cs_prefix else name],
+            )
+        case BaseType(name=BaseTy.Device):
+            return ArgConversion(
+                c_types=["int32_t", "int32_t"],
+                names=[name, name + "_index_"],
+                callsite_exprs=[
                     f"c10::Device(static_cast<c10::DeviceType>({name}), static_cast<c10::DeviceIndex>({name}_index_))"
                 ],
             )
-        else:
+        case BaseType():
             # TODO: BaseTy.Dimname, etc.
             raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
-    elif isinstance(typ, OptionalType):
-        c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
-            typ.elem, name
-        )
-        j = 0  # index for names
-        new_aten_types = []
-        new_callsite_exprs = []
-        for aten_type in aten_types:
-            # Use pointer to denote optional type
-            c_types[j] = c_types[j] + "*"
-            if aten_type.startswith("c10::ArrayRef<"):
-                # ArrayRef is passed as pointer + size, but no need to add "*" to the size argument
-                new_aten_types.append(f"::std::optional<{aten_type}>")
-                base_type = aten_type[len("c10::ArrayRef<") : -1]
-                new_callsite_exprs.append(
-                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j + 1]})"
+        case OptionalType():
+            return _convert_optional(typ, name, is_write)
+        case ListType():
+            return _convert_list(typ, name, is_write)
+    raise NotImplementedError(f"Argument type {repr(typ)} not supported!")
+
+
+def _convert_optional(typ: OptionalType, name: str, is_write: bool) -> ArgConversion:
+    inner = convert_arg_type_and_name(typ.elem, name, is_write)
+    c_types = inner.c_types
+    names = inner.names
+    # Pointer denotes optionality on the lead wire param; trailing params
+    # (list length, device index) stay pass-by-value.
+    c_types[0] = c_types[0] + "*"
+    aten_inner = _aten_ctype(typ.elem).cpp_type()
+    optional_type = f"::std::optional<{aten_inner}>"
+    prologue_stmts: list[str] = []
+
+    match typ.elem:
+        case ListType(elem=elem_t):
+            # Wire-format and receiver element types match: borrow the wire
+            # buffer directly (it outlives the call). They differ: materialize
+            # a converted vector in a named local so it outlives the call.
+            base_type = _aten_ctype(elem_t).cpp_type()
+            wire_eq_aten = (
+                isinstance(elem_t, BaseType)
+                and elem_t.name in base_type_to_c_type
+                and base_type_to_c_type[elem_t.name]
+                == str(BaseTypeToCppMapping[elem_t.name])
+            )
+            if wire_eq_aten:
+                callsite_expr = (
+                    f"({names[0]}"
+                    f" ? {optional_type}({aten_inner}(*{names[0]}, {names[1]}))"
+                    f" : {optional_type}(::std::nullopt))"
                 )
-                j += 2
-            elif aten_type == "c10::Device":
-                # Device is passed as device_type + device_index
-                new_aten_types.append("::std::optional<c10::Device>")
-                new_callsite_exprs.append(
-                    f"pointer_to_optional_device({names[j]}, {names[j + 1]})"
-                )
-                j += 2
-            elif aten_type == "at::Tensor":
-                new_aten_types.append(f"::std::optional<{aten_type}>")
-                new_callsite_exprs.append(f"resolve_tensor_dispatch_flags({names[j]})")
-                j += 1
             else:
-                new_aten_types.append(f"::std::optional<{aten_type}>")
-                new_callsite_exprs.append(
-                    f"pointer_to_optional<{aten_type}>({names[j]})"
+                storage_var = f"{names[0]}_aoti_storage_"
+                prologue_stmts.append(
+                    f"auto {storage_var} = {names[0]}"
+                    f" ? ::std::make_optional(pointer_to_list<{base_type}>(*{names[0]}, {names[1]}))"
+                    f" : ::std::optional<::std::vector<{base_type}>>(::std::nullopt);"
                 )
-                j += 1
+                callsite_expr = (
+                    f"({storage_var}"
+                    f" ? {optional_type}({aten_inner}(*{storage_var}))"
+                    f" : {optional_type}(::std::nullopt))"
+                )
+        case BaseType(name=BaseTy.Device):
+            # Device is passed as device_type + device_index.
+            callsite_expr = f"pointer_to_optional_device({names[0]}, {names[1]})"
+        case BaseType(name=BaseTy.Tensor):
+            callsite_expr = f"resolve_tensor_dispatch_flags({names[0]})"
+        case _:
+            callsite_expr = f"pointer_to_optional<{aten_inner}>({names[0]})"
 
-        return (
-            c_types,
-            names,
-            new_aten_types,
-            new_callsite_exprs,
-        )
-    elif isinstance(typ, ListType):
-        # Need to explicitly pass the list as pointer + length
-        c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
-        if len(c_types) != 1:
-            raise AssertionError(f"ListType with unsupported element type {repr(typ)}")
+    return ArgConversion(
+        c_types=c_types,
+        names=names,
+        callsite_exprs=[callsite_expr],
+        prologue_stmts=prologue_stmts,
+    )
 
-        # The list content should never be modified
-        c_types[0] = f"const {c_types[0]}*"
-        c_types.append("int64_t")
-        name = names[0]
-        names.append(name + "_len_")
 
-        atype = aten_types[0]
-        callsite_exprs = []
-        if atype == "bool":
-            # no converter from std::vector<bool> to c10::ArrayRef<bool>
-            # construct std::array<bool, N> instead
+def _convert_list(typ: ListType, name: str, is_write: bool) -> ArgConversion:
+    # Pass the list as pointer + length.
+    inner = convert_arg_type_and_name(typ.elem, name, is_write)
+    if len(inner.c_types) != 1:
+        raise AssertionError(f"ListType with unsupported element type {repr(typ)}")
+    c_types = [f"const {inner.c_types[0]}*", "int64_t"]
+    names = [inner.names[0], inner.names[0] + "_len_"]
+    aten_inner = _aten_ctype(typ.elem).cpp_type()
+
+    match typ.elem:
+        case BaseType(name=BaseTy.bool):
+            # No converter from std::vector<bool> to c10::ArrayRef<bool>;
+            # construct std::array<bool, N> instead.
             if typ.size is None:
                 raise AssertionError("bool ListType must have a size")
-            callsite_exprs.append(f"pointer_to_list<{typ.size}>({name})")
-        elif atype == "at::Tensor" and not is_write:
-            callsite_exprs.append(
-                f"resolve_tensor_list_dispatch_flags({name}, {name}_len_)"
+            callsite_expr = f"pointer_to_list<{typ.size}>({names[0]})"
+        case BaseType(name=BaseTy.Tensor) if not is_write:
+            callsite_expr = (
+                f"resolve_tensor_list_dispatch_flags({names[0]}, {names[1]})"
             )
-        elif atype == "::std::optional<at::Tensor>":
-            # convert from std::vector<::std::optional<at::Tensor>> to c10::List<::std::optional<at::Tensor>>
-            callsite_exprs.append(
-                f"c10::List<{atype}>(c10::ArrayRef<{atype}>(resolve_tensor_list_dispatch_flags({name}, {name}_len_)))"
+        case OptionalType(elem=BaseType(name=BaseTy.Tensor)):
+            # std::vector<::std::optional<at::Tensor>> -> c10::List<::std::optional<at::Tensor>>
+            elem_ctype = _aten_ctype(typ.elem)
+            callsite_expr = (
+                f"{ListCType(elem_ctype).cpp_type()}"
+                f"({ArrayRefCType(elem_ctype).cpp_type()}("
+                f"resolve_tensor_list_dispatch_flags({names[0]}, {names[1]})))"
             )
-        else:
-            callsite_exprs.append(f"pointer_to_list<{atype}>({name}, {name}_len_)")
+        case _:
+            callsite_expr = f"pointer_to_list<{aten_inner}>({names[0]}, {names[1]})"
 
-        aten_types = [f"c10::ArrayRef<{t}>" for t in aten_types]
-        return (
-            c_types,
-            names,
-            aten_types,
-            callsite_exprs,
-        )
-    raise NotImplementedError(f"Argument type {repr(typ)} not supported!")
+    return ArgConversion(
+        c_types=c_types,
+        names=names,
+        callsite_exprs=[callsite_expr],
+    )
 
 
 def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
     return [typ + " " + name for typ, name in zip(types, names)]
 
 
-# Generate argument declarations and callsite expressions
+# Returns (decls, callsite_exprs, prologue_stmts).
 def gen_arguments(
     flat_arguments: Sequence[Argument], skipped_args: set[str]
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     types: list[str] = []
     new_names: list[str] = []
     callsite_exprs: list[str] = []
+    prologue_stmts: list[str] = []
     for arg in flat_arguments:
         if arg.name in skipped_args:
             # Pass the arg's schema default when available (e.g. "false" for
@@ -220,19 +249,16 @@ def gen_arguments(
             # can be versioned too. Fall back to std::nullopt for optional args
             # with no default (matches historical behavior).
             if arg.default is not None:
-                from torchgen.api.cpp import default_expr
-
                 callsite_exprs.append(default_expr(arg.default, arg.type, symint=False))
             else:
                 callsite_exprs.append("std::nullopt")
             continue
-        new_types, names, _, new_callsite_exprs = convert_arg_type_and_name(
-            arg.type, arg.name, arg.is_write
-        )
-        types.extend(new_types)
-        new_names.extend(names)
-        callsite_exprs.extend(new_callsite_exprs)
-    return zip_type_and_name(types, new_names), callsite_exprs
+        conv = convert_arg_type_and_name(arg.type, arg.name, arg.is_write)
+        types.extend(conv.c_types)
+        new_names.extend(conv.names)
+        callsite_exprs.extend(conv.callsite_exprs)
+        prologue_stmts.extend(conv.prologue_stmts)
+    return zip_type_and_name(types, new_names), callsite_exprs, prologue_stmts
 
 
 # Return values are passed out as pointer arguments because all the C shim functions
@@ -260,24 +286,23 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
         else:
             return val
 
-    ret_pointer_can_be_null = False
     unambiguous_name = schema.name.unambiguous_name()
-    for name in (
-        "_functional_sym_constrain_range",
-        "_scaled_dot_product_cudnn_attention",
-        "_scaled_dot_product_efficient_attention_backward",
-        "_scaled_dot_product_efficient_attention",
-        "_scaled_dot_product_flash_attention",
-        "_scaled_dot_product_fused_attention_overrideable",
-        "_thhn_fused_lstm_cell_backward_impl",
-        "convolution_backward",
-        "grid_sampler_2d_backward",
-        "grid_sampler_3d_backward",
-        "linear_backward",
-    ):
-        if name in unambiguous_name:
-            ret_pointer_can_be_null = True
-            break
+    ret_pointer_can_be_null = any(
+        name in unambiguous_name
+        for name in (
+            "_functional_sym_constrain_range",
+            "_scaled_dot_product_cudnn_attention",
+            "_scaled_dot_product_efficient_attention_backward",
+            "_scaled_dot_product_efficient_attention",
+            "_scaled_dot_product_flash_attention",
+            "_scaled_dot_product_fused_attention_overrideable",
+            "_thhn_fused_lstm_cell_backward_impl",
+            "convolution_backward",
+            "grid_sampler_2d_backward",
+            "grid_sampler_3d_backward",
+            "linear_backward",
+        )
+    )
 
     callsite_exprs: list[str] = []
     for idx, ret in enumerate(schema.returns):
@@ -386,12 +411,12 @@ def gen_declaration_and_definition(
         if schema.is_out_fn():
             # out_variant has out arguments in the front, and it's ok to ignore return values
             # because C shim functions only return AOTITorchError
-            args, callsite_exprs = gen_arguments(
+            args, callsite_exprs, prologue_stmts = gen_arguments(
                 [*schema.arguments.out, *schema.arguments.flat_non_out], skipped_args
             )
             ret_assignments: list[str] = []
         else:
-            args, callsite_exprs = gen_arguments(
+            args, callsite_exprs, prologue_stmts = gen_arguments(
                 schema.arguments.flat_all, skipped_args
             )
             # ignore return values for inplace ops
@@ -406,6 +431,9 @@ def gen_declaration_and_definition(
 
         tmp_result = "auto tmp_result = " if ret_assignments else ""
         indent = "\t\t"
+        # Prologue lines are interpolated inside the same dedent block as the
+        # call so that textwrap.dedent computes one consistent indent.
+        prologue_block = "".join(f"                {s}\n" for s in prologue_stmts)
         ret_assignments_str = (
             "\n".join(indent + r for r in ret_assignments) if ret_assignments else ""
         )
@@ -413,7 +441,7 @@ def gen_declaration_and_definition(
             textwrap.dedent(f"""
         {declaration} {{
             AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
-                {tmp_result}{backend_call}(
+{prologue_block}                {tmp_result}{backend_call}(
                     {", ".join(callsite_exprs)}
                 );
         """)
