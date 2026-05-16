@@ -1958,9 +1958,10 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
     )
 
-    # For small output size reductions uses cross thread-block synchronization to gain more parallelism
+    # For small output size reductions uses cross thread-block synchronization to gain more parallelism.
+    # The shape heuristic in InductorChoices.should_use_cooperative_reduction decides when this applies.
     cooperative_reductions = (
-        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "1") == "1"
     )
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
