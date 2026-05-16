@@ -1199,6 +1199,42 @@ class CudaReproTests(TestCase):
         view_copy(target, source)
         self.assertEqual(out, target.view(torch.uint16))
 
+    def test_dce_fallback_alias_mutation(self):
+        from torch._inductor.decomposition import decompositions
+
+        def fn(ag_0, ag_1):
+            ag_0_bf16 = ag_0.to(torch.bfloat16)
+            ag_1_bf16 = ag_1.to(torch.bfloat16) * 2
+
+            buffer = torch.empty(32, dtype=torch.uint8, device=ag_0.device)
+            buffer_slice = buffer[:32]
+            slices = torch.split(buffer_slice, [16, 16])
+            bf16_slice1 = slices[0].view(torch.bfloat16)
+            bf16_slice2 = slices[1].view(torch.bfloat16)
+
+            for dst, src in zip(
+                [bf16_slice1, bf16_slice2],
+                [ag_0_bf16.flatten(), ag_1_bf16.flatten()],
+            ):
+                dst.copy_(src)
+
+            return ag_0_bf16, ag_1_bf16, buffer
+
+        ag_0 = torch.arange(8, device=device_type, dtype=torch.float32).reshape(2, 4)
+        ag_1 = (torch.arange(8, device=device_type, dtype=torch.float32) + 8).reshape(
+            2, 4
+        )
+        inputs = [ag_0, ag_1]
+
+        gm = make_fx(
+            fn,
+            decomposition_table=decompositions,
+            tracing_mode="fake",
+        )(*[x.clone() for x in inputs])
+        compiled = compile_fx_inner(gm, [x.clone() for x in inputs])
+
+        self.assertEqual(fn(*inputs), compiled([x.clone() for x in inputs]))
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(

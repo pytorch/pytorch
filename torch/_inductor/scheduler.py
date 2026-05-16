@@ -4632,16 +4632,36 @@ class Scheduler:
         # self.nodes is in topological order, so by iterating in reverse order
         # we have visited (and potentially removed) all users before visiting a
         # given node.
+        node_order = {node.get_name(): i for i, node in enumerate(self.nodes)}
         updated_nodes = []
         for node in reversed(self.nodes):
 
             def can_eliminate_user(user: NodeUser) -> bool:
                 return user.is_weak or user.get_name() in V.graph.removed_operations
 
+            def mutation_target_has_live_user(buf: SchedulerBuffer) -> bool:
+                for mutation_name in buf.get_mutations():
+                    if mutation_name not in self.name_to_buf:
+                        continue
+                    for user in self.name_to_buf[mutation_name].users:
+                        if user.get_name() == node.get_name() or can_eliminate_user(
+                            user
+                        ):
+                            continue
+                        if isinstance(user.node, OutputNode):
+                            return True
+                        user_order = node_order.get(user.get_name())
+                        if (
+                            user_order is None
+                            or user_order > node_order[node.get_name()]
+                        ):
+                            return True
+                return False
+
             active_buffers = False
             for buf in node.get_outputs():
                 can_eliminate = all(can_eliminate_user(u) for u in buf.users)
-                if can_eliminate:
+                if can_eliminate and not mutation_target_has_live_user(buf):
                     log.debug("removed dead buffer: %s", buf.get_name())
                     V.graph.removed_buffers.add(buf.get_name())
                 else:
