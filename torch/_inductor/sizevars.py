@@ -118,6 +118,25 @@ _GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
 _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
 
 
+def _simplify_with_opaque_predicates(expr: sympy.Basic) -> sympy.Basic:
+    predicate_replacements = {}
+    for node in sympy.preorder_traversal(expr):
+        if node in (sympy.true, sympy.false):
+            continue
+        if getattr(node, "is_Relational", False) or getattr(node, "is_Boolean", False):
+            predicate_replacements.setdefault(
+                node, sympy.Dummy("inductor_predicate", boolean=True)
+            )
+
+    if not predicate_replacements:
+        return sympy.simplify(expr)
+
+    inverse_replacements = {v: k for k, v in predicate_replacements.items()}
+    return sympy.simplify(expr.xreplace(predicate_replacements)).xreplace(
+        inverse_replacements
+    )
+
+
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     if not index.has(var):
@@ -127,7 +146,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
-    return sympy.simplify(new_index - index)
+    return _simplify_with_opaque_predicates(new_index - index)
 
 
 @functools.lru_cache
@@ -186,7 +205,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    index = sympy.simplify(index)
+    index = _simplify_with_opaque_predicates(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
