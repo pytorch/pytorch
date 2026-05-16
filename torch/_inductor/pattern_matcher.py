@@ -1504,6 +1504,12 @@ def register_replacement(
         extra_check: additional check to run on match(using real shapes)
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
+    scalar_workaround_keys = (
+        OrderedSet(scalar_workaround.keys()) if scalar_workaround else OrderedSet()
+    )
+    argnames_from_example_inputs = [
+        name for name in argnames_static if name not in scalar_workaround_keys
+    ]
 
     if inspect.ismethod(search_fn):
         search_fn = _wrap_bound_method(search_fn, argnames_static)
@@ -1517,6 +1523,24 @@ def register_replacement(
             f"example_inputs must be a list or tuple, got {type(example_inputs)}"
         )
 
+    def add_scalar_workarounds(
+        args: list[Any], match_kwargs: dict[str, Any]
+    ) -> list[Any]:
+        if not scalar_workaround:
+            return args
+
+        args_by_name = dict(zip(argnames_from_example_inputs, args))
+
+        def get_arg(name: str) -> Any:
+            if name in args_by_name:
+                return args_by_name[name]
+            if name in match_kwargs:
+                return torch.fx.map_arg(match_kwargs[name], lambda n: n.meta["val"])
+            assert name in scalar_workaround
+            return scalar_workaround[name]
+
+        return [get_arg(name) for name in argnames_static]
+
     def check_fn(match: Match) -> bool:
         """
         Often shapes get burned into the pattern, so our initial match ran with
@@ -1524,17 +1548,18 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
-        argnames = list(argnames_static)
-        for name in argnames:
+        for name in argnames_from_example_inputs:
             if name not in match.kwargs:
                 raise RuntimeError(
                     f"Not all inputs to pattern found in match.kwargs. Perhaps one "
-                    f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
+                    f"of the inputs is unused? argnames={argnames_from_example_inputs}, "
+                    f"match.kwargs={match.kwargs}"
                 )
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [match.kwargs[name] for name in argnames_from_example_inputs],
+                lambda n: n.meta["val"],
             )
         )
 
@@ -1566,6 +1591,8 @@ def register_replacement(
                         ):
                             sym_args.append(v)
 
+            full_args = add_scalar_workarounds(args, match.kwargs)
+
             # If we were given a pre-traced pattern then use that instead of
             # retracing. Note that this means the pattern has to be independent
             # of its args.
@@ -1581,12 +1608,12 @@ def register_replacement(
                     # sizes will get re-traced and added to the graph.
 
                     def search_fn_new(*args_new: Any, **_: Any) -> Any:
-                        return search_fn(*args_new[len(args_new) - len(args) :])
+                        return search_fn(*args_new[len(args_new) - len(full_args) :])
 
                     try:
                         specific_graph = trace_fn(
                             search_fn_new,
-                            sym_args + args,
+                            sym_args + full_args,
                             get_decomp_fn=get_decomp_fn,
                         )
                     except RuntimeError as e:
@@ -1596,7 +1623,7 @@ def register_replacement(
                     # correct argnames in the graph
                     sym_arg_names = []
                     for i, placeholder in zip(
-                        range(len(sym_args) + len(args)),
+                        range(len(sym_args) + len(full_args)),
                         specific_graph.graph.nodes,
                     ):
                         if i < len(sym_args):
@@ -1605,21 +1632,22 @@ def register_replacement(
 
                         with specific_graph.graph.inserting_after(placeholder):
                             new_node = specific_graph.graph.placeholder(
-                                argnames[i - len(sym_args)]
+                                argnames_static[i - len(sym_args)]
                             )
                             new_node.target = new_node.name
                             placeholder.replace_all_uses_with(new_node)
                             specific_graph.graph.erase_node(placeholder)
 
-                    argnames = sym_arg_names + argnames
+                    argnames = sym_arg_names + argnames_static
                 else:
                     try:
                         specific_graph = trace_fn(
-                            search_fn, args, get_decomp_fn=get_decomp_fn
+                            search_fn, full_args, get_decomp_fn=get_decomp_fn
                         )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
+                    argnames = argnames_static
 
                 specific_pattern = fx_to_pattern(
                     specific_graph,
@@ -1644,7 +1672,7 @@ def register_replacement(
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(
-                    replace_fn, args, get_decomp_fn=get_decomp_fn
+                    replace_fn, full_args, get_decomp_fn=get_decomp_fn
                 )
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
@@ -1657,7 +1685,12 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> list[Any]:
-        args = [kwargs.pop(name) for name in argnames_static]
+        args = []
+        for name in argnames_static:
+            if scalar_workaround is not None and name in scalar_workaround:
+                args.append(kwargs.pop(name, scalar_workaround[name]))
+            else:
+                args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
