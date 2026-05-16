@@ -15,7 +15,6 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     run_tests,
-    TEST_WITH_TORCHDYNAMO,
 )
 
 # ======= END DYNAMO PATCH =======
@@ -432,10 +431,6 @@ class BuiltinTest(CPythonTestCase):
 
 
     @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
-    @unittest.skipIf(
         support.is_emscripten or support.is_wasi,
         "socket.accept is broken"
     )
@@ -691,10 +686,6 @@ class BuiltinTest(CPythonTestCase):
 
         self.assertRaises(TypeError, divmod)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_eval(self):
         self.assertEqual(eval('1+1'), 2)
         self.assertEqual(eval(' 1+1\n'), 2)
@@ -718,19 +709,11 @@ class BuiltinTest(CPythonTestCase):
                 raise ValueError
         self.assertRaises(ValueError, eval, "foo", {}, X())
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_eval_kwargs(self):
         data = {"A_GLOBAL_VALUE": 456}
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", globals=data), 456)
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", locals=data), 123)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_general_eval(self):
         # Tests that general mappings can be used for the locals argument
 
@@ -908,10 +891,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaisesRegex(NameError, "name 'superglobal' is not defined",
                                exec, code, {'__builtins__': customdict()})
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_eval_builtins_mapping(self):
         code = compile("superglobal", "test", "eval")
         # works correctly
@@ -930,10 +909,6 @@ class BuiltinTest(CPythonTestCase):
         exec(code, ns)
         self.assertEqual(ns['foo'], ('foo.bar', ns, ns, None, 0))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_eval_builtins_mapping_reduce(self):
         # list_iterator.__reduce__() calls _PyEval_GetBuiltin("iter")
         code = compile("x.__reduce__()", "test", "eval")
@@ -2489,53 +2464,29 @@ class PtyTests(CPythonTestCase):
         else:
             yield
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty(self):
         # Test input() functionality when wired to a tty
         self.check_input_tty("prompt", b"quux")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty_non_ascii(self):
         # Check stdin/stdout encoding is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xc3\xa9", "utf-8")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty_non_ascii_unicode_errors(self):
         # Check stdin/stdout error handler is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xe9", "ascii")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty_null_in_prompt(self):
         self.check_input_tty("prompt\0", b"",
                 expected='ValueError: input: prompt string cannot contain '
                          'null characters')
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty_nonencodable_prompt(self):
         self.check_input_tty("prompté", b"quux", "ascii", stdout_errors='strict',
                 expected="UnicodeEncodeError: 'ascii' codec can't encode "
                          "character '\\xe9' in position 6: ordinal not in "
                          "range(128)")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_input_tty_nondecodable_input(self):
         self.check_input_tty("prompt", b"quux\xe9", "ascii", stdin_errors='strict',
                 expected="UnicodeDecodeError: 'ascii' codec can't decode "

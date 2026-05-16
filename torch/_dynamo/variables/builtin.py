@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import ast
 import builtins
 import contextlib
 import functools
@@ -1395,6 +1396,103 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return rv
 
         return builtin_dispatch
+
+    _constant_eval_numeric_binops = (
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+    )
+    _constant_eval_numeric_unaryops = (ast.UAdd, ast.USub, ast.Invert)
+
+    @staticmethod
+    def _constant_eval_expr(node: ast.AST) -> bool:
+        if isinstance(node, ast.Expression):
+            return BuiltinVariable._constant_eval_expr(node.body)
+        if isinstance(node, ast.Constant):
+            return (
+                node.value is None
+                or node.value is Ellipsis
+                or isinstance(node.value, (bool, int, float, complex, str, bytes))
+            )
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            return all(BuiltinVariable._constant_eval_expr(elt) for elt in node.elts)
+        if isinstance(node, ast.Dict):
+            return all(
+                key is not None
+                and BuiltinVariable._constant_eval_expr(key)
+                and BuiltinVariable._constant_eval_expr(value)
+                for key, value in zip(node.keys, node.values)
+            )
+        if isinstance(node, ast.UnaryOp):
+            if isinstance(node.op, BuiltinVariable._constant_eval_numeric_unaryops):
+                return BuiltinVariable._constant_eval_numeric_expr(node.operand)
+            if isinstance(node.op, ast.Not):
+                return BuiltinVariable._constant_eval_expr(node.operand)
+            return False
+        if isinstance(node, ast.BinOp):
+            return (
+                isinstance(node.op, BuiltinVariable._constant_eval_numeric_binops)
+                and BuiltinVariable._constant_eval_numeric_expr(node.left)
+                and (BuiltinVariable._constant_eval_numeric_expr(node.right))
+            )
+        return False
+
+    @staticmethod
+    def _constant_eval_numeric_expr(node: ast.AST) -> bool:
+        if isinstance(node, ast.Expression):
+            return BuiltinVariable._constant_eval_numeric_expr(node.body)
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, (bool, int, float, complex))
+        if isinstance(node, ast.UnaryOp):
+            return isinstance(
+                node.op, BuiltinVariable._constant_eval_numeric_unaryops
+            ) and BuiltinVariable._constant_eval_numeric_expr(node.operand)
+        if isinstance(node, ast.BinOp):
+            return (
+                isinstance(node.op, BuiltinVariable._constant_eval_numeric_binops)
+                and BuiltinVariable._constant_eval_numeric_expr(node.left)
+                and (BuiltinVariable._constant_eval_numeric_expr(node.right))
+            )
+        return False
+
+    def call_eval(
+        self,
+        tx: "InstructionTranslator",
+        source: VariableTracker,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if args or kwargs:
+            return None
+        if not source.is_python_constant():
+            return None
+        source_str = source.as_python_constant()
+        if not isinstance(source_str, str):
+            return None
+
+        try:
+            tree = ast.parse(source_str.strip(), mode="eval")
+        except SyntaxError:
+            return None
+
+        if not self._constant_eval_expr(tree):
+            return None
+
+        try:
+            result = eval(
+                compile(tree, "<torch._dynamo.eval>", "eval"),
+                {"__builtins__": {}},
+                {},
+            )
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, result)
 
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:

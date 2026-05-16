@@ -1493,6 +1493,24 @@ graph():
             actual = opt_fn(*sample)
             self.assertEqual(expect, actual)
 
+    def test_builtin_eval_constant_expr(self):
+        def fn(x):
+            values = eval("{'scale': 2, 'offset': (3, 4)}")
+            return x * values["scale"] + eval(" 1+1\n") + eval("1/2")
+
+        x = torch.randn(4)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_builtin_eval_rejects_non_constant_expr(self):
+        def fn(x):
+            return x + eval("len([1])")
+
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -3397,7 +3415,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             def __getattribute__(self, name):
                 if name == "my_attr":
-                    return eval("42")  # eval is untraceable
+                    return eval("len([1])")
                 return super().__getattribute__(name)
 
             def forward(self, x):

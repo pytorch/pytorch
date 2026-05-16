@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -198,10 +198,6 @@ class GeneralFloatCases(__TestCase):
     def test_noargs(self):
         self.assertEqual(float(), 0.0)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_underscores(self):
         for lit in VALID_UNDERSCORE_LITERALS:
             if not any(ch in lit for ch in 'jJxXoObB'):
@@ -899,10 +895,6 @@ class FormatTestCase(__TestCase):
         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
 
 class ReprTestCase(__TestCase):
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval in compiled function not supported",
-    )
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
                   'mathdata',
