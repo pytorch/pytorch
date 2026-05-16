@@ -428,6 +428,30 @@ class TestCalculateShards(unittest.TestCase):
             ),
         )
 
+    def test_opinfo_uses_min_duration_for_pytest_sharding(self) -> None:
+        opinfo = "inductor/test_torchinductor_opinfo"
+        shards = calculate_shards(
+            1,
+            [TestRun(opinfo), TestRun("normal_test")],
+            {opinfo: 1, "normal_test": 2},
+            None,
+        )
+        self.assertEqual(THRESHOLD * 14 + 2, shards[0][0])
+
+        opinfo_shards = [test for test in shards[0][1] if test.name == opinfo]
+        self.assertEqual(14, len(opinfo_shards))
+        self.assertEqual(list(range(1, 15)), [test.shard for test in opinfo_shards])
+        self.assertTrue(
+            all(
+                test.num_shards == 14 and test.time == THRESHOLD
+                for test in opinfo_shards
+            )
+        )
+        self.assertIn(
+            ShardedTest(test="normal_test", shard=1, num_shards=1, time=2),
+            shards[0][1],
+        )
+
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 

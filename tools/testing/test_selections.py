@@ -36,6 +36,13 @@ NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
+MIN_TEST_FILE_TIMES = {
+    # Generated stats can record a fully skipped CPU Inductor OpInfo run.
+    # Keep enough pytest shards to stay under per-test timeouts when that
+    # near-zero runtime is stale.
+    "inductor/test_torchinductor_opinfo": THRESHOLD * 14,
+}
+
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
 # torch.version.hip was not available to check if this was a ROCm self-hosted runner.
@@ -107,6 +114,9 @@ def get_duration(
     test_class_times.  Returns None if the time is unknown."""
     file_duration = test_file_times.get(test.test_file, None)
     if test.is_full_file():
+        min_duration = MIN_TEST_FILE_TIMES.get(test.test_file)
+        if min_duration is not None:
+            return max(file_duration or 0, min_duration)
         return file_duration
 
     def get_duration_for_classes(
