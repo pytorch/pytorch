@@ -11,6 +11,7 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -263,6 +264,90 @@ class TestScheduler(TestCase):
                     group_size=16,
                 )
             )
+
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
