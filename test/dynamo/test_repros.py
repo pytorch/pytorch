@@ -2031,6 +2031,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(y.requires_grad)
         self.assertFalse(z.requires_grad)
 
+    def test_basic_tensor_subclass_constructor(self):
+        # Tests that basic Tensor subclass construction works with torch.compile
+        # Regression test for LazyVariableTracker not being realized before
+        # accessing __dict__ in TensorWithTFOverrideVariable.from_tensor_var
+        class MyTensor(torch.Tensor):
+            pass
+
+        def f(x):
+            y = MyTensor(x)
+            return torch.abs(y)
+
+        x = torch.randn(4)
+        eager_out = f(x)
+        compiled_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        compiled_out = compiled_f(x)
+
+        torch.testing.assert_close(
+            torch.as_tensor(eager_out),
+            torch.as_tensor(compiled_out),
+        )
+        self.assertIsInstance(compiled_out, MyTensor)
+
     def test_locals_traced_correctly_under_compile(self):
         def fn(x):
             if x.dim() > 2:
