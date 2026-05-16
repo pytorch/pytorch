@@ -2664,7 +2664,17 @@ class halide:
 
 
 # create a directory containing lots of debug information
+def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
+    if format_env_name in os.environ:
+        return os.environ[format_env_name]
+    if os.environ.get(legacy_svg_env_name, "0") == "1":
+        return "svg"
+    return os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
 class trace:
+    """Configuration for torch.compile debug trace artifacts."""
+
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
@@ -2696,11 +2706,39 @@ class trace:
     # Copy generated code to trace dir
     output_code = True
 
-    # SVG figure showing post-fusion graph
-    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+    # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
+    # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
+    # same dump for any graph_diagram_format.
+    graph_diagram = (
+        os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_POST_FUSION_GRAPH", "0") == "1"
+    )
 
-    # SVG figure showing fx with fusion
-    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+    # Output format for post-fusion graph_diagram dumps.  Defaults to svg when
+    # the legacy INDUCTOR_POST_FUSION_SVG flag is used; otherwise defaults to
+    # the shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_POST_FUSION_GRAPH_FORMAT",
+        "INDUCTOR_POST_FUSION_SVG",
+    )
+
+    # Diagram showing FX with fusion. INDUCTOR_ORIG_FX_SVG is the legacy
+    # spelling for SVG output; INDUCTOR_ORIG_FX_GRAPH enables the same dump for
+    # any orig_fx_graph_diagram_format.
+    draw_orig_fx_graph = (
+        os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_ORIG_FX_GRAPH", "0") == "1"
+    )
+
+    # Output format for original FX graph dumps.  Defaults to svg when the
+    # legacy INDUCTOR_ORIG_FX_SVG flag is used; otherwise defaults to the
+    # shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    orig_fx_graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_ORIG_FX_GRAPH_FORMAT",
+        "INDUCTOR_ORIG_FX_SVG",
+    )
 
     # We draw our fx graphs with the "record" shape attribute by default.
     # Sometimes, when the graph is very complex, we may hit dot errors like below:
