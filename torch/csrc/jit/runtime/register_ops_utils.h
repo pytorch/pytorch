@@ -146,7 +146,8 @@ void listReverse(Stack& stack);
 
 template <typename T>
 void minList(Stack& stack) {
-  auto [a, b] = pop<c10::List<T>, c10::List<T>>(stack);
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
   for (const auto i : c10::irange(min_size)) {
@@ -158,12 +159,13 @@ void minList(Stack& stack) {
     return;
   }
 
-  push(stack, a.size() < b.size() ? a : b);
+  push(stack, b.size() < a.size() ? b : a);
 }
 
 template <typename T>
 void maxList(Stack& stack) {
-  auto [a, b] = pop<c10::List<T>, c10::List<T>>(stack);
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
 
   size_t min_size = std::min(a.size(), b.size());
   for (const auto i : c10::irange(min_size)) {
@@ -175,7 +177,7 @@ void maxList(Stack& stack) {
     return;
   }
 
-  push(stack, a.size() > b.size() ? a : b);
+  push(stack, b.size() > a.size() ? b : a);
 }
 
 void listPopImpl(Stack& stack, const char* empty_message);
@@ -430,7 +432,8 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(#aten_op                                         \
                              ".int_int(int a, int b) -> " #int_float_result), \
       [](Stack& stack) {                                                      \
-        auto [a, b] = pop<int64_t, int64_t>(stack);                           \
+        int64_t a, b;                                                         \
+        pop(stack, a, b);                                                     \
         push(stack, op);                                                      \
       },                                                                      \
       aliasAnalysisFromSchema()),                                             \
@@ -439,7 +442,8 @@ struct OperatorGeneratorArgs {
               #aten_op                                                        \
               ".float_float(float a, float b) -> " #int_float_result),        \
           [](Stack& stack) {                                                  \
-            auto [a, b] = pop<double, double>(stack);                         \
+            double a, b;                                                      \
+            pop(stack, a, b);                                                 \
             push(stack, op);                                                  \
           },                                                                  \
           aliasAnalysisFromSchema()),                                         \
@@ -448,8 +452,8 @@ struct OperatorGeneratorArgs {
               #aten_op                                                        \
               ".complex_complex(complex a, complex b) -> " #complex_result),  \
           [](Stack& stack) {                                                  \
-            auto [a, b] =                                                     \
-                pop<c10::complex<double>, c10::complex<double>>(stack);       \
+            c10::complex<double> a, b;                                        \
+            pop(stack, a, b);                                                 \
             push(stack, op);                                                  \
           },                                                                  \
           aliasAnalysisFromSchema())
@@ -459,7 +463,8 @@ struct OperatorGeneratorArgs {
   OperatorGeneratorArgs(                                                       \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),   \
       [](Stack& stack) {                                                       \
-        auto [a, b] = pop<int64_t, int64_t>(stack);                            \
+        int64_t a, b;                                                          \
+        pop(stack, a, b);                                                      \
         push(stack, int_op);                                                   \
       },                                                                       \
       aliasAnalysisFromSchema()),                                              \
@@ -467,7 +472,8 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(                                              \
               #aten_op ".float(float a, float b) -> " #float_result),          \
           [](Stack& stack) {                                                   \
-            auto [a, b] = pop<double, double>(stack);                          \
+            double a, b;                                                       \
+            pop(stack, a, b);                                                  \
             push(stack, float_op);                                             \
           },                                                                   \
           aliasAnalysisFromSchema())
@@ -477,7 +483,9 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_float(int a, float b) -> " #result),     \
       [](Stack& stack) {                                                    \
-        auto [a, b] = pop<int64_t, double>(stack);                          \
+        int64_t a;                                                          \
+        double b;                                                           \
+        pop(stack, a, b);                                                   \
         push(stack, op);                                                    \
       },                                                                    \
       aliasAnalysisFromSchema()),                                           \
@@ -485,7 +493,9 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(#aten_op                                   \
                                  ".float_int(float a, int b) -> " #result), \
           [](Stack& stack) {                                                \
-            auto [a, b] = pop<double, int64_t>(stack);                      \
+            double a;                                                       \
+            int64_t b;                                                      \
+            pop(stack, a, b);                                               \
             push(stack, op);                                                \
           },                                                                \
           aliasAnalysisFromSchema())
@@ -494,7 +504,8 @@ struct OperatorGeneratorArgs {
   OperatorGeneratorArgs(                                            \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> int"), \
       [](Stack& stack) {                                            \
-        auto [a, b] = pop<int64_t, int64_t>(stack);                 \
+        int64_t a, b;                                               \
+        pop(stack, a, b);                                           \
         push(stack, op); /* NOLINT(hicpp-signed-bitwise) */         \
       },                                                            \
       aliasAnalysisFromSchema())
@@ -519,7 +530,8 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
                              "(Scalar a, Scalar b) -> " #result), \
       [](Stack& stack) {                                          \
-        auto [x, y] = pop<IValue, IValue>(stack);                 \
+        IValue x, y;                                              \
+        pop(stack, x, y);                                         \
         if (x.isDouble()) {                                       \
           if (y.isDouble()) {                                     \
             double a = x.toDouble();                              \
@@ -610,7 +622,8 @@ struct OperatorGeneratorArgs {
   OperatorGeneratorArgs(                                                \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"), \
       [](Stack& stack) {                                                \
-        auto [a, b] = pop<bool, bool>(stack);                           \
+        bool a, b;                                                      \
+        pop(stack, a, b);                                               \
         push(stack, op);                                                \
       },                                                                \
       aliasAnalysisFromSchema())
@@ -686,7 +699,8 @@ struct OperatorGeneratorArgs {
   OperatorGeneratorArgs(                                                      \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),  \
       [](Stack& stack) {                                                      \
-        auto [a, b] = pop<int64_t, int64_t>(stack);                           \
+        int64_t a, b;                                                         \
+        pop(stack, a, b);                                                     \
         push(stack, int_op);                                                  \
       },                                                                      \
       aliasAnalysisFromSchema()),                                             \
@@ -694,8 +708,8 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".complex(complex a, complex b) -> " #complex_result), \
           [](Stack& stack) {                                                  \
-            auto [a, b] =                                                     \
-                pop<c10::complex<double>, c10::complex<double>>(stack);       \
+            c10::complex<double> a, b;                                        \
+            pop(stack, a, b);                                                 \
             push(stack, complex_op);                                          \
           },                                                                  \
           aliasAnalysisFromSchema()),                                         \
@@ -703,7 +717,8 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(                                             \
               #aten_op ".float(float a, float b) -> " #float_result),         \
           [](Stack& stack) {                                                  \
-            auto [a, b] = pop<double, double>(stack);                         \
+            double a, b;                                                      \
+            pop(stack, a, b);                                                 \
             push(stack, float_op);                                            \
           },                                                                  \
           aliasAnalysisFromSchema())
@@ -713,7 +728,9 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
                              ".int_complex(int a, complex b) -> " #result), \
       [](Stack& stack) {                                                    \
-        auto [a, b] = pop<int64_t, c10::complex<double>>(stack);            \
+        int64_t a;                                                          \
+        c10::complex<double> b;                                             \
+        pop(stack, a, b);                                                   \
         push(stack, op);                                                    \
       },                                                                    \
       aliasAnalysisFromSchema()),                                           \
@@ -721,7 +738,9 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(                                           \
               #aten_op ".complex_int(complex a, int b) -> " #result),       \
           [](Stack& stack) {                                                \
-            auto [a, b] = pop<c10::complex<double>, int64_t>(stack);        \
+            c10::complex<double> a;                                         \
+            int64_t b;                                                      \
+            pop(stack, a, b);                                               \
             push(stack, op);                                                \
           },                                                                \
           aliasAnalysisFromSchema())
@@ -731,7 +750,9 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(                                             \
           #aten_op ".float_complex(float a, complex b) -> " #result),     \
       [](Stack& stack) {                                                  \
-        auto [a, b] = pop<double, c10::complex<double>>(stack);           \
+        double a;                                                         \
+        c10::complex<double> b;                                           \
+        pop(stack, a, b);                                                 \
         push(stack, op);                                                  \
       },                                                                  \
       aliasAnalysisFromSchema()),                                         \
@@ -739,7 +760,9 @@ struct OperatorGeneratorArgs {
           TORCH_SELECTIVE_SCHEMA(                                         \
               #aten_op ".complex_float(complex a, float b) -> " #result), \
           [](Stack& stack) {                                              \
-            auto [a, b] = pop<c10::complex<double>, double>(stack);       \
+            c10::complex<double> a;                                       \
+            double b;                                                     \
+            pop(stack, a, b);                                             \
             push(stack, op);                                              \
           },                                                              \
           aliasAnalysisFromSchema())
@@ -750,7 +773,8 @@ struct OperatorGeneratorArgs {
       TORCH_SELECTIVE_SCHEMA(#aten_op string_val                      \
                              "(Scalar a, Scalar b) -> " #result),     \
       [](Stack& stack) {                                              \
-        auto [x, y] = pop<IValue, IValue>(stack);                     \
+        IValue x, y;                                                  \
+        pop(stack, x, y);                                             \
         if (x.isComplexDouble()) {                                    \
           c10::complex<double> a = x.toComplexDouble();               \
           if (y.isComplexDouble()) {                                  \
@@ -796,7 +820,8 @@ struct OperatorGeneratorArgs {
   OperatorGeneratorArgs(                                                   \
       TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
       [](Stack& stack) {                                                   \
-        auto [x, y] = pop<IValue, IValue>(stack);                          \
+        IValue x, y;                                                       \
+        pop(stack, x, y);                                                  \
         if (x.isComplexDouble()) {                                         \
           c10::complex<double> a = x.toComplexDouble();                    \
           if (y.isComplexDouble()) {                                       \
