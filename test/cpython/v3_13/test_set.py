@@ -12,7 +12,11 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
+)
 
 __TestCase = CPythonTestCase
 
@@ -1870,6 +1874,10 @@ class bad_dict_clear:
         return 0
 
 class TestWeirdBugs(__TestCase):
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_8420_set_merge(self):
         # This used to segfault
         global be_bad, set2, dict2
@@ -1896,6 +1904,10 @@ class TestWeirdBugs(__TestCase):
         s.update(range(100))
         list(si)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_merge_and_mutate(self):
         class X:
             def __hash__(self):
@@ -2017,18 +2029,34 @@ class _TestBinaryOpsMutating(_TestOperationsMutating):
         self.check_set_op_does_not_crash(f3)
 
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestBinaryOpsMutating_Set_Set(_TestBinaryOpsMutating, __TestCase):
     constructor1 = set
     constructor2 = set
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestBinaryOpsMutating_Subclass_Subclass(_TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = SetSubclass
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestBinaryOpsMutating_Set_Subclass(_TestBinaryOpsMutating, __TestCase):
     constructor1 = set
     constructor2 = SetSubclass
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestBinaryOpsMutating_Subclass_Set(_TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = set
@@ -2070,26 +2098,50 @@ class _TestMethodsMutating(_TestOperationsMutating):
         self.check_set_op_does_not_crash(set.update)
 
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Set_Set(_TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = set
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Subclass_Subclass(_TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = SetSubclass
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Set_Subclass(_TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = SetSubclass
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Subclass_Set(_TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
     constructor2 = set
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Set_Dict(_TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = dict.fromkeys
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO,
+    "__build_class__ with closed over objects not supported",
+)
 class TestMethodsMutating_Set_List(_TestMethodsMutating, __TestCase):
     constructor1 = set
     constructor2 = list
@@ -2198,8 +2250,6 @@ class TestGraphs(__TestCase):
             for cubevert in edge:
                 self.assertIn(cubevert, g)
 
-
-#==============================================================================
 
 if __name__ == "__main__":
     run_tests()

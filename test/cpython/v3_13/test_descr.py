@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 # ======= END DYNAMO PATCH =======
 
@@ -4491,6 +4491,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             with self.assertRaises(RuntimeError):
                 print("Oops!")
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_vicious_descriptor_nonsense(self):
         # Testing vicious_descriptor_nonsense...
 
@@ -5180,6 +5184,10 @@ class AAAPTypesLongInitTest(CPythonTestCase):
 
 
 class MiscTests(CPythonTestCase):
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_type_lookup_mro_reference(self):
         # Issue #14199: _PyType_Lookup() has to keep a strong reference to
         # the type MRO because it may be modified during the lookup, if
