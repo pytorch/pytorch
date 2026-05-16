@@ -1396,120 +1396,56 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return builtin_dispatch
 
-    _constant_eval_numeric_binops = (
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
-        ast.FloorDiv,
-        ast.Mod,
-        ast.BitOr,
-        ast.BitXor,
-        ast.BitAnd,
-    )
-    _constant_eval_numeric_unaryops = (ast.UAdd, ast.USub, ast.Invert)
-
-    @staticmethod
-    def _constant_eval_expr(node: ast.AST) -> bool:
-        if isinstance(node, ast.Expression):
-            return BuiltinVariable._constant_eval_expr(node.body)
-        if isinstance(node, ast.Constant):
-            return (
-                node.value is None
-                or node.value is Ellipsis
-                or isinstance(node.value, (bool, int, float, complex, str, bytes))
-            )
-        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-            return all(BuiltinVariable._constant_eval_expr(elt) for elt in node.elts)
-        if isinstance(node, ast.Dict):
-            return all(
-                key is not None
-                and BuiltinVariable._constant_eval_expr(key)
-                and BuiltinVariable._constant_eval_expr(value)
-                for key, value in zip(node.keys, node.values)
-            )
-        if isinstance(node, ast.UnaryOp):
-            if isinstance(node.op, BuiltinVariable._constant_eval_numeric_unaryops):
-                return BuiltinVariable._constant_eval_numeric_expr(node.operand)
-            if isinstance(node.op, ast.Not):
-                return BuiltinVariable._constant_eval_expr(node.operand)
-            return False
-        if isinstance(node, ast.BinOp):
-            return (
-                isinstance(node.op, BuiltinVariable._constant_eval_numeric_binops)
-                and BuiltinVariable._constant_eval_numeric_expr(node.left)
-                and (BuiltinVariable._constant_eval_numeric_expr(node.right))
-            )
-        return False
-
     @staticmethod
     def _constant_eval_numeric_expr(node: ast.AST) -> bool:
-        if isinstance(node, ast.Expression):
-            return BuiltinVariable._constant_eval_numeric_expr(node.body)
-        if isinstance(node, ast.Constant):
-            return isinstance(node.value, (bool, int, float, complex))
-        if isinstance(node, ast.UnaryOp):
-            return isinstance(
-                node.op, BuiltinVariable._constant_eval_numeric_unaryops
-            ) and BuiltinVariable._constant_eval_numeric_expr(node.operand)
-        if isinstance(node, ast.BinOp):
-            return (
-                isinstance(node.op, BuiltinVariable._constant_eval_numeric_binops)
-                and BuiltinVariable._constant_eval_numeric_expr(node.left)
-                and (BuiltinVariable._constant_eval_numeric_expr(node.right))
+        allowed_nodes = (
+            ast.Expression,
+            ast.Constant,
+            ast.UnaryOp,
+            ast.BinOp,
+            ast.UAdd,
+            ast.USub,
+            ast.Invert,
+            ast.Add,
+            ast.Sub,
+            ast.Mult,
+            ast.Div,
+            ast.FloorDiv,
+            ast.Mod,
+            ast.BitOr,
+            ast.BitXor,
+            ast.BitAnd,
+        )
+        return all(
+            isinstance(child, allowed_nodes)
+            and (
+                not isinstance(child, ast.Constant)
+                or isinstance(child.value, (bool, int, float, complex))
             )
-        return False
+            for child in ast.walk(node)
+        )
 
     @staticmethod
     def _constant_eval_result(
-        tx: "InstructionTranslator", node: ast.expr, filename: str
-    ) -> VariableTracker:
-        expr = ast.Expression(node)
-        ast.fix_missing_locations(expr)
+        tx: "InstructionTranslator", tree: ast.Expression, filename: str
+    ) -> VariableTracker | None:
+        if any(isinstance(child, ast.Call) for child in ast.walk(tree)):
+            return None
+        ast.fix_missing_locations(tree)
         try:
-            result = eval(
-                compile(expr, filename, "eval"),
-                {"__builtins__": {}},
-                {},
-            )
-        except Exception as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
+            result = ast.literal_eval(tree)
+        except ValueError:
+            if not BuiltinVariable._constant_eval_numeric_expr(tree):
+                return None
+            try:
+                result = eval(
+                    compile(tree, filename, "eval"),
+                    {"__builtins__": {}},
+                    {},
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, result)
-
-    @staticmethod
-    def _constant_exec_stmt(stmt: ast.stmt) -> bool:
-        if isinstance(stmt, (ast.Pass, ast.Global)):
-            return True
-        if isinstance(stmt, ast.Expr):
-            return BuiltinVariable._constant_eval_expr(ast.Expression(stmt.value))
-        if isinstance(stmt, ast.Assign):
-            return all(isinstance(target, ast.Name) for target in stmt.targets) and (
-                BuiltinVariable._constant_eval_expr(ast.Expression(stmt.value))
-            )
-        return False
-
-    @staticmethod
-    def _exec_namespace_arg(arg: VariableTracker | None) -> ConstDictVariable | None:
-        if isinstance(arg, ConstDictVariable) and arg.is_mutable():
-            return arg
-        return None
-
-    @staticmethod
-    def _exec_setitem(
-        tx: "InstructionTranslator",
-        namespace: ConstDictVariable | None,
-        name: str,
-        value: VariableTracker,
-    ) -> bool:
-        if namespace is None:
-            return False
-        namespace.call_method(
-            tx,
-            "__setitem__",
-            [ConstantVariable.create(name), value],
-            {},
-        )
-        return True
 
     def call_eval(
         self,
@@ -1528,13 +1464,10 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         try:
             tree = ast.parse(source_str.strip(), mode="eval")
-        except SyntaxError:
-            return None
+        except SyntaxError as exc:
+            raise_observed_exception(SyntaxError, tx, args=[exc.msg])
 
-        if not self._constant_eval_expr(tree):
-            return None
-
-        return self._constant_eval_result(tx, tree.body, "<torch._dynamo.eval>")
+        return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
 
     def call_exec(
         self,
@@ -1543,22 +1476,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        kwargs = dict(kwargs)
-        if len(args) > 2 or "closure" in kwargs:
-            return None
-        globals_arg = None
-        locals_arg = None
-        if args:
-            globals_arg = args[0]
-        elif "globals" in kwargs:
-            globals_arg = kwargs.pop("globals")
         if len(args) > 1:
-            locals_arg = args[1]
-        elif "locals" in kwargs:
-            locals_arg = kwargs.pop("locals")
+            return None
+        if "globals" in kwargs:
+            if args:
+                return None
+            args = (kwargs.pop("globals"),)
         if kwargs:
             return None
-
         if not source.is_python_constant():
             return None
         source_str = source.as_python_constant()
@@ -1567,65 +1492,42 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         try:
             tree = ast.parse(source_str.strip(), mode="exec")
-        except SyntaxError:
-            return None
+        except SyntaxError as exc:
+            raise_observed_exception(SyntaxError, tx, args=[exc.msg])
 
-        if not all(self._constant_exec_stmt(stmt) for stmt in tree.body):
-            return None
-        try:
-            compile(tree, "<torch._dynamo.exec>", "exec")
-        except SyntaxError:
-            return None
-
-        globals_ns = self._exec_namespace_arg(globals_arg)
-        locals_ns = self._exec_namespace_arg(locals_arg)
-        if globals_arg is not None and globals_ns is None:
-            return None
-        if locals_arg is not None and locals_ns is None:
-            return None
-        if globals_ns is not None and locals_ns is None:
-            locals_ns = globals_ns
-
-        global_names = {
-            name
-            for stmt in tree.body
-            if isinstance(stmt, ast.Global)
-            for name in stmt.names
-        }
-        assignment_names = []
-        for stmt in tree.body:
-            if isinstance(stmt, ast.Assign):
-                for target in stmt.targets:
-                    if not isinstance(target, ast.Name):
-                        return None
-                    assignment_names.append(target.id)
-        if (
-            any(name in global_names for name in assignment_names)
-            and globals_ns is None
+        globals_ns = args[0] if args else None
+        if globals_ns is not None and not (
+            isinstance(globals_ns, ConstDictVariable) and globals_ns.is_mutable()
         ):
             return None
-        if (
-            any(name not in global_names for name in assignment_names)
-            and locals_ns is None
-        ):
-            return None
-
         for stmt in tree.body:
-            if isinstance(stmt, ast.Global):
+            if isinstance(stmt, ast.Pass):
                 continue
             if isinstance(stmt, ast.Expr):
-                self._constant_eval_result(tx, stmt.value, "<torch._dynamo.exec>")
-                continue
-            if isinstance(stmt, ast.Assign):
                 value = self._constant_eval_result(
-                    tx, stmt.value, "<torch._dynamo.exec>"
+                    tx, ast.Expression(stmt.value), "<torch._dynamo.exec>"
                 )
-                for target in stmt.targets:
-                    if not isinstance(target, ast.Name):
-                        return None
-                    namespace = globals_ns if target.id in global_names else locals_ns
-                    if not self._exec_setitem(tx, namespace, target.id, value):
-                        return None
+                if value is None:
+                    return None
+                continue
+            if not (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and globals_ns is not None
+            ):
+                return None
+            value = self._constant_eval_result(
+                tx, ast.Expression(stmt.value), "<torch._dynamo.exec>"
+            )
+            if value is None:
+                return None
+            globals_ns.call_method(
+                tx,
+                "__setitem__",
+                [ConstantVariable.create(stmt.targets[0].id), value],
+                {},
+            )
 
         return ConstantVariable.create(None)
 
