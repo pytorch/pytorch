@@ -164,6 +164,11 @@ class TestTimer(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
+    def test_emulate_precision_casts_sets_libdevice_path(self):
+        """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
+        self._test_libdevice_path_with_compilation()
+
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
@@ -202,6 +207,40 @@ class TestSetTritonLibdevicePath(TestCase):
 
         eager_result = torch.pow(base, exp)
         compiled_result = torch.compile(torch.pow)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
+    def test_erf_bitwise_precision_with_emulate_precision_casts(self):
+        """Test that erf matches eager bitwise when eager numerics mode is active."""
+        import torch
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        torch._dynamo.reset()
+        values = torch.tensor(
+            [
+                -3.9194295406341553,
+                -3.9188895225524902,
+                0.0,
+                1.0,
+                3.9194295406341553,
+            ],
+            device="cuda",
+            dtype=torch.float32,
+        )
+
+        def fn(x):
+            return torch.erf(x)
+
+        eager_result = fn(values)
+        compiled_result = torch.compile(fn)(values)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
     def _test_libdevice_path_with_compilation(self):
