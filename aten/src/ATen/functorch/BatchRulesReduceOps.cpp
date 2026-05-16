@@ -75,6 +75,14 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
+static Tensor count_nonzero_decomp(
+  const Tensor& self, std::optional<int64_t> dim) {
+if (dim.has_value()) {
+  return at::count_nonzero(self, IntArrayRef{*dim});
+}
+return at::count_nonzero(self, range(0, self.dim()));
+}
+
 enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
@@ -464,6 +472,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
   m.impl("bucketize.Scalar", bucketize_decomp_Scalar);
+  m.impl("count_nonzero", count_nonzero_decomp);
   REDUCTION_BOXED_ARGS(count_nonzero.dim_IntList, 1, KEEPDIM_CASE_FALSE, -1);
   REDUCTION_NO_KEEPDIM_ARG(cummax);
   REDUCTION_NO_KEEPDIM_ARG(cummin);
