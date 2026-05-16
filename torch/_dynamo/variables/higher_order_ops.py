@@ -1837,16 +1837,15 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
-            graph_output_vt_list = []
+            graph_output_vts: list[VariableTracker] = []
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
                     vt, (SymNodeVariable, TorchScriptObjectVariable)
                 ):
-                    graph_output_vt_list.append(vt)
+                    graph_output_vts.append(vt)
 
             VariableTracker.visit(visit, output, side_effects=tx.output.side_effects)
-            graph_output_vts = tuple(graph_output_vt_list)
 
             # NOTE - [Return subgraph intermediates as subgraph outputs]
             # This helps HOPs which allow side effects. Consider the
@@ -1894,21 +1893,21 @@ def speculate_subgraph_with_auto_output_flattening(
             )
             if (allow_side_effects or traced_externally) and has_side_effects:
                 extra_outputs = collect_intermediate_outputs(
-                    tx, subtracer, list(graph_output_vts), filter_aliased_intermediates
+                    tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
-                graph_output_vts = graph_output_vts + tuple(extra_outputs)
+                graph_output_vts = graph_output_vts + extra_outputs
 
             tx.output.current_tracer.traced_with_externally_visible_side_effects = (
                 old_value
             )
 
-            validate_subgraph_output_types(list(graph_output_vts))
+            validate_subgraph_output_types(graph_output_vts)
 
             # The output proxies might not belong to this SubgraphTracer
             # (if they are free variables that were never lifted)
             # so lift them here.
             # output_proxies = output.as_proxy()
-            if isinstance(graph_output_vts, tuple):
+            if isinstance(graph_output_vts, list):
                 output_proxies = [a.as_proxy() for a in graph_output_vts]  # type: ignore[attr-defined]
                 output_proxies = pytree.tree_map(
                     subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
@@ -1957,7 +1956,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 output,
                 graph,
                 lifted_freevars,
-                graph_output_vts,
+                tuple(graph_output_vts),
                 tracing_info,
             )
     except Unsupported as ex:

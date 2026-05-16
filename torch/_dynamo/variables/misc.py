@@ -1449,7 +1449,7 @@ class GetAttrVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def mp_subscript_impl(
         self,
