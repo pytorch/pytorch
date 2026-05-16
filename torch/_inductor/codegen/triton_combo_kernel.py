@@ -4,6 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, cast
 
 import sympy
@@ -50,6 +51,67 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 LARGE_NUMELS = 512e5
 BLOCK_UTILIZATION = 0.8
+
+
+def _size_hint(expr: Any) -> int:
+    return V.graph.sizevars.optimization_hint(expr, fallback=1)
+
+
+def _node_partition_log_context(
+    node: BaseSchedulerNode, node_info_map: dict[BaseSchedulerNode, NodeInfo]
+) -> tuple[Any, ...]:
+    node_info = node_info_map[node]
+    tiling_hints = tuple(
+        (str(dim), _size_hint(numel))
+        for dim, numel in sorted(
+            node_info.tiling.items(), key=lambda item: str(item[0])
+        )
+    )
+    return (
+        bool(node_info.features.is_reduction()),
+        node_info.is_persistent_reduction,
+        tiling_hints,
+        _size_hint(node_info.numel),
+        _size_hint(node_info.rnumel),
+    )
+
+
+def _large_pointwise_separation_log_context(
+    large_pointwise: list[BaseSchedulerNode],
+    partition_candidates: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, NodeInfo],
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    return (
+        tuple(_node_partition_log_context(n, node_info_map) for n in large_pointwise),
+        tuple(
+            _node_partition_log_context(n, node_info_map) for n in partition_candidates
+        ),
+    )
+
+
+def _log_large_pointwise_separation(
+    large_pointwise: list[BaseSchedulerNode],
+    partition_candidates: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, NodeInfo],
+) -> None:
+    if log.isEnabledFor(logging.DEBUG):
+        _log_large_pointwise_separation_once(
+            len(large_pointwise),
+            _large_pointwise_separation_log_context(
+                large_pointwise, partition_candidates, node_info_map
+            ),
+        )
+
+
+# This diagnostic is otherwise repeated once per equivalent recompile.
+@cache
+def _log_large_pointwise_separation_once(
+    num_nodes: int, _partition_context: tuple[tuple[Any, ...], tuple[Any, ...]]
+) -> None:
+    log.debug(
+        "ComboKernels: %d large pointwise nodes are separated",
+        num_nodes,
+    )
 
 
 def _default_custom_combo_kernel_horizontal_partition(
@@ -115,9 +177,8 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
-            log.debug(
-                "ComboKernels: %d large pointwise nodes are separated",
-                len(large_pointwise),
+            _log_large_pointwise_separation(
+                large_pointwise, group_per_dim, node_info_map
             )
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
             nodes_per_ndim.extend([node] for node in large_pointwise)
