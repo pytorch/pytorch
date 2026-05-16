@@ -34,10 +34,10 @@ kernel void scatter_set(
   const uint ndim = ndim_dim.x;
   const uint dim = ndim_dim.y;
 
-  long pos[max_ndim];
-  pos_from_thread_index<long>(long(thread_index), pos, index_sizes, ndim);
+  ::metal::array<long, max_ndim> pos;
+  pos_from_thread_index<long>(long(thread_index), &pos[0], index_sizes, ndim);
 
-  const long index_offs = offset_from_coord<long>(pos, index_strides, ndim);
+  const long index_offs = offset_from_coord<long>(&pos[0], index_strides, ndim);
   long idx = long(index[index_offs]);
   if (idx < 0 || idx >= dim_size) {
     TORCH_REPORT_ERROR(
@@ -51,9 +51,9 @@ kernel void scatter_set(
     return;
   }
 
-  const long src_offs = offset_from_coord<long>(pos, src_strides, ndim);
+  const long src_offs = offset_from_coord<long>(&pos[0], src_strides, ndim);
   pos[dim] = idx;
-  const long out_offs = offset_from_coord<long>(pos, output_strides, ndim);
+  const long out_offs = offset_from_coord<long>(&pos[0], output_strides, ndim);
   output[out_offs] = src[src_offs];
 }
 
