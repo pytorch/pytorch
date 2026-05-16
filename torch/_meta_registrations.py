@@ -2465,11 +2465,6 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
-    if not exp_config.skip_dtype_check_in_meta_registrations:
-        torch._check(
-            a.dtype == b.dtype,
-            lambda: f"expected mat1 and mat2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
-        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -2598,6 +2593,30 @@ def calc_conv_nd_return_shape(
             output_padding_list = [output_padding[0]] * len(dims)
         else:
             output_padding_list = output_padding
+
+    # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
+    # in aten/src/ATen/native/Convolution.cpp).
+    if not is_transposed:
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        # pyrefly: ignore [bad-index, index-error]
+        padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
+        effective_kernel = [
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
+        ]
+        torch._check(
+            sym_and(
+                *[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]
+            ),
+            lambda: (
+                f"Calculated padded input size per channel: "
+                f"({' x '.join(str(x) for x in padded_input)}). "
+                f"Kernel size: ({' x '.join(str(x) for x in effective_kernel)}). "
+                f"Kernel size can't be greater than actual input size"
+            ),
+        )
 
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution

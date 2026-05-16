@@ -19,6 +19,9 @@ logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
     inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
+use_torch_profiler_benchmarker = (
+    inductor_config.use_torch_profiler_benchmarker and torch.cuda.is_available()
+)
 
 
 MILLISECONDS_PER_SECOND = 1000
@@ -544,6 +547,155 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             )
 
 
+class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
+    """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
+
+    @time_and_count
+    def benchmark_gpu(  # type: ignore[override]
+        self: Self,
+        _callable: Callable[[], Any],
+        warmup: int = 25,
+        rep: int = 100,
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 10,
+        max_benchmark_duration: int = 25,
+        return_mode: str = "mean",
+        grad_to_none: list[torch.Tensor] | None = None,
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using torch.profiler.
+
+        Arguments:
+        - _callable: The callable to benchmark.
+
+        Keyword Arguments:
+        - warmup: Ignored (kept for API compat). Warmup is handled by the
+        estimation phase which runs estimation_iters with cache flushing.
+        - rep: Optionally, the maximum number of iterations to run during benchmarking.
+        - estimation_iters: Optionally, the number of iterations used to estimate
+        the runtime of `_callable` for dynamic rep adjustment. These iterations
+        also serve as warmup for the callable.
+        - memory_warmup_iters: Optionally, the number of buffer.zero_() iterations
+        to run after estimation to bring the cache into a steady state before
+        the profiled benchmark phase.
+        - max_benchmark_duration: Optionally, the maximum duration of the profiled
+        benchmark phase, in milliseconds. The rep count is reduced if the
+        estimated total would exceed this budget.
+        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default),
+        or "max".
+        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
+        before each benchmark iteration.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The runtime of `_callable` in milliseconds, computed according to return_mode.
+        """
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # warmup `_callable` (and catches any failures in the process)
+        _callable()
+        torch.cuda.synchronize()
+
+        # Keep Triton's 256 MB cache flush on ROCm. On other backends, reuse
+        # the shared L2-sized flush from InductorBenchmarker.
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        if torch.version.hip:
+            buffer_size_bytes = 256 * 1024 * 1024
+        else:
+            buffer_size_bytes = self.L2_cache_size
+        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+
+        # Estimation phase with separate event pairs — also serves as warmup.
+        # Using per-iteration event pairs lets us take the min, matching
+        # InductorBenchmarker's approach for a more robust estimate.
+        event_pairs = self.get_event_pairs(estimation_iters)
+        for start_event, end_event in event_pairs:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        torch.cuda.synchronize()
+        estimated_ms = self.get_event_pairs_min_timing(event_pairs)
+        if estimated_ms > 0:
+            rep = max(min(rep, int(max_benchmark_duration / estimated_ms)), 1)
+
+        # Light memory warmup: flush the cache into a steady state before
+        # the profiled run.  No callable — estimation already warmed it.
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark with profiler
+        # Use both CPU and CUDA activities, otherwise record_function
+        # will not record the region.
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=False,
+        ) as prof:
+            for _ in range(rep):
+                if grad_to_none is not None:
+                    for x in grad_to_none:
+                        x.grad = None
+                buffer.zero_()
+
+                with torch.profiler.record_function("_CALLABLE"):
+                    _callable()
+
+        torch.cuda.synchronize()
+
+        # Extract _CALLABLE GPU time directly from raw kineto events.
+        # This avoids prof.key_averages() which triggers expensive lazy
+        # processing: _parse_kineto_results (wrapping every raw event in
+        # a Python FunctionEvent), _build_tree, and grouping/aggregation.
+        from torch.autograd import DeviceType as _DeviceType
+
+        callable_gpu_time_us = 0.0
+        for kineto_event in prof.profiler.kineto_results.events():
+            if (
+                kineto_event.name() == "_CALLABLE"
+                and kineto_event.device_type() == _DeviceType.CUDA
+            ):
+                callable_gpu_time_us += (
+                    kineto_event.end_ns() - kineto_event.start_ns()
+                ) / 1000.0
+
+        if callable_gpu_time_us <= 0:
+            raise AssertionError(
+                "TorchProfilerBenchmarker: '_CALLABLE' CUDA event not found in "
+                "raw kineto results. This indicates record_function('_CALLABLE') did "
+                "not produce a GPU_USER_ANNOTATION profiler event."
+            )
+
+        # TODO: Revisit incorporating launch overhead effects.
+        total_time_us = callable_gpu_time_us
+        avg_time_ms = (total_time_us / rep) / 1000.0
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # Return based on the requested mode
+        # Note: For profiler-based benchmarking, we return the mean time per iteration
+        # min/max modes are kept for API compatibility but return the mean
+        if return_mode in ("min", "mean", "max"):
+            return avg_time_ms
+        else:
+            raise ValueError(
+                f"Unsupported return_mode: {return_mode}. Use 'min', 'mean', or 'max'."
+            )
+
+
 benchmarker = (
-    InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+    TorchProfilerBenchmarker()
+    if use_torch_profiler_benchmarker
+    else (
+        InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+    )
 )
