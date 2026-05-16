@@ -1597,8 +1597,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       atomic_counter = at::zeros({1}, query.options().dtype(at::kInt));
     }
 
-    using aotriton::v2::flash::attn_fwd;
-    using aotriton::v2::flash::attn_fwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
@@ -1659,6 +1657,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                           stream);
 #endif  // AOTRITON_V3_API
     } else if (seqstart_q.has_value()) {
+      using aotriton::v2::flash::attn_fwd_compact_varlen;
       // varlen aka nested tensor
       err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
                                     mk_aotensor(k_t, "k"),
@@ -1682,6 +1681,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     persistent_counter,
                                     stream);
     } else {
+      using aotriton::v2::flash::attn_fwd;
       err = attn_fwd(mk_aotensor(q_t, "q"),
                      mk_aotensor(k_t, "k"),
                      mk_aotensor(v_t, "v"),

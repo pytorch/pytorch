@@ -257,7 +257,6 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   }
 
   hipError_t err; // TODO: Error handling
-  using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
@@ -270,54 +269,32 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
   auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
   auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
-  if (uses_swa || AOTRITON_ALWAYS_V3_API) {
-#if AOTRITON_V3_API
-    using aotriton::v3::flash::CausalType;
-    using aotriton::v3::flash::VarlenType;
-    aotriton::v3::flash::attn_fwd_params params;
-    params.Q = mk_aotensor(q_t, "q");
-    params.K = mk_aotensor(k_t, "k");
-    params.V = mk_aotensor(v_t, "v");
-    params.Sm_scale = softmax_scale;
-    params.L = mk_aotensor<2>(M, "M");
-    params.Out = mk_aotensor(output_t, "Out");
-    params.Max_seqlen_q = seqlen_q;    // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = seqlen_k;    // Unused if cu_seqlens_k is empty
-    params.dropout_p = p_dropout;
-    params.philox_seed_ptr = seed;
-    params.philox_offset1 = offset1;
-    params.philox_offset2 = offset2;
-    params.philox_seed_output = seed_output;
-    params.philox_offset_output = offset_output;
-    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
-    params.persistent_atomic_counter = persistent_counter;
-    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-    params.varlen_type = VarlenType::None;
-    params.window_left = window_left;
-    params.window_right = window_right;
-    err = aotriton::v3::flash::attn_fwd(params,
-                                        aotriton::v3::flash::attn_fwd_params::kVersion,
-                                        stream);
-#endif
-  } else {
-    err = attn_fwd(mk_aotensor(q_t, "q"),
-                   mk_aotensor(k_t, "k"),
-                   mk_aotensor(v_t, "v"),
-                   empty_bias,
-                   softmax_scale,
-                   mk_aotensor<2>(M, "M"),
-                   mk_aotensor(output_t, "Out"),
-                   p_dropout,
-                   seed,
-                   offset1,
-                   offset2,
-                   seed_output,
-                   offset_output,
-                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                   is_causal,
-                   persistent_counter,
-                   stream);
-  }
+  using aotriton::v3::flash::CausalType;
+  using aotriton::v3::flash::VarlenType;
+  aotriton::v3::flash::attn_fwd_params params;
+  params.Q = mk_aotensor(q_t, "q");
+  params.K = mk_aotensor(k_t, "k");
+  params.V = mk_aotensor(v_t, "v");
+  params.Sm_scale = softmax_scale;
+  params.L = mk_aotensor<2>(M, "M");
+  params.Out = mk_aotensor(output_t, "Out");
+  params.Max_seqlen_q = seqlen_q;    // Unused if cu_seqlens_q is empty
+  params.Max_seqlen_k = seqlen_k;    // Unused if cu_seqlens_k is empty
+  params.dropout_p = p_dropout;
+  params.philox_seed_ptr = seed;
+  params.philox_offset1 = offset1;
+  params.philox_offset2 = offset2;
+  params.philox_seed_output = seed_output;
+  params.philox_offset_output = offset_output;
+  params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+  params.persistent_atomic_counter = persistent_counter;
+  params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+  params.varlen_type = VarlenType::None;
+  params.window_left = window_left;
+  params.window_right = window_right;
+  err = aotriton::v3::flash::attn_fwd(params,
+                                      aotriton::v3::flash::attn_fwd_params::kVersion,
+                                      stream);
   // Note: These are propagated up to the return of mha_fwd(). comments
   //       represent the assignments at that level
   return {out,          // output
@@ -465,7 +442,6 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
 
   if (max_seqlen_k > 0) {
     hipError_t err; // TODO: Error handling
-    using aotriton::v2::flash::attn_fwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
@@ -483,60 +459,34 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
     auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
-    if (uses_swa || AOTRITON_ALWAYS_V3_API) {
-#if AOTRITON_V3_API
-      using aotriton::v3::flash::CausalType;
-      using aotriton::v3::flash::VarlenType;
-      aotriton::v3::flash::attn_fwd_params params;
-      params.Q = mk_aotensor(q_padded, "q");
-      params.K = mk_aotensor(k_padded, "k");
-      params.V = mk_aotensor(v_padded, "v");
-      params.Sm_scale = softmax_scale;
-      params.L = mk_aotensor<2>(M, "M");
-      params.Out = mk_aotensor(out_padded, "Out");
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
-      params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
-      params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
-      params.dropout_p = p_dropout;
-      params.philox_seed_ptr = seed;
-      params.philox_offset1 = offset1;
-      params.philox_offset2 = offset2;
-      params.philox_seed_output = seed_output;
-      params.philox_offset_output = offset_output;
-      params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
-      params.persistent_atomic_counter = persistent_counter;
-      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      params.varlen_type = VarlenType::CompactVarlen;
-      params.window_left = window_left;
-      params.window_right = window_right;
-      err = aotriton::v3::flash::attn_fwd(params,
-                                          aotriton::v3::flash::attn_fwd_params::kVersion,
-                                          stream);
-#endif
-    } else {
-      err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
-                                    mk_aotensor(k_padded, "k"),
-                                    mk_aotensor(v_padded, "v"),
-                                    empty_bias,
-                                    mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
-                                    mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    softmax_scale,
-                                    mk_aotensor<2>(M, "M"),
-                                    mk_aotensor(out_padded, "Out"),
-                                    p_dropout,
-                                    seed,
-                                    offset1,
-                                    offset2,
-                                    seed_output,
-                                    offset_output,
-                                    mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                                    is_causal,
-                                    persistent_counter,
-                                    stream);
-    }
+    using aotriton::v3::flash::CausalType;
+    using aotriton::v3::flash::VarlenType;
+    aotriton::v3::flash::attn_fwd_params params;
+    params.Q = mk_aotensor(q_padded, "q");
+    params.K = mk_aotensor(k_padded, "k");
+    params.V = mk_aotensor(v_padded, "v");
+    params.Sm_scale = softmax_scale;
+    params.L = mk_aotensor<2>(M, "M");
+    params.Out = mk_aotensor(out_padded, "Out");
+    params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+    params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+    params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.dropout_p = p_dropout;
+    params.philox_seed_ptr = seed;
+    params.philox_offset1 = offset1;
+    params.philox_offset2 = offset2;
+    params.philox_seed_output = seed_output;
+    params.philox_offset_output = offset_output;
+    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.persistent_atomic_counter = persistent_counter;
+    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+    params.varlen_type = VarlenType::CompactVarlen;
+    params.window_left = window_left;
+    params.window_right = window_right;
+    err = aotriton::v3::flash::attn_fwd(params,
+                                        aotriton::v3::flash::attn_fwd_params::kVersion,
+                                        stream);
   } else {
     // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
     out.zero_();
@@ -678,96 +628,41 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   hipError_t err; // TODO: Error handling
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
-  if (uses_swa || AOTRITON_ALWAYS_V3_API) {
-#if AOTRITON_V3_API
-    // Fused BWD does not support SWA
-    using aotriton::v3::flash::CausalType;
-    using aotriton::v3::flash::VarlenType;
-    aotriton::v3::flash::attn_bwd_params params;
-    params.Q = mk_aotensor(q_t, "q");
-    params.K = mk_aotensor(k_t, "k");
-    params.V = mk_aotensor(v_t, "v");
-    params.Sm_scale = softmax_scale;
-    params.Out = mk_aotensor(out_t, "out");
-    params.DO = mk_aotensor(dout_t, "dout");
-    params.DQ = mk_aotensor(dq_t, "dq");
-    params.DK = mk_aotensor(dk_t, "dk");
-    params.DV = mk_aotensor(dv_t, "dv");
-    params.L = mk_aotensor<2>(softmax_lse_cont, "L");
-    params.Max_seqlen_q = seqlen_q;        // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = seqlen_k;        // Unused if cu_seqlens_k is empty
-    params.dropout_p = p_dropout;
-    params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
-    params.philox_offset1 = mk_aoscalartensor(philox_offset);
-    params.philox_offset2 = 0;
-    // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
-    params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
-    params.window_left = window_left;
-    params.window_right = window_right;
-    params.varlen_type = VarlenType::None;
-#if AOTRITON_ALWAYS_V3_API
-    using sdp::aotriton_adapter::mklazy_empty_like;
-    using sdp::aotriton_adapter::mklazy_fp32zeros;
-    using sdp::aotriton_adapter::LazyTensorContext;
-    LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
-    LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
-    params.D = mklazy_empty_like<2>(&lazy_delta);
-    params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
-#else
-    at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
-    params.D = mk_aotensor<2>(delta, "delta");
-#endif
-    err = aotriton::v3::flash::attn_bwd(params,
-                                        aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream);
-#endif
-  } else if (use_fused_bwd) {
-    using aotriton::v2::flash::attn_bwd_fused;
-    using sdp::aotriton_adapter::cast_dtype;
-    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
-    err = attn_bwd_fused(mk_aotensor(q_t, "q"),
-                         mk_aotensor(k_t, "k"),
-                         mk_aotensor(v_t, "v"),
-                         empty_bias,
-                         softmax_scale,
-                         mk_aotensor(out_t, "out"),
-                         mk_aotensor(dout_t, "dout"),
-                         mk_aotensor(dq_t, "dq"),
-                         mk_aotensor(dk_t, "dk"),
-                         mk_aotensor(dv_t, "dv"),
-                         empty_bias,  // dbb
-                         mk_aotensor<2>(softmax_lse_cont, "L"),
-                         p_dropout,
-                         mk_aoscalartensor(philox_seed),
-                         mk_aoscalartensor(philox_offset),
-                         0,
-                         is_causal,
-                         stream);
-  } else {
-    at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
-    using aotriton::v2::flash::attn_bwd;
-    using sdp::aotriton_adapter::cast_dtype;
-    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
-    err = attn_bwd(mk_aotensor(q_t, "q"),
-                   mk_aotensor(k_t, "k"),
-                   mk_aotensor(v_t, "v"),
-                   empty_bias,
-                   softmax_scale,
-                   mk_aotensor(out_t, "out"),
-                   mk_aotensor(dout_t, "dout"),
-                   mk_aotensor(dq_t, "dq"),
-                   mk_aotensor(dk_t, "dk"),
-                   mk_aotensor(dv_t, "dv"),
-                   empty_bias,  // db
-                   mk_aotensor<2>(softmax_lse_cont, "L"),
-                   mk_aotensor<2>(delta, "delta"),
-                   p_dropout,
-                   mk_aoscalartensor(philox_seed),
-                   mk_aoscalartensor(philox_offset),
-                   0,
-                   is_causal,
-                   stream);
-  }
+  // Fused BWD does not support SWA
+  using aotriton::v3::flash::CausalType;
+  using aotriton::v3::flash::VarlenType;
+  aotriton::v3::flash::attn_bwd_params params;
+  params.Q = mk_aotensor(q_t, "q");
+  params.K = mk_aotensor(k_t, "k");
+  params.V = mk_aotensor(v_t, "v");
+  params.Sm_scale = softmax_scale;
+  params.Out = mk_aotensor(out_t, "out");
+  params.DO = mk_aotensor(dout_t, "dout");
+  params.DQ = mk_aotensor(dq_t, "dq");
+  params.DK = mk_aotensor(dk_t, "dk");
+  params.DV = mk_aotensor(dv_t, "dv");
+  params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+  params.Max_seqlen_q = seqlen_q;        // Unused if cu_seqlens_q is empty
+  params.Max_seqlen_k = seqlen_k;        // Unused if cu_seqlens_k is empty
+  params.dropout_p = p_dropout;
+  params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+  params.philox_offset1 = mk_aoscalartensor(philox_offset);
+  params.philox_offset2 = 0;
+  // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+  params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
+  params.window_left = window_left;
+  params.window_right = window_right;
+  params.varlen_type = VarlenType::None;
+  using sdp::aotriton_adapter::mklazy_empty_like;
+  using sdp::aotriton_adapter::mklazy_fp32zeros;
+  using sdp::aotriton_adapter::LazyTensorContext;
+  LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
+  LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
+  params.D = mklazy_empty_like<2>(&lazy_delta);
+  params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+  err = aotriton::v3::flash::attn_bwd(params,
+                                      aotriton::v3::flash::attn_bwd_params::kVersion,
+                                      stream);
 
   return { dq, dk, dv, softmax_d };
 }
@@ -931,79 +826,42 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     hipError_t err; // TODO: Error handling
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
-    if (uses_swa || AOTRITON_ALWAYS_V3_API) {
-#if AOTRITON_V3_API
-      using aotriton::v3::flash::CausalType;
-      using aotriton::v3::flash::VarlenType;
-      aotriton::v3::flash::attn_bwd_params params;
-      params.Q = mk_aotensor(q_padded, "q");
-      params.K = mk_aotensor(k_padded, "k");
-      params.V = mk_aotensor(v_padded, "v");
-      params.Sm_scale = softmax_scale;
-      params.Out = mk_aotensor(out_t, "out");
-      params.DO = mk_aotensor(dout_t, "dout");
-      params.DK = mk_aotensor(dk_padded, "dk");
-      params.DV = mk_aotensor(dv_padded, "dv");
-      params.DQ = mk_aotensor(dq_padded, "dq");
-      params.L = mk_aotensor<2>(softmax_lse_cont, "L");
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
-      params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
-      params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
-      params.dropout_p = p_dropout;
-      params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
-      params.philox_offset1 = mk_aoscalartensor(philox_offset);
-      params.philox_offset2 = 0;
-      // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
-      params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
-      params.varlen_type = VarlenType::CompactVarlen;
-      params.window_left = window_left;
-      params.window_right = window_right;
-#if AOTRITON_ALWAYS_V3_API
-      using sdp::aotriton_adapter::mklazy_empty_like;
-      using sdp::aotriton_adapter::mklazy_fp32zeros;
-      using sdp::aotriton_adapter::LazyTensorContext;
-      LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
-      LazyTensorContext lazy_dq_acc { .like_tensor = dq_padded, .tensor_name = "dq_acc" };
-      params.D = mklazy_empty_like<2>(&lazy_delta);
-      params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
-#else
-      at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
-      params.D = mk_aotensor<2>(delta, "delta");
-#endif
-      err = aotriton::v3::flash::attn_bwd(params,
-                                          aotriton::v3::flash::attn_bwd_params::kVersion,
-                                          stream);
-#endif  // AOTRITON_ALWAYS_V3_API
-    } else {
-      using aotriton::v2::flash::attn_bwd_compact_varlen;
-      using sdp::aotriton_adapter::cast_dtype;
-      at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
-      aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
-      err = attn_bwd_compact_varlen(mk_aotensor(q_padded, "q"),
-                                    mk_aotensor(k_padded, "k"),
-                                    mk_aotensor(v_padded, "v"),
-                                    mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
-                                    mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    empty_bias,
-                                    softmax_scale,
-                                    mk_aotensor(out_t, "out"),
-                                    mk_aotensor(dout_t, "dout"),
-                                    mk_aotensor(dq_padded, "dq"),
-                                    mk_aotensor(dk_padded, "dk"),
-                                    mk_aotensor(dv_padded, "dv"),
-                                    empty_bias,
-                                    mk_aotensor<2>(softmax_lse_cont, "L"),
-                                    mk_aotensor<2>(delta, "delta"),
-                                    p_dropout,
-                                    mk_aoscalartensor(philox_seed),
-                                    mk_aoscalartensor(philox_offset),
-                                    0,
-                                    is_causal,
-                                    stream);
-    }
+    using aotriton::v3::flash::CausalType;
+    using aotriton::v3::flash::VarlenType;
+    aotriton::v3::flash::attn_bwd_params params;
+    params.Q = mk_aotensor(q_padded, "q");
+    params.K = mk_aotensor(k_padded, "k");
+    params.V = mk_aotensor(v_padded, "v");
+    params.Sm_scale = softmax_scale;
+    params.Out = mk_aotensor(out_t, "out");
+    params.DO = mk_aotensor(dout_t, "dout");
+    params.DK = mk_aotensor(dk_padded, "dk");
+    params.DV = mk_aotensor(dv_padded, "dv");
+    params.DQ = mk_aotensor(dq_padded, "dq");
+    params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+    params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+    params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+    params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
+    params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+    params.dropout_p = p_dropout;
+    params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
+    params.philox_offset1 = mk_aoscalartensor(philox_offset);
+    params.philox_offset2 = 0;
+    // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+    params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
+    params.varlen_type = VarlenType::CompactVarlen;
+    params.window_left = window_left;
+    params.window_right = window_right;
+    using sdp::aotriton_adapter::mklazy_empty_like;
+    using sdp::aotriton_adapter::mklazy_fp32zeros;
+    using sdp::aotriton_adapter::LazyTensorContext;
+    LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
+    LazyTensorContext lazy_dq_acc { .like_tensor = dq_padded, .tensor_name = "dq_acc" };
+    params.D = mklazy_empty_like<2>(&lazy_delta);
+    params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+    err = aotriton::v3::flash::attn_bwd(params,
+                                        aotriton::v3::flash::attn_bwd_params::kVersion,
+                                        stream);
   } else {
     // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
     dq.zero_();

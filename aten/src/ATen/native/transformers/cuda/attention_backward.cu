@@ -570,9 +570,6 @@ _efficient_attention_backward(
     at::Tensor dout_t = grad_out.permute({0,2,1,3});
     at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
     hipError_t err;
-    using aotriton::v2::flash::attn_bwd;
-    using aotriton::v2::flash::attn_bwd_fused;
-    using aotriton::v2::flash::attn_bwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
@@ -628,6 +625,9 @@ _efficient_attention_backward(
       } else {
         params.varlen_type = VarlenType::None;
       }
+      using aotriton::v2::flash::attn_bwd;
+      using aotriton::v2::flash::attn_bwd_fused;
+      using aotriton::v2::flash::attn_bwd_compact_varlen;
       err = aotriton::v3::flash::attn_bwd(params,
                                           aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
