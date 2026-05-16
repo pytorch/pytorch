@@ -48,15 +48,15 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     // non-empty tensor
-    if (self.device().is_cpu() || self.device().is_mps()) {
-      // MPS scatter has no device-side assert (unlike CUDA), so check here to
-      // avoid silently returning zeros on out-of-bounds indices (issue #170507).
+    if (self.device().is_cpu()) {
+      // for cuda, rely on device assert thrown by scatter
       TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
     }
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        if (self.device().is_cpu() || self.device().is_mps()) {
+        if (self.device().is_cpu()) {
+          // rely on device asserts from scatter to avoid sync here
           TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
         } else {
             //for cuda, assert that num_classes is at least 1
