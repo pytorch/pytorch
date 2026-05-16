@@ -1511,6 +1511,18 @@ graph():
         with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
+    def test_builtin_eval_propagates_syntax_error(self):
+        def fn(x):
+            try:
+                eval("1+")
+            except SyntaxError:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
