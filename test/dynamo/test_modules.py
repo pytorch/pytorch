@@ -14,6 +14,8 @@ from functools import partial
 from typing import NamedTuple
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -1813,6 +1815,165 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+    def test_numpy_float_module_attr_specialized(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return x * self.scale
+
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append((gm, example_inputs))
+            return gm.forward
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=backend, fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(opt_mod(x), mod(x))
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(len(graphs[0][1]), 1)
+        self.assertNotIn("self_scale", graphs[0][0].code)
+
+        mod.scale = np.float64(3.0)
+        self.assertEqual(opt_mod(x), mod(x))
+        self.assertEqual(len(graphs), 2)
+
+    def test_numpy_float_module_attr_type_check(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                if isinstance(self.scale, np.float64):
+                    return x + 1
+                return x - 1
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(opt_mod(x), mod(x))
+
+        mod.scale = 2.0
+        self.assertEqual(opt_mod(x), mod(x))
+
+    def test_numpy_float_module_attr_item(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return x * self.scale.item()
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(opt_mod(x), mod(x))
+
+    def test_numpy_float_module_attr_real_imag(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return x * self.scale.real + self.scale.imag
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(opt_mod(x), mod(x))
+
+    def test_numpy_float_module_attr_tensor_factory_dtype(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return (
+                    torch.tensor(self.scale, device=x.device),
+                    torch.as_tensor(self.scale, device=x.device),
+                    torch.asarray(self.scale, device=x.device),
+                    torch.tensor([self.scale], device=x.device),
+                    torch.as_tensor([self.scale], device=x.device),
+                    torch.asarray([self.scale], device=x.device),
+                    torch.tensor((self.scale,), device=x.device),
+                    torch.as_tensor([[self.scale]], device=x.device),
+                    torch.asarray(((self.scale,),), device=x.device),
+                    torch.tensor(self.scale, dtype=torch.float32, device=x.device),
+                    torch.tensor([self.scale], dtype=torch.float32, device=x.device),
+                )
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref_outputs = mod(x)
+        res_outputs = opt_mod(x)
+        for ref, res in zip(ref_outputs[:-2], res_outputs[:-2]):
+            self.assertEqual(res, ref)
+            self.assertEqual(res.dtype, torch.float64)
+
+        for ref, res in zip(ref_outputs[-2:], res_outputs[-2:]):
+            self.assertEqual(res, ref)
+            self.assertEqual(res.dtype, torch.float32)
+
+    def test_numpy_float_module_attr_tensor_factory_requires_grad(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(2.0)
+
+            def forward(self, x):
+                return torch.tensor([self.scale], device=x.device, requires_grad=True)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "requires_grad=True",
+        ):
+            opt_mod(x)
+
+    def test_numpy_float_module_attr_nan_specialized(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = np.float64(np.nan)
+
+            def forward(self, x):
+                return x * self.scale
+
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append((gm, example_inputs))
+            return gm.forward
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=backend, fullgraph=True)
+        x = torch.randn(4)
+
+        torch.testing.assert_close(opt_mod(x), mod(x), equal_nan=True)
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(len(graphs[0][1]), 1)
+
+        mod.scale = np.float64(np.nan)
+        torch.testing.assert_close(opt_mod(x), mod(x), equal_nan=True)
+        self.assertEqual(len(graphs), 1)
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):

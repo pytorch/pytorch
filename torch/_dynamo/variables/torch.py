@@ -42,7 +42,7 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import ConstantVariable, NumpyScalarVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -835,6 +835,37 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        def maybe_set_numpy_scalar_dtype(
+            args: Sequence[VariableTracker],
+            kwargs: dict[str, VariableTracker],
+        ) -> bool:
+            def contains_numpy_scalar(vt: VariableTracker) -> bool:
+                if isinstance(vt, NumpyScalarVariable):
+                    return True
+                if isinstance(vt, (ListVariable, TupleVariable)):
+                    return any(contains_numpy_scalar(item) for item in vt.items)
+                return False
+
+            if len(args) > 1 or (
+                "dtype" in kwargs and not kwargs["dtype"].is_constant_none()
+            ):
+                return False
+
+            data_arg = None
+            if args:
+                data_arg = args[0]
+            elif "data" in kwargs:
+                data_arg = kwargs["data"]
+
+            if data_arg is not None and contains_numpy_scalar(data_arg):
+                try:
+                    dtype = torch.as_tensor(data_arg.as_python_constant()).dtype
+                except Exception:
+                    return False
+                kwargs["dtype"] = ConstantVariable.create(dtype)
+                return True
+            return False
+
         @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self,
@@ -1427,6 +1458,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 example_value=None,
             )
 
+        @register(torch.as_tensor, torch.asarray)
+        def handle_tensor_from_numpy_scalar(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if maybe_set_numpy_scalar_dtype(args, kwargs):
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+            return None
+
         @register(torch.jit.annotate)
         def handle_jit_annotate(
             self, tx: "InstructionTranslator", the_type: Any, the_value: V
@@ -1990,6 +2039,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            numpy_scalar_dtype_added = maybe_set_numpy_scalar_dtype(args, kwargs)
+
             def check_any_unspec(x: VariableTracker) -> bool:
                 # NB: This includes UnspecializedPythonVariable
                 if x.is_tensor() or isinstance(x, SymNodeVariable):
@@ -2017,6 +2068,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # have to
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
                     tx, [*args], kwargs
+                )
+            elif numpy_scalar_dtype_added:
+                if (
+                    "requires_grad" in kwargs
+                    and kwargs["requires_grad"].as_python_constant()
+                ):
+                    unimplemented(
+                        gb_type="Attempted to use tensor creation function with requires_grad=True",
+                        context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+                        explanation="Dynamo does not support this.",
+                        hints=[
+                            "Create the tensor outside the compiled region.",
+                            "Do not set `requires_grad=True`.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
                 )
             else:
                 return None

@@ -8,15 +8,18 @@ maintaining type safety through the compilation process.
 
 from __future__ import annotations
 
+import math
 import operator
 from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
-from torch._dynamo.source import GetItemSource
+from torch._dynamo.bytecode_transformation import create_call_function
+from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import variables
 from ..exc import raise_observed_exception, unimplemented
+from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
 
@@ -505,6 +508,103 @@ class ConstantVariable(VariableTracker):
         # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
         # bool inherits nb_positive from int via slot inheritance.
         return ConstantVariable.create(+self.value)
+
+
+class NumpyScalarVariable(ConstantVariable):
+    """
+    Represents a NumPy scalar specialized by value.
+
+    Tensor operations should see the equivalent Python scalar, while Python-level
+    type checks and reconstruction still observe the original NumPy scalar.
+    """
+
+    _nonvar_fields = {
+        "numpy_value",
+        "numpy_type",
+        *ConstantVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value: Any,
+        *,
+        numpy_value: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if np is None:
+            raise AssertionError("numpy must be available for NumpyScalarVariable")
+
+        if numpy_value is None:
+            numpy_value = value
+            value = value.item()
+
+        if not isinstance(numpy_value, np.generic):
+            raise AssertionError(
+                f"Expected np.generic, got {type(numpy_value).__name__}"
+            )
+
+        super().__init__(value, **kwargs)
+        self.numpy_value = numpy_value
+        self.numpy_type = type(numpy_value)
+
+    def __repr__(self) -> str:
+        return f"NumpyScalarVariable({self.numpy_type.__name__}: {self.numpy_value!r})"
+
+    def as_proxy(self) -> Any:
+        return self.value
+
+    def as_python_constant(self) -> Any:
+        return self.numpy_value
+
+    def python_type(self) -> type:
+        return self.numpy_type
+
+    def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
+        member = self.const_getattr(tx, name)
+        source = self.source and AttrSource(self.source, name)
+
+        if np is not None and isinstance(member, np.generic):
+            return NumpyScalarVariable(member, source=source)
+
+        if not ConstantVariable.is_literal(member):
+            raise NotImplementedError
+        if source and not self.is_python_constant():
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        return ConstantVariable.create(member, source=source)
+
+    def const_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
+        if not hasattr(self.numpy_value, name):
+            raise_observed_exception(AttributeError, tx, args=[name])
+        member = getattr(self.numpy_value, name)
+        if callable(member):
+            raise NotImplementedError
+        return member
+
+    def call_method(
+        self,
+        tx: InstructionTranslator,
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "item" and not args and not kwargs:
+            return ConstantVariable.create(self.numpy_value.item())
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen: Any) -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("numpy", self.numpy_type.__name__)
+        )
+        codegen.append_output(codegen.create_load_const(self.value))
+        codegen.extend_output(create_call_function(1, False))
+
+    def reconstruct_pycode(self, codegen: Any) -> str:
+        value = (
+            "float('nan')"
+            if isinstance(self.value, float) and math.isnan(self.value)
+            else repr(self.value)
+        )
+        return f"__import__('numpy').{self.numpy_type.__name__}({value})"
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
