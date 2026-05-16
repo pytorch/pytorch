@@ -1740,6 +1740,64 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
 
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_softmax_nonfinite_matches_eager(self):
+        def check(fn, args):
+            torch._dynamo.reset()
+            counters.clear()
+            expected = fn(*args)
+            actual, _ = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual[0], expected[0])
+            self.assertTrue(torch.isnan(expected[-1]).all().item())
+            self.assertTrue(torch.isnan(actual[-1]).all().item())
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        def mul_softmax(x, scale):
+            for _ in range(3):
+                x = x * scale
+            return x, F.softmax(x, dim=0)
+
+        def div_softmax(x, inv_scale):
+            x = x / inv_scale
+            return x, F.softmax(x, dim=0)
+
+        def duplicated_mul_softmax(x, scale):
+            y = x
+            for _ in range(3):
+                y = y * scale
+            z = x
+            for _ in range(3):
+                z = z * scale
+            return y, F.softmax(z, dim=0)
+
+        torch.manual_seed(100)
+        check(mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(duplicated_mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(
+            div_softmax,
+            (
+                torch.tensor([[1.0, -1.0, 2.0, -2.0]]),
+                torch.tensor([1e-45]),
+            ),
+        )
+
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_amax_sub_nonfinite_matches_eager(self):
+        def fn(x, scale):
+            y = x * scale
+            return y - torch.amax(y, dim=0, keepdim=True)
+
+        torch._dynamo.reset()
+        counters.clear()
+        x = torch.tensor([[10.0], [0.0]])
+        scale = torch.tensor([1e38])
+        expected = fn(x, scale)
+        actual, _ = run_and_get_code(torch.compile(fn), x, scale)
+        self.assertTrue(torch.isnan(expected[0, 0]).item())
+        self.assertTrue(torch.isnan(actual[0, 0]).item())
+        self.assertEqual(actual[1, 0].item(), float("-inf"))
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
             if type not in ["call_function", "call_method"]:
