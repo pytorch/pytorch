@@ -263,6 +263,10 @@ class SIMDKernelFeatures:
         pointwise_nodes: Iterable[SchedulerNode],
         reduction_nodes: Iterable[SchedulerNode],
     ) -> bool:
+        pointwise_nodes = list(pointwise_nodes)
+        if not pointwise_nodes:
+            return False
+
         reduction_reads = [
             dep
             for node in reduction_nodes
@@ -279,11 +283,10 @@ class SIMDKernelFeatures:
             if node.is_reduction():
                 return False
             for dep in node.read_writes.reads:
-                if cls._is_non_contiguous_dep(dep) and not (
-                    isinstance(dep, MemoryDep)
-                    and cls._is_compatible_recomputed_read(dep, reduction_reads)
-                ):
-                    return False
+                if cls._is_non_contiguous_dep(dep):
+                    dep = typing.cast(MemoryDep, dep)
+                    if not cls._is_compatible_recomputed_read(dep, reduction_reads):
+                        return False
             if any(cls._is_non_contiguous_dep(dep) for dep in node.read_writes.writes):
                 return False
         return True
@@ -307,13 +310,17 @@ class SIMDKernelFeatures:
         ignore_recomputed_reads = self.is_compatible_online_softmax_epilogue(
             pointwise_nodes, reduction_nodes
         )
-        reduction_reads = [
-            dep
-            for node in reduction_nodes
-            if self._is_online_softmax_reduction(node)
-            for dep in node.read_writes.reads
-            if isinstance(dep, MemoryDep)
-        ]
+        reduction_reads = (
+            [
+                dep
+                for node in reduction_nodes
+                if self._is_online_softmax_reduction(node)
+                for dep in node.read_writes.reads
+                if isinstance(dep, MemoryDep)
+            ]
+            if ignore_recomputed_reads
+            else []
+        )
         for node in pointwise_nodes:
             # An index can be an integer when loading a random seed.
             if not all(

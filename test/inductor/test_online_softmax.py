@@ -212,7 +212,7 @@ class TestOnlineSoftmax(TestCase):
             torch.compile(softmax_epilogue, fullgraph=True), scores, position_bias
         )
 
-        self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
+        self.assertEqual(ref, act, atol=1e-3, rtol=1e-3)
         self.assertIn("triton_per_fused", code)
         self.assertIn("prepare_softmax_online", code)
         self.assertEqual(code.count("def triton"), 1)
@@ -234,7 +234,7 @@ class TestOnlineSoftmax(TestCase):
         ref = f(x)
         act, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
 
-        self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
+        self.assertEqual(ref, act, atol=1e-3, rtol=1e-3)
         self.assertNotIn("triton_per_fused", code)
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
