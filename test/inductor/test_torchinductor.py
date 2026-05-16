@@ -16549,6 +16549,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
 
+    @config.patch(force_disable_caches=True)
+    @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
+    def test_broadcasted_inner_reduction_detection(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+
+        x = torch.randn(2000000, 1, 2, device=self.device).expand(-1, 2, -1)
+
+        @torch.compile
+        def f(x):
+            return x.sum(dim=(0, 1))
+
+        code = run_and_get_triton_code(f, x)
+        self.assertTrue("ReductionHint.OUTER" in code)
+        self.assertFalse("ReductionHint.INNER" in code)
+
     @skip_if_halide
     @requires_gpu_and_triton
     def test_triton_argmin_argmax_transpose_logical_index(self):
