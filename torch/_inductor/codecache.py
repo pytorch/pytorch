@@ -845,49 +845,20 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def _collect_module_files(
-    roots: list[str] | None, prefix: str
-) -> list[tuple[str, str]]:
-    """Collect all (spec_name, file_path) pairs from a module tree."""
-    result: list[tuple[str, str]] = []
-    for lib in pkgutil.iter_modules(roots, prefix):
+def build_code_hash(
+    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
+    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
-        result.append((spec.name, module))
+        with open(module, "rb") as f:
+            hasher.update(spec.name.encode("utf-8"))
+            hasher.update(f.read())
         if lib.ispkg:
-            result.extend(
-                _collect_module_files(spec.submodule_search_locations, f"{spec.name}.")
-            )
-    return result
-
-
-def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
-    """Hash a single module file. Suitable for concurrent execution."""
-    h = hashlib.sha256()
-    h.update(name.encode("utf-8"))
-    with open(path, "rb") as f:
-        if sys.version_info >= (3, 11):
-            h.update(hashlib.file_digest(f, "sha256").digest())
-        else:
-            h.update(f.read())
-    return (name, h.digest())
-
-
-def build_code_hash(
-    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
-) -> None:
-    from concurrent.futures import ThreadPoolExecutor
-
-    files = _collect_module_files(roots, prefix)
-    if not files:
-        return
-    with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
-        per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
-    per_file_hashes.sort()
-    for _name, digest in per_file_hashes:
-        hasher.update(digest)
+            # need to also hash submodules
+            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
 @torch_key_cache
@@ -1552,7 +1523,7 @@ class GuardedCache(Generic[T]):
             local, remote_cache, key
         ):
             assert hasattr(candidate, "guards_expr")
-            if not candidate.guards_expr:
+            if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
                 pickled_content = content
@@ -1563,7 +1534,7 @@ class GuardedCache(Generic[T]):
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))
+            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
             if hit:
                 graph = candidate
                 pickled_content = content
@@ -3271,7 +3242,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
         result = [torch.tensor([]) if r is None else r for r in result]
         for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
 
     assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
     return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
@@ -4995,7 +4966,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
             self.static_autotuner.recheck_autotune_cache(
                 reload_kernel_from_src=self.reload_kernel_from_src
             )
-            self.static_autotuner.precompile(
+            self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
