@@ -13,10 +13,12 @@ from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
+from ...sizevars import stride_at
 from ...virtualized import V
 from .common import (
     create_indices_fake,
@@ -43,14 +45,187 @@ class FlexFlashConfig:
 def _get_flex_flash_fwd_configs(
     has_score_mod: bool,
     has_aux_tensors: bool,
+    device: torch.device | None = None,
+    score_mod_graph_module: GraphModule | None = None,
+    score_mod_other_buffers: Sequence[TensorBox] = (),
 ) -> list[FlexFlashConfig]:
-    if not has_score_mod or not torch._inductor.config.max_autotune:
+    if not has_score_mod:
         return [FlexFlashConfig()]
     if has_aux_tensors:
+        device_index = None if device is None else device.index
+        if (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability(device_index)[0] >= 10
+        ):
+            return [
+                FlexFlashConfig(
+                    score_mod_vec_size=_select_aux_score_mod_vec_size(
+                        score_mod_graph_module, score_mod_other_buffers
+                    )
+                )
+            ]
         return [FlexFlashConfig(score_mod_vec_size=1)]
+    if not torch._inductor.config.max_autotune:
+        return [FlexFlashConfig()]
     return [
         FlexFlashConfig(score_mod_vec_size=v) for v in (1, 2, 4, 8, 16, 32, 64, 128)
     ]
+
+
+def _select_aux_score_mod_vec_size(
+    graph_module: GraphModule | None, score_mod_other_buffers: Sequence[TensorBox]
+) -> int:
+    """Choose a safe score_mod vector width for captured tensor loads.
+
+    Flex score_mod vectorization is only enabled when every captured tensor
+    index load can be emitted without per-lane gather semantics: either as a
+    direct contiguous vector load or as a lane-uniform scalar load broadcast to
+    all lanes. If any load needs scalar gather semantics, force vec_size=1 so
+    the generated score_mod matches scalar-lane lowering.
+    """
+    if graph_module is None:
+        return 1
+
+    placeholders = [
+        node for node in graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    if len(placeholders) < 5:
+        return 1
+
+    capture_to_buffer = dict(zip(placeholders[5:], score_mod_other_buffers))
+    selected_vec_size = 8
+    found_vectorizable_load = False
+    for node in graph_module.graph.nodes:
+        if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
+            continue
+        buffer_node, indices = node.args
+        if buffer_node not in capture_to_buffer:
+            continue
+        max_vec_size = _max_direct_aux_load_vec_size(
+            indices, capture_to_buffer[buffer_node], placeholders[3], placeholders[4]
+        )
+        if max_vec_size is None:
+            return 1
+        selected_vec_size = min(selected_vec_size, max_vec_size)
+        found_vectorizable_load = True
+
+    return selected_vec_size if found_vectorizable_load else 1
+
+
+def _max_direct_aux_load_vec_size(
+    indices: object,
+    buffer: TensorBox,
+    q_idx_node: torch.fx.Node,
+    kv_idx_node: torch.fx.Node,
+) -> int | None:
+    if not isinstance(indices, (list, tuple)) or not indices:
+        return None
+
+    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
+    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
+    prefix_exprs = [
+        _fx_aux_index_to_sympy(index, q_idx_node, kv_idx_node, q_idx, kv_idx)
+        for index in indices[:-1]
+    ]
+    if any(expr is None or kv_idx in expr.free_symbols for expr in prefix_exprs):
+        return None
+
+    last_expr = _fx_aux_index_to_sympy(
+        indices[-1], q_idx_node, kv_idx_node, q_idx, kv_idx
+    )
+    if last_expr is None:
+        return None
+    if kv_idx not in last_expr.free_symbols:
+        # All score_mod vector lanes read the same element, so the load can use
+        # the uniform-broadcast path even though it is not a direct vector copy.
+        return 8
+
+    sizes = buffer.get_size()
+    strides = buffer.get_stride()
+    if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+        return None
+
+    # FlashAttention's score_mod loop groups consecutive flattened score entries.
+    # On SM100, those entries have consecutive KV coordinates for a fixed Q row.
+    offset = buffer.get_layout().offset
+    lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(last_expr, kv_idx)
+    for vec_size in (8, 4, 2):
+        if not (
+            V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
+            and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
+            and all(
+                V.graph.sizevars.statically_known_multiple_of(stride, vec_size)
+                for stride in strides[:-1]
+            )
+        ):
+            continue
+        if (
+            (
+                isinstance(last_expr, ModularIndexing)
+                or V.graph.sizevars.statically_known_equals(
+                    stride_at(last_expr, kv_idx), 1
+                )
+            )
+            and lane_contiguity.is_contiguous_for(vec_size)
+            and _lane_group_start_is_aligned(last_expr, kv_idx, vec_size)
+            and _lane_group_start_is_nonnegative(last_expr, kv_idx)
+        ):
+            return vec_size
+    return None
+
+
+def _fx_aux_index_to_sympy(
+    index: object,
+    q_idx_node: torch.fx.Node,
+    kv_idx_node: torch.fx.Node,
+    q_idx: sympy.Symbol,
+    kv_idx: sympy.Symbol,
+) -> sympy.Expr | None:
+    if isinstance(index, int | sympy.Integer):
+        return sympy.Integer(index)
+    if not isinstance(index, torch.fx.Node):
+        return None
+    if index is q_idx_node:
+        return q_idx
+    if index is kv_idx_node:
+        return kv_idx
+    if index.op != "call_function":
+        return None
+
+    args = index.args
+    target = index.target
+    if len(args) < 2:
+        return None
+    lhs = _fx_aux_index_to_sympy(args[0], q_idx_node, kv_idx_node, q_idx, kv_idx)
+    rhs = _fx_aux_index_to_sympy(args[1], q_idx_node, kv_idx_node, q_idx, kv_idx)
+    if lhs is None or rhs is None:
+        return None
+    if target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar):
+        return V.graph.sizevars.simplify(lhs + rhs)
+    if target in (torch.ops.aten.sub.Tensor, torch.ops.aten.sub.Scalar):
+        return V.graph.sizevars.simplify(lhs - rhs)
+    if target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar):
+        return V.graph.sizevars.simplify(lhs * rhs)
+    if target in (torch.ops.aten.remainder.Tensor, torch.ops.aten.remainder.Scalar):
+        return ModularIndexing(lhs, 1, rhs)
+    if (
+        target == torch.ops.aten.div.Tensor_mode
+        and index.kwargs.get("rounding_mode") == "floor"
+    ):
+        return FloorDiv(lhs, rhs)
+    return None
+
+
+def _lane_group_start_is_aligned(
+    expr: sympy.Expr, lane_var: sympy.Symbol, vec_size: int
+) -> bool:
+    start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
+    return V.graph.sizevars.statically_known_multiple_of(start_expr, vec_size)
+
+
+def _lane_group_start_is_nonnegative(expr: sympy.Expr, lane_var: sympy.Symbol) -> bool:
+    start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
+    return V.graph.sizevars.statically_known_geq(start_expr, 0)
 
 
 def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:
@@ -69,7 +244,7 @@ def ensure_flash_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None
+        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
     except ImportError:
         return False
 
@@ -415,7 +590,11 @@ def create_flex_flash_attention_kernel(
     subgraphs.append(mask_graph_buffer)
 
     configs = _get_flex_flash_fwd_configs(
-        has_score_mod, len(score_mod_other_buffers) > 0
+        has_score_mod,
+        len(score_mod_other_buffers) > 0,
+        device,
+        subgraph.graph_module if has_score_mod and subgraph is not None else None,
+        score_mod_other_buffers,
     )
 
     error: NotImplementedError | None = None
