@@ -1289,6 +1289,44 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
+    @requires_gpu
+    def test_triton_kernel_mutates_strided_intermediate(self):
+        @triton.jit
+        def add_one_strided_kernel(
+            in_ptr,
+            out_ptr,
+            n_cols: tl.constexpr,
+            stride_b: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            row = tl.program_id(0)
+            offsets = tl.arange(0, BLOCK_N)
+            mask = offsets < n_cols
+            values = tl.load(in_ptr + row * stride_b + offsets, mask=mask, other=0.0)
+            tl.store(out_ptr + row * stride_b + offsets, values + 1.0, mask=mask)
+
+        def triton_update(x):
+            out = x
+            add_one_strided_kernel[(x.size(0),)](
+                x,
+                out,
+                x.size(1),
+                x.stride(0),
+                BLOCK_N=4096,
+            )
+            return out
+
+        def f(base):
+            x = (base + 1)[:, :4096]
+            return triton_update(x)
+
+        base = torch.randn(64, 8192, device=GPU_TYPE)
+        eager_out = f(base.clone())
+        compiled_out = torch.compile(f, fullgraph=True)(base.clone())
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+
     @inductor_config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
     )

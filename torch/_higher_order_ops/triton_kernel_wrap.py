@@ -11,18 +11,19 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
 
+import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
-from torch._prims_common import clone_preserve_strides
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -199,6 +200,18 @@ class KernelSideTable:
 
 
 kernel_side_table = KernelSideTable()
+
+
+def clone_preserve_strides_for_triton_kernel_wrapper(x: Tensor) -> Tensor:
+    storage_offset = cast(int, x.storage_offset())
+    needed_size = compute_required_storage_length(x.size(), x.stride(), storage_offset)
+    buffer = torch.empty_strided((needed_size,), (1,), dtype=x.dtype, device=x.device)
+    out = torch.as_strided(buffer, x.size(), x.stride(), storage_offset)
+    # Copy logical elements only. Inductor may use a compact internal
+    # materialization for strided views, so flattening the source storage span
+    # can read past the realized buffer.
+    out.copy_(x)
+    return out
 
 
 ###############################################################################
@@ -1550,7 +1563,11 @@ def triton_kernel_wrapper_functional_dense(
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
     kwargs = {
-        key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
+        key: (
+            clone_preserve_strides_for_triton_kernel_wrapper(val)
+            if key in tensors_to_clone
+            else val
+        )
         for key, val in kwargs.items()
     }
     triton_kernel_wrapper_mutation(
@@ -1580,7 +1597,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # Requires https://github.com/pytorch/pytorch/issues/109240
     with mode:
         return {
-            key: clone_preserve_strides(val)
+            key: clone_preserve_strides_for_triton_kernel_wrapper(val)
             for key, val in kwargs.items()
             if key in tensors_to_clone
         }
