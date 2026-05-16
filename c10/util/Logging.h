@@ -1,6 +1,7 @@
 #ifndef C10_UTIL_LOGGING_H_
 #define C10_UTIL_LOGGING_H_
 
+#include <atomic>
 #include <climits>
 #include <exception>
 #include <functional>
@@ -54,6 +55,27 @@ C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 #else
 #define C10_LOG_EVERY_N(severity, n) LOG(severity)
 #endif
+
+#ifdef LOG_IF_EVERY_N
+#define C10_LOG_IF_EVERY_N(severity, condition, n) \
+  LOG_IF_EVERY_N(severity, condition, n)
+#else
+// Without LOG_IF_EVERY_N we can't throttle, but we still honor the condition
+// so behavior doesn't silently diverge from the glog path.
+#define C10_LOG_IF_EVERY_N(severity, condition, n) LOG_IF(severity, condition)
+#endif
+
+// Logs on the Nth, 2Nth, 3Nth, ... call at each call site (counting from 1).
+// For N=1 this logs every call. Contrast with glog's LOG_EVERY_N (wrapped as
+// C10_LOG_EVERY_N), which fires on calls 1, N+1, 2N+1, ... Uses a local counter
+// so the schedule is identical on glog and non-glog builds. LOG_IF is provided
+// by both glog and the non-glog path (see logging_is_not_google_glog.h).
+#define C10_LOG_EVERY_NTH(severity, n)                              \
+  LOG_IF(severity, [&] {                                            \
+    static std::atomic<size_t> counter{0};                          \
+    size_t c = counter.fetch_add(1, std::memory_order_relaxed) + 1; \
+    return c % (n) == 0;                                            \
+  }())
 
 namespace c10 {
 
