@@ -1003,6 +1003,18 @@ class DictViewVariable(VariableTracker):
         s.call_method(tx, "update", [other], {})
         return s
 
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6036 (dictviews_sub)
+        self_, other_ = (other, self) if reverse else (self, other)
+        s = VariableTracker.build(tx, set).call_function(tx, [self_], {})
+        s.call_method(tx, "difference_update", [other_], {})
+        return s
+
 
 class DictKeysVariable(DictViewVariable):
     # PyDictKeys_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6365
@@ -1057,8 +1069,6 @@ class DictKeysVariable(DictViewVariable):
         if name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
@@ -1104,9 +1114,11 @@ class DictValuesVariable(DictViewVariable):
     # Override DictViewVariable.hash_impl to restore the base identity hash.
     kv = "values"
 
-    # dict.values() do not implement nb_or and nb_inplace_or
+    # dict.values() do not implement tp_as_number
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None  # type: ignore[bad-override]
+    nb_inplace_or = None
+    nb_subtract_impl = None  # type: ignore[bad-override]
+    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1231,8 +1243,6 @@ class DictItemsVariable(DictViewVariable):
         elif name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
