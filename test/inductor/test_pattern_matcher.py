@@ -2702,6 +2702,70 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
                 self.assertEqual(accumulated_count, count1 + count2)
 
+    def test_list_tensor_pattern_replacement(self):
+        with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
+            lib.define("list_op(Tensor[] xs) -> Tensor[]")
+            lib.impl(
+                "list_op",
+                lambda xs: [x + 1 for x in xs],
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("_test_pm_list::list_op", lib=lib)
+            def list_op_fake(xs):
+                return xs
+
+            def src_pattern(xs: list[torch.Tensor]):
+                return torch.ops._test_pm_list.list_op.default(xs)
+
+            def target_pattern(xs: list[torch.Tensor]):
+                return xs
+
+            class Backend:
+                def __init__(self, example_inputs) -> None:
+                    self.pm = PatternMatcherPass()
+                    self.count = 0
+                    self.graph = None
+                    register_replacement(
+                        src_pattern,
+                        target_pattern,
+                        [example_inputs],
+                        fwd_only,
+                        self.pm,
+                    )
+
+                def __call__(self, gm, example_inputs):
+                    self.count = self.pm.apply(gm.graph)
+                    gm.graph.lint()
+                    gm.recompile()
+                    self.graph = gm.graph
+                    return gm.forward
+
+            def run_case(length):
+                torch._dynamo.reset()
+                backend = Backend([torch.empty(4, 5) for _ in range(length)])
+
+                def fn(xs):
+                    return torch.ops._test_pm_list.list_op.default(xs)
+
+                xs = [torch.randn(4, 5) for _ in range(length)]
+                result = torch.compile(fn, backend=backend)(xs)
+
+                self.assertEqual(backend.count, 1)
+                self.assertEqual(len(result), length)
+                for actual, expected in zip(result, xs):
+                    self.assertEqual(actual, expected)
+
+                if backend.graph is None:
+                    self.fail("Expected the custom backend to record a graph")
+                op_targets = [
+                    n.target for n in backend.graph.nodes if n.op == "call_function"
+                ]
+                self.assertNotIn(torch.ops._test_pm_list.list_op.default, op_targets)
+
+            run_case(1)
+            run_case(2)
+
     def test_opaque_obj_custom_op(self):
         with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
             lib.define(
