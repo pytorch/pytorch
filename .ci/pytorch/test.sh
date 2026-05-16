@@ -1360,6 +1360,14 @@ test_unbacked_parity_smoketest() {
 }
 
 test_inductor_set_cpu_affinity(){
+  # `nproc` from coreutils honors $OMP_NUM_THREADS and returns the smaller of
+  # that and the real cpuset count. The USE_ARC block earlier in this script
+  # sets OMP_NUM_THREADS=nproc/4 for general tests; if we leave it set, every
+  # subsequent `nproc` call here returns the quartered value instead of the
+  # pod's true CPU allocation. Unset it so we can re-derive OMP_NUM_THREADS
+  # from the actual cgroup cpuset below.
+  unset OMP_NUM_THREADS
+
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
