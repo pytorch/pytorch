@@ -807,6 +807,15 @@ epilogue_scaling_types = [ScalingType.TensorWise, ScalingType.RowWise]
 main_loop_scaling_types = [ScalingType.BlockWise1x128, ScalingType.BlockWise128x128]
 
 
+def _uses_blockwise_scaling(
+    scale_option_a: ScalingType, scale_option_b: ScalingType
+) -> bool:
+    return (
+        scale_option_a in main_loop_scaling_types
+        or scale_option_b in main_loop_scaling_types
+    )
+
+
 def _is_tensorwise_scaling(sz: Any) -> bool:
     return (len(sz) == 0) or all(
         V.graph.sizevars.statically_known_equals(d, 1) for d in sz
@@ -869,17 +878,30 @@ def get_tile_size(scale_option) -> int:
             )
 
 
+def _try_get_scaling_options(
+    mat_a: Any,
+    mat_b: Any,
+    scale_a_size: torch.Tensor,
+    scale_b_size: torch.Tensor,
+) -> tuple[ScalingType, ScalingType] | None:
+    for scale_option_a, scale_option_b in scaling_pairs:
+        if is_desired_scaling(
+            mat_a, scale_a_size, scale_option_a
+        ) and is_desired_scaling(mat_b, scale_b_size, scale_option_b, transpose=True):
+            return scale_option_a, scale_option_b
+
+    return None
+
+
 def get_scaling_options(
     mat_a: Any,
     mat_b: Any,
     scale_a_size: torch.Tensor,
     scale_b_size: torch.Tensor,
 ) -> tuple[ScalingType, ScalingType]:
-    for scale_option_a, scale_option_b in scaling_pairs:
-        if is_desired_scaling(
-            mat_a, scale_a_size, scale_option_a
-        ) and is_desired_scaling(mat_b, scale_b_size, scale_option_b, transpose=True):
-            return scale_option_a, scale_option_b
+    scaling_options = _try_get_scaling_options(mat_a, mat_b, scale_a_size, scale_b_size)
+    if scaling_options is not None:
+        return scaling_options
 
     raise AssertionError(
         f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
@@ -952,27 +974,44 @@ def tuned_scaled_mm(
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides = {}
 
-    if use_aten_gemm_kernels():
+    _, is_nonzero = _is_static_problem(layout)
+    use_triton_scaled_mm = (
+        # We dont have triton lowerings for the MX variants yet
+        scale_a.dtype == torch.float32
+        and is_nonzero
+        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
+    )
+
+    scale_option_a: ScalingType | None = None
+    scale_option_b: ScalingType | None = None
+    use_aten_for_triton_unsafe_scaling = False
+    if use_triton_scaled_mm:
+        scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
+        scaling_options = _try_get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+        if scaling_options is None:
+            use_aten_for_triton_unsafe_scaling = True
+        else:
+            scale_option_a, scale_option_b = scaling_options
+            use_aten_for_triton_unsafe_scaling = _uses_blockwise_scaling(
+                scale_option_a, scale_option_b
+            )
+
+    # Triton's scaled_mm templates only support the classified tensorwise and
+    # rowwise layouts. Use ATen for unknown or blockwise float32 scale layouts
+    # instead of treating Triton classification as generic operator validation.
+    if use_aten_gemm_kernels() or use_aten_for_triton_unsafe_scaling:
         templates_to_use.append(aten__fp8_mm)
         kwarg_overrides[aten__fp8_mm.uid] = dict(
             out_dtype=out_dtype, use_fast_accum=use_fast_accum
         )
 
-    _, is_nonzero = _is_static_problem(layout)
-
-    if (
-        # We dont have triton lowerings for the MX variants yet
-        scale_a.dtype == torch.float32
-        and is_nonzero
-        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
-    ):
+    if use_triton_scaled_mm and not use_aten_for_triton_unsafe_scaling:
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
-        scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
+        assert scale_option_a is not None
+        assert scale_option_b is not None
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
@@ -1032,6 +1071,12 @@ def tuned_scaled_mm(
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    if use_aten_for_triton_unsafe_scaling:
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
     if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
