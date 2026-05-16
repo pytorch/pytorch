@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 __TestCase = CPythonTestCase
 
@@ -895,6 +895,10 @@ class FormatTestCase(__TestCase):
         self.assertEqual(format(-123.34, '00.10g'), '-123.34')
 
 class ReprTestCase(__TestCase):
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
                   'mathdata',

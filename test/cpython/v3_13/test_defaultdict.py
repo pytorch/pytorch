@@ -14,6 +14,7 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 __TestCase = CPythonTestCase
@@ -110,6 +111,10 @@ class TestDefaultDict(__TestCase):
         d1.default_factory = list
         self.assertEqual(d1.__missing__(42), [])
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_repr(self):
         d1 = defaultdict()
         self.assertEqual(d1.default_factory, None)

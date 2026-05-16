@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
     slowTest,
+    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 
@@ -895,6 +896,10 @@ class ComplexTest(__TestCase):
         self.assertEqual(complex("-1e500j"), complex(0.0, -INF))
         self.assertEqual(complex("-1e500+1.8e308j"), complex(-INF, INF))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     @support.requires_IEEE_754
     def test_repr_roundtrip(self):
         vals = [0.0, 1e-500, 1e-315, 1e-200, 0.0123, 3.1415, 1e50, INF, NAN]

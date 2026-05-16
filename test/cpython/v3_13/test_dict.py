@@ -85,6 +85,10 @@ class DictTest(__TestCase):
         self.assertEqual(dict(), {})
         self.assertIsNot(dict(), {})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_literal_constructor(self):
         # check literal constructor for different sized dicts
         # (to exercise the BUILD_MAP oparg).
@@ -873,6 +877,10 @@ class DictTest(__TestCase):
             d[(1,)]
         self.assertEqual(c.exception.args, ((1,),))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_bad_key(self):
         # Dictionary lookups should fail if __eq__() raises an exception.
         class CustomException(Exception):

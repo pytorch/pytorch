@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 
@@ -117,6 +118,10 @@ class ExceptionTests(__TestCase):
             self.assertEqual(buf1, buf2)
             self.assertEqual(exc.__name__, excname)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def testRaising(self):
         self.raise_catch(AttributeError, "AttributeError")
         self.assertRaises(AttributeError, getattr, sys, "undefined_attribute")

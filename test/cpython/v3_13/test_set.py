@@ -1401,6 +1401,10 @@ class _TestSubsets:
                ">=": "<=",
               }
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_issubset(self):
         x = self.left
         y = self.right

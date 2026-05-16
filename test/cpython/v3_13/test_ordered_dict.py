@@ -352,6 +352,10 @@ class OrderedDictTests:
         # different length implied inequality
         self.assertNotEqual(od1, OrderedDict(pairs[:-1]))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_copying(self):
         OrderedDict = self.OrderedDict
         # Check that ordered dicts are copyable, deepcopyable, picklable,
@@ -429,6 +433,10 @@ class OrderedDictTests:
                 self.assertEqual(list(dup.keys()), [1])
                 self.assertIs(dup[1], dup)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_repr(self):
         OrderedDict = self.OrderedDict
         od = OrderedDict([('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)])

@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 # ======= END DYNAMO PATCH =======
@@ -360,6 +361,10 @@ class BuiltinTest(CPythonTestCase):
     def test_cmp(self):
         self.assertTrue(not hasattr(builtins, "cmp"))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_compile(self):
         compile('print(1)\n', '', 'exec')
         bom = b'\xef\xbb\xbf'
@@ -430,6 +435,10 @@ class BuiltinTest(CPythonTestCase):
                                 msg=f"source={source} mode={mode}")
 
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     @unittest.skipIf(
         support.is_emscripten or support.is_wasi,
         "socket.accept is broken"
@@ -530,6 +539,10 @@ class BuiltinTest(CPythonTestCase):
             asyncio.set_event_loop_policy(policy)
 
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_compile_async_generator(self):
         """
         With the PyCF_ALLOW_TOP_LEVEL_AWAIT flag added in 3.8, we want to
@@ -686,6 +699,10 @@ class BuiltinTest(CPythonTestCase):
 
         self.assertRaises(TypeError, divmod)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_eval(self):
         self.assertEqual(eval('1+1'), 2)
         self.assertEqual(eval(' 1+1\n'), 2)
@@ -709,11 +726,19 @@ class BuiltinTest(CPythonTestCase):
                 raise ValueError
         self.assertRaises(ValueError, eval, "foo", {}, X())
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_eval_kwargs(self):
         data = {"A_GLOBAL_VALUE": 456}
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", globals=data), 456)
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", locals=data), 123)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_general_eval(self):
         # Tests that general mappings can be used for the locals argument
 
@@ -807,6 +832,10 @@ class BuiltinTest(CPythonTestCase):
             del l['__builtins__']
         self.assertEqual((g, l), ({'a': 1}, {'b': 2}))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_kwargs(self):
         g = {}
         exec('global z\nz = 1', globals=g)
@@ -820,6 +849,10 @@ class BuiltinTest(CPythonTestCase):
         exec('global z\nz = 1', locals=g)
         self.assertEqual(g, {})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_globals(self):
         code = compile("print('Hello World!')", "", "exec")
         # no builtin function
@@ -829,6 +862,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError,
                           exec, code, {'__builtins__': 123})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_globals_frozen(self):
         class frozendict_error(Exception):
             pass
@@ -861,6 +898,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(frozendict_error,
                           exec, code, namespace)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_globals_error_on_get(self):
         # custom `globals` or `builtins` can raise errors on item access
         class setonlyerror(Exception):
@@ -880,6 +921,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(setonlyerror, exec, code,
                           {'__builtins__': setonlydict({'superglobal': 1})})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_globals_dict_subclass(self):
         class customdict(dict):  # this one should not do anything fancy
             pass
@@ -891,6 +936,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaisesRegex(NameError, "name 'superglobal' is not defined",
                                exec, code, {'__builtins__': customdict()})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_eval_builtins_mapping(self):
         code = compile("superglobal", "test", "eval")
         # works correctly
@@ -901,6 +950,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaisesRegex(NameError, "name 'superglobal' is not defined",
                                eval, code, ns)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_builtins_mapping_import(self):
         code = compile("import foo.bar", "test", "exec")
         ns = {'__builtins__': types.MappingProxyType({})}
@@ -909,6 +962,10 @@ class BuiltinTest(CPythonTestCase):
         exec(code, ns)
         self.assertEqual(ns['foo'], ('foo.bar', ns, ns, None, 0))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_eval_builtins_mapping_reduce(self):
         # list_iterator.__reduce__() calls _PyEval_GetBuiltin("iter")
         code = compile("x.__reduce__()", "test", "eval")
@@ -917,6 +974,10 @@ class BuiltinTest(CPythonTestCase):
         ns = {'__builtins__': types.MappingProxyType({'iter': iter}), 'x': iter([1, 2])}
         self.assertEqual(eval(code, ns), (iter, ([1, 2],), 0))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_redirected(self):
         savestdout = sys.stdout
         sys.stdout = None # Whatever that cannot flush()
@@ -928,6 +989,10 @@ class BuiltinTest(CPythonTestCase):
         finally:
             sys.stdout = savestdout
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_exec_closure(self):
         def function_without_closures():
             return 3 * 5
@@ -1277,6 +1342,10 @@ class BuiltinTest(CPythonTestCase):
             m2 = map(map_char, "Is this the real life?")
             self.check_iter_pickle(m1, list(m2), proto)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_max(self):
         self.assertEqual(max('123123'), '3')
         self.assertEqual(max(1, 2, 3), 3)
@@ -1340,6 +1409,10 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(max(data, key=f),
                          sorted(reversed(data), key=f)[-1])
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "exec outside constant assignments not supported",
+    )
     def test_min(self):
         self.assertEqual(min('123123'), '1')
         self.assertEqual(min(1, 2, 3), 1)
@@ -2464,29 +2537,53 @@ class PtyTests(CPythonTestCase):
         else:
             yield
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty(self):
         # Test input() functionality when wired to a tty
         self.check_input_tty("prompt", b"quux")
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty_non_ascii(self):
         # Check stdin/stdout encoding is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xc3\xa9", "utf-8")
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty_non_ascii_unicode_errors(self):
         # Check stdin/stdout error handler is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xe9", "ascii")
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty_null_in_prompt(self):
         self.check_input_tty("prompt\0", b"",
                 expected='ValueError: input: prompt string cannot contain '
                          'null characters')
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty_nonencodable_prompt(self):
         self.check_input_tty("prompté", b"quux", "ascii", stdout_errors='strict',
                 expected="UnicodeEncodeError: 'ascii' codec can't encode "
                          "character '\\xe9' in position 6: ordinal not in "
                          "range(128)")
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval outside constant expressions not supported",
+    )
     def test_input_tty_nondecodable_input(self):
         self.check_input_tty("prompt", b"quux\xe9", "ascii", stdin_errors='strict',
                 expected="UnicodeDecodeError: 'ascii' codec can't decode "
