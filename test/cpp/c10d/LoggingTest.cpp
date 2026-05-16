@@ -137,8 +137,7 @@ TEST(C10DWarningEveryNElseDebug, StderrShowsBothPaths) {
   std::string output = testing::internal::GetCapturedStderr();
 
   size_t debug_lines = countOccurrences(output, "[c10d - debug]");
-  size_t c10d_lines = countOccurrences(output, "[c10d");
-  size_t warning_lines = c10d_lines - debug_lines;
+  size_t warning_lines = countOccurrences(output, "[c10d]");
 
   EXPECT_EQ(warning_lines, 4u); // calls 3, 6, 9, 12
   EXPECT_EQ(debug_lines, 8u); // calls 1, 2, 4, 5, 7, 8, 10, 11
