@@ -192,6 +192,21 @@ class PadMMTest(TestCase):
         b = torch.randn(10, 100).to(GPU_TYPE)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
+    @unittest.skipIf(GPU_TYPE != "cuda", "TF32 matmul is CUDA-specific")
+    @inductor_config.patch(shape_padding=True)
+    def test_can_pad_non_contiguous_fp32_tf32(self):
+        old_precision = torch.get_float32_matmul_precision()
+        try:
+            torch.set_float32_matmul_precision("high")
+
+            mat1 = rand_strided((7, 4), (1, 8), device=GPU_TYPE, dtype=torch.float32)
+            mat2 = torch.randn((4, 4), device=GPU_TYPE, dtype=torch.float32)
+
+            self.assertFalse(can_pad(mat1, mat2, torch.ops.aten.mm))
+            self.assertTrue(can_pad(mat1.contiguous(), mat2, torch.ops.aten.mm))
+        finally:
+            torch.set_float32_matmul_precision(old_precision)
+
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
