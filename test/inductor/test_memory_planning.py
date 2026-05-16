@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import re
 import sys
 import unittest
 
@@ -132,15 +133,32 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(model(*example_inputs), result))
 
-        # check allocation is done after the unbacked symint is computed
-        FileCheck().check("auto u0 = u0_raw;").check(
-            # Shows up as one of the following:
-            #   const int64_t int_array_2[] = {10L, 8L*u0, 32L};
-            #   const int64_t int_array_3[] = {10L, 8L*u0, 32L};
-            "[] = {10L, 8L*u0, 32L};"
-        ).check("AtenTensorHandle pool0_handle;").check(
-            "aoti_torch_empty_strided(3, int_array_2, int_array_3"
-        ).run(code)
+        def find_code(pattern, pos=0):
+            match = re.compile(pattern).search(code, pos)
+            if match is None:
+                self.fail(f"Expected to find {pattern!r} in generated code")
+            return match
+
+        # Check allocation is done after the unbacked symint is computed. The
+        # exact int_array_N names are not stable, so capture the emitted names
+        # and verify the calls use the matching shape/stride arrays.
+        u0_match = find_code(r"auto u0 = u0_raw;")
+        pool_shape = find_code(
+            r"const int64_t (?P<name>int_array_\d+)\[\] = \{10L, 8L\*u0, 32L\};",
+            u0_match.end(),
+        )
+        pool_stride = find_code(
+            r"const int64_t (?P<name>int_array_\d+)\[\] = \{256L\*u0, 32L, 1L\};",
+            pool_shape.end(),
+        )
+        pool_handle = find_code(r"AtenTensorHandle pool0_handle;", pool_stride.end())
+        empty_strided = find_code(
+            rf"aoti_torch_empty_strided\(3, {pool_shape.group('name')}, {pool_stride.group('name')},",
+            pool_handle.end(),
+        )
+        pool0_raii = find_code(
+            r"RAIIAtenTensorHandle pool0\(pool0_handle\);", empty_strided.end()
+        )
 
         # all AtenTensorHandle allocated using aoti_torch__alloc_from_pool are wrapped with RAIIAtenTensorHandle
         # otherwise we'll have memory leak
@@ -148,11 +166,36 @@ class TestMemoryPlanning(TestCase):
             "aoti_torch__alloc_from_pool(pool1", 1, exactly=True
         ).check_count("aoti_torch__alloc_from_pool(pool0", 1, exactly=True).run(code)
 
-        FileCheck().check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"
-        ).check("RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"
-        ).check("RAIIAtenTensorHandle(tmp_tensor_handle_1);").run(code)
+        array_decls = {
+            match.group("name"): match
+            for match in re.finditer(
+                r"const int64_t (?P<name>int_array_\d+)\[\] = \{(?P<value>[^}]+)\};",
+                code,
+            )
+        }
+        pool1_alloc = find_code(
+            r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch__alloc_from_pool\(pool1, 0, cached_torch_dtype_int32, 0, int_array_\d+, int_array_\d+, &(?P<handle>tmp_tensor_handle_\d+)\)\);"
+        )
+        pool1_raii = find_code(
+            rf"RAIIAtenTensorHandle\({pool1_alloc.group('handle')}\);",
+            pool1_alloc.end(),
+        )
+        pool0_alloc = find_code(
+            r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch__alloc_from_pool\(pool0, 0, cached_torch_dtype_float32, 3, (?P<shape>int_array_\d+), (?P<stride>int_array_\d+), &(?P<handle>tmp_tensor_handle_\d+)\)\);",
+            max(pool0_raii.end(), pool1_raii.end()),
+        )
+        alloc_shape = pool0_alloc.group("shape")
+        alloc_stride = pool0_alloc.group("stride")
+        self.assertIn(alloc_shape, array_decls)
+        self.assertIn(alloc_stride, array_decls)
+        self.assertLess(array_decls[alloc_shape].end(), pool0_alloc.start())
+        self.assertLess(array_decls[alloc_stride].end(), pool0_alloc.start())
+        self.assertEqual(array_decls[alloc_shape].group("value"), "10L, 8L*u0, 32L")
+        self.assertEqual(array_decls[alloc_stride].group("value"), "256L*u0, 32L, 1L")
+        find_code(
+            rf"RAIIAtenTensorHandle\({pool0_alloc.group('handle')}\);",
+            pool0_alloc.end(),
+        )
 
 
 if __name__ == "__main__":
