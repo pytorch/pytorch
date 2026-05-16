@@ -284,7 +284,7 @@ class TestScatterGather(TestCase):
 
     @serialTest()
     @onlyCUDA
-    @dtypes(torch.float32, torch.half, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
         # and verify large launch configs don't produce invalid kernel launches
@@ -301,6 +301,17 @@ class TestScatterGather(TestCase):
             shapes.append((4, 4, 16384 * 8192))
         else:
             shapes.append((4, 4, 16384 * 256))
+        # Small-D shapes that exercise the 2D TMA tiled kernel path
+        # (num_chunks == 1, i.e. D <= 512/sizeof). Use a non-multiple of K=4
+        # to cover the final partial 2D TMA tile.
+        if dtype.itemsize <= 2:
+            shapes.append((50_003, 50_003, 128))
+            shapes.append((50_000, 50_000, 256))
+        elif dtype.itemsize == 4:
+            shapes.append((50_003, 50_003, 128))
+        else:
+            # float64: chunk_elems = 512/8 = 64, need D <= 64
+            shapes.append((50_003, 50_003, 64))
         for (m, n, k) in shapes:
             torch.cuda.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
