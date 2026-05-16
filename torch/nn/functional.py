@@ -3211,7 +3211,14 @@ def poisson_nll_loss(
     See :class:`~torch.nn.PoissonNLLLoss` for details.
 
     Args:
-        input: Expectation of underlying Poisson distribution.
+        input: Expectation of underlying Poisson distribution. When
+            :attr:`log_input`\ =\ ``False`` the value must be non-negative,
+            since the loss takes :math:`\log(\text{input}+\text{eps})`;
+            elements with ``input < -eps`` evaluate to ``NaN`` and propagate
+            through the reduction. If the upstream layer can produce negative
+            pre-activations, apply :func:`torch.clamp` with ``min=0`` or pass
+            the values through :func:`~torch.nn.functional.softplus` before
+            handing them to the loss.
         target: Random sample :math:`target \sim \text{Poisson}(input)`.
         log_input: If ``True`` the loss is computed as
             :math:`\exp(\text{input}) - \text{target} * \text{input}`, if ``False`` then loss is

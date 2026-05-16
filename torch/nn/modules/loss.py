@@ -298,6 +298,17 @@ class PoissonNLLLoss(_Loss):
     approximation is used for target values more than 1. For targets less or
     equal to 1 zeros are added to the loss.
 
+    .. note::
+        When :attr:`log_input`\ =\ ``False`` the input must be non-negative,
+        since the loss takes :math:`\log(\text{input}+\text{eps})`. Any
+        element of :attr:`input` with value less than ``-eps`` produces
+        ``NaN`` and the NaN propagates through the reduction. If the
+        upstream layer can produce negative pre-activations, apply
+        :func:`torch.clamp` with ``min=0`` or pass the values through
+        :func:`~torch.nn.functional.softplus` before handing them to the
+        loss. When :attr:`log_input`\ =\ ``True`` the loss is finite for
+        any real :attr:`input`.
+
     Args:
         log_input (bool, optional): if ``True`` the loss is computed as
             :math:`\exp(\text{input}) - \text{target}*\text{input}`, if ``False`` the loss is
