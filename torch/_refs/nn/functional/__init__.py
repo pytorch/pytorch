@@ -292,7 +292,7 @@ def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     if inplace:
         raise NotImplementedError
-    return torch.where(torch.isnan(a), a, torch.clamp(a / 6 + 0.5, 0, 1))
+    return torch.clamp(a / 6 + 0.5, 0, 1)
 
 
 @register_decomposition(aten.channel_shuffle)
