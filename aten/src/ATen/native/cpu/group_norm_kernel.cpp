@@ -879,6 +879,8 @@ BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
 template <typename T, typename PT>
 void GroupNormBackwardKernelImplInternal(
     const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
@@ -1357,6 +1359,8 @@ inline typename std::
 template <typename T, typename PT>
 void GroupNormBackwardKernelImplChannelsLastInternal(
     const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
@@ -1527,6 +1531,8 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
 
 void GroupNormBackwardKernelImpl(
     const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
@@ -1551,10 +1557,10 @@ void GroupNormBackwardKernelImpl(
         using param_t = at::opmath_type<scalar_t>;
         if(mixed_type) {
           GroupNormBackwardKernelImplInternal<scalar_t, param_t>(
-              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+              dY, dmean, drstd, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         } else {
           GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
-              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+              dY, dmean, drstd, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         }
       });
       break;
@@ -1566,10 +1572,10 @@ void GroupNormBackwardKernelImpl(
         using param_t = at::opmath_type<scalar_t>;
         if(mixed_type) {
           GroupNormBackwardKernelImplChannelsLastInternal<scalar_t, param_t>(
-              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+              dY, dmean, drstd, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         } else {
           GroupNormBackwardKernelImplChannelsLastInternal<scalar_t, scalar_t>(
-              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+              dY, dmean, drstd, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         }
       });
       break;
