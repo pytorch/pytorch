@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 # ======= END DYNAMO PATCH =======
@@ -310,6 +311,10 @@ class RatTestCase(CPythonTestCase):
         self.assertEqual(Rat(10), 10.0)
         self.assertEqual(10.0, Rat(10))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_true_div(self):
         self.assertEqual(Rat(10, 3) / Rat(5, 7), Rat(14, 3))
         self.assertEqual(Rat(10, 3) / 3, Rat(10, 9))

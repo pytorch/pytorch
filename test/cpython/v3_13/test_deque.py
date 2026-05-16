@@ -571,6 +571,10 @@ class TestBasic(CPythonTestCase):
             self.assertRaises(IndexError, d.remove, 'c')
             self.assertEqual(d, deque())
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_repr(self):
         d = deque(range(200))
         e = eval(repr(d))

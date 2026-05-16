@@ -12,7 +12,11 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
+)
 
 __TestCase = CPythonTestCase
 
@@ -371,6 +375,10 @@ class IntTestCases(__TestCase):
         self.assertEqual(int("१२३४५६७८९०1234567890", 0), 12345678901234567890)
         self.assertEqual(int('١٢٣٤٥٦٧٨٩٠', 0), 1234567890)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_underscores(self):
         for lit in VALID_UNDERSCORE_LITERALS:
             if any(ch in lit for ch in '.eEjJ'):

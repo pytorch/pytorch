@@ -85,6 +85,10 @@ class DictTest(__TestCase):
         self.assertEqual(dict(), {})
         self.assertIsNot(dict(), {})
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_literal_constructor(self):
         # check literal constructor for different sized dicts
         # (to exercise the BUILD_MAP oparg).

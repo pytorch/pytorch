@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 # ======= END DYNAMO PATCH =======
 
@@ -36,6 +36,10 @@ class BoolTest(CPythonTestCase):
 
         self.assertRaises(TypeError, int.__new__, bool, 0)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_repr(self):
         self.assertEqual(repr(False), 'False')
         self.assertEqual(repr(True), 'True')
@@ -64,6 +68,10 @@ class BoolTest(CPythonTestCase):
         self.assertEqual(complex(True), 1+0j)
         self.assertEqual(complex(True), True)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "eval in compiled function not supported",
+    )
     def test_math(self):
         self.assertEqual(+False, 0)
         self.assertIsNot(+False, False)
