@@ -53,6 +53,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
@@ -5761,6 +5762,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
+        if (rblock := self._get_native_matmul_persistent_rblock()) is not None:
+            out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
         if (
@@ -6084,6 +6087,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return val
 
         return val
+
+    def _get_native_matmul_persistent_rblock(self) -> int | None:
+        if (
+            not self.is_native_matmul
+            or not self.persistent_reduction
+            or self.cooperative_reduction
+        ):
+            return None
+
+        rblocks = [
+            native_matmul_persistent_rblock(self._get_persistent_RBLOCK(tree.numel))
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+        return math.prod(rblocks) if rblocks else None
 
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
