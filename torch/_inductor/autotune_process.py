@@ -37,6 +37,7 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
+    apply_subprocess_env,
     do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
@@ -99,8 +100,7 @@ class TuningProcess:
                     # None is a sentinel for the child to shut down
                     break
                 try:
-                    if extra_env:
-                        os.environ.update(extra_env)
+                    apply_subprocess_env(extra_env)
                     result = job()
                 except Exception as e:
                     result = e
@@ -114,7 +114,7 @@ class TuningProcess:
 
     @staticmethod
     def send(
-        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str] | None = None
+        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str | None] | None = None
     ) -> None:
         pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
@@ -178,7 +178,7 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any, extra_env: dict[str, str] | None = None) -> None:
+    def put(self, req: Any, extra_env: dict[str, str | None] | None = None) -> None:
         """
         Push a work item to the child process.
         """
@@ -326,7 +326,7 @@ class TuningProcessPool:
         assert choice.bmreq is not None
 
         env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+        extra_env = {v: os.environ.get(v) for v in env_vars}
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:

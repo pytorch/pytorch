@@ -438,7 +438,7 @@ class AsyncCompile:
                 "TRITON_CACHE_DIR",
                 "TRITON_LIBDEVICE_PATH",
             ]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
             }

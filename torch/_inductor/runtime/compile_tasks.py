@@ -12,6 +12,8 @@ from typing import Any, TYPE_CHECKING
 
 from torch._utils_internal import log_triton_builds
 
+from ..utils import apply_subprocess_env
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -116,18 +118,18 @@ def _set_triton_libdevice_path_impl() -> None:
 
 def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
-    extra_env: dict[str, str],
+    extra_env: dict[str, str | None],
     extra_config: dict[str, Any],
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
-    os.environ.update(extra_env)
-    # Set libdevice path if passed via env from main process
-    libdevice_path = extra_env.get("TRITON_LIBDEVICE_PATH")
-    if libdevice_path:
+    apply_subprocess_env(extra_env)
+    # Keep Triton's in-process knob in sync with the parent environment, including
+    # clearing stale worker state when the parent no longer has this variable.
+    if "TRITON_LIBDEVICE_PATH" in extra_env:
         try:
             from triton import knobs
 
-            knobs.nvidia.libdevice_path = libdevice_path
+            knobs.nvidia.libdevice_path = extra_env["TRITON_LIBDEVICE_PATH"]
         except ImportError:
             pass
     from torch._inductor import config
