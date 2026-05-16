@@ -121,7 +121,7 @@ try:
     finally:
         del _version
 except ImportError as err:
-    _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
+    _PYNVML_ERR = err  # noqa: EXCEPTION_TRACEBACK  # stored for deferred error reporting
 
 _lazy_seed_tracker = _LazySeedTracker()
 

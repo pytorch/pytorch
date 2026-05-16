@@ -4,7 +4,7 @@ Linter that checks for exception reference cycles.
 When an exception caught with `except ... as e:` is stored beyond the except
 block (e.g. `saved = e`), its `__traceback__` attribute keeps the entire call
 stack alive, creating a reference cycle.  This linter flags such patterns and
-suggests adding `e.__traceback__ = None` to break the cycle.
+suggests adding `traceback.clear_frames(e.__traceback__)` to break the cycle.
 """
 
 from __future__ import annotations
@@ -39,77 +39,97 @@ LINTER_CODE = "EXCEPTION_TRACEBACK"
 ERROR_NAME = "exception-traceback-reference-cycle"
 DESCRIPTION = (
     "Exception stored outside except block without clearing __traceback__. "
-    "Add `traceback.clear_frames({exc_name}.__traceback__)` to avoid reference cycles. "
+    "Add `traceback.clear_frames({exc_name}.__traceback__)` or "
+    "`{exc_name}.__traceback__ = None` to avoid reference cycles. "
     "See https://docs.python.org/3/reference/compound_stmts.html#the-try-statement"
 )
 
 
 class _TracebackVisitor(ast.NodeVisitor):
     """Walk an except-handler body looking for assignments that leak the
-    exception variable and for ``__traceback__ = None`` clean-ups."""
+    exception variable and for traceback cleanup patterns."""
 
     def __init__(self, exc_name: str) -> None:
         self.exc_name = exc_name
+        # Names that alias the exception (including the original)
+        self.aliases: set[str] = {exc_name}
         self.is_stored = False
         self.is_cleared = False
+        self.is_reraised = False
         self.store_line: int | None = None
 
-    # --- detect `some_var = e` or `obj.attr = e` -------------------------
     def visit_Assign(self, node: ast.Assign) -> None:
+        # Track aliases: `exc = e` means `exc` is also an alias
         if self._value_is_exc(node.value):
-            self.is_stored = True
-            if self.store_line is None:
-                self.store_line = node.lineno
+            # Only flag simple name targets (e.g. `saved = e`).
+            # Attribute assignments like `ret.__cause__ = e` are standard
+            # exception chaining and not the kind of leak we're looking for.
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.aliases.add(target.id)
+                    self.is_stored = True
+                    if self.store_line is None:
+                        self.store_line = node.lineno
         self._check_clear(node)
         self.generic_visit(node)
 
-    # --- detect `e.__traceback__ = None` or `traceback.clear_frames(e.__traceback__)` ---
     def _check_clear(self, node: ast.Assign) -> None:
+        """Detect `alias.__traceback__ = None`."""
         for target in node.targets:
             if (
                 isinstance(target, ast.Attribute)
                 and target.attr == "__traceback__"
                 and isinstance(target.value, ast.Name)
-                and target.value.id == self.exc_name
+                and target.value.id in self.aliases
             ):
                 self.is_cleared = True
 
-    def visit_Expr(self, node: ast.Expr) -> None:
-        # detect `traceback.clear_frames(e.__traceback__)`
-        call = node.value
-        if not isinstance(call, ast.Call):
-            return
-        fn = call.func
-        if not (
-            isinstance(fn, ast.Attribute)
-            and fn.attr == "clear_frames"
-            and isinstance(fn.value, ast.Name)
-            and fn.value.id == "traceback"
-        ):
-            return
-        if len(call.args) == 1:
-            arg = call.args[0]
+    def visit_Call(self, node: ast.Call) -> None:
+        """Detect `traceback.clear_frames(alias.__traceback__)`."""
+        if self._is_clear_frames_call(node) and node.args:
+            arg = node.args[0]
             if (
                 isinstance(arg, ast.Attribute)
                 and arg.attr == "__traceback__"
                 and isinstance(arg.value, ast.Name)
-                and arg.value.id == self.exc_name
+                and arg.value.id in self.aliases
             ):
                 self.is_cleared = True
+        self.generic_visit(node)
 
-    # --- detect `raise` (re-raise means no leak) --------------------------
     def visit_Raise(self, node: ast.Raise) -> None:
-        # bare `raise` or `raise e` — not a leak
-        pass
+        """Bare `raise` or `raise alias` means the exception escapes via
+        normal raise semantics -- not a leak from storage."""
+        if node.exc is None:
+            # bare `raise`
+            self.is_reraised = True
+        elif isinstance(node.exc, ast.Name) and node.exc.id in self.aliases:
+            self.is_reraised = True
+        self.generic_visit(node)
 
-    # --- helpers ----------------------------------------------------------
     def _value_is_exc(self, node: ast.expr) -> bool:
-        return isinstance(node, ast.Name) and node.id == self.exc_name
+        return isinstance(node, ast.Name) and node.id in self.aliases
+
+    @staticmethod
+    def _is_clear_frames_call(node: ast.Call) -> bool:
+        # traceback.clear_frames(...)
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "clear_frames"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "traceback"
+        ):
+            return True
+        # from traceback import clear_frames; clear_frames(...)
+        if isinstance(node.func, ast.Name) and node.func.id == "clear_frames":
+            return True
+        return False
 
 
 class _FileChecker(ast.NodeVisitor):
-    def __init__(self, filepath: str) -> None:
+    def __init__(self, filepath: str, source_lines: list[str]) -> None:
         self.filepath = filepath
+        self.source_lines = source_lines
         self.messages: list[LintMessage] = []
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
@@ -117,7 +137,12 @@ class _FileChecker(ast.NodeVisitor):
             visitor = _TracebackVisitor(node.name)
             for child in ast.iter_child_nodes(node):
                 visitor.visit(child)
-            if visitor.is_stored and not visitor.is_cleared:
+            if (
+                visitor.is_stored
+                and not visitor.is_cleared
+                and not visitor.is_reraised
+                and not self._has_noqa(visitor.store_line)
+            ):
                 self.messages.append(
                     LintMessage(
                         path=self.filepath,
@@ -132,6 +157,23 @@ class _FileChecker(ast.NodeVisitor):
                     )
                 )
         self.generic_visit(node)
+
+    def _has_noqa(self, lineno: int | None) -> bool:
+        if lineno is None:
+            return False
+        line = self.source_lines[lineno - 1]
+        if "# noqa" not in line:
+            return False
+        # `# noqa` alone suppresses all linters
+        idx = line.index("# noqa")
+        rest = line[idx + 6:]
+        if not rest.strip() or rest.strip().startswith(":"):
+            # `# noqa` or `# noqa: CODE1, CODE2`
+            if not rest.strip():
+                return True
+            codes = rest.strip()[1:]  # strip the ":"
+            return LINTER_CODE in codes
+        return False
 
 
 def check_file(filepath: str) -> list[LintMessage]:
@@ -155,9 +197,9 @@ def check_file(filepath: str) -> list[LintMessage]:
     try:
         tree = ast.parse(source, filename=filepath)
     except SyntaxError:
-        # Not valid Python — skip quietly
         return []
-    checker = _FileChecker(filepath)
+    source_lines = source.splitlines()
+    checker = _FileChecker(filepath, source_lines)
     checker.visit(tree)
     return checker.messages
 

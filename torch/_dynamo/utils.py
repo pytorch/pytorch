@@ -4195,7 +4195,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        exn = e  # to make typing happy for the lambda
+        exn = e  # noqa: EXCEPTION_TRACEBACK  # short-lived, passed to unimplemented()
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
                 gb_type="RuntimeError when trying to get real value from fx.Node",
