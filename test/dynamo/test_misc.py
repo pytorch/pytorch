@@ -1511,6 +1511,31 @@ graph():
         with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
+    def test_builtin_exec_constant_assignments(self):
+        def fn(x):
+            exec("pass")
+            g = {}
+            exec("z = 1", g)
+            exec("w = 1+1", g)
+            l = {}
+            exec("global a; a = 4; b = 3", g, l)
+            return x + g["z"] + g["w"] + g["a"] + l["b"]
+
+        x = torch.randn(4)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_builtin_exec_rejects_non_constant_stmt(self):
+        def fn(x):
+            g = {}
+            exec("import math", g)
+            return x
+
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)

@@ -1460,6 +1460,57 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         return False
 
+    @staticmethod
+    def _constant_eval_result(
+        tx: "InstructionTranslator", node: ast.expr, filename: str
+    ) -> VariableTracker:
+        expr = ast.Expression(node)
+        ast.fix_missing_locations(expr)
+        try:
+            result = eval(
+                compile(expr, filename, "eval"),
+                {"__builtins__": {}},
+                {},
+            )
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, result)
+
+    @staticmethod
+    def _constant_exec_stmt(stmt: ast.stmt) -> bool:
+        if isinstance(stmt, (ast.Pass, ast.Global)):
+            return True
+        if isinstance(stmt, ast.Expr):
+            return BuiltinVariable._constant_eval_expr(ast.Expression(stmt.value))
+        if isinstance(stmt, ast.Assign):
+            return all(isinstance(target, ast.Name) for target in stmt.targets) and (
+                BuiltinVariable._constant_eval_expr(ast.Expression(stmt.value))
+            )
+        return False
+
+    @staticmethod
+    def _exec_namespace_arg(arg: VariableTracker | None) -> ConstDictVariable | None:
+        if isinstance(arg, ConstDictVariable) and arg.is_mutable():
+            return arg
+        return None
+
+    @staticmethod
+    def _exec_setitem(
+        tx: "InstructionTranslator",
+        namespace: ConstDictVariable | None,
+        name: str,
+        value: VariableTracker,
+    ) -> bool:
+        if namespace is None:
+            return False
+        namespace.call_method(
+            tx,
+            "__setitem__",
+            [ConstantVariable.create(name), value],
+            {},
+        )
+        return True
+
     def call_eval(
         self,
         tx: "InstructionTranslator",
@@ -1483,15 +1534,100 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not self._constant_eval_expr(tree):
             return None
 
+        return self._constant_eval_result(tx, tree.body, "<torch._dynamo.eval>")
+
+    def call_exec(
+        self,
+        tx: "InstructionTranslator",
+        source: VariableTracker,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        kwargs = dict(kwargs)
+        if len(args) > 2 or "closure" in kwargs:
+            return None
+        globals_arg = None
+        locals_arg = None
+        if args:
+            globals_arg = args[0]
+        elif "globals" in kwargs:
+            globals_arg = kwargs.pop("globals")
+        if len(args) > 1:
+            locals_arg = args[1]
+        elif "locals" in kwargs:
+            locals_arg = kwargs.pop("locals")
+        if kwargs:
+            return None
+
+        if not source.is_python_constant():
+            return None
+        source_str = source.as_python_constant()
+        if not isinstance(source_str, str):
+            return None
+
         try:
-            result = eval(
-                compile(tree, "<torch._dynamo.eval>", "eval"),
-                {"__builtins__": {}},
-                {},
-            )
-        except Exception as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
-        return VariableTracker.build(tx, result)
+            tree = ast.parse(source_str.strip(), mode="exec")
+        except SyntaxError:
+            return None
+
+        if not all(self._constant_exec_stmt(stmt) for stmt in tree.body):
+            return None
+        try:
+            compile(tree, "<torch._dynamo.exec>", "exec")
+        except SyntaxError:
+            return None
+
+        globals_ns = self._exec_namespace_arg(globals_arg)
+        locals_ns = self._exec_namespace_arg(locals_arg)
+        if globals_arg is not None and globals_ns is None:
+            return None
+        if locals_arg is not None and locals_ns is None:
+            return None
+        if globals_ns is not None and locals_ns is None:
+            locals_ns = globals_ns
+
+        global_names = {
+            name
+            for stmt in tree.body
+            if isinstance(stmt, ast.Global)
+            for name in stmt.names
+        }
+        assignment_names = []
+        for stmt in tree.body:
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if not isinstance(target, ast.Name):
+                        return None
+                    assignment_names.append(target.id)
+        if (
+            any(name in global_names for name in assignment_names)
+            and globals_ns is None
+        ):
+            return None
+        if (
+            any(name not in global_names for name in assignment_names)
+            and locals_ns is None
+        ):
+            return None
+
+        for stmt in tree.body:
+            if isinstance(stmt, ast.Global):
+                continue
+            if isinstance(stmt, ast.Expr):
+                self._constant_eval_result(tx, stmt.value, "<torch._dynamo.exec>")
+                continue
+            if isinstance(stmt, ast.Assign):
+                value = self._constant_eval_result(
+                    tx, stmt.value, "<torch._dynamo.exec>"
+                )
+                for target in stmt.targets:
+                    if not isinstance(target, ast.Name):
+                        return None
+                    namespace = globals_ns if target.id in global_names else locals_ns
+                    if not self._exec_setitem(tx, namespace, target.id, value):
+                        return None
+
+        return ConstantVariable.create(None)
 
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
