@@ -165,7 +165,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     @staticmethod
     def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
         # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)
+        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
