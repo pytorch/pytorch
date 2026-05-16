@@ -378,6 +378,8 @@ def flex_attention(
         )
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
+    kernel_options["QK_SAME_DTYPE"] = query.get_dtype() == key.get_dtype()
+    kernel_options["QV_SAME_DTYPE"] = query.get_dtype() == value.get_dtype()
 
     choices: list[Any] = []
 
