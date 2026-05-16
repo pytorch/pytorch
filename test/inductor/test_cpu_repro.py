@@ -4827,6 +4827,19 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(compiled_out, eager_out)
         torch.testing.assert_close(w_cmp.grad, w_ref.grad)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_lp_pool2d_symbolic_float_min_norm_type(self):
+        def fn(x):
+            norm_type = min(4.0, 0.5 + float(x.mean().abs().detach()) * 1.5)
+            return F.lp_pool2d(x, norm_type=norm_type, kernel_size=1)
+
+        generator = torch.Generator().manual_seed(0)
+        x = torch.randn(1, 1, 4, 4, generator=generator)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
