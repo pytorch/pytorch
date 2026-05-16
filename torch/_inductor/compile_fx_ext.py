@@ -467,6 +467,16 @@ class _SerializedFxCompile(FxCompile):
         Prepare a _WireProtocolInput to compile. If None is returned then it
         wasn't possible to serialize and we should fallback to in-process.
         """
+        from .custom_graph_pass import has_active_custom_passes
+
+        if has_active_custom_passes():
+            log.debug(
+                "Skipping %s compile: active custom_pass_context cannot be "
+                "serialized across process boundaries",
+                type(self),
+            )
+            return None
+
         try:
             # _check_for_hop raises BypassFxGraphCache when it detects something
             # we can't cache (or serialize)

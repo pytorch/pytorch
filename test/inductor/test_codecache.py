@@ -47,9 +47,11 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.common import get_custom_backend_pass_for_device
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
+    custom_pass_context,
     CustomGraphModulePass,
     CustomGraphPass,
     CustomPartitionerFn,
@@ -2749,6 +2751,44 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_context_cache_hit(self):
+        class TestCustomGraphPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return "uuid"
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
+        compiled_fn = torch.compile(fn)
+
+        with custom_pass_context(
+            post_grad_pre_passes=[TestCustomGraphPass()],
+            post_grad_post_passes=[TestCustomGraphPass()],
+            joint_pre_passes=[TestCustomGraphPass()],
+            joint_post_passes=[TestCustomGraphPass()],
+        ):
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
@@ -3212,6 +3252,163 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details1),
                 pickler.dumps(details3),
             )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_context_stateful_pass_config_serializable(self):
+        class StatefulCustomGraphPass(CustomGraphPass):
+            def __init__(self):
+                self._not_pickleable = lambda x: x
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return "stateful-pass-v1"
+
+        custom_pass = StatefulCustomGraphPass()
+
+        with config.patch({"post_grad_custom_pre_pass": custom_pass}):
+            with self.assertRaisesRegex(AttributeError, "Can't get local object"):
+                pickle.dumps(config.get_config_copy())
+
+        with custom_pass_context(post_grad_pre_passes=[custom_pass]):
+            config_copy = pickle.loads(pickle.dumps(config.get_config_copy()))
+            self.assertIsNone(config_copy["post_grad_custom_pre_pass"])
+
+    def test_custom_pass_context_config_copy_is_inert_after_context(self):
+        class TestCustomGraphPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return "uuid"
+
+        saved_config = config.get_config_copy()
+        try:
+            with custom_pass_context(
+                pre_grad_passes=[TestCustomGraphPass()],
+                post_grad_pre_passes=[TestCustomGraphPass()],
+                post_fusion_custom_passes=[TestCustomGraphPass()],
+            ):
+                copied_config = config.get_config_copy()
+
+            config.load_config(copied_config)
+            self.assertFalse(config.pre_grad_custom_pass)
+            self.assertFalse(config.post_grad_custom_pre_pass)
+            self.assertFalse(config._post_fusion_custom_pass)
+            FxGraphCache._check_can_cache(
+                torch.fx.GraphModule({}, torch.fx.Graph()), require_shape_env=False
+            )
+        finally:
+            config.load_config(saved_config)
+
+    def test_hash_custom_pass_context_passes(self):
+        class TestCustomGraphPass(CustomGraphPass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return self._uuid
+
+        custom_pass = TestCustomGraphPass()
+        with custom_pass_context(post_grad_pre_passes=[custom_pass]):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+
+            self.assertEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
+
+    def test_post_fusion_custom_pass_handling(self):
+        class TestPostFusionCustomPass(CustomGraphPass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, nodes: list[Any]) -> list[Any]:
+                return nodes
+
+            def uuid(self) -> bytes | str | None:
+                return self._uuid
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        custom_pass = TestPostFusionCustomPass()
+        with config.patch({"_post_fusion_custom_pass": custom_pass}):
+            custom_pass._uuid = "1"
+            FxGraphCache._check_can_cache(gm, require_shape_env=False)
+            details1 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            pickler = FxGraphCachePickler(gm)
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+
+        with config.patch({"_post_fusion_custom_pass": lambda nodes: nodes}):
+            with self.assertRaisesRegex(
+                BypassFxGraphCache, "Unsupported _post_fusion_custom_pass"
+            ):
+                FxGraphCache._check_can_cache(gm, require_shape_env=False)
+
+    def test_custom_backend_pass_context_restore_on_enter_error(self):
+        class TestCustomGraphModulePass(CustomGraphModulePass):
+            def __call__(self, gm: torch.fx.GraphModule) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return "uuid"
+
+        original_pass = get_custom_backend_pass_for_device("cpu")
+        with self.assertRaisesRegex(RuntimeError, "unregistered device"):
+            with custom_pass_context(
+                custom_backend_passes={
+                    "cpu": TestCustomGraphModulePass(),
+                    "zz_bad_device": TestCustomGraphModulePass(),
+                }
+            ):
+                pass
+
+        self.assertIs(get_custom_backend_pass_for_device("cpu"), original_pass)
+
+    def test_custom_backend_pass_context_overlapping_contexts_restore(self):
+        class TestCustomGraphModulePass(CustomGraphModulePass):
+            def __call__(self, gm: torch.fx.GraphModule) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return "uuid"
+
+        original_pass = get_custom_backend_pass_for_device("cpu")
+        with custom_pass_context(
+            custom_backend_passes={"cpu": TestCustomGraphModulePass()}
+        ):
+            outer_wrapper = get_custom_backend_pass_for_device("cpu")
+            self.assertIsNot(outer_wrapper, original_pass)
+            with custom_pass_context(
+                custom_backend_passes={"cpu": TestCustomGraphModulePass()}
+            ):
+                self.assertIs(get_custom_backend_pass_for_device("cpu"), outer_wrapper)
+            self.assertIs(get_custom_backend_pass_for_device("cpu"), outer_wrapper)
+
+        self.assertIs(get_custom_backend_pass_for_device("cpu"), original_pass)
 
     def test_hash_custom_backend_pass(self):
         """
