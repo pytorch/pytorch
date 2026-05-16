@@ -16,7 +16,10 @@ TEST(SchemaMatchingTest, VarType) {
       Operator(
           "aten::test_vartype(t[] a, t b) -> (t)",
           [](Stack& stack) {
-            auto [list, a] = pop<c10::List<double>, double>(stack);
+            c10::List<double> list;
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+            double a;
+            pop(stack, list, a);
             push(stack, a);
           },
           c10::AliasAnalysisKind::FROM_SCHEMA),
@@ -52,7 +55,10 @@ TEST(SchemaMatchingTest, VarType2) {
       Operator(
           "aten::test_vartype2(t a, t[] b) -> (t[])",
           [](Stack& stack) {
-            auto [a, list] = pop<double, c10::List<double>>(stack);
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+            double a;
+            c10::List<double> list;
+            pop(stack, a, list);
             push(stack, a);
           },
           AliasAnalysisKind::FROM_SCHEMA),
