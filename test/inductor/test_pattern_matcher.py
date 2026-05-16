@@ -1134,6 +1134,121 @@ class TestPatternMatcher(TestCase):
                 "target=torch.ops.aten.sym_size"
             ).run(str(saved_graph))
 
+    def test_symint_pattern_matching_with_scalar_workaround(self):
+        import torch._inductor.config as config
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.graph.Graph):
+                self.apply(g)
+
+        with config.patch(
+            pattern_matcher=False,
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=_CustomPass(),
+        ):
+
+            def add(x, y, scale):
+                return x + y
+
+            def sym_minus(x, y, scale):
+                return (x - (-y.size(0))) - (y * -scale) - y.size(0)
+
+            invoked = False
+
+            def extra_check(match):
+                nonlocal invoked
+                invoked = True
+                return True
+
+            register_replacement(
+                add,
+                sym_minus,
+                [
+                    torch.empty([8, 1]),
+                    torch.empty([10]),
+                ],
+                fwd_only,
+                [config.post_grad_custom_post_pass],
+                extra_check=extra_check,
+                scalar_workaround={"scale": 1.0},
+            )
+
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            x = torch.rand([8, 1])
+            y = torch.rand([10])
+
+            self.assertEqual(foo(x, y), x + y)
+            self.assertTrue(invoked)
+
+    def test_scalar_workaround_uses_matched_scalar(self):
+        import torch._inductor.config as config
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.graph.Graph):
+                self.apply(g)
+
+        custom_pass = _CustomPass()
+        with config.patch(
+            pattern_matcher=False,
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=custom_pass,
+        ):
+
+            def mul(x, scale):
+                return x * scale
+
+            def replacement(x, scale):
+                return x * scale
+
+            invoked = False
+
+            def extra_check(match):
+                nonlocal invoked
+                invoked = True
+                return True
+
+            register_replacement(
+                mul,
+                replacement,
+                [torch.empty([4])],
+                fwd_only,
+                [config.post_grad_custom_post_pass],
+                extra_check=extra_check,
+                scalar_workaround={"scale": 2.0},
+            )
+
+            entry = next(iter(custom_pass.patterns.values()))[0]
+            x_arg = object()
+            self.assertEqual(entry.normalize_args(x=x_arg, scale=3.0), [x_arg, 3.0])
+
+            @torch.compile
+            def foo(x):
+                return x * 3.0
+
+            x = torch.rand([4])
+
+            self.assertEqual(foo(x), x * 3.0)
+            self.assertTrue(invoked)
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_with_mutation(self):
         counter = 0
@@ -1408,6 +1523,23 @@ class TestPatternMatcher(TestCase):
         FileCheck().check_not("extern_kernels.addmm(").check(
             "def triton_tem_fused_addmm"
         ).run(code[0])
+
+    @inductor_config.patch(fx_graph_remote_cache=False)
+    def test_randperm_index_scalar_workaround(self):
+        x = torch.randn(3)
+
+        def func(x):
+            perm = torch.randperm(x.numel(), device=x.device)
+            return x.view(-1)[perm].view_as(x)
+
+        counters.clear()
+        torch.manual_seed(40)
+        expected = func(x)
+        compiled = torch.compile(func)
+        torch.manual_seed(40)
+        actual = compiled(x)
+        torch.testing.assert_close(actual, expected)
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
