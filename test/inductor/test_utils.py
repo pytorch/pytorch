@@ -410,6 +410,32 @@ class TestFakeTensorUpdater(TestCase):
 
         yield from ((graph, n) for n in graph.graph.nodes if n.op == "call_function")
 
+    @staticmethod
+    def _make_inductor_lowering_function() -> Callable[[torch.Tensor], torch.Tensor]:
+        def lowering_fn(x: torch.Tensor) -> torch.Tensor:
+            raise AssertionError("lowering_fn should not run under FakeTensorUpdater")
+
+        lowering_fn._inductor_lowering_function = True  # type: ignore[attr-defined]
+        return lowering_fn
+
+    @classmethod
+    def _build_graph_with_inductor_lowering_node(
+        cls,
+    ) -> tuple[
+        torch.fx.GraphModule,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+    ]:
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(cls._make_inductor_lowering_function(), (neg,))
+        graph.output(lowered)
+        return torch.fx.GraphModule({}, graph), x, y, neg, lowered
+
     def _add_delete_nodes_test(self, graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(graph)
         fake_mode = self._get_faketensormode(graph)
@@ -526,6 +552,122 @@ class TestFakeTensorUpdater(TestCase):
         # tensors.
         for m in mul_nodes:
             self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_unchanged_inductor_lowering_node_is_ignored(self):
+        graph, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(graph)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_with_metadata_is_ignored(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_with_changed_dependency_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_without_metadata_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            output.args = (lowered,)
+
+            with self.assertRaisesRegex(RuntimeError, "already carry fake metadata"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_changed_inductor_lowering_node_raises_before_stale_metadata(self):
+        graph, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(graph)
+            with graph.graph.inserting_before(lowered):
+                neg_replacement = graph.graph.call_function(aten.neg.default, (y,))
+            lowered.args = (neg_replacement,)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "_inductor_lowering_function nodes",
+            ):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
 
 
 if __name__ == "__main__":
