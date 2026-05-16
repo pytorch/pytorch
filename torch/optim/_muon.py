@@ -466,7 +466,17 @@ def param_groups_for_muon(
     .. _Building Parameter Groups:
         https://github.com/microsoft/dion?tab=readme-ov-file#building-parameter-groups
     """
+    if isinstance(exclude_name_patterns, str):
+        raise TypeError(
+            "exclude_name_patterns must be a sequence of strings (e.g. "
+            f'("embed", "lm_head")), not a single string {exclude_name_patterns!r}; '
+            "a bare str would be iterated character-by-character."
+        )
     patterns: tuple[str, ...] = tuple(exclude_name_patterns or ())
+    if not all(isinstance(pat, str) for pat in patterns):
+        raise TypeError(
+            f"exclude_name_patterns must contain only strings, got {patterns!r}"
+        )
     muon_params: list[torch.nn.Parameter] = []
     other_params: list[torch.nn.Parameter] = []
     for name, p in module.named_parameters():

@@ -2613,6 +2613,17 @@ class TestParamGroupsForMuon(TestCase):
             id(model.linear.weight), {id(p) for p in muon_params + other_params}
         )
 
+    def test_rejects_bare_string_patterns(self):
+        # A bare str is also a Sequence[str] (iterated char-by-char); reject it
+        # explicitly so users don't silently match on every letter.
+        model = _make_mixed_module()
+        with self.assertRaisesRegex(TypeError, "must be a sequence of strings"):
+            torch.optim.param_groups_for_muon(model, exclude_name_patterns="embed")
+        with self.assertRaisesRegex(TypeError, "must contain only strings"):
+            torch.optim.param_groups_for_muon(
+                model, exclude_name_patterns=("embed", 42)  # type: ignore[arg-type]
+            )
+
 
 class TestMuon(TestCase):
     """Device-generic tests for Muon's ``ndim >= 2`` support."""
