@@ -61,15 +61,60 @@ class TestFxFusion(TestCase):
         def test_kwarg3(x, y):
             return torch.cat(tensors=[x, y], dim=0).view(128).tanh()
 
+        def test_axis(x, y):
+            return torch.cat([x, y], axis=-1).tanh()
+
+        def test_out_none(x, y):
+            return torch.cat([x, y], dim=-1, out=None).tanh()
+
         trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
         inputs = [
             torch.randn(8, 8),
             torch.randn(8, 8),
         ]
-        for f in [test_kwarg, test_arg, test_arg2, test_kwarg2, test_kwarg3]:
+        for f in [
+            test_kwarg,
+            test_arg,
+            test_arg2,
+            test_kwarg2,
+            test_kwarg3,
+            test_axis,
+            test_out_none,
+        ]:
             traced = trace_func(f, inputs)
             torch.testing.assert_close(f(*inputs), traced(*inputs))
             self.assertEqual(count_call_method(traced, "tanh"), 2)
+
+    def test_sink_cat_after_pointwise_out_kwarg(self):
+        out = torch.empty(8, 16)
+
+        def test_out(x, y):
+            return torch.cat([x, y], dim=-1, out=out).tanh()
+
+        trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
+        inputs = [
+            torch.randn(8, 8),
+            torch.randn(8, 8),
+        ]
+        traced = trace_func(test_out, inputs)
+        torch.testing.assert_close(test_out(*inputs), traced(*inputs))
+        self.assertEqual(count_call_function(traced, torch.cat), 1)
+        self.assertEqual(count_call_method(traced, "tanh"), 1)
+
+    def test_sink_cat_after_pointwise_axis_none(self):
+        def test_axis_none(x, y):
+            return torch.cat([x, y], axis=None).tanh()
+
+        traced = sink_cat_after_pointwise(torch.fx.symbolic_trace(test_axis_none))
+        self.assertEqual(count_call_function(traced, torch.cat), 1)
+        self.assertEqual(count_call_method(traced, "tanh"), 1)
+        cat_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function" and n.target == torch.cat
+        ]
+        self.assertEqual(cat_nodes[0].kwargs.get("axis"), None)
+        self.assertNotIn("dim", cat_nodes[0].kwargs)
 
     def test_linear_permute_fusion(self):
         class TestModule(torch.nn.Module):
