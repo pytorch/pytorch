@@ -14568,6 +14568,21 @@ class TestErrorInputs(TestCase):
             torch.nn.functional.embedding_bag(inputs, weight, offsets)
             torch.mps.synchronize()
 
+    def test_scatter_out_of_bounds(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/170507
+        # one_hot is composite (zeros + scatter_); bad indices used to silently
+        # produce zeros instead of raising. MPS scatter now reports async via
+        # the stream error buffer, matching CUDA's deferred-assert behavior.
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.nn.functional.one_hot(torch.tensor([8], device=device), num_classes=8)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.nn.functional.one_hot(torch.tensor([-1], device=device), num_classes=8)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(3, 4, device=device).scatter_(1, torch.tensor([[4]], device=device), 1.0)
+            torch.mps.synchronize()
+
 
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):

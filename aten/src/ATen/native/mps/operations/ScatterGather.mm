@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/metal/common.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,6 +15,95 @@
 #endif
 
 namespace at::native {
+
+namespace mps {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& scatterLib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Scatter_metallib.h>
+#endif
+
+// Fast path applies when output, src, and index are all contiguous, src
+// matches index's shape (no broadcasting), and index matches output's shape
+// outside `dim`. Indexing math collapses to a single mod + div per thread.
+static bool can_use_dense_scatter_set(const Tensor& output, const Tensor& src, const Tensor& index, int64_t dim) {
+  if (!output.is_contiguous() || !src.is_contiguous() || !index.is_contiguous()) {
+    return false;
+  }
+  if (src.sizes() != index.sizes()) {
+    return false;
+  }
+  for (const auto i : c10::irange(output.dim())) {
+    if (i == dim) {
+      continue;
+    }
+    if (output.size(i) != index.size(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Metal path for scatter with reduce='set'. Reports out-of-bounds indices
+// to the stream's async error buffer, matching CUDA's deferred-assert
+// behavior (raised on the next sync via MPSStream::checkLastError).
+static void scatter_set_mps_kernel(const Tensor& self,
+                                   int64_t dim,
+                                   const Tensor& index,
+                                   const Tensor& src,
+                                   const Tensor& output) {
+  if (!output.is_same(self)) {
+    output.copy_(self);
+  }
+
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "scatter: expected index to be Long or Int, got ",
+              index.scalar_type());
+
+  const auto ndim = static_cast<uint32_t>(index.dim());
+  TORCH_CHECK(
+      ndim <= c10::metal::max_ndim, "scatter: tensor rank ", ndim, " exceeds Metal max of ", c10::metal::max_ndim);
+  const int64_t output_dim_size = self.size(dim);
+  const bool use_dense = can_use_dense_scatter_set(output, src, index, dim);
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      if (use_dense) {
+        int64_t inner_size = 1;
+        for (int64_t i = dim + 1; i < output.dim(); ++i) {
+          inner_size *= output.size(i);
+        }
+        const int64_t index_dim_size = index.size(dim);
+        auto pso = scatterLib.getPipelineStateForFunc(
+            fmt::format("scatter_set_dense_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, output, src, index, inner_size, index_dim_size, output_dim_size, stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, index.numel());
+      } else {
+        auto sizes = index.sizes();
+        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        auto pso = scatterLib.getPipelineStateForFunc(
+            fmt::format("scatter_set_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder,
+                    output,
+                    src,
+                    index,
+                    sizes,
+                    output.strides(),
+                    src.strides(),
+                    index.strides(),
+                    ndim_dim,
+                    output_dim_size,
+                    stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, index.numel());
+      }
+    }
+  });
+}
+} // namespace mps
 
 static Tensor maybe_expand_0_dim(const Tensor& t) {
   return t.dim() == 0 ? t.view({1}) : t;
@@ -172,6 +262,21 @@ static void scatter_mps_general(const Tensor& self_arg,
     auto src_real = at::view_as_real(maybe_expand_0_dim(src));
     auto output_real = at::view_as_real(maybe_expand_0_dim(output));
     scatter_mps_general(self_real, dim, index_expanded, src_real, output_real, func_name, reduce);
+    return;
+  }
+
+  if (reduce == "set") {
+    auto src_view = maybe_expand_0_dim(src);
+    auto output_view = maybe_expand_0_dim(output);
+    auto index_view = maybe_expand_0_dim(index);
+    TORCH_CHECK(index_view.dim() == self.dim() && index_view.dim() == src_view.dim(),
+                "Input, index and src must have same rank");
+    for (const auto i : c10::irange(self.dim())) {
+      TORCH_CHECK(index_view.size(i) <= src_view.size(i), "Index dim must not exceed src dim");
+      TORCH_CHECK(i == dim || index_view.size(i) <= self.size(i),
+                  "Index dim must not exceed input dim except at gathering axis");
+    }
+    mps::scatter_set_mps_kernel(self, dim, index_view, src_view, output_view);
     return;
   }
 
