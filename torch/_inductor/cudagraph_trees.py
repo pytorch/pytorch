@@ -2230,10 +2230,10 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            self.try_end_curr_recording(function_id, new_inputs)
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            self.try_end_curr_warmup(function_id, new_inputs)
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2313,7 +2313,7 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                self.try_end_curr_execution(function_id, new_inputs)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2353,7 +2353,7 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            self.try_end_curr_execution(function_id, new_inputs)
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2543,19 +2543,48 @@ class CUDAGraphTreeManager:
     def user_invoked_mark_step() -> bool:
         return MarkStepBox.mark_step_counter != 0
 
-    def can_start_new_generation(self) -> bool:
+    def new_invocation_uses_live_output(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> bool:
+        if self.current_node is None:
+            return False
+
+        live_data_ptrs = OrderedSet(
+            ref.data_ptr() for ref in self.current_node.path_live_weakrefs()
+        )
+        if not live_data_ptrs:
+            return False
+
+        for t in itertools.chain(new_inputs, self.ids_to_funcs[function_id].constants):
+            if (
+                isinstance(t, torch.Tensor)
+                and t.is_cuda
+                and t.untyped_storage().data_ptr() in live_data_ptrs
+            ):
+                return True
+
+        return False
+
+    def can_start_new_generation(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> bool:
         if not self.in_new_torch_compile_invocation():
             return False
 
         if self.user_invoked_mark_step():
             return True
 
-        return not self.running_forwards_with_pending_backwards
+        if self.running_forwards_with_pending_backwards:
+            return False
+
+        return not self.new_invocation_uses_live_output(function_id, new_inputs)
 
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def try_end_curr_recording(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2565,7 +2594,7 @@ class CUDAGraphTreeManager:
         assert self.current_node is not None
 
         # multiple invocations, allow overwriting the previous generation
-        if self.can_start_new_generation():
+        if self.can_start_new_generation(function_id, new_inputs):
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
@@ -2576,7 +2605,9 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2587,15 +2618,17 @@ class CUDAGraphTreeManager:
         if self.current_node is None:
             return
 
-        if self.can_start_new_generation():
+        if self.can_start_new_generation(function_id, new_inputs):
             self.clear_current_path_state_and_set_to_none()
             return
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
-        if self.can_start_new_generation():
+    def try_end_curr_warmup(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
+        if self.can_start_new_generation(function_id, new_inputs):
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
