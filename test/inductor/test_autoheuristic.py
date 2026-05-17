@@ -224,6 +224,10 @@ class AutoHeuristicTest(TestCase):
         with (
             patch("torch.cuda.is_available", return_value=False),
             patch(
+                "torch.cuda.get_device_capability",
+                side_effect=AssertionError("unexpected CUDA capability query"),
+            ) as get_device_capability,
+            patch(
                 "torch._inductor.autoheuristic.autoheuristic.get_gpu_shared_memory",
                 return_value=0,
             ),
@@ -231,6 +235,7 @@ class AutoHeuristicTest(TestCase):
             ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_no_cuda")
 
         self.assertEqual(ah.metadata.device_capa, (0, 0))
+        self.assertFalse(get_device_capability.called)
 
 
 if __name__ == "__main__":
