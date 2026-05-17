@@ -5618,6 +5618,16 @@ def pad(
                 return importlib.import_module(
                     "torch._decomp.decompositions"
                 )._replication_pad(input, pad)
+        if (
+            mode == "constant"
+            and value is not None
+            and not isinstance(value, float)
+            and not input.is_floating_point()
+            and not input.is_complex()
+        ):
+            # F.pad routes value through a C++ double; Python ints above
+            # 2**53 lose precision. constant_pad_nd takes a Scalar.
+            return torch.constant_pad_nd(input, pad, value)
     return torch._C._nn.pad(input, pad, mode, value)
 
 
