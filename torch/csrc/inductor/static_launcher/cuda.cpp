@@ -3,6 +3,8 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
@@ -311,6 +313,13 @@ void parseKernelArgs(
         break;
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+        break;
+      case 'e':
+        convertType<c10::Half>(THPUtils_unpackDouble, "float16", slot, item);
+        break;
+      case 'y':
+        convertType<c10::BFloat16>(
+            THPUtils_unpackDouble, "bfloat16", slot, item);
         break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
@@ -827,6 +836,13 @@ static PyObject* fast_launcher_vectorcall(
         break;
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+        break;
+      case 'e':
+        convertType<c10::Half>(THPUtils_unpackDouble, "float16", slot, item);
+        break;
+      case 'y':
+        convertType<c10::BFloat16>(
+            THPUtils_unpackDouble, "bfloat16", slot, item);
         break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);

@@ -18,6 +18,8 @@
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
@@ -166,6 +168,13 @@ void parseKernelArgs(
         break;
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+        break;
+      case 'e':
+        convertType<c10::Half>(THPUtils_unpackDouble, "float16", slot, item);
+        break;
+      case 'y':
+        convertType<c10::BFloat16>(
+            THPUtils_unpackDouble, "bfloat16", slot, item);
         break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
