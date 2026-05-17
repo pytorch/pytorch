@@ -1027,7 +1027,7 @@ class CppGemmTemplate(CppTemplate):
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
             W = transpose_w(W, trans_w)
-            B = expand_bias(B, X)
+            B = expand_bias(B, X)  # type:ignore[arg-type]
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B
@@ -1239,7 +1239,7 @@ class CppGemmTemplate(CppTemplate):
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                     assert all(
                         isinstance(item, torch.Tensor)
                         for item in (x_scale, x_zp, w_scale)
@@ -1255,7 +1255,7 @@ class CppGemmTemplate(CppTemplate):
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                 new_inputs.append(BCompensate)
         return new_inputs, layout
 
@@ -1288,7 +1288,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
