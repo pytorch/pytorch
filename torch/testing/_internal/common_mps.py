@@ -585,6 +585,9 @@ if torch.backends.mps.is_available():
             if MACOS_VERSION < 15.0
             else [torch.int64],
             "scatter_reducemean": [torch.bool],
+            # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
+            # to int32 (silently lossy).
+            "scatter_reduceprod": [torch.int64],
             "segment_reduce": None,
             "_segment.reduce": None,
             "segment.reduce": None,
