@@ -663,6 +663,44 @@ def _add_with_alpha_fma(a, b, alpha):
     )
 
 
+def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
+    if node is None:
+        return False
+
+    has_non_output_user = False
+    for user in node.users:
+        if user.op != "output":
+            has_non_output_user = True
+            break
+
+    if not has_non_output_user:
+        return False
+
+    from torch._functorch._aot_autograd.descriptors import (
+        SavedForBackwardsAOTOutput,
+        SavedForBackwardsNoVcCheckAOTOutput,
+    )
+
+    saved_desc_types = (
+        SavedForBackwardsAOTOutput,
+        SavedForBackwardsNoVcCheckAOTOutput,
+    )
+    for user in node.users:
+        if user.op != "output":
+            continue
+
+        descs = user.meta.get("desc")
+        if descs is None:
+            continue
+
+        output_values = pytree.tree_leaves(user.args[0])
+        for output_value, desc in zip(output_values, descs):
+            if output_value is node and isinstance(desc, saved_desc_types):
+                return True
+
+    return False
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
@@ -717,13 +755,22 @@ def make_pointwise(
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
-        emulate_precision_casts = (
-            V.graph is not None
-            and getattr(V.graph, "current_node", None) is not None
-            and V.graph.current_node.meta is not None
-            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+        current_node = (
+            getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
+        emulate_precision_casts = (
+            current_node is not None
+            and current_node.meta is not None
+            and current_node.meta.get("low_precision_pointwise_barrier", False)
+        )
+        truncate_saved_output = (
+            not emulate_precision_casts
+            and dtype in low_pr_fp
+            and _has_saved_lowp_output_use(current_node)
+        )
+        emulate_output_cast = (
+            emulate_precision_casts or truncate_saved_output
+        ) and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
