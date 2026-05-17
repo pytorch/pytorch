@@ -2568,8 +2568,8 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDA_FATBINARY_EXECUTABLE}} --64 --create=${{FATBIN_FILE}}
-                                --image=profile=compute_{current_arch},file=${{PTX_FILE}}
-                                --image=profile=sm_{current_arch},file=${{CUBIN_FILE}}
+                                --image3=kind=ptx,sm={current_arch},file=${{PTX_FILE}}
+                                --image3=kind=elf,sm={current_arch},file=${{CUBIN_FILE}}
                         DEPENDS ${{PTX_FILE}} ${{CUBIN_FILE}}
                     )
 

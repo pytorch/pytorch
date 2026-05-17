@@ -182,9 +182,7 @@ def get_kernel_bin_format(device: str) -> str:
 
 
 def _cuda_fatbinary() -> str:
-    nvcc = cuda_compile_utils._cuda_compiler() or "nvcc"
-    nvcc_path = shutil.which(nvcc) or nvcc
-    if nvcc_path:
+    if nvcc_path := shutil.which(cuda_compile_utils._cuda_compiler() or "nvcc"):
         fatbinary = os.path.join(
             os.path.dirname(os.path.realpath(nvcc_path)), "fatbinary"
         )
@@ -206,8 +204,8 @@ def _cuda_fatbinary_command(
         _cuda_fatbinary(),
         "--64",
         f"--create={fatbin_file}",
-        f"--image=profile=compute_{arch},file={asm_file}",
-        f"--image=profile=sm_{arch},file={source_cubin_file}",
+        f"--image3=kind=ptx,sm={arch},file={asm_file}",
+        f"--image3=kind=elf,sm={arch},file={source_cubin_file}",
     ]
 
 
@@ -2952,17 +2950,18 @@ end
                     if asm_file := value["asm"]:
                         asm_files.append(asm_file)
 
-                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    kernel_bin_file = value[get_cpp_wrapper_cubin_path_name()]
                     if (
                         config.aot_inductor.emit_multi_arch_kernel
                         and device_type == "cuda"
                     ):
                         if torch.version.hip is None:
+                            fatbin_file = kernel_bin_file
                             source_cubin_file = _source_cubin_path_from_fatbin(
-                                cubin_file
+                                fatbin_file
                             )
                             fatbin_cmds.append(
-                                (asm_file, source_cubin_file, cubin_file)
+                                (asm_file, source_cubin_file, fatbin_file)
                             )
                             fatbin_sources.append((asm_file, source_cubin_file))
 
@@ -2985,7 +2984,7 @@ end
                             success = compile_multiarch_bundle_from_llvm_ir(
                                 # pyrefly: ignore [unbound-name]
                                 llvm_ir_path=asm_file,
-                                output_bundle_path=cubin_file,
+                                output_bundle_path=kernel_bin_file,
                                 target_archs=None,
                             )
 
@@ -2995,10 +2994,10 @@ end
                                     f"Check that ROCm toolchain is available and LLVM IR is valid."
                                 )
 
-                            log.info("Created multi-arch bundle: %s", cubin_file)
+                            log.info("Created multi-arch bundle: %s", kernel_bin_file)
 
                     if config.aot_inductor.embed_kernel_binary:
-                        cubins_to_embed.append((cubin_file, kernel_name))
+                        cubins_to_embed.append((kernel_bin_file, kernel_name))
 
                 # Package Triton PTX/cubin into fatbins in parallel.
                 # Must complete before cubin embedding below.
@@ -3008,9 +3007,9 @@ end
                     current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
 
                     def _compile_fatbin(
-                        asm_cubin_and_fatbin: tuple[str, str, str],
+                        ptx_cubin_and_fatbin: tuple[str, str, str],
                     ) -> None:
-                        asm_f, source_cubin_f, fatbin_f = asm_cubin_and_fatbin
+                        asm_f, source_cubin_f, fatbin_f = ptx_cubin_and_fatbin
                         if not os.path.exists(source_cubin_f):
                             raise RuntimeError(
                                 f"Missing Triton cubin file for fatbin packaging: "
@@ -3154,9 +3153,7 @@ end
                         path for source in fatbin_sources for path in source
                     )
                 elif (
-                    config.aot_inductor.emit_multi_arch_kernel
-                    and device_type == "xpu"
-                    and torch.version.hip is None
+                    config.aot_inductor.emit_multi_arch_kernel and device_type == "xpu"
                 ):
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
