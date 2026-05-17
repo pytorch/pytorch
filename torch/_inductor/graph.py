@@ -219,6 +219,10 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     return ret
 
 
+def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
+    return t.device.type == "cpu" and t.layout == torch.strided and t.is_pinned()
+
+
 def extend_user_visible_output_strides(
     user_visible_outputs: dict[Node, tuple[int, ...]],
 ) -> dict[Node, object]:
@@ -1191,7 +1195,7 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device,
                     data.dtype,
                     *self.static_sizes_strides(data),
-                    is_pinned=data.is_pinned(),
+                    is_pinned=_is_cpu_strided_tensor_pinned(data),
                 ),
             )
         )
@@ -1570,7 +1574,7 @@ class GraphLowering(torch.fx.Interpreter):
                     value.tolist(),
                     dtype=value.dtype,
                     device=value.device,
-                    pin_memory=value.is_pinned(),
+                    pin_memory=_is_cpu_strided_tensor_pinned(value),
                 )
 
         return self.add_tensor_constant(value, target)
@@ -2454,9 +2458,27 @@ class GraphLowering(torch.fx.Interpreter):
         self,
     ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         """
-        For GPU, Triton kernels are autotuned and stored as cubin files
+        For GPU, Triton kernels are autotuned and stored as cubin files.
+
+        For CPU with user-defined Triton kernels, AOTI also needs the
+        same two-pass compile when `autotune_at_compile_time` is off,
+        since `CpuTritonKernelCache` is otherwise only populated by the
+        autotune block (see `DeferredCpuTritonCallWrapper` in
+        `cpp_wrapper_cpu.py`).
         """
-        if any(device in self.device_types for device in ["cuda", "xpu"]):
+        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        # CPU + user-defined Triton + AOTI + autotune block disabled is the
+        # only CPU configuration that needs the two-pass dance: the autotune
+        # block normally populates CpuTritonKernelCache, but here it doesn't run.
+        needs_cpu_triton_two_pass = (
+            "cpu" in self.device_types
+            and self.aot_mode
+            and not config.triton.autotune_at_compile_time
+            and any(
+                isinstance(op, ir.UserDefinedTritonKernel) for op in self.operations
+            )
+        )
+        if has_gpu or needs_cpu_triton_two_pass:
 
             def extract_real_inputs() -> list[int | float | torch.Tensor]:
                 def materialize(

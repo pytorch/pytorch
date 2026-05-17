@@ -204,6 +204,10 @@ def _is_tma_supported(
 def _is_vec_scatter_supported(
     self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
 ) -> bool:
+    # ``red.global.add.noftz.bf16x2`` requires sm_90+. fp16x2 (sm_70+)
+    # and scalar fp32 atomicAdd (sm_60+) work everywhere we care about.
+    if self.dtype is torch.bfloat16 and not _has_sm90_plus():
+        return False
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
         return False

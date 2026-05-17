@@ -3353,8 +3353,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
+            size = x.get_size()
+            if len(size) == 0:
+                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
@@ -3665,6 +3668,8 @@ def lift_fresh_copy(x):
     result = clone(x)
     input_layout = x.maybe_get_layout()
     if input_layout is not None and input_layout.is_pinned:
+        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
+        # pinned constant followed by lift_fresh_copy.
         _realize_as_pinned(result)
     return result
 
