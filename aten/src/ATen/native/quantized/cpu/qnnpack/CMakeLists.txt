@@ -827,7 +827,6 @@ if(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8gemm-bench PRIVATE src)
-  target_compile_definitions(q8gemm-bench PRIVATE pytorch_PYTORCH_QNNPACK_BENCHMARK_GEMMLOWP=0)
   target_link_libraries(q8gemm-bench PRIVATE pytorch_qnnpack cpuinfo fp16 benchmark)
 
   add_executable(q8gemm-sparse-bench bench/q8gemm_sparse.cc)
