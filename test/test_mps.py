@@ -6319,6 +6319,17 @@ class TestMPS(TestCaseMPS):
 
         helper(3, 3)
 
+    def _check_kthvalue_matches_cpu(self, cpu, dim):
+        mps = cpu.to("mps")
+        n = cpu.size(dim)
+        for k in (1, max(1, n // 2), n):
+            cv, _ = torch.kthvalue(cpu, k, dim=dim)
+            mv, mi = torch.kthvalue(mps, k, dim=dim)
+            self.assertEqual(cv, mv.cpu(), atol=0, rtol=0)
+            # indices may differ for duplicates, re-fetch values via indices
+            gathered = torch.gather(cpu, dim, mi.cpu().unsqueeze(dim)).squeeze(dim)
+            self.assertEqual(gathered, cv, atol=0, rtol=0)
+
     def test_sort(self):
         for SIZE in (4, 2049):
             device = 'mps'
@@ -6342,12 +6353,15 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_single_block(self, dtype, descending, dup):
+    @parametrize("kth", [False, True])
+    def test_sort_single_block(self, dtype, descending, dup, kth):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
         # dup=True uses a small value range so many elements collide; this exercises
         # the tie-break path in the bitonic sort (equal values must still produce
         # valid index permutations).
+        if kth and descending:
+            self.skipTest("kthvalue has no descending parameter")
         max_ss = 1024 if dtype == torch.int64 else 4096
         lo, hi = (0, 5) if dup else (-1000, 1000)
 
@@ -6358,6 +6372,9 @@ class TestMPS(TestCaseMPS):
 
         for cpu in [make((4, 4)), make((8, max_ss)), make((16, 32, 64)),
                     make((8, 2048))[:, ::2], make((1024, 8)).t()]:
+            if kth:
+                self._check_kthvalue_matches_cpu(cpu, dim=-1)
+                continue
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=-1, descending=descending)
             mv, mi = torch.sort(mps, dim=-1, descending=descending)
@@ -6404,8 +6421,11 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_multi_block(self, dtype, descending, dup):
+    @parametrize("kth", [False, True])
+    def test_sort_multi_block(self, dtype, descending, dup, kth):
         # shapes chosen to hit the metal multi block merge path
+        if kth and descending:
+            self.skipTest("kthvalue has no descending parameter")
         cases = {
             2: [((1, 4096), -1), ((2, 3000), -1)],
             4: [((1, 2049), -1), ((1, 8192), -1), ((2, 16384), -1),
@@ -6426,6 +6446,9 @@ class TestMPS(TestCaseMPS):
             return torch.randint(lo, hi, shape, dtype=dtype)
 
         def check(cpu, dim=-1):
+            if kth:
+                self._check_kthvalue_matches_cpu(cpu, dim=dim)
+                return
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=dim, descending=descending)
             mv, mi = torch.sort(mps, dim=dim, descending=descending)
@@ -6447,10 +6470,15 @@ class TestMPS(TestCaseMPS):
                            torch.int16, torch.int8, torch.uint8, torch.bool])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_radix(self, dtype, descending, dup):
+    @parametrize("kth", [False, True])
+    def test_sort_radix(self, dtype, descending, dup, kth):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
         # small_tg (RTPTG=512) variant. Strided cases exercise non-contiguous input.
+        if kth and descending:
+            self.skipTest("kthvalue has no descending parameter")
+        if kth and dtype == torch.bool:
+            self.skipTest("kthvalue not implemented for bool")
         if torch.tensor([], dtype=dtype).element_size() == 4:
             cases = [((4, 65536), -1), ((1, 1048576), -1), ((8, 131072), -1),
                      ((4, 8, 65536), 2), ((2, 65536, 4), 1)]
@@ -6467,6 +6495,9 @@ class TestMPS(TestCaseMPS):
             return torch.randint(lo, hi, shape).to(dtype)
 
         def check(cpu, dim=-1):
+            if kth:
+                self._check_kthvalue_matches_cpu(cpu, dim=dim)
+                return
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=dim, descending=descending)
             mv, mi = torch.sort(mps, dim=dim, descending=descending)

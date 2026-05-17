@@ -17,6 +17,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/as_strided.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/kthvalue_native.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sort_native.h>
@@ -89,7 +90,9 @@ static void sort_radix(const Tensor& input,
                        const Tensor& indices,
                        int64_t dim,
                        bool descending,
-                       int sort_size) {
+                       int sort_size,
+                       int kth_target = -1) {
+  const bool kth_mode = kth_target >= 0;
   bool need_permute = (dim != input.ndimension() - 1);
   Tensor work_in = input;
   if (need_permute) {
@@ -116,7 +119,9 @@ static void sort_radix(const Tensor& input,
 
   auto opts_val = values.options();
   auto opts_u32 = at::TensorOptions().dtype(at::kInt).device(values.device());
-  const bool direct_final_write = !need_permute;
+  // kth always writes the final element to values directly
+  // (one element per row), independent of need_permute.
+  const bool direct_final_write = kth_mode || !need_permute;
   // Use int16 storage reinterpreted as ushort in the kernel: halves the
   // intermediate index memory traffic. Only valid when global indices fit in
   // 16 bits (sort_size <= 65536). The kernel never treats these as signed.
@@ -133,6 +138,7 @@ static void sort_radix(const Tensor& input,
   const auto type_str = scalarToMetalTypeString(values);
   const char* tptg_suffix = small_tg ? "_tptg512" : "";
   const char* u16_suffix = use_u16 ? "_u16" : "";
+  const char* kth_suffix = kth_mode ? "_kth" : "";
   const auto count_kernel = fmt::format("radix_count_{}_{}bit{}", type_str, radix_bits, tptg_suffix);
 
   constexpr int kMaxFusedBlocks = 4;
@@ -143,8 +149,8 @@ static void sort_radix(const Tensor& input,
   const char* fused_prefix = use_fused_scan ? "fused_" : "";
   const auto scatter_kernel =
       fmt::format("radix_scatter_{}{}_{}bit{}{}", fused_prefix, type_str, radix_bits, tptg_suffix, u16_suffix);
-  const auto scatter_final_kernel =
-      fmt::format("radix_scatter_{}final_{}_{}bit{}{}", fused_prefix, type_str, radix_bits, tptg_suffix, u16_suffix);
+  const auto scatter_final_kernel = fmt::format(
+      "radix_scatter_{}final{}_{}_{}bit{}{}", fused_prefix, kth_suffix, type_str, radix_bits, tptg_suffix, u16_suffix);
   const auto count_scan_kernel =
       use_fused_count_scan ? fmt::format("radix_count_scan_{}_{}bit_mb4", type_str, radix_bits) : std::string{};
 
@@ -203,7 +209,9 @@ static void sort_radix(const Tensor& input,
         const auto& kernel_name = use_direct ? scatter_final_kernel : scatter_kernel;
         getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in});
         [enc setComputePipelineState:pso];
-        if (use_direct) {
+        if (use_direct && kth_mode) {
+          mtl_setArgs(enc, k_in, i_in, values, indices, histograms, dims, flags, kth_target);
+        } else if (use_direct) {
           mtl_setArgs(enc, k_in, i_in, values, indices, histograms, dims, flags);
         } else {
           mtl_setArgs(enc, k_in, i_in, k_out_buf, i_out_buf, histograms, dims, flags);
@@ -236,10 +244,13 @@ static void sort_single_block(const Tensor& input,
                               int64_t stride_sort,
                               int64_t stride_seg,
                               int tptg,
-                              bool stable) {
+                              bool stable,
+                              int kth_target = -1) {
+  const bool kth_mode = kth_target >= 0;
   auto n_rows = static_cast<int>(input.numel() / sort_size);
-  const char* stable_sfx = stable ? "_stable" : "";
-  const auto kernel = fmt::format("sort_block_{}_tptg{}{}", scalarToMetalTypeString(input), tptg, stable_sfx);
+  const auto type_str = scalarToMetalTypeString(input);
+  const auto kernel = kth_mode ? fmt::format("sort_block_kth_{}_tptg{}", type_str, tptg)
+                               : fmt::format("sort_block_{}_tptg{}{}", type_str, tptg, stable ? "_stable" : "");
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -248,7 +259,12 @@ static void sort_single_block(const Tensor& input,
       auto pso = lib.getPipelineStateForFunc(kernel);
       getMPSProfiler().beginProfileKernel(pso, kernel, {input});
       [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, input, values, indices, sort_size, std::array<int64_t, 2>{stride_sort, stride_seg}, descending);
+      const auto strides = std::array<int64_t, 2>{stride_sort, stride_seg};
+      if (kth_mode) {
+        mtl_setArgs(enc, input, values, indices, sort_size, strides, descending, kth_target);
+      } else {
+        mtl_setArgs(enc, input, values, indices, sort_size, strides, descending);
+      }
       [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
       getMPSProfiler().endProfileKernel(pso);
     }
@@ -264,7 +280,9 @@ static void sort_multi_block(const Tensor& input,
                              int64_t stride_sort,
                              int64_t stride_seg,
                              int tptg,
-                             bool stable) {
+                             bool stable,
+                             int kth_target = -1) {
+  const bool kth_mode = kth_target >= 0;
   const int elems_per_tg = tptg * static_cast<int>(c10::metal::ILP_PER_THREAD);
   const int n_rows = static_cast<int>(input.numel() / sort_size);
   const int n_blocks = at::ceil_div(sort_size, elems_per_tg);
@@ -279,7 +297,9 @@ static void sort_multi_block(const Tensor& input,
 
   // ushort indices halve merge bandwidth; direct_final lets the last merge
   // write long indices straight to output, skipping a widen copy.
-  const bool direct_final = !need_permute;
+  // Kth writes one element per row directly to values/indices regardless of
+  // need_permute, so the final merge always uses the direct path.
+  const bool direct_final = kth_mode || !need_permute;
   const bool use_u16 = direct_final && sort_size <= 65536;
   auto opts_val = values.options();
   auto opts_idx = use_u16 ? at::TensorOptions().dtype(at::kShort).device(values.device())
@@ -296,7 +316,8 @@ static void sort_multi_block(const Tensor& input,
   // mb_sort_block has stable variants; mb_merge doesn't (stable on stable input).
   const auto block_fn = fmt::format("mb_sort_block_{}_tptg{}{}{}", type_str, tptg, u16_sfx, stable_sfx);
   const auto merge_fn = fmt::format("mb_merge_{}_tptg{}{}", type_str, tptg, u16_sfx);
-  const auto final_fn = fmt::format("mb_merge_final_{}_tptg{}{}", type_str, tptg, u16_sfx);
+  const char* final_kth_sfx = kth_mode ? "_kth" : "";
+  const auto final_fn = fmt::format("mb_merge_final{}_{}_tptg{}{}", final_kth_sfx, type_str, tptg, u16_sfx);
 
   int total_rounds = 0;
   for (int m = 2; (m / 2) < n_blocks; m *= 2)
@@ -331,8 +352,12 @@ static void sort_multi_block(const Tensor& input,
 
           getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in});
           [enc setComputePipelineState:pso];
-          mtl_setArgs(
-              enc, v_in, i_in, v_out, i_out, std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks}, descending);
+          const auto dims = std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks};
+          if (is_last && kth_mode) {
+            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, descending, kth_target);
+          } else {
+            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, descending);
+          }
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
           getMPSProfiler().endProfileKernel(pso);
         }
@@ -355,90 +380,13 @@ static void sort_multi_block(const Tensor& input,
   }
 }
 
-void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& values, Tensor& indices) {
-  using namespace mps;
-  if (self.dim() == 0 && self.numel() == 1) {
-    values.copy_(self);
-    indices.zero_();
-    return;
-  }
-  // Handle empty tensors
-  if (self.numel() == 0) {
-    values.copy_(self);
-    indices.copy_(values.toType(at::ScalarType::Long));
-    return;
-  }
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "kthvalue is not implemented for complex types");
-  // issue #154890, raising error to prevent crash within MPSGraph until
-  // workaround is implemented.
-  TORCH_CHECK(self.dim() - dim <= 4, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890");
-
-  auto stream = getCurrentMPSStream();
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *selfTensor = nil, *valuesTensor = nil, *indicesTensor = nil;
-  };
-
-  // MPSGraph kthvalue is always sorted.
-  @autoreleasepool {
-    // Input as placeholders
-    MPSShape* input_shape = getMPSShape(self);
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string key = std::string("kthvalue:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" +
-        std::to_string(k) + ":dim" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
-
-      MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
-      MPSDataType dataType = getMPSDataType(self);
-      // #issue 104398441 sortWithTensor and argsortWithTensor
-      if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
-        dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
-        castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
-      }
-      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
-                                                         axis:(NSUInteger)dim
-                                                   descending:false
-                                                         name:nil];
-      sortedTensor = [mpsGraph sliceTensor:sortedTensor
-                                 dimension:(NSUInteger)dim
-                                     start:((NSUInteger)k - 1)
-                                    length:1
-                                      name:nil];
-      MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
-                                                               axis:(NSInteger)dim
-                                                         descending:false
-                                                               name:@"kthvalue_out"];
-      argSortedTensor = [mpsGraph sliceTensor:argSortedTensor
-                                    dimension:dim
-                                        start:((NSUInteger)k - 1)
-                                       length:1
-                                         name:nil];
-      newCachedGraph->valuesTensor = sortedTensor;
-      newCachedGraph->indicesTensor = argSortedTensor;
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->selfTensor, self);
-    // Outputs as placeholders
-    Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
-    Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
-    // Create dictionary of inputs and outputs
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    auto results = dictionaryFromPlaceholders(valuesPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
-}
-} // anonymous namespace
-
-// sort
-TORCH_IMPL_FUNC(sort_stable_out_mps)
-(const Tensor& self,
- std::optional<bool> stable,
- int64_t dim,
- bool descending,
- const Tensor& values,
- const Tensor& indices) {
-  using namespace mps;
-
+static void sort_out_mps_impl(const Tensor& self,
+                              std::optional<bool> stable,
+                              int64_t dim,
+                              bool descending,
+                              const Tensor& values,
+                              const Tensor& indices,
+                              int kth_target = -1) {
   if (self.numel() == 0) {
     return;
   }
@@ -457,12 +405,13 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     return;
   }
 
+  const bool kth_mode = kth_target >= 0;
   Tensor out_vals = values;
   Tensor out_inds = indices;
   const bool need_copy_back = !values.is_contiguous() || !indices.is_contiguous();
   if (need_copy_back) {
-    out_vals = at::empty(self.sizes(), values.options());
-    out_inds = at::empty(self.sizes(), indices.options());
+    out_vals = at::empty(values.sizes(), values.options());
+    out_inds = at::empty(indices.sizes(), indices.options());
   }
 
   const int n_rows = static_cast<int>(self.numel() / sort_size);
@@ -474,11 +423,14 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   const bool use_radix = should_use_radix(sort_size, self.element_size(), elems_per_tg);
 
   if (use_radix) {
-    sort_radix(self, out_vals, out_inds, dim, descending, sort_size);
+    sort_radix(self, out_vals, out_inds, dim, descending, sort_size, kth_target);
   } else {
     // For last-dim sort, try a strided view to skip .contiguous(); the kernels
     // read with (stride_sort, stride_seg) so any view that flattens to 2D works.
-    // For non-last-dim, sort_multi_block handles the permute+contiguous itself.
+    // For non-last-dim, sort_multi_block handles the permute+contiguous itself
+    // (full-sort path). In kth_mode we instead pre-permute here so the
+    // single-block path can serve small sort_size without needing a kth
+    // variant of mb_sort_block.
     Tensor input = self;
     int64_t input_dim = dim;
     int64_t stride_sort = 1;
@@ -495,13 +447,29 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
       // After the view, the sort dim is the last dim of `input` (which may be 2D
       // even when self is 1D or N-D). For the contiguous path it's the same as dim.
       input_dim = input.ndimension() - 1;
+    } else if (kth_mode && sort_size <= elems_per_tg) {
+      input = self.movedim(dim, -1).contiguous();
+      input_dim = input.ndimension() - 1;
+      stride_sort = 1;
+      stride_seg = sort_size;
     }
 
-    if (is_last_dim && sort_size <= elems_per_tg) {
-      sort_single_block(input, out_vals, out_inds, descending, sort_size, stride_sort, stride_seg, tptg, stable_kernel);
+    const bool use_single_block = sort_size <= elems_per_tg && (is_last_dim || kth_mode);
+    if (use_single_block) {
+      sort_single_block(
+          input, out_vals, out_inds, descending, sort_size, stride_sort, stride_seg, tptg, stable_kernel, kth_target);
     } else {
-      sort_multi_block(
-          input, out_vals, out_inds, input_dim, descending, sort_size, stride_sort, stride_seg, tptg, stable_kernel);
+      sort_multi_block(input,
+                       out_vals,
+                       out_inds,
+                       input_dim,
+                       descending,
+                       sort_size,
+                       stride_sort,
+                       stride_seg,
+                       tptg,
+                       stable_kernel,
+                       kth_target);
     }
   }
 
@@ -509,6 +477,34 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     values.copy_(out_vals);
     indices.copy_(out_inds);
   }
+}
+
+void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& values, Tensor& indices) {
+  if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
+    indices.zero_();
+    return;
+  }
+  if (self.numel() == 0) {
+    values.copy_(self);
+    indices.copy_(values.toType(at::ScalarType::Long));
+    return;
+  }
+  // to mimic cpu behaviour
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "kthvalue_mps", [] {});
+
+  sort_out_mps_impl(
+      self, /*stable=*/false, dim, /*descending=*/false, values, indices, /*kth_target=*/static_cast<int>(k - 1));
+}
+} // namespace
+
+TORCH_IMPL_FUNC(sort_stable_out_mps)(const Tensor& self,
+                                     std::optional<bool> stable,
+                                     int64_t dim,
+                                     bool descending,
+                                     const Tensor& values,
+                                     const Tensor& indices) {
+  sort_out_mps_impl(self, stable, dim, descending, values, indices);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_mps(const Tensor& self,
