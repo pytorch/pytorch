@@ -1613,7 +1613,7 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter_meta(
         partial_workspace1,
     )
     group_size = c10d._get_group_size_by_name(group_name)
-    local_m = A.shape[0] // group_size
+    local_m = (A.shape[0] + group_size - 1) // group_size
     return A.new_empty((local_m, B.shape[-2]), dtype=torch.bfloat16)
 
 
@@ -1636,6 +1636,27 @@ def _get_nvfp4_nccl_rs_stripes(chunk_m: int) -> int:
     return 1
 
 
+def _get_nvfp4_nccl_rs_stripe_sizes(chunk_m: int, num_stripes: int) -> list[int]:
+    if num_stripes <= 1:
+        return [chunk_m]
+
+    aligned_rows = (chunk_m // 128) * 128
+    tail_rows = chunk_m - aligned_rows
+    num_aligned_chunks = aligned_rows // 128
+    if num_aligned_chunks == 0:
+        return [chunk_m]
+
+    num_stripes = min(num_stripes, num_aligned_chunks)
+    base_chunks = num_aligned_chunks // num_stripes
+    extra_chunks = num_aligned_chunks % num_stripes
+    stripe_ms = [
+        (base_chunks + (1 if stripe_idx < extra_chunks else 0)) * 128
+        for stripe_idx in range(num_stripes)
+    ]
+    stripe_ms[-1] += tail_rows
+    return stripe_ms
+
+
 @torch.library.impl(lib, "fused_nvfp4_scaled_matmul_reduce_scatter", "CUDA")
 def _fused_nvfp4_scaled_matmul_reduce_scatter(
     A: torch.Tensor,
@@ -1653,15 +1674,7 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
     partial_workspace0: Optional[torch.Tensor] = None,
     partial_workspace1: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    del tile_n
-    if reduce_op != "sum":
-        raise ValueError("fused_nvfp4_scaled_matmul_reduce_scatter only supports sum")
-    if A.dim() != 2:
-        raise ValueError("A must be a 2D tensor")
-    if B.dim() != 3:
-        raise ValueError("B must be grouped as [group_size, N, K]")
-    if B_scale.dim() != 3:
-        raise ValueError("B_scale must be grouped as [group_size, *, *]")
+    del tile_m, tile_n
     if not hasattr(torch.ops, "mslk") or not hasattr(
         torch.ops.mslk, "f4f4bf16_grouped_stacked_out"
     ):
@@ -1673,53 +1686,28 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
     group = c10d._resolve_process_group(group_name)
     world_size = group.size()
     total_m = A.shape[0]
-    if total_m % world_size != 0:
-        raise ValueError(
-            "fused_nvfp4_scaled_matmul_reduce_scatter currently requires "
-            "M to be divisible by group size"
-        )
-    chunk_m = total_m // world_size
-    if chunk_m % 128 != 0:
-        raise ValueError(
-            "fused_nvfp4_scaled_matmul_reduce_scatter currently requires "
-            "M / group_size to be 128-row aligned"
-        )
-    if tile_m != 128:
-        raise ValueError("fused_nvfp4_scaled_matmul_reduce_scatter expects tile_m=128")
-    if B.shape[0] != world_size:
-        raise ValueError("B first dimension must equal group size")
-    if B_scale.shape[0] != world_size:
-        raise ValueError("B_scale first dimension must equal group size")
+    chunk_m = (total_m + world_size - 1) // world_size
+    padded_total_m = chunk_m * world_size
+    group_sizes = [
+        max(0, min(chunk_m, total_m - group_idx * chunk_m))
+        for group_idx in range(world_size)
+    ]
 
     n = B.shape[-2]
-    m_sizes = torch.full((world_size,), chunk_m, device=A.device, dtype=torch.long)
-    starting_row_after_padding = (
-        torch.arange(world_size + 1, device=A.device, dtype=torch.long) * chunk_m
-    )
     alpha = (
         A_global_scale.reshape(-1).to(device=A.device, dtype=torch.float32)
         * B_global_scale.reshape(-1).to(device=A.device, dtype=torch.float32)
     )
     if alpha.numel() == 1:
         alpha = alpha.expand(world_size).contiguous()
-    elif alpha.numel() == world_size:
-        alpha = alpha.contiguous()
     else:
-        raise ValueError(
-            "A_global_scale * B_global_scale must broadcast to either one value "
-            "or group_size values"
-        )
+        alpha = alpha.contiguous()
 
-    num_stripes = _get_nvfp4_nccl_rs_stripes(chunk_m)
+    can_overlap = reduce_op == "sum"
+    num_stripes = _get_nvfp4_nccl_rs_stripes(chunk_m) if can_overlap else 1
     if num_stripes > 1:
-        num_stripe_quanta = chunk_m // 128
-        num_stripes = min(num_stripes, num_stripe_quanta)
-        base_quanta = num_stripe_quanta // num_stripes
-        extra_quanta = num_stripe_quanta % num_stripes
-        stripe_ms = [
-            (base_quanta + (1 if stripe_idx < extra_quanta else 0)) * 128
-            for stripe_idx in range(num_stripes)
-        ]
+        stripe_ms = _get_nvfp4_nccl_rs_stripe_sizes(chunk_m, num_stripes)
+        num_stripes = len(stripe_ms)
         stripe_offsets = [0]
         for stripe_m in stripe_ms:
             stripe_offsets.append(stripe_offsets[-1] + stripe_m)
@@ -1728,11 +1716,18 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
         output = A.new_empty((chunk_m, n), dtype=torch.bfloat16)
         expected_a_workspace_shape = (max_stripe_m * world_size, A.shape[1])
         expected_partial_workspace_shape = (max_stripe_m * world_size, n)
-        if (A_workspace0 is None) != (A_workspace1 is None):
-            raise ValueError("A ping-pong workspaces must be provided together")
-        if (partial_workspace0 is None) != (partial_workspace1 is None):
-            raise ValueError("partial ping-pong workspaces must be provided together")
-        if A_workspace0 is not None:
+        if (
+            A_workspace0 is not None
+            and A_workspace1 is not None
+            and tuple(A_workspace0.shape) == expected_a_workspace_shape
+            and tuple(A_workspace1.shape) == expected_a_workspace_shape
+            and A_workspace0.dtype == A.dtype
+            and A_workspace1.dtype == A.dtype
+            and A_workspace0.device == A.device
+            and A_workspace1.device == A.device
+            and A_workspace0.is_contiguous()
+            and A_workspace1.is_contiguous()
+        ):
             a_workspaces = [A_workspace0, A_workspace1]
         else:
             a_workspaces = [
@@ -1741,7 +1736,18 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
                 )
                 for _ in range(2)
             ]
-        if partial_workspace0 is not None:
+        if (
+            partial_workspace0 is not None
+            and partial_workspace1 is not None
+            and tuple(partial_workspace0.shape) == expected_partial_workspace_shape
+            and tuple(partial_workspace1.shape) == expected_partial_workspace_shape
+            and partial_workspace0.dtype == torch.bfloat16
+            and partial_workspace1.dtype == torch.bfloat16
+            and partial_workspace0.device == A.device
+            and partial_workspace1.device == A.device
+            and partial_workspace0.is_contiguous()
+            and partial_workspace1.is_contiguous()
+        ):
             partial_workspaces = [partial_workspace0, partial_workspace1]
         else:
             partial_workspaces = [
@@ -1750,31 +1756,6 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
                 )
                 for _ in range(2)
             ]
-        for workspace in a_workspaces:
-            if (
-                workspace is None
-                or tuple(workspace.shape) != expected_a_workspace_shape
-                or workspace.dtype != A.dtype
-                or workspace.device != A.device
-                or not workspace.is_contiguous()
-            ):
-                raise ValueError(
-                    "A workspace must be contiguous with shape "
-                    f"{expected_a_workspace_shape}, dtype {A.dtype}, device {A.device}"
-                )
-        for workspace in partial_workspaces:
-            if (
-                workspace is None
-                or tuple(workspace.shape) != expected_partial_workspace_shape
-                or workspace.dtype != torch.bfloat16
-                or workspace.device != A.device
-                or not workspace.is_contiguous()
-            ):
-                raise ValueError(
-                    "partial workspace must be contiguous with shape "
-                    f"{expected_partial_workspace_shape}, dtype torch.bfloat16, "
-                    f"device {A.device}"
-                )
         producer_stream = torch.cuda.current_stream(A.device)
         comm_stream = torch.cuda.Stream(device=A.device)
         producer_done = [torch.cuda.Event() for _ in range(2)]
@@ -1790,25 +1771,38 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
 
             stripe_start = stripe_offsets[stripe_idx]
             stripe_stop = stripe_offsets[stripe_idx + 1]
-            m_sizes = torch.full(
-                (world_size,), stripe_m, device=A.device, dtype=torch.long
+            stripe_group_sizes = [
+                max(0, min(stripe_stop, group_size) - stripe_start)
+                for group_size in group_sizes
+            ]
+            stripe_total_m = sum(stripe_group_sizes)
+            m_sizes = torch.tensor(
+                stripe_group_sizes, device=A.device, dtype=torch.long
             )
-            a_workspace = a_workspaces[slot][: stripe_m * world_size]
-            partial_workspace = partial_workspaces[slot][: stripe_m * world_size]
-            row_starts = (
+            a_workspace = a_workspaces[slot][:stripe_total_m]
+            partial_workspace_full = partial_workspaces[slot][
+                : stripe_m * world_size
+            ]
+            partial_workspace = partial_workspace_full[:stripe_total_m]
+            row_starts = torch.clamp(
                 torch.arange(world_size + 1, device=A.device, dtype=torch.long)
                 * chunk_m
-                + stripe_start
+                + stripe_start,
+                max=total_m,
             )
+            compact_offset = 0
             for group_idx in range(world_size):
-                a_workspace[
-                    group_idx * stripe_m : (group_idx + 1) * stripe_m
-                ].copy_(
+                group_m = stripe_group_sizes[group_idx]
+                if group_m == 0:
+                    continue
+                a_workspace[compact_offset : compact_offset + group_m].copy_(
                     A[
                         group_idx * chunk_m + stripe_start : group_idx * chunk_m
-                        + stripe_stop
+                        + stripe_start
+                        + group_m
                     ]
                 )
+                compact_offset += group_m
             torch.ops.mslk.f4f4bf16_grouped_stacked_out.default(
                 a_workspace,
                 B,
@@ -1820,13 +1814,15 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
                 row_starts,
                 False,
             )
+            if stripe_total_m < stripe_m * world_size:
+                partial_workspace_full[stripe_total_m : stripe_m * world_size].zero_()
             producer_done[slot].record(producer_stream)
 
             with torch.cuda.stream(comm_stream):
                 comm_stream.wait_event(producer_done[slot])
                 works[slot] = c10d.reduce_scatter_tensor(
                     output[stripe_start:stripe_stop],
-                    partial_workspace,
+                    partial_workspace_full,
                     op=c10d.ReduceOp.SUM,
                     group=group,
                     async_op=True,
@@ -1839,18 +1835,35 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
         producer_stream.wait_stream(comm_stream)
         return output
 
-    partials = A.new_empty((total_m, n), dtype=torch.bfloat16)
+    m_sizes = torch.tensor(group_sizes, device=A.device, dtype=torch.long)
+    starting_row_after_padding = torch.clamp(
+        torch.arange(world_size + 1, device=A.device, dtype=torch.long) * chunk_m,
+        max=total_m,
+    )
+    compact_partials = A.new_empty((total_m, n), dtype=torch.bfloat16)
     torch.ops.mslk.f4f4bf16_grouped_stacked_out.default(
         A,
         B,
         A_scale,
         B_scale,
         m_sizes,
-        partials,
+        compact_partials,
         alpha,
         starting_row_after_padding,
         False,
     )
+    if padded_total_m == total_m:
+        partials = compact_partials
+    else:
+        partials = A.new_zeros((padded_total_m, n), dtype=torch.bfloat16)
+        compact_offset = 0
+        for group_idx, group_m in enumerate(group_sizes):
+            if group_m == 0:
+                continue
+            partials[group_idx * chunk_m : group_idx * chunk_m + group_m].copy_(
+                compact_partials[compact_offset : compact_offset + group_m]
+            )
+            compact_offset += group_m
     out = funcol.reduce_scatter_tensor(partials, reduce_op, 0, group_name)
     return funcol.wait_tensor(out)
 
