@@ -11816,6 +11816,14 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_straight_through(device, dtype)
         self._test_gumbel_softmax_grad(device, dtype)
 
+    def test_gumbel_softmax_tau_zero_raises(self, device, dtype):
+        # tau <= 0 must raise ValueError; tau=0 previously produced NaN silently
+        logits = torch.randn(4, 8, device=device, dtype=dtype)
+        with self.assertRaisesRegex(ValueError, "tau"):
+            F.gumbel_softmax(logits, tau=0.0)
+        with self.assertRaisesRegex(ValueError, "tau"):
+            F.gumbel_softmax(logits, tau=-1.0)
+
     def _test_rnn_retain_variables(self, device, dtype):
         rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
                 nn.GRU(10, 20, num_layers=2).to(device, dtype),
