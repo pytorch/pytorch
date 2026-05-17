@@ -114,6 +114,13 @@ zip = strict_zip
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _noop() -> None:
+    pass
+
+
+_NOOP_CTX: AbstractContextManager[None] = nullcontext()
+
+
 def _unwrap_no_symints(args: list[Any]) -> list[Any]:
     return runtime_unwrap_tensor_subclasses(args, append_symints=False)
 
@@ -482,7 +489,7 @@ class _FirstInvocationContext:
         ):
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
-        return nullcontext()
+        return _NOOP_CTX
 
 
 # Note [RuntimeWrapper codegen specification methods]
@@ -760,8 +767,6 @@ def _codegen_capture_orig_inputs(
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
         rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
-    else:
-        rw_lines.append("    orig_inputs = {}")
 
 
 def _codegen_increment_mutation_versions(
@@ -786,6 +791,7 @@ def _codegen_compiled_fn_invocation(
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    is_trivial: bool = False,
 ) -> None:
     rw_lines.append("    with _first_ctx_():")
     if trace_joint:
@@ -819,7 +825,14 @@ def _codegen_compiled_fn_invocation(
             "            if grad_enabled: torch._C._set_grad_enabled(False)"
         )
         rw_lines.append("            _on_before_call_()")
-        if disable_amp:
+        if is_trivial:
+            if disable_amp:
+                rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+                rw_lines.append("            with _DisableAutocast_():")
+                rw_lines.append("                return _compiled_fn_(args)")
+            else:
+                rw_lines.append("            return _compiled_fn_(args)")
+        elif disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
             rw_lines.append("            with _DisableAutocast_():")
             rw_lines.append(
@@ -831,7 +844,8 @@ def _codegen_compiled_fn_invocation(
             )
         rw_lines.append("        finally:")
         rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
-    rw_lines.append("    del args")
+    if not is_trivial:
+        rw_lines.append("    del args")
 
 
 def _codegen_epilogue(
@@ -841,7 +855,10 @@ def _codegen_epilogue(
     runtime_epilogue: _RuntimeForwardEpilogue,
     num_mutated_runtime_inps: int,
     expected_outs: int,
+    is_trivial: bool = False,
 ) -> None:
+    if is_trivial:
+        return
     rw_lines.append(f"    if len(all_outs) != {expected_outs}:")
     rw_lines.append(
         f'        raise AssertionError(f"expected {expected_outs} outputs, '
@@ -972,24 +989,6 @@ def _create_runtime_wrapper(
             runtime_epilogue,
         )
 
-    def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
-        if (
-            torch.autograd.profiler._is_profiler_enabled
-            and dynamo_config.record_runtime_overhead
-        ):
-            cm = torch._C._profiler._RecordFunctionFast(
-                "AOTDispatcher Runtime Wrapper Prologue"
-            )
-            cm.__enter__()
-            return cm
-        return None
-
-    def record_runtime_wrapper_prologue_exit(
-        cm: AbstractContextManager[None] | None,
-    ) -> None:
-        if cm is not None:
-            cm.__exit__(None, None, None)
-
     # Codegen mutation epilogue: emit straight-line code per mutated input
     # with all branches resolved at compile time.
     if runtime_metadata.num_mutated_inp_runtime_indices > 0:
@@ -1088,8 +1087,20 @@ def _create_runtime_wrapper(
     _codegen_increment_mutation_versions(
         rw_lines, rw_globals, keep_input_mutations, runtime_metadata
     )
+    is_trivial = (
+        not trace_joint
+        and num_mutated_runtime_inps == 0
+        and runtime_metadata.num_outputs_aliased == 0
+        and not runtime_metadata.dynamic_outputs
+        and runtime_metadata.grad_enabled_mutation is None
+    )
     _codegen_compiled_fn_invocation(
-        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+        rw_lines,
+        rw_globals,
+        trace_joint,
+        indices_of_inps_to_detach,
+        disable_amp,
+        is_trivial,
     )
     _codegen_epilogue(
         rw_lines,
@@ -1098,6 +1109,7 @@ def _create_runtime_wrapper(
         runtime_epilogue,
         num_mutated_runtime_inps,
         expected_outs,
+        is_trivial,
     )
     rw_source = "\n".join(rw_lines)
 
@@ -1113,24 +1125,38 @@ def _create_runtime_wrapper(
 
     @simple_wraps(_inner_compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
-        cm = record_runtime_wrapper_prologue_enter()
-        prologue_exited = False
+        if (
+            torch.autograd.profiler._is_profiler_enabled
+            and dynamo_config.record_runtime_overhead
+        ):
+            cm = torch._C._profiler._RecordFunctionFast(
+                "AOTDispatcher Runtime Wrapper Prologue"
+            )
+            cm.__enter__()
+            prologue_exited = False
 
-        def exit_prologue() -> None:
-            nonlocal prologue_exited
-            if not prologue_exited:
-                record_runtime_wrapper_prologue_exit(cm)
-                prologue_exited = True
+            def exit_prologue() -> None:
+                nonlocal prologue_exited
+                if not prologue_exited:
+                    cm.__exit__(None, None, None)
+                    prologue_exited = True
 
-        try:
+            try:
+                result = _codegen_runtime_wrapper(
+                    _inner_compiled_fn,
+                    _first_invocation_ctx,
+                    exit_prologue,
+                    args,
+                )
+            finally:
+                exit_prologue()
+        else:
             result = _codegen_runtime_wrapper(
                 _inner_compiled_fn,
                 _first_invocation_ctx,
-                exit_prologue,
+                _noop,
                 args,
             )
-        finally:
-            exit_prologue()
         del args
         return result
 
