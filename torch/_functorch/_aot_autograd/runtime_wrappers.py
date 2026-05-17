@@ -329,10 +329,7 @@ _HANDLER_MAP: dict[
 def make_output_handler(
     info: OutputAliasInfo, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
 ) -> (
-    NoopAliasHandler
-    | AliasOfInputHandler
-    | IsInputHandler
-    | AliasOfIntermediateHandler
+    NoopAliasHandler | AliasOfInputHandler | IsInputHandler | AliasOfIntermediateHandler
 ):
     handler_type = _HANDLER_MAP[info.output_type]
     return handler_type(info, runtime_metadata, trace_joint)
