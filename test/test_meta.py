@@ -1568,6 +1568,70 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
+    def test_meta__fused_moving_avg_obs_fq_helper_functional(self, device):
+        to_meta = MetaConverter()
+
+        def assert_metadata_matches(args, kwargs):
+            ref_out = aten._fused_moving_avg_obs_fq_helper_functional.default(
+                *args, **kwargs
+            )
+            meta_args = [
+                to_meta(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in args
+            ]
+            meta_out = aten._fused_moving_avg_obs_fq_helper_functional.default(
+                *meta_args, **kwargs
+            )
+
+            self.assertEqual(len(ref_out), len(meta_out))
+            for out in (*ref_out[:2], *meta_out[:2]):
+                self.assertEqual(args[0].size(), out.size())
+                self.assertEqual(args[0].stride(), out.stride())
+            for ref, meta in zip(ref_out, meta_out):
+                self.assertEqual(ref.size(), meta.size())
+                self.assertEqual(ref.stride(), meta.stride())
+                self.assertEqual(ref.dtype, meta.dtype)
+
+        observer_on = torch.tensor([1], dtype=torch.long, device=device)
+        fake_quant_off = torch.tensor([0], dtype=torch.long, device=device)
+        x = torch.randn(4, 3, device=device).t()
+
+        scalar_args = [
+            x,
+            observer_on,
+            fake_quant_off,
+            torch.tensor(float("inf"), device=device),
+            torch.tensor(float("-inf"), device=device),
+            torch.tensor([1.0], device=device),
+            torch.tensor([0], dtype=torch.int, device=device),
+            0.01,
+            0,
+            255,
+            0,
+        ]
+        assert_metadata_matches(
+            scalar_args,
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+        )
+
+        per_row_args = [
+            x,
+            observer_on,
+            fake_quant_off,
+            torch.empty(0, device=device),
+            torch.empty(0, device=device),
+            torch.tensor([1.0], device=device),
+            torch.tensor([0], dtype=torch.int, device=device),
+            0.01,
+            0,
+            255,
+            0,
+        ]
+        assert_metadata_matches(
+            per_row_args,
+            {"per_row_fake_quant": True, "symmetric_quant": False},
+        )
+
     def test_cdist_forward(self, device):
         to_meta = MetaConverter()
         x1 = torch.rand([3, 2], device=device)
