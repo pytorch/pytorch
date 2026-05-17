@@ -4563,6 +4563,60 @@ class numpy_operator_wrapper(Generic[_P, R]):
         return numpy_to_tensor(out)
 
 
+@functools.lru_cache(maxsize=1)
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any]]:
+    from torch._dynamo.variables.misc import get_tnp_to_np_map
+
+    return {
+        id(tnp_callable): (tnp_callable, np_callable)
+        for tnp_callable, np_callable in get_tnp_to_np_map().items()
+    }
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    entry = _torch_numpy_callable_id_map().get(id(obj))
+    if entry is None:
+        return None
+
+    tnp_callable, np_callable = entry
+    if obj is not tnp_callable:
+        return None
+
+    if np_callable is None:
+        return None
+
+    module = getattr(np_callable, "__module__", None) or "numpy"
+    if module == "numpy.random" or module.startswith("numpy.random."):
+        return None
+
+    name = getattr(np_callable, "__name__", None)
+    if name is None:
+        return None
+
+    try:
+        if np_callable is not getattr(importlib.import_module(module), name):
+            return None
+    except (AttributeError, ImportError):
+        return None
+
+    return f"{module}.{name}"
+
+
+def is_safe_numpy_wrapper(obj: Any) -> bool:
+    return (
+        isinstance(obj, numpy_to_tensor_wrapper)
+        and _torch_numpy_callable_cache_key(obj.f) is not None
+    )
+
+
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str]:
+    if isinstance(obj, numpy_to_tensor_wrapper):
+        key = _torch_numpy_callable_cache_key(obj.f)
+        if key is not None:
+            return (type(obj).__qualname__, key)
+    raise TypeError(f"expected safe numpy wrapper, got {type(obj)!r}")
+
+
 def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
