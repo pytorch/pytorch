@@ -2998,6 +2998,18 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_flip_zero_dim(self):
+        def fn(x):
+            return x.flip(0), x.flip([0]), torch.flip(x, [0]), x.flip([])
+
+        self.common(fn, (torch.rand(()),))
+
+    def test_flip_zero_dim_backward(self):
+        def fn(x):
+            return x.sum().flip(0)
+
+        self.common(fn, (torch.randn(4, 8, device=self.device, requires_grad=True),))
+
     def test_cumprod_backward(self):
         if self.device == "mps":
             raise unittest.SkipTest(
