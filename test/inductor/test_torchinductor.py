@@ -3000,15 +3000,27 @@ class CommonTemplate:
 
     def test_flip_zero_dim(self):
         def fn(x):
-            return x.flip(0), x.flip([0]), torch.flip(x, [0]), x.flip([])
+            return (
+                x.flip(0),
+                x.flip([0]),
+                x.flip(-1),
+                x.flip([-1]),
+                torch.flip(x, [0]),
+                torch.flip(x, [-1]),
+                x.flip([]),
+            )
 
         self.common(fn, (torch.rand(()),))
 
     def test_flip_zero_dim_backward(self):
         def fn(x):
-            return x.sum().flip(0)
+            return x.flip(0)
 
-        self.common(fn, (torch.randn(4, 8, device=self.device, requires_grad=True),))
+        self.common(
+            fn,
+            (torch.randn((), requires_grad=True),),
+            check_gradient=True,
+        )
 
     def test_cumprod_backward(self):
         if self.device == "mps":
