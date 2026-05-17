@@ -1211,6 +1211,18 @@
       ]
     }
   ],
+  "GB5225": [
+    {
+      "Gb_type": "Attempted to use tensor creation function with requires_grad=True",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Create the tensor outside the compiled region.",
+        "Do not set `requires_grad=True`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -3066,6 +3078,16 @@
     }
   ],
   "GB0225": [
+    {
+      "Gb_type": "numpy_scalar_tensor_requires_grad",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Create the tensor outside the compiled region.",
+        "Do not set `requires_grad=True`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Attempted to use tensor creation function with requires_grad=True",
       "Context": "fn={self.value}, args={args}, kwargs={kwargs}",

@@ -2182,7 +2182,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     and kwargs["requires_grad"].as_python_constant()
                 ):
                     unimplemented(
-                        gb_type="Attempted to use tensor creation function with requires_grad=True",
+                        gb_type="numpy_scalar_tensor_requires_grad",
                         context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                         explanation="Dynamo does not support this.",
                         hints=[
