@@ -6666,7 +6666,7 @@ class TritonScheduling(SIMDScheduling):
                 return value, dtype
 
             def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
-                if sympy.simplify(expr) == 0:
+                if expr == 0 or sympy.simplify(expr) == 0:
                     return 0, dtype
                 raise NotImplementedError
 
@@ -6681,6 +6681,7 @@ class TritonScheduling(SIMDScheduling):
         except NotImplementedError:
             return False
 
+        # ZeroFillHandler returns OpsValue-wrapped (value, dtype) pairs.
         result = getattr(result, "value", result)
         if isinstance(result, tuple):
             result = tuple(getattr(x, "value", x) for x in result)

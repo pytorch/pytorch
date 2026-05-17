@@ -2195,6 +2195,46 @@ class CudaReproTests(TestCase):
         loss = attn_output.mean()
         loss.backward()
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -2787,6 +2827,17 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertIn(".zero_()", code)
         self.assertNotIn("async_compile.triton", code)
         self.assertNotIn("tl.store", code)
+
+    @skipIfXpu(msg="CUDA wrapper codegen check")
+    def test_positive_zero_full_uses_zero_fill(self):
+        def fn():
+            return torch.full((8,), 0.0, device=device_type)
+
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+
+        self.assertEqual(out, torch.zeros((8,), device=device_type))
+        self.assertIn(".zero_()", code)
+        self.assertNotIn("async_compile.triton", code)
 
     @skipIfXpu(msg="CUDA wrapper codegen check")
     def test_negative_zero_full_not_zero_fill(self):

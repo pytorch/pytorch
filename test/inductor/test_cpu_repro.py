@@ -41,10 +41,16 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
+    TEST_WITH_ROCM,
     xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TEST_WITH_ROCM:
+    config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
 try:
@@ -152,10 +158,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @torch._inductor.config.patch({"layout_optimization": True})
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_conv_stride_constraints(self):
-        for fmt in [torch.contiguous_format, torch.channels_last]:
+    def _check_conv_stride_constraints(self, formats):
+        for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason
             m = torch.nn.Conv2d(5, 6, [3, 3])
 
@@ -177,15 +181,20 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channels last
-                        nonlocal fmt
-                        if (
+                        expected_fmt = fmt
+                        if config.force_layout_optimization or (
                             torch.backends.mkldnn.enabled
                             and torch.backends.mkldnn.is_available()
                         ):
-                            fmt = torch.channels_last
-                        test_self.assertTrue(args[0].is_contiguous(memory_format=fmt))
-                        test_self.assertTrue(args[1].is_contiguous(memory_format=fmt))
+                            expected_fmt = torch.channels_last
+                        test_self.assertTrue(
+                            args[0].is_contiguous(memory_format=expected_fmt),
+                            f"input stride {args[0].stride()} is not {expected_fmt}",
+                        )
+                        test_self.assertTrue(
+                            args[1].is_contiguous(memory_format=expected_fmt),
+                            f"weight stride {args[1].stride()} is not {expected_fmt}",
+                        )
                         nonlocal conv_seen
                         conv_seen = True
 
@@ -195,6 +204,33 @@ class CPUReproTests(TestCase):
                 fn_compiled(inps)
 
             self.assertTrue(conv_seen)
+
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_stride_constraints(self):
+        self._check_conv_stride_constraints(
+            [torch.contiguous_format, torch.channels_last]
+        )
+
+    @torch._inductor.config.patch(
+        {"layout_optimization": True, "force_layout_optimization": True}
+    )
+    @patch("torch.backends.mkldnn.is_available", lambda: False)
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_stride_constraints_forced_without_mkldnn(self):
+        self._check_conv_stride_constraints([torch.contiguous_format])
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_bias_flattened_view(self):
+        def fn(x):
+            bias = x.to(torch.bool).float().flatten()
+            return F.conv2d(x, x, bias, stride=1, padding=0)
+
+        x = torch.ones(1, 1, 1, 1)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        self.assertEqual(compiled(x), expected)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
