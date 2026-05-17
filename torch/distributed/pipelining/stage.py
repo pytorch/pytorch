@@ -606,10 +606,15 @@ class _PipelineStageBase(ABC):
                 # Effective requires_grad: metadata captures what the model
                 # produced, but the runtime context (has_backward, grad mode)
                 # determines whether we actually need gradients.
+                # Only floating-point and complex dtypes can require gradients.
                 effective_requires_grad = (
                     info.tensor_meta.requires_grad
                     and self.has_backward
                     and torch.is_grad_enabled()
+                    and (
+                        info.tensor_meta.dtype.is_floating_point
+                        or info.tensor_meta.dtype.is_complex
+                    )
                 )
                 if isinstance(info.tensor_meta, _DTensorMeta):
                     # Buffer must not require grad so from_local stays out
@@ -1358,11 +1363,16 @@ class _PipelineStage(_PipelineStageBase):
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create metadata directly with correct requires_grad.
+            # Only floating-point and complex dtypes can require gradients.
+            can_require_grad = (
+                example_value.dtype.is_floating_point
+                or example_value.dtype.is_complex
+            )
             tensor_meta = _TensorMeta(
                 shape=example_value.shape,
                 stride=example_value.stride(),
                 dtype=example_value.dtype,
-                requires_grad=self.has_backward,
+                requires_grad=self.has_backward and can_require_grad,
             )
 
             logger.debug(
@@ -1373,7 +1383,7 @@ class _PipelineStage(_PipelineStageBase):
                 tensor_meta.dtype,
             )
             buffer = _make_tensor_from_meta(tensor_meta, self.device)
-            if self.has_backward:
+            if self.has_backward and can_require_grad:
                 buffer.requires_grad_(True)
 
             return _RecvInfo(
@@ -1464,7 +1474,8 @@ class _PipelineStage(_PipelineStageBase):
                     shape=val.shape,
                     stride=val.stride(),
                     dtype=val.dtype,
-                    requires_grad=self.has_backward,
+                    requires_grad=self.has_backward
+                    and (val.dtype.is_floating_point or val.dtype.is_complex),
                 )
             )
         self._stage_meta.outputs = tuple(output_metas)

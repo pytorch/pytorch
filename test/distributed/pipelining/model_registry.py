@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 # This file is a model zoo for testing torch.distributed.pipelining.
 import torch
+import torch.nn as nn
 from torch.autograd import Function
 from torch.distributed.pipelining import pipe_split, SplitPoint
 
@@ -362,3 +363,26 @@ class MultiMLPWithDw(torch.nn.Module):
 
         for i in reversed(range(len(self.layers))):
             self.layers[i].compute_dW()
+
+
+class ModelWithIntInput(nn.Module):
+    """Model that passes non-float tensors (like attention_mask) between stages.
+
+    Simulates a HuggingFace-style model where integer/boolean tensors are
+    passed alongside float hidden states across pipeline stage boundaries.
+    """
+
+    def __init__(self, d_hid: int, vocab_size: int = 100):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, d_hid)
+        self.lin0 = nn.Linear(d_hid, d_hid)
+        self.lin1 = nn.Linear(d_hid, d_hid)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+        x = self.embedding(input_ids)
+        x = self.lin0(x)
+        x = x * attention_mask.unsqueeze(-1).float()
+        pipe_split()
+        x = self.lin1(x)
+        x = x * attention_mask.unsqueeze(-1).float()
+        return x

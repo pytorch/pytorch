@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
+from model_registry import ExampleCode, ModelWithIntInput, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
@@ -176,6 +176,46 @@ class StageTest(MultiProcContinuousTest):
             raise AssertionError(
                 f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
             )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    def test_tracer_non_float_inputs(self):
+        """Test that non-float tensors (e.g. attention_mask) can be passed between stages."""
+        seq_len = 16
+        mod = ModelWithIntInput(d_hid)
+        mod.to(self.device)
+
+        input_ids = torch.randint(0, 100, (batch_size, seq_len), device=self.device)
+        attention_mask = torch.ones(
+            batch_size, seq_len, dtype=torch.bool, device=self.device
+        )
+
+        input_ids_mb = input_ids.chunk(chunks)[0]
+        attention_mask_mb = attention_mask.chunk(chunks)[0]
+
+        pipe = pipeline(
+            mod,
+            mb_args=(input_ids_mb,),
+            mb_kwargs={"attention_mask": attention_mask_mb},
+        )
+
+        stage = pipe.build_stage(
+            self.rank,
+            self.device,
+        )
+
+        schedule = ScheduleGPipe(stage, chunks)
+
+        if self.rank == 0:
+            out = schedule.step(input_ids, attention_mask=attention_mask)
+        else:
+            out = schedule.step()
+
+        if self.rank == self.world_size - 1:
+            ref_out = mod(input_ids, attention_mask)
+            torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(

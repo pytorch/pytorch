@@ -93,7 +93,10 @@ class _TensorMeta:
             An empty strided tensor on ``device``.
         """
         t = _make_tensor_from_meta(self, device)
-        t.requires_grad_(self.requires_grad)
+        if self.requires_grad and (
+            self.dtype.is_floating_point or self.dtype.is_complex
+        ):
+            t.requires_grad_(True)
         return t
 
     def get_diff(self, other: _TensorMeta) -> list[str]:
@@ -195,6 +198,9 @@ class _DTensorMeta(_TensorMeta):
         local_tensor = _make_tensor_from_meta(self, device)
         # Set requires_grad after from_local() so that the from_local
         # operation itself is not recorded in the autograd graph.
+        effective_requires_grad = self.requires_grad and (
+            self.dtype.is_floating_point or self.dtype.is_complex
+        )
         return cast(
             DTensor,
             DTensor.from_local(
@@ -204,7 +210,7 @@ class _DTensorMeta(_TensorMeta):
                 shape=self.global_shape,
                 stride=self.global_stride,
                 run_check=False,
-            ).requires_grad_(self.requires_grad),
+            ).requires_grad_(effective_requires_grad),
         )
 
     def get_diff(self, other: _TensorMeta) -> list[str]:
