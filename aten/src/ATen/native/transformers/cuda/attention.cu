@@ -1569,6 +1569,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     // compute_logsumexp is false
     constexpr int kAlignLSE = 1;
     res = at::empty({B, M, num_heads, Kv}, query.options());
+    // TODO: Use Compact Varlen LSE
+    //       The current memory allocation is strictly larger than necessary
+    //       (total_q <= max_seqlen_q * B)
+    //       The problem is total_q is not available here.
     at::Tensor softmax_lse;
     logsumexp = at::empty(
       { B, num_heads, compute_logsumexp ? max_seqlen_q : 0},

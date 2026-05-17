@@ -402,8 +402,13 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
 
   auto opts = q.options();
 
+#if AOTRITON_COMPACT_VARLEN_LSE
+  auto softmax_lse = at::empty({num_heads, total_q}, opts.dtype(at::kFloat));
+  at::Tensor M = softmax_lse;
+#else
   auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
   at::Tensor M = softmax_lse.view({batch_size * num_heads, max_seqlen_q});
+#endif
   at::Tensor softmax_fa_t;
   // Only return softmax if there's dropout to reduce compilation time
   if (return_softmax) {
@@ -466,7 +471,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.K = mk_aotensor(k_padded, "k");
     params.V = mk_aotensor(v_padded, "v");
     params.Sm_scale = softmax_scale;
-    params.L = mk_aotensor<2>(M, "M");
+    params.L = mk_aotensor<2>(M, "logsumexp");
     params.Out = mk_aotensor(out_padded, "Out");
     params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
     params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
@@ -748,7 +753,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
   CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
 
+#if AOTRITON_COMPACT_VARLEN_LSE
+  at::Tensor softmax_lse_cont = softmax_lse.view({num_heads, total_q}).contiguous();
+#else
   at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, max_seqlen_q}).contiguous();
+#endif
 
   at::Tensor q_padded, k_padded, v_padded;
   q_padded = q.unsqueeze(0).transpose(1, 2);
