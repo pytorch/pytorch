@@ -3269,7 +3269,10 @@ class TestFxGraphCacheHashing(TestCase):
         custom_pass = StatefulCustomGraphPass()
 
         with config.patch({"post_grad_custom_pre_pass": custom_pass}):
-            with self.assertRaisesRegex(AttributeError, "Can't get local object"):
+            with self.assertRaisesRegex(
+                (AttributeError, pickle.PicklingError),
+                r"Can't (?:get|pickle) local object",
+            ):
                 pickle.dumps(config.get_config_copy())
 
         with custom_pass_context(post_grad_pre_passes=[custom_pass]):
