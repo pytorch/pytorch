@@ -771,9 +771,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
-                Stack(stack.end() - inst.N, stack.end()),
+                pop(stack, static_cast<size_t>(inst.N)),
                 getDistAutogradContextId());
-            drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
           }
@@ -793,7 +792,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
-            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto args = pop(stack, static_cast<size_t>(inst.N));
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
             aw->setFn(
@@ -814,7 +813,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   }
                   return c10::ivalue::Tuple::create(jit::last(s, n_out));
                 });
-            drop(stack, inst.N);
             push(stack, std::move(aw));
           }
             INST_NEXT;
