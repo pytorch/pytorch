@@ -199,7 +199,7 @@ class Vectorized<float> {
     return Vectorized<float>(Sleef_asinf8_u10(values));
   }
   Vectorized<float> asinh() const {
-    return Vectorized<float>(Sleef_asinhf8_u10(values));
+    return map(std::asinh);
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf8_u10(values));
