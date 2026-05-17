@@ -92,7 +92,24 @@ def _get_total_norm(
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(torch._foreach_norm(device_tensors, norm_type))
+            # On CPU in auto mode, for many small tensors, concatenating into a
+            # single flat tensor and computing one norm avoids N aten::empty({})
+            # scalar allocations that _foreach_norm produces for each output
+            # (issue #133586). view(-1) returns a zero-copy view for contiguous
+            # tensors. Benchmark shows this is faster only when numel ≤ 512;
+            # above that the cat copy cost exceeds the allocation savings.
+            if (
+                foreach is None
+                and device.type == "cpu"
+                and device_tensors[0].numel() <= 512
+            ):
+                norms.append(
+                    torch.linalg.vector_norm(
+                        torch.cat([t.view(-1) for t in device_tensors]), norm_type
+                    )
+                )
+            else:
+                norms.extend(torch._foreach_norm(device_tensors, norm_type))
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
@@ -102,9 +119,13 @@ def _get_total_norm(
                 [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
             )
 
-    total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
-    )
+    # When all tensors share the same device (the typical single-GPU or CPU-only
+    # case), the [norm.to(first_device) for norm in norms] list comprehension is
+    # a no-op but still dispatches N Python calls. Skip it when no cross-device
+    # movement is actually needed (issue #133586).
+    if any(device != first_device for (device, _) in grouped_tensors):
+        norms = [norm.to(first_device) for norm in norms]
+    total_norm = torch.linalg.vector_norm(torch.stack(norms), norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(
