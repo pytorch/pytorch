@@ -163,6 +163,7 @@ def call_backward(
                 raise AssertionError(
                     "saved_tensor_inputs must be set with saved_tensor_indices"
                 )
+            input_tensor: torch.Tensor | None = None
             input_tensors_list = []
             for idx in saved_tensor_indices:
                 input_tensor = saved_tensor_inputs[idx]
