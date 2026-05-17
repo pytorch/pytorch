@@ -73,12 +73,14 @@ When migrating an existing operator from MPSGraph to native Metal, **consolidate
 
 **Key change:** Replace `MPS: my_op_out_mps` with adding `MPS` to the shared dispatch line (e.g., `CPU, CUDA, MPS: my_op_out`).
 
-**Migrate every row.** Operators usually have several rows (functional / out /
-inplace, broadcasting variants). `REGISTER_MPS_DISPATCH` only affects rows
-routing to the shared template; rows still naming the legacy `MPS: my_op_mps`
-keep the MPSGraph path and silently bypass the template's guarantees
-(broadcast, bounds checks, type promotion). Grep for the legacy function name
-and collapse every row.
+**Update every overload.** A single op typically has several
+`native_functions.yaml` entries — functional / inplace / `.out`, plus
+`Tensor` and `Scalar` variants. Each entry has its own `dispatch:` block, and
+each one must be moved over. Any entry left pointing at `MPS: my_op_mps`
+still routes that overload to the MPSGraph code, so callers can silently
+land on the old path depending on which overload they hit. Before declaring
+the migration done, grep the legacy function name and confirm no entry still
+references it.
 
 **Dispatch naming conventions:**
 - `MPS: function_name_mps` - MPS-specific implementation (old MPSGraph pattern)
