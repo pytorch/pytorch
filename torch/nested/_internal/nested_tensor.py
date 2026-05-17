@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
+import math
 from typing import *  # noqa: F403
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
-from torch._prims_common import is_expandable_to
+from torch._prims_common import canonicalize_dim, is_expandable_to
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -357,6 +358,25 @@ class NestedTensor(torch.Tensor):
         # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
 
+        if args and isinstance(args[0], NestedTensor) and len(args) == 1 and not kwargs:
+            inp = args[0]
+            if func is torch.ops.aten.is_non_overlapping_and_dense.default:
+                return False
+            if func is torch.ops.aten.sym_size.default:
+                return inp._size
+            if func is torch.ops.aten.dim.default:
+                return len(inp._size)
+            if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
+                if inp._lengths is not None:
+                    return int(sum(inp._lengths) * math.prod(inp._size[2:]))
+                return inp._values.numel()
+            if func is torch.ops.aten.sym_stride.default:
+                return inp._strides
+            if func is torch.ops.aten.sym_storage_offset.default:
+                return inp._values.storage_offset()
+            if func is torch.ops.prim.layout.default:
+                return torch.jagged
+
         # Lazy import to avoid circular dependency
         from .ops import lookup_jagged
 
@@ -384,6 +404,31 @@ class NestedTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        if args and isinstance(args[0], NestedTensor):
+            inp = args[0]
+            if (
+                (func is torch.Tensor.size or func is torch.Tensor.stride)
+                and len(args) <= 2
+                and (not kwargs or set(kwargs) == {"dim"})
+            ):
+                dim = kwargs.get("dim", args[1] if len(args) == 2 else None)
+                data = inp._size if func is torch.Tensor.size else inp._strides
+                if dim is None:
+                    return torch.Size(data) if func is torch.Tensor.size else data
+                return data[canonicalize_dim(len(data), dim)]
+            if func is torch.Tensor.dim and len(args) == 1 and not kwargs:
+                return len(inp._size)
+            if (
+                getattr(func, "__name__", None) == "__get__"
+                and len(args) == 1
+                and not kwargs
+            ):
+                descriptor = getattr(func, "__self__", None)
+                if descriptor is torch.Tensor.shape:
+                    return torch.Size(inp._size)
+                if descriptor is torch.Tensor.ndim:
+                    return len(inp._size)
 
         from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 

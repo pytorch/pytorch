@@ -3993,6 +3993,9 @@ def _automatic_dynamic(
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
+            track_outer_size_stride=not isinstance(
+                e, torch.nested._internal.nested_tensor.NestedTensor
+            ),
         )
 
     if static_shapes and not is_dynamic_source(name):
