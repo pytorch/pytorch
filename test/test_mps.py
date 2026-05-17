@@ -8661,6 +8661,7 @@ class TestMPS(TestCaseMPS):
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
             self.assertLess(
+                # Use 95th percentile of relative error to avoid outliers present due to MPS's lower precision
                 np.quantile(rel_error, 0.95),
                 0.005,
                 "\n".join(
