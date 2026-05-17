@@ -1855,17 +1855,20 @@ class CUDAGraphNode:
         # the cudagraph managed tensors which died upon recording must also die upon
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
+        cleared_inputs: list[tuple[int, InputType]] = []
         for idx in self.cudagraph_managed_idxs:
             if not self.preserved_aliased_inputs[idx]:
+                cleared_inputs.append((idx, inputs[idx]))
                 inputs[idx] = None  # type: ignore[call-overload]
 
-        torch._check(
-            self._check_liveness(
-                self.expected_dead_indices_after_graph, self.path_weakrefs
-            ),
-            lambda: "TODO: graph recording observed an input tensor deallocate during graph "
-            " recording that did not occur during replay. Please file an issue.",
-        )
+        if not self._check_liveness(
+            self.expected_dead_indices_after_graph, self.path_weakrefs
+        ):
+            for idx, inp in cleared_inputs:
+                inputs[idx] = inp
+            status = CheckInvariantStatus.ExpectedDeadIndicesAfterGraphMismatch
+            return status, lambda: f"{status}"
+
         return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def num_descendants(self) -> int:

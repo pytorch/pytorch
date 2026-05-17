@@ -1681,6 +1681,64 @@ if HAS_CUDA_AND_TRITON:
             self.assertFalse(curr_node.unaliased_in_all_paths[0])
             self.assertFalse(out_id == id(new_out))
 
+        def test_non_reentrant_checkpoint_recomputes_compiled_module(self):
+            class SubModule(nn.Module):
+                def __init__(self, hidden_size):
+                    super().__init__()
+                    self.linear = nn.Linear(hidden_size, hidden_size)
+                    self.activation = nn.GELU()
+
+                def forward(self, x):
+                    return self.activation(self.linear(x))
+
+            class CheckpointedLayer(nn.Module):
+                def __init__(self, hidden_size):
+                    super().__init__()
+                    self.pre_module = nn.Linear(hidden_size, hidden_size)
+                    self.sub_module = torch.compile(
+                        SubModule(hidden_size), mode="reduce-overhead"
+                    )
+                    self.post_module = nn.Linear(hidden_size, hidden_size)
+
+                def forward(self, x):
+                    x = self.pre_module(x)
+
+                    def custom_func(z):
+                        return self.sub_module(z + 1) + 1
+
+                    x = torch.utils.checkpoint.checkpoint(
+                        custom_func, x, use_reentrant=False
+                    )
+                    return self.post_module(x)
+
+            class Model(nn.Module):
+                def __init__(self, hidden_size, num_layers):
+                    super().__init__()
+                    self.layers = nn.ModuleList(
+                        [CheckpointedLayer(hidden_size) for _ in range(num_layers)]
+                    )
+                    self.final = nn.Linear(hidden_size, hidden_size)
+
+                def forward(self, x):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    for layer in self.layers:
+                        x = layer(x)
+                    return self.final(x)
+
+            torch.manual_seed(42)
+            hidden_size = 32
+            model = Model(hidden_size, num_layers=2).cuda()
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+            for _ in range(4):
+                x = torch.randn(2, 4, hidden_size, device="cuda")
+                target = torch.randn(2, 4, hidden_size, device="cuda")
+
+                optimizer.zero_grad()
+                loss = (model(x) - target).square().mean()
+                loss.backward()
+                optimizer.step()
+
         def test_aliased_static_parameter(self):
             inp = torch.rand([20, 20], device="cuda")
 

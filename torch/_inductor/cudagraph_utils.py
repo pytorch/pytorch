@@ -366,6 +366,9 @@ class CheckInvariantStatus(Enum):
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
 
+    # Expected dead indices after graph would still be live
+    ExpectedDeadIndicesAfterGraphMismatch = 5
+
     def __str__(self) -> str:
         if self.name == "CudagraphManagedIdxMismatch":
             return "cudagraph managed tensor data pointer changed"
@@ -373,6 +376,8 @@ class CheckInvariantStatus(Enum):
             return "static input data pointer changed"
         elif self.name == "ExpectedDeadIndicesBeforeGraphMismatch":
             return "expected dead indices before graph are live"
+        elif self.name == "ExpectedDeadIndicesAfterGraphMismatch":
+            return "expected dead indices after graph are live"
         else:
             return f"{self.name}: {self.value}"
 
