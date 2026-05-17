@@ -37,22 +37,29 @@ runs:
       run: |
         echo "::group::Checking for IAM instance profile"
         echo "Checking EC2 metadata endpoint for IAM instance profile..."
+        # IMDS may be reachable over IPv6 [fd00:ec2::254] (IPv6-only EKS pods
+        # without NAT64) or IPv4 169.254.169.254 elsewhere; --resolve tries
+        # both. --noproxy '*' avoids any corporate proxy interception, and
+        # -m 2 bounds the total time per call.
 
         # Try IMDSv2 first (more secure, required on some instances)
         echo "Attempting IMDSv2..."
-        TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
-          -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
-          --connect-timeout 2 2>/dev/null) || TOKEN=""
+        TOKEN=$(curl -sf -m 2 --noproxy '*' \
+          --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
+          -X PUT "http://metadata/latest/api/token" \
+          -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null) || TOKEN=""
 
         if [[ -n "$TOKEN" ]]; then
           echo "IMDSv2 token obtained, checking IAM info..."
-          IAM_INFO=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" \
-            "http://169.254.169.254/latest/meta-data/iam/info" \
-            --connect-timeout 2 2>/dev/null) || IAM_INFO=""
+          IAM_INFO=$(curl -sf -m 2 --noproxy '*' \
+            --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
+            -H "X-aws-ec2-metadata-token: $TOKEN" \
+            "http://metadata/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
         else
           echo "IMDSv2 not available, trying IMDSv1..."
-          IAM_INFO=$(curl -sf --connect-timeout 2 \
-            "http://169.254.169.254/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
+          IAM_INFO=$(curl -sf -m 2 --noproxy '*' \
+            --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
+            "http://metadata/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
         fi
 
         if [[ -n "$IAM_INFO" ]]; then

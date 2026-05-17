@@ -17,22 +17,25 @@ concurrency:
         shell: bash
         run: |
           set -euo pipefail
-          # IMDS link-local IPv4 (169.254.169.254) is unreachable from IPv6-only
-          # pods (e.g. EKS). Probe first; skip the banner if the endpoint is unavailable.
-          IMDS_TOKEN=$(curl --connect-timeout 2 --max-time 5 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30" 2>/dev/null || echo "")
-          if [ -n "${IMDS_TOKEN}" ]; then
-            function get_ec2_metadata() {
-              # Pulled from instance metadata endpoint for EC2
-              # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-              category=$1
-              curl -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-            }
-            echo "ami-id: $(get_ec2_metadata ami-id)"
-            echo "instance-id: $(get_ec2_metadata instance-id)"
-            echo "instance-type: $(get_ec2_metadata instance-type)"
-          else
-            echo "EC2 IMDS unavailable (likely non-EC2 or IPv6-only runner); skipping instance metadata."
-          fi
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            # IMDS may be reachable over IPv6 [fd00:ec2::254] (IPv6-only EKS pods
+            # without NAT64) or IPv4 169.254.169.254 elsewhere; --resolve tries
+            # both. Soft-fail when neither responds (off-EC2 or v6 endpoint not
+            # enabled via HttpProtocolIpv6).
+            category=$1
+            local token
+            token=$(curl -sS -m 2 --noproxy '*' --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' -X PUT "http://metadata/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30" 2>/dev/null || true)
+            if [ -z "${token}" ]; then
+              echo "unavailable"
+              return 0
+            fi
+            curl -sS -m 2 --noproxy '*' --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' -H "X-aws-ec2-metadata-token: ${token}" -fsSL "http://metadata/latest/meta-data/${category}" 2>/dev/null || echo "unavailable"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
 {%- endmacro -%}
 
