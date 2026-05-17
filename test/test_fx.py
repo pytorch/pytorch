@@ -6,44 +6,34 @@ import builtins
 import collections
 import contextlib
 import copy
-import gc
 import functools
+import gc
 import inspect
 import io
+import json
 import math
 import numbers
 import operator
 import os
 import pickle
 import sys
+import tempfile
 import traceback
 import types
 import typing
 import unittest
-import weakref
 import warnings
-from math import sqrt
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-import torch.utils._pytree as pytree
-import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
-from torch.fx.node import Target, Argument, ArgumentT, _format_arg
-from torch.fx.passes import shape_prop
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from copy import deepcopy
+import weakref
 from collections import namedtuple
-from typing import Any, NamedTuple
 from collections.abc import Callable
+from copy import deepcopy
+from math import sqrt
+from typing import Any, NamedTuple
 
 import torch
-
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
-
 from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
@@ -52,7 +42,6 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
-
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
     TypeCheckerTest,
@@ -62,17 +51,45 @@ from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+from torch.autograd.profiler_util import _canonicalize_profiler_events
+from torch.fx import (
+    CodeGen,
+    Graph,
+    GraphModule,
+    Interpreter,
+    Node,
+    PH,
+    Proxy,
+    symbolic_trace,
+    Tracer,
+    Transformer,
+    wrap,
+)
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
-
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.node import _format_arg, Argument, ArgumentT, Target
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.passes import shape_prop
 from torch.fx.proxy import TraceError
+from torch.multiprocessing import Process
+from torch.profiler import profile, ProfilerActivity
+from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import blas_library_context
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
     IS_ARM64,
+    IS_FBCODE,
     IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -80,12 +97,6 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-
-import json
-import tempfile
-from torch.profiler import profile, ProfilerActivity
-from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
-from torch.autograd.profiler_util import _canonicalize_profiler_events
 
 try:
     from torchvision import models as torchvision_models
@@ -223,16 +234,14 @@ def _enrich_profiler_traces(prof):
     Returns:
         A string representing enriched events
     """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as f:
         trace_file = f.name
         prof.export_chrome_trace(trace_file)
 
         with open(trace_file) as f:
             trace_data = json.load(f)
 
-        map_recorded_events_to_aten_ops_with_stack_trace(
-            trace_data
-        )
+        map_recorded_events_to_aten_ops_with_stack_trace(trace_data)
 
         events = []
         for event in trace_data["traceEvents"]:
@@ -772,16 +781,16 @@ class TestFX(JitTestCase):
 
         graph = tracer.trace(M())
         # saving the original list because we will insert new nodes as a part of a test
-        stack_traces = "\n".join([node.meta.get("stack_trace", "") for node in graph.nodes])
-        FileCheck().check_count(
-            "c = a + b", 1, exactly=True
-        ).run(stack_traces.strip())
-        FileCheck().check_count(
-            "c = foo(a, c)", 1, exactly=True
-        ).run(stack_traces.strip())
-        FileCheck().check_count(
-            "return a * b", 1, exactly=True
-        ).run(stack_traces.strip())
+        stack_traces = "\n".join(
+            [node.meta.get("stack_trace", "") for node in graph.nodes]
+        )
+        FileCheck().check_count("c = a + b", 1, exactly=True).run(stack_traces.strip())
+        FileCheck().check_count("c = foo(a, c)", 1, exactly=True).run(
+            stack_traces.strip()
+        )
+        FileCheck().check_count("return a * b", 1, exactly=True).run(
+            stack_traces.strip()
+        )
 
     def test_stack_traces_with_transformer(self):
         class M(torch.nn.Module):
@@ -1358,13 +1367,15 @@ class TestFX(JitTestCase):
 
         graph: torch.fx.Graph = torch.fx.Graph()
         a: torch.fx.Node = graph.create_node("placeholder", "x")
-        b: torch.fx.Node = graph.create_node("call_function", op, (a,), type_expr=type_name)
-        c: torch.fx.Node = graph.create_node("call_function", op, (b,), type_expr=type_name)
+        b: torch.fx.Node = graph.create_node(
+            "call_function", op, (a,), type_expr=type_name
+        )
+        c: torch.fx.Node = graph.create_node(
+            "call_function", op, (b,), type_expr=type_name
+        )
         graph.output((b, c))
 
-        gm: torch.fx.GraphModule = torch.fx.GraphModule(
-            torch.nn.Module(), graph
-        )
+        gm: torch.fx.GraphModule = torch.fx.GraphModule(torch.nn.Module(), graph)
         gm.graph.lint()
         text = gm.print_readable(False)
         count = text.count("_torch__ops_aten_aten_relu_")
@@ -2058,7 +2069,7 @@ class TestFX(JitTestCase):
                         f"got {tensor_meta[1].shape}"
                     )
 
-    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
+    @xfailIf(IS_ARM64 and IS_LINUX)  # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
@@ -2486,14 +2497,15 @@ class TestFX(JitTestCase):
         )
         output: torch.fx.Node = graph.output(b)
 
-        self.assertTrue('list[float]' in str(graph))
+        self.assertTrue("list[float]" in str(graph))
 
     def test_typename_print_pre_pep585(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        x : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
-                                              type_expr=typing.List[float])  # noqa: UP006
-        output : torch.fx.Node = graph.output(b)
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=list[float]
+        )
+        output: torch.fx.Node = graph.output(b)
 
         self.assertTrue("typing.List[float]" in str(graph))
 
@@ -2501,11 +2513,14 @@ class TestFX(JitTestCase):
         graph: torch.fx.Graph = torch.fx.Graph()
         x: torch.fx.Node = graph.create_node("placeholder", "x")
         b: torch.fx.Node = graph.create_node(
-            "call_function", target=torch.relu, args=(x,), type_expr=float|torch.Tensor|None
+            "call_function",
+            target=torch.relu,
+            args=(x,),
+            type_expr=float | torch.Tensor | None,
         )
         output: torch.fx.Node = graph.output(b)
 
-        self.assertTrue('float | torch.Tensor | None' in str(graph))
+        self.assertTrue("float | torch.Tensor | None" in str(graph))
 
     def test_layout(self):
         class M(torch.nn.Module):
@@ -3012,9 +3027,7 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(Foo())
         if not all("constant" not in node.target for node in traced.graph.nodes):
-            raise AssertionError(
-                "Expected no node targets to contain 'constant'"
-            )
+            raise AssertionError("Expected no node targets to contain 'constant'")
 
     def test_single_default_arg(self):
         class M(torch.nn.Module):
@@ -3240,9 +3253,7 @@ class TestFX(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "'wrapper_fn' is "
-            "being compiled since it was called"
-            " from 'fn.forward'",
+            "'wrapper_fn' is being compiled since it was called from 'fn.forward'",
         ):
             scripted = torch.jit.script(traced)
 
@@ -3255,7 +3266,7 @@ class TestFX(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "'wrapper_fn' is " "being compiled since it was called" " from 'M.forward'",
+            "'wrapper_fn' is being compiled since it was called from 'M.forward'",
         ):
             scripted = torch.jit.script(traced)
 
@@ -3317,9 +3328,7 @@ class TestFX(JitTestCase):
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
         if not any(i.target is torch._assert for i in mod_true.graph.nodes):
-            raise AssertionError(
-                "Expected at least one node with target torch._assert"
-            )
+            raise AssertionError("Expected at least one node with target torch._assert")
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -3656,7 +3665,7 @@ class TestFX(JitTestCase):
         self.assertFalse(module_exists(a, "net_b.net_c.conv"))
 
         # Test `get_submodule` with a deleted submodule
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`conv`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `conv`"):
             self.assertIsNone(a.get_submodule("net_b.net_c.conv"))
 
         # Test `get_attr` warnings
@@ -3685,16 +3694,16 @@ class TestFX(JitTestCase):
 
         # Test `get_parameter`
         a.get_parameter("net_b.net_c.param")
-        with self.assertRaisesRegex(AttributeError, "is not an " "nn.Parameter"):
+        with self.assertRaisesRegex(AttributeError, "is not an nn.Parameter"):
             a.get_parameter("net_b.buf")
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`param`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `param`"):
             a.get_parameter("net_b.param")
 
         # Test `get_buffer`
         a.get_buffer("net_b.buf")
-        with self.assertRaisesRegex(AttributeError, "is not a " "buffer"):
+        with self.assertRaisesRegex(AttributeError, "is not a buffer"):
             a.get_buffer("net_b.net_c.param")
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`buf`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `buf`"):
             a.get_buffer("net_b.net_c.buf")
 
         # Test non-nested attributes
@@ -4006,7 +4015,9 @@ class TestFX(JitTestCase):
     @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
-            def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
+            def forward(
+                self, x: tuple[()], y: tuple[str, tuple[()]]
+            ):
                 return "foo"
 
         traced = torch.fx.symbolic_trace(Foo())
@@ -4117,9 +4128,7 @@ class TestFX(JitTestCase):
                 raise AssertionError("Expected tree_flatten_spec not in nf.code")
             placeholder_count = sum(i.op == "placeholder" for i in nf.graph.nodes)
             if placeholder_count != 1:
-                raise AssertionError(
-                    f"Expected 1 placeholder, got {placeholder_count}"
-                )
+                raise AssertionError(f"Expected 1 placeholder, got {placeholder_count}")
 
             nf = symbolic_trace(nf, concrete_args={"x": inp})
             self.assertEqual(nf(val), orig_out)
@@ -4228,7 +4237,7 @@ class TestFX(JitTestCase):
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4268,7 +4277,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4300,7 +4309,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4475,9 +4484,10 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         # Handle platform-specific event names
         if torch.version.hip:
-            actual_traces = '\n'.join(
-                line for line in actual_traces.split('\n')
-                if 'hipGetDeviceProperties' not in line
+            actual_traces = "\n".join(
+                line
+                for line in actual_traces.split("\n")
+                if "hipGetDeviceProperties" not in line
             )
             kernel_event = "hipExtModuleLaunchKernel"
             kernel_event_relu = "hipLaunchKernel"
@@ -4560,12 +4570,14 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
-        self.assertExpectedInline(actual_traces, f"""\
+        self.assertExpectedInline(
+            actual_traces,
+            f"""\
 event=aten::add node=add stack_trace=return x + 1
 event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event={kernel_event} node=sub stack_trace=return x - 1"""
-            )
+event={kernel_event} node=sub stack_trace=return x - 1""",
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -4595,24 +4607,30 @@ event={kernel_event} node=sub stack_trace=return x - 1"""
 
         # Warmup
         for _ in range(3):
-            _ = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            _ = compiled_model(
+                torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda")
+            )
 
         # Profile
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         ) as prof:
-            result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            result = compiled_model(
+                torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda")
+            )
 
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
-        self.assertExpectedInline(actual_traces, f"""\
+        self.assertExpectedInline(
+            actual_traces,
+            f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
 event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
 event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
-event={kernel_event} node=add stack_trace=a = s + self.c"""
-            )
+event={kernel_event} node=add stack_trace=a = s + self.c""",
+        )
 
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -4682,6 +4700,192 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
                 if node.op == "call_function"
             ),
             "Deserialized graph should contain triton_kernel_wrapper_functional",
+        )
+
+    def test_materialize_symints_basic(self):
+        """``Graph.materialize_symints`` lowers each SymInt input into an FX
+        subgraph rooted at existing symbol producers."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            return x + 1
+
+        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
+        gm = backend.graphs[-1]
+
+        # Pick a tensor placeholder so we can derive its symbolic dims.
+        tensor_placeholder = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value"), torch.Tensor)
+        )
+        h, _ = tensor_placeholder.meta["example_value"].shape  # h is a SymInt
+        self.assertIsInstance(h, torch.SymInt)
+
+        result = gm.graph.materialize_symints([h - 1, 3 * (h - 1), (h - 1) ** 2, 5])
+
+        # Plain int passes through, the rest are Nodes.
+        self.assertEqual(result[3], 5)
+        for got in result[:3]:
+            self.assertIsInstance(got, torch.fx.Node)
+
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %s77 : torch.SymInt [num_users=3] = placeholder[target=s77]
+    %s27 : torch.SymInt [num_users=0] = placeholder[target=s27]
+    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
+    %add : [num_users=1] = call_function[target=operator.add](args = (%l_x_, 1), kwargs = {})
+    return (add,)
+    %add_1 : [num_users=0] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
+    %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %s77), kwargs = {})
+    %add_2 : [num_users=0] = call_function[target=operator.add](args = (-3, %mul), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
+    %pow_1 : [num_users=0] = call_function[target=operator.pow](args = (%add_3, 2), kwargs = {})""",
+        )
+
+    def test_materialize_symints_constant_symint(self):
+        """A SymInt whose expression has folded to a constant is unwrapped
+        to a plain ``int`` rather than emitting any FX nodes."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            return x + 1
+
+        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
+        gm = backend.graphs[-1]
+
+        tensor_placeholder = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value"), torch.Tensor)
+        )
+        h = tensor_placeholder.meta["example_value"].shape[0]
+        self.assertIsInstance(h, torch.SymInt)
+
+        const = h - h  # = 0, constant SymInt
+        result = gm.graph.materialize_symints([const])
+        self.assertEqual(result, [0])
+        self.assertIsInstance(result[0], int)
+
+    def test_materialize_symints_missing_symbol_rejects(self):
+        """Materializing a SymInt whose symbol has no producer in the graph
+        raises ``AssertionError`` rather than producing a dangling node."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        # First, capture a graph that has symbolic shapes so we can grab a SymInt.
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            return x + 1
+
+        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
+        captured_gm = backend.graphs[-1]
+        captured_tensor_placeholder = next(
+            n
+            for n in captured_gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value"), torch.Tensor)
+        )
+        h = captured_tensor_placeholder.meta["example_value"].shape[0]
+        self.assertIsInstance(h, torch.SymInt)
+
+        # Build a NEW empty graph (no symbol producers) and try to materialize.
+        empty_graph = torch.fx.Graph()
+        with self.assertRaisesRegex(AssertionError, "no producer in the graph"):
+            empty_graph.materialize_symints([h])
+
+    def test_materialize_symints_symint_placeholder(self):
+        """When the symbol is produced by a top-level SymInt placeholder, the
+        placeholder itself is used as the symbol's producer — no
+        `sym_size.int` node is emitted."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(n: int):
+            # A pure-int input keeps `n` as a top-level Sym(...) placeholder
+            # (Dynamo represents it directly, no tensor backing).
+            return torch.zeros(n + 1)
+
+        torch.compile(f, dynamic=True, backend=backend)(8)
+        gm = backend.graphs[-1]
+
+        sym_placeholder = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value"), torch.SymInt)
+        )
+        s = sym_placeholder.meta["example_value"]
+        self.assertIsInstance(s, torch.SymInt)
+
+        result = gm.graph.materialize_symints([s + 2, s * 3])
+        self.assertEqual(len(result), 2)
+        for got in result:
+            self.assertIsInstance(got, torch.fx.Node)
+
+        # The new `add_1` and `mul` reference `%l_n_` (the SymInt placeholder)
+        # directly — no `aten.sym_size.int` node was emitted to recover `s`.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %l_n_ : torch.SymInt [num_users=3] = placeholder[target=L_n_]
+    %add : [num_users=1] = call_function[target=operator.add](args = (%l_n_, 1), kwargs = {})
+    %zeros : [num_users=1] = call_function[target=torch.zeros](args = (%add,), kwargs = {})
+    return (zeros,)
+    %add_1 : [num_users=0] = call_function[target=operator.add](args = (2, %l_n_), kwargs = {})
+    %mul : [num_users=0] = call_function[target=operator.mul](args = (3, %l_n_), kwargs = {})""",
+        )
+
+    def test_materialize_symints_item_unbacked(self):
+        """When a symbol is produced by a data-dependent op like ``.item()``
+        (an unbacked SymInt), the producing FX node is used as the root —
+        which is what protects the ``.item()`` call from DCE."""
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        def f(x):
+            n = x.item()
+            torch._check(n >= 1)
+            return torch.zeros(n + 2)
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            torch.compile(f, dynamic=True, backend=backend)(torch.tensor(5))
+        gm = backend.graphs[-1]
+
+        item_node = next(
+            n for n in gm.graph.nodes if n.op == "call_method" and n.target == "item"
+        )
+        u = item_node.meta["example_value"]
+        self.assertIsInstance(u, torch.SymInt)
+
+        result = gm.graph.materialize_symints([u + 5])
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.fx.Node)
+
+        # The new `add_1` references `%item` directly.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
+    %item : [num_users=3] = call_method[target=item](args = (%l_x_,), kwargs = {})
+    %ge : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
+    %_check : [num_users=0] = call_function[target=torch._check](args = (%ge,), kwargs = {})
+    %add : [num_users=1] = call_function[target=operator.add](args = (%item, 2), kwargs = {})
+    %zeros : [num_users=1] = call_function[target=torch.zeros](args = (%add,), kwargs = {})
+    return (zeros,)
+    %add_1 : [num_users=0] = call_function[target=operator.add](args = (5, %item), kwargs = {})""",
         )
 
 
@@ -4817,7 +5021,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             else ""
         )
 
-        return f'{fn_name}({", ".join(arg_strs)}){return_annot}'
+        return f"{fn_name}({', '.join(arg_strs)}){return_annot}"
 
     _trivial_mappings = {
         str: "str",
@@ -4897,7 +5101,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             self._annotation_type_to_stable_str(ct, sig_str, True) for ct in contained
         ]
         contained_type_str = (
-            f'[{", ".join(contained_type_annots)}]'
+            f"[{', '.join(contained_type_annots)}]"
             if len(contained_type_annots) > 0
             else ""
         )
@@ -4927,17 +5131,19 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             return f"Type{contained_type_str}"
         if isinstance(t, typing.Callable):
             if len(contained) > 0 and contained[0] is not Ellipsis:
-                return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
+                return f"Callable[[{', '.join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]"
             else:
-                return f'Callable{contained_type_str}'
+                return f"Callable{contained_type_str}"
 
         if t is ArgumentT:
             # ArgumentT is a TypeVar bound to torch.fx.node.Argument
-            return f'torch.fx.node.Argument{contained_type_str}'
+            return f"torch.fx.node.Argument{contained_type_str}"
 
-        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
-                           f'Please add support for this type and confirm with the '
-                           f'FX team that your signature change is valid.')
+        raise RuntimeError(
+            f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."
+            f"Please add support for this type and confirm with the "
+            f"FX team that your signature change is valid."
+        )
 
         raise RuntimeError(
             f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."
@@ -5038,9 +5244,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx, set())
         check_symbols_have_bc_designation(torch.fx.passes, set())
 
-        non_back_compat_strs = [
-            torch.typename(obj) for obj in non_back_compat_objects
-        ]
+        non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects]
         # Only want objects in torch.fx
         non_back_compat_strs = [
             s
@@ -5326,9 +5530,9 @@ class TestFunctionalTracing(JitTestCase):
     @classmethod
     def generate_test_func(cls, func_name, fn):
         def functional_test(self):
-            if (
-                func_name in self.UNTRACEABLE_FUNCTIONALS_PY38
-                and sys.version_info < (3, 12)
+            if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and sys.version_info < (
+                3,
+                12,
             ):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
