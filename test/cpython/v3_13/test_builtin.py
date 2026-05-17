@@ -187,6 +187,7 @@ class BuiltinTest(CPythonTestCase):
         it = pickle.loads(d)
         self.assertEqual(list(it), seq[1:])
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_import(self):
         __import__('sys')
         __import__('time')
@@ -410,6 +411,7 @@ class BuiltinTest(CPythonTestCase):
                     rv = ns['f']()
                     self.assertEqual(rv, tuple(expected))
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_compile_top_level_await_no_coro(self):
         """Make sure top level non-await codes get the correct coroutine flags"""
         modes = ('single', 'exec')
@@ -494,6 +496,7 @@ class BuiltinTest(CPythonTestCase):
         finally:
             asyncio.set_event_loop_policy(policy)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_compile_top_level_await_invalid_cases(self):
          # helper function just to check we can run top=level async-for
         async def arange(n):
@@ -549,6 +552,7 @@ class BuiltinTest(CPythonTestCase):
         exec(co, glob)
         self.assertEqual(type(glob['ticker']()), AsyncGeneratorType)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_compile_ast(self):
         args = ("a*(1+2)", "f.py", "exec")
         raw = compile(*args, flags = ast.PyCF_ONLY_AST).body[0]
@@ -789,6 +793,7 @@ class BuiltinTest(CPythonTestCase):
                 return 1 # used to be 'a' but that's no longer an error
         self.assertRaises(TypeError, eval, 'dir()', globals(), C())
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_exec(self):
         g = {}
         exec('z = 1', g)
@@ -1462,6 +1467,7 @@ class BuiltinTest(CPythonTestCase):
             fp.write('XXX'*100)
             fp.write('YYY'*100)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_open(self):
         self.write_testfile()
         fp = open(TESTFN, encoding="utf-8")
@@ -1478,6 +1484,7 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(ValueError, open, b'a\x00b')
 
     @unittest.skipIf(sys.flags.utf8_mode, "utf-8 mode is enabled")
+    @torch._dynamo.error_on_graph_break(False)
     def test_open_default_encoding(self):
         old_environ = dict(os.environ)
         try:
@@ -1500,6 +1507,7 @@ class BuiltinTest(CPythonTestCase):
             os.environ.update(old_environ)
 
     @support.requires_subprocess()
+    @torch._dynamo.error_on_graph_break(False)
     def test_open_non_inheritable(self):
         fileobj = open(__file__, encoding="utf-8")
         with fileobj:
@@ -1594,6 +1602,7 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(mod10(2, 6), 4)
         self.assertEqual(mod10(exp=6, base=2), 4)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input(self):
         self.write_testfile()
         fp = open(TESTFN, encoding="utf-8")
@@ -1629,6 +1638,7 @@ class BuiltinTest(CPythonTestCase):
             sys.stdout = savestdout
             fp.close()
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_gh130163(self):
         class X(io.StringIO):
             def __getattribute__(self, name):
@@ -2248,6 +2258,7 @@ class TestBreakpoint(CPythonTestCase):
         self.resources.enter_context(
             swap_attr(sys, 'breakpointhook', sys.__breakpointhook__))
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_breakpoint(self):
         with patch('pdb.set_trace') as mock:
             breakpoint()
@@ -2291,6 +2302,7 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with('7')
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
+    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_other(self):
         self.env['PYTHONBREAKPOINT'] = 'sys.exit'
         with patch('sys.exit') as mock:
@@ -2298,12 +2310,14 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with()
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
+    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_noop_0(self):
         self.env['PYTHONBREAKPOINT'] = '0'
         with patch('pdb.set_trace') as mock:
             breakpoint()
             mock.assert_not_called()
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_empty_string(self):
         # PYTHONBREAKPOINT='' is the same as it not being set.
         self.env['PYTHONBREAKPOINT'] = ''
@@ -2312,6 +2326,7 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with()
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
+    @torch._dynamo.error_on_graph_break(False)
     def test_envar_unimportable(self):
         for envar in (
                 '.', '..', '.foo', 'foo.', '.int', 'int.',
@@ -2330,6 +2345,7 @@ class TestBreakpoint(CPythonTestCase):
                 self.assertEqual(w.category, RuntimeWarning)
                 mock.assert_not_called()
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_envar_ignored_when_hook_is_set(self):
         self.env['PYTHONBREAKPOINT'] = 'sys.exit'
         with patch('sys.exit') as mock:
@@ -2337,6 +2353,7 @@ class TestBreakpoint(CPythonTestCase):
             breakpoint()
             mock.assert_not_called()
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_runtime_error_when_hook_is_lost(self):
         del sys.breakpointhook
         with self.assertRaises(RuntimeError):
@@ -2479,29 +2496,35 @@ class PtyTests(CPythonTestCase):
         else:
             yield
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty(self):
         # Test input() functionality when wired to a tty
         self.check_input_tty("prompt", b"quux")
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty_non_ascii(self):
         # Check stdin/stdout encoding is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xc3\xa9", "utf-8")
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty_non_ascii_unicode_errors(self):
         # Check stdin/stdout error handler is used when invoking PyOS_Readline()
         self.check_input_tty("prompté", b"quux\xe9", "ascii")
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty_null_in_prompt(self):
         self.check_input_tty("prompt\0", b"",
                 expected='ValueError: input: prompt string cannot contain '
                          'null characters')
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty_nonencodable_prompt(self):
         self.check_input_tty("prompté", b"quux", "ascii", stdout_errors='strict',
                 expected="UnicodeEncodeError: 'ascii' codec can't encode "
                          "character '\\xe9' in position 6: ordinal not in "
                          "range(128)")
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_input_tty_nondecodable_input(self):
         self.check_input_tty("prompt", b"quux\xe9", "ascii", stdin_errors='strict',
                 expected="UnicodeDecodeError: 'ascii' codec can't decode "
