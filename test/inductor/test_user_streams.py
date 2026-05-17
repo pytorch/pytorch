@@ -208,6 +208,8 @@ class TestUserStreamCompile(InductorTestCase):
             s = torch.cuda.Stream()
             # Perform operation on default stream
             z = x + y
+            # Order the side stream after the default-stream producer before reading z.
+            s.wait_stream(torch.cuda.current_stream())
             # Perform operation on side stream
             with torch.cuda.stream(s):
                 w = z * 2
@@ -230,6 +232,7 @@ class TestUserStreamCompile(InductorTestCase):
 
         # Verify generated code contains stream handling and synchronize survives
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
     @unittest.skipIf(
@@ -372,6 +375,7 @@ class TestUserStreamCompile(InductorTestCase):
             a = x * 2
 
             # Use result on side stream
+            s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
                 b = a + 1  # depends on 'a' from default stream
 
@@ -388,6 +392,7 @@ class TestUserStreamCompile(InductorTestCase):
 
         # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
     def test_event_record_and_wait(self):
