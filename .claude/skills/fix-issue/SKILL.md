@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: Fix bugs reported in PyTorch GitHub issues by reproducing, root-causing, and implementing a fix in the local working tree. Use when the user asks to fix a PyTorch GitHub issue, references a github.com/pytorch/pytorch/issues/N URL, or asks to "fix issue #N" / "address issue N".
+description: Fix bugs reported in PyTorch GitHub issues by reproducing, root-causing, and implementing a fix in the local working tree. Use when the user asks to fix a PyTorch GitHub issue.
 ---
 
 # Fix PyTorch GitHub Issue
