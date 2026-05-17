@@ -185,6 +185,120 @@ def _transfer_meta(
         new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
 
 
+def _node_meta_val(node: torch.fx.Node) -> Any:
+    return node.meta["val"] if "val" in node.meta else node.meta["example_value"]
+
+
+def _convert_fake_tensors_to_fake_mode(
+    example_vals: Any, fake_mode: FakeTensorMode
+) -> Any:
+    def convert(it):
+        if isinstance(it, FakeTensor):
+            return fake_mode.from_tensor(it)
+        return it
+
+    return torch.fx.node.map_aggregate(example_vals, convert)
+
+
+def _normalize_pytree_container_types(tree: Any) -> Any:
+    type_mapping: dict[type, type] = {
+        immutable_list: tuple,
+        list: tuple,
+        immutable_dict: dict,
+    }
+
+    def convert_type(x: Any) -> Any:
+        convert_fn = type_mapping.get(type(x))
+        if convert_fn is None:
+            return x
+        return pytree.tree_map(
+            convert_type,
+            convert_fn(x),
+            is_leaf=lambda x: type(x) in type_mapping,
+        )
+
+    return pytree.tree_map(
+        convert_type,
+        tree,
+        is_leaf=lambda x: type(x) in type_mapping,
+    )
+
+
+def _replacement_args_with_eager_input_vals(
+    match: Match,
+    arg_nodes: Sequence[Any],
+    args: Sequence[Any],
+    fake_mode: FakeTensorMode,
+) -> list[Any] | None:
+    node_to_eager_val: dict[torch.fx.Node, Any] = {}
+    node_to_arg_val: dict[torch.fx.Node, Any] = {}
+
+    def record(node: Any, val: Any) -> None:
+        if isinstance(node, torch.fx.Node) and val is not None:
+            node_to_eager_val[node] = val
+
+    for node in match.nodes:
+        if "eager_input_vals" not in node.meta:
+            continue
+        torch.utils._pytree.tree_map(
+            record,
+            _normalize_pytree_container_types((node.args, node.kwargs)),
+            _normalize_pytree_container_types(node.meta["eager_input_vals"]),
+        )
+
+    if not node_to_eager_val:
+        return None
+
+    def record_arg(node: Any, val: Any) -> None:
+        if isinstance(node, torch.fx.Node):
+            node_to_arg_val[node] = val
+
+    torch.utils._pytree.tree_map(
+        record_arg,
+        _normalize_pytree_container_types(arg_nodes),
+        _normalize_pytree_container_types(args),
+    )
+
+    used_eager_val = False
+
+    def to_example_val(node: torch.fx.Node) -> Any:
+        nonlocal used_eager_val
+        if node in node_to_eager_val:
+            used_eager_val = True
+            return node_to_eager_val[node]
+        return node_to_arg_val.get(node, _node_meta_val(node))
+
+    example_vals = list(torch.fx.map_arg(arg_nodes, to_example_val))
+    if not used_eager_val:
+        return None
+    return _convert_fake_tensors_to_fake_mode(example_vals, fake_mode)
+
+
+def _copy_eager_input_vals(
+    eager_gm: torch.fx.GraphModule, replacement_gm: torch.fx.GraphModule
+) -> bool:
+    eager_nodes = list(eager_gm.graph.nodes)
+    replacement_nodes = list(replacement_gm.graph.nodes)
+    if len(eager_nodes) != len(replacement_nodes):
+        return False
+
+    for eager_node, replacement_node in zip(eager_nodes, replacement_nodes):
+        if eager_node.op != replacement_node.op:
+            return False
+        if (
+            eager_node.op == "call_function"
+            and eager_node.target != replacement_node.target
+        ):
+            return False
+
+    for eager_node, replacement_node in zip(eager_nodes, replacement_nodes):
+        if "eager_input_vals" in eager_node.meta:
+            replacement_node.meta["eager_input_vals"] = eager_node.meta[
+                "eager_input_vals"
+            ]
+    return True
+
+
 class Match:
     """
     Represents a successfully matched pattern.
@@ -700,28 +814,7 @@ class _TargetArgsExpr(_TargetExpr):
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
     ) -> tuple[Sequence[Any], _SimpleSpec | pytree.TreeSpec]:
-        type_mapping: dict[type, type] = {
-            immutable_list: tuple,
-            list: tuple,
-            immutable_dict: dict,
-        }
-
-        def convert_type(x: Any) -> Any:
-            cls = type(x)
-            convert_fn = type_mapping.get(cls)
-            if convert_fn is not None:
-                return pytree.tree_map(
-                    convert_type,
-                    convert_fn(x),
-                    is_leaf=lambda x: type(x) in type_mapping,
-                )
-            return x
-
-        normalized_args_tree = pytree.tree_map(
-            convert_type,
-            (args, kwargs),
-            is_leaf=lambda x: type(x) in type_mapping,
-        )
+        normalized_args_tree = _normalize_pytree_container_types((args, kwargs))
         flat, spec = pytree.tree_flatten(normalized_args_tree)
         return flat, spec
 
@@ -1532,11 +1625,8 @@ def register_replacement(
                     f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
                 )
 
-        args = list(
-            torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
-            )
-        )
+        arg_nodes = [match.kwargs[name] for name in argnames]
+        args = list(torch.fx.map_arg(arg_nodes, _node_meta_val))
 
         sym_args: list[torch.SymInt] = []
         fake_mode = torch._dynamo.utils.detect_fake_mode(args)
@@ -1643,9 +1733,27 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(
-                    replace_fn, args, get_decomp_fn=get_decomp_fn
+                replacement_graph = trace_fn(
+                    replace_fn,
+                    args,
+                    get_decomp_fn=get_decomp_fn,
                 )
+                if eager_args := _replacement_args_with_eager_input_vals(
+                    match, arg_nodes, args, fake_mode
+                ):
+                    graph_with_eager_vals = trace_fn(
+                        replace_fn,
+                        eager_args,
+                        get_decomp_fn=get_decomp_fn,
+                    )
+                    if not _copy_eager_input_vals(
+                        graph_with_eager_vals, replacement_graph
+                    ):
+                        log.debug(
+                            "Unable to propagate eager_input_vals for replacement %s",
+                            getattr(replace_fn, "__name__", repr(replace_fn)),
+                        )
+                match.replacement_graph = replacement_graph
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
