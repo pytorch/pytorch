@@ -470,6 +470,12 @@ lib.define(
     "bool use_fast_accum = False) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
+lib.define(
+    "fused_nvfp4_scaled_matmul_reduce_scatter("
+    "Tensor A, Tensor B, Tensor A_scale, Tensor A_global_scale, Tensor B_scale, Tensor B_global_scale, "
+    "str reduce_op, str group_name, int tile_m=128, int tile_n=256) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
+)
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
@@ -1572,6 +1578,111 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     output_shape[orig_scatter_dim] //= group.size()
     out = reduced_out.view(*output_shape)
     return out
+
+
+@torch.library.impl(lib, "fused_nvfp4_scaled_matmul_reduce_scatter", "Meta")
+def _fused_nvfp4_scaled_matmul_reduce_scatter_meta(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    A_global_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    B_global_scale: torch.Tensor,
+    reduce_op: str,
+    group_name: c10d.GroupName,
+    tile_m: int = 128,
+    tile_n: int = 256,
+) -> torch.Tensor:
+    del A_scale, A_global_scale, B_scale, B_global_scale, reduce_op, tile_m, tile_n
+    group_size = c10d._get_group_size_by_name(group_name)
+    local_m = A.shape[0] // group_size
+    return A.new_empty((local_m, B.shape[-2]), dtype=torch.bfloat16)
+
+
+@torch.library.impl(lib, "fused_nvfp4_scaled_matmul_reduce_scatter", "CUDA")
+def _fused_nvfp4_scaled_matmul_reduce_scatter(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    A_global_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    B_global_scale: torch.Tensor,
+    reduce_op: str,
+    group_name: c10d.GroupName,
+    tile_m: int = 128,
+    tile_n: int = 256,
+) -> torch.Tensor:
+    del tile_n
+    if reduce_op != "sum":
+        raise ValueError("fused_nvfp4_scaled_matmul_reduce_scatter only supports sum")
+    if A.dim() != 2:
+        raise ValueError("A must be a 2D tensor")
+    if B.dim() != 3:
+        raise ValueError("B must be grouped as [group_size, N, K]")
+    if B_scale.dim() != 3:
+        raise ValueError("B_scale must be grouped as [group_size, *, *]")
+    if not hasattr(torch.ops, "mslk") or not hasattr(
+        torch.ops.mslk, "f4f4bf16_grouped_stacked_out"
+    ):
+        raise RuntimeError(
+            "torch.ops.mslk.f4f4bf16_grouped_stacked_out is unavailable; "
+            "rebuild with USE_MSLK=1 and the MSLK PyTorch registration source."
+        )
+
+    group = c10d._resolve_process_group(group_name)
+    world_size = group.size()
+    total_m = A.shape[0]
+    if total_m % world_size != 0:
+        raise ValueError(
+            "fused_nvfp4_scaled_matmul_reduce_scatter currently requires "
+            "M to be divisible by group size"
+        )
+    chunk_m = total_m // world_size
+    if chunk_m % 128 != 0:
+        raise ValueError(
+            "fused_nvfp4_scaled_matmul_reduce_scatter currently requires "
+            "M / group_size to be 128-row aligned"
+        )
+    if tile_m != 128:
+        raise ValueError("fused_nvfp4_scaled_matmul_reduce_scatter expects tile_m=128")
+    if B.shape[0] != world_size:
+        raise ValueError("B first dimension must equal group size")
+    if B_scale.shape[0] != world_size:
+        raise ValueError("B_scale first dimension must equal group size")
+
+    n = B.shape[-2]
+    m_sizes = torch.full((world_size,), chunk_m, device=A.device, dtype=torch.long)
+    starting_row_after_padding = (
+        torch.arange(world_size + 1, device=A.device, dtype=torch.long) * chunk_m
+    )
+    alpha = (
+        A_global_scale.reshape(-1).to(device=A.device, dtype=torch.float32)
+        * B_global_scale.reshape(-1).to(device=A.device, dtype=torch.float32)
+    )
+    if alpha.numel() == 1:
+        alpha = alpha.expand(world_size).contiguous()
+    elif alpha.numel() == world_size:
+        alpha = alpha.contiguous()
+    else:
+        raise ValueError(
+            "A_global_scale * B_global_scale must broadcast to either one value "
+            "or group_size values"
+        )
+
+    partials = A.new_empty((total_m, n), dtype=torch.bfloat16)
+    torch.ops.mslk.f4f4bf16_grouped_stacked_out.default(
+        A,
+        B,
+        A_scale,
+        B_scale,
+        m_sizes,
+        partials,
+        alpha,
+        starting_row_after_padding,
+        False,
+    )
+    out = funcol.reduce_scatter_tensor(partials, reduce_op, 0, group_name)
+    return funcol.wait_tensor(out)
 
 
 def restride_A_for_fused_matmul_reduce_scatter(
