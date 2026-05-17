@@ -930,6 +930,114 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+# ── Fused gate+up GEMM + SiLU (Llama MLP pattern) ──────────────────────────
+#
+# Matches: silu(x @ Wg^T) * (x @ Wu^T)
+# Replaces with: torch.ops.xpu._fused_gate_up_silu(x, Wg, Wu)
+#
+# The fused kernel does a single GEMM with cat(Wg, Wu) then SiLU*mul,
+# eliminating the second GEMM dispatch and intermediate memory traffic.
+
+
+def is_valid_fused_gate_up_silu(match: Match):
+    """Check that inputs are XPU fp16/bf16 and shapes are compatible."""
+    # Only fuse when the sycl-tla kernel was compiled in
+    if not hasattr(torch.ops, "xpu") or not hasattr(
+        torch.ops.xpu, "_is_fused_gate_up_silu_available"
+    ):
+        return False
+    if not torch.ops.xpu._is_fused_gate_up_silu_available():
+        return False
+
+    def get_val(node_name):
+        node = match.kwargs.get(node_name)
+        if node is None:
+            return None
+        return node.meta.get("val")
+
+    input_val = get_val("input")
+    if input_val is None:
+        return False
+
+    # XPU only
+    if input_val.device.type != "xpu":
+        return False
+
+    # fp16/bf16 only
+    if input_val.dtype not in (torch.float16, torch.bfloat16):
+        return False
+
+    gate_val = get_val("gate_weight")
+    up_val = get_val("up_weight")
+    if gate_val is None or up_val is None:
+        return False
+
+    # Weights must be 2D, same N dimension
+    if gate_val.dim() != 2 or up_val.dim() != 2:
+        return False
+    if gate_val.size(0) != up_val.size(0):
+        return False
+
+    return True
+
+
+# Inductor decomposes aten.silu into x / (1 + exp(-x)) with fp16/bf16 → fp32
+# type promotion (pw_cast_for_opmath).  The pattern must match the decomposed
+# form that exists in the post-grad graph:
+#   convert_element_type(
+#     div(
+#       convert_element_type(mm, float32),            ← _users=2
+#       add(exp(neg(convert_element_type(mm, float32))), 1)
+#     ),
+#     original_dtype
+#   )  *  mm(input, t(up_weight))
+# Note: _users=MULTIPLE on mm/mul nodes because autograd saves intermediate
+# tensors for backward, giving them extra users beyond the forward graph.
+# Note: aten.t is decomposed to aten.permute.default in the post-grad graph.
+_gate_mm = CallFunction(
+    aten.mm,
+    KeywordArg("input"),
+    CallFunction(aten.permute.default, KeywordArg("gate_weight"), Ignored()),
+    _users=MULTIPLE,
+)
+_gate_fp32 = CallFunction(
+    torch.ops.prims.convert_element_type.default,
+    _gate_mm,
+    KeywordArg("to_float"),
+    _users=2,
+)
+_decomposed_silu = CallFunction(
+    aten.div,
+    _gate_fp32,
+    CallFunction(
+        aten.add,
+        CallFunction(aten.exp, CallFunction(aten.neg, _gate_fp32)),
+        1,
+    ),
+)
+_silu_cast_back = CallFunction(
+    torch.ops.prims.convert_element_type.default,
+    _decomposed_silu,
+    KeywordArg("to_dtype"),
+)
+_up_mm = CallFunction(
+    aten.mm,
+    KeywordArg("input"),
+    CallFunction(aten.permute.default, KeywordArg("up_weight"), Ignored()),
+    _users=MULTIPLE,
+)
+
+
+@register_lowering_pattern(
+    CallFunction(aten.mul, _silu_cast_back, _up_mm, _users=MULTIPLE),
+    extra_check=is_valid_fused_gate_up_silu,
+)
+def fused_gate_up_silu(match: Match, input, gate_weight, up_weight, to_float, to_dtype):
+    return inductor.kernel.fused_gate_up_silu.tuned_fused_gate_up_silu(
+        input, gate_weight, up_weight
+    )
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
