@@ -258,7 +258,6 @@ class IsInputHandler:
         if info.base_idx is None:
             raise AssertionError("expected info.base_idx to be set")
         self.base_idx = info.base_idx
-        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
 
     def __call__(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
