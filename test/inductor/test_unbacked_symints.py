@@ -857,6 +857,35 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_runtime_assert_scalar_item_symbols_not_codegened_stale(self, device):
+        if device != "cpu":
+            raise unittest.SkipTest("CPU regression for generated wrapper code")
+
+        def fn(x, y1, y2, y3, y4):
+            a = y1.item() * 12
+            b = y2.item() * 12
+            c = y3.item() * 12
+            d = y4.item() * 12
+            z = torch.randn(
+                a * 12 + b * 12 + c * 12 + d * 12,
+                device=x.device,
+            )
+            return x * z
+
+        x = torch.randn(576, device=device, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        scalars = tuple(torch.tensor(1, device=device) for _ in range(4))
+
+        compiled = torch.compile(fn)
+        actual = compiled(x, *scalars)
+        self.assertEqual(actual.shape, x.shape)
+
+        bad_x = torch.randn(10, device=device, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(bad_x, 0)
+        with self.assertRaisesRegex(RuntimeError, "Eq\\("):
+            compiled(bad_x, *scalars)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_eager(self, device):
         """Test that override_optimization_hint updates var_to_hint_override eagerly."""
         t = torch.tensor([5], device=device)
