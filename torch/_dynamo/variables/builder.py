@@ -2320,13 +2320,17 @@ class VariableBuilder:
         if type(value) is int:
             if not isinstance(value, int):
                 raise AssertionError(f"Expected int, got {type(value)}")
-            # allowlist has higher precedence over specialization control.
+            # The dynamic-sources list has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
-                log.debug("%s marked dynamic via source whitelist", self.source.name)
+                log.debug(
+                    "%s marked dynamic via dynamic-sources list", self.source.name
+                )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
             if is_unbacked_source(self.source.name):
-                log.debug("%s marked unbacked via source whitelist", self.source.name)
+                log.debug(
+                    "%s marked unbacked via unbacked-sources list", self.source.name
+                )
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
@@ -3824,11 +3828,29 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
         )
 
 
-_DYNAMIC_SOURCES: set[str] | None = None
+# Each entry is (pattern, dim) where dim is None for "all dims" or an int
+# for a single dim. The optional ":N" suffix on a source list entry restricts
+# the match to dim N of the matched tensor. List the same source multiple
+# times (e.g. "L['x']:0, L['x']:2") to target multiple specific dims.
+_DYNAMIC_SOURCES: list[tuple[str, int | None]] | None = None
 _DYNAMIC_SOURCES_CONFIG_HASH: int | None = None
 
+_DIM_SUFFIX_RE: re.Pattern[str] = re.compile(r"^(.+):(\d+)$")
 
-def get_dynamic_sources() -> set[str]:
+
+def _parse_source_entry(entry: str) -> tuple[str, int | None]:
+    """Parse a source list entry into (pattern, dim).
+
+    Entries may end with an optional ``:N`` suffix where ``N`` is a literal
+    non-negative integer (the dim portion is not part of the name regex).
+    """
+    m = _DIM_SUFFIX_RE.match(entry)
+    if m:
+        return m.group(1), int(m.group(2))
+    return entry, None
+
+
+def get_dynamic_sources() -> list[tuple[str, int | None]]:
     global _DYNAMIC_SOURCES, _DYNAMIC_SOURCES_CONFIG_HASH
 
     current_hash = hash(torch.compiler.config.dynamic_sources)
@@ -3838,31 +3860,43 @@ def get_dynamic_sources() -> set[str]:
         return _DYNAMIC_SOURCES
 
     # Config has changed or first time, (re)calculate the sources
-    _DYNAMIC_SOURCES = {
-        s
+    _DYNAMIC_SOURCES = [
+        _parse_source_entry(s)
         for s in torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
         if s
-    }
+    ]
     _DYNAMIC_SOURCES_CONFIG_HASH = current_hash
 
     return _DYNAMIC_SOURCES
 
 
-def is_dynamic_source(source_name: str) -> bool:
+def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the dynamic-sources list.
+
+    If ``dim`` is None, returns True if any entry matches the source
+    name (regardless of any per-dim qualifier). This is the right semantics for
+    callers that ask "is this source dynamic at all?" (e.g. the static-shapes
+    early return, or non-tensor int sources which have no dim).
+
+    If ``dim`` is given, returns True only when a matching entry either has no
+    dim qualifier ("all dims dynamic") or its dim qualifier equals ``dim``.
+    """
     dynamic_sources = get_dynamic_sources()
-    for pattern in dynamic_sources:
+    for pattern, pat_dim in dynamic_sources:
         if pattern == source_name or re.match(pattern, source_name):
-            log.debug(
-                "%s was marked dynamic due to dynamic source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            symbolic_shape_log.info(
-                "%s was marked dynamic due to dynamic source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            return True
+            if dim is None or pat_dim is None or pat_dim == dim:
+                pretty = pattern if pat_dim is None else f"{pattern}:{pat_dim}"
+                log.debug(
+                    "%s was marked dynamic due to dynamic-sources entry: %s",
+                    source_name,
+                    pretty,
+                )
+                symbolic_shape_log.info(
+                    "%s was marked dynamic due to dynamic-sources entry: %s",
+                    source_name,
+                    pretty,
+                )
+                return True
     return False
 
 
@@ -3898,11 +3932,13 @@ def record_automatic_dynamic(
     )
 
 
-_UNBACKED_SOURCES: set[str] | None = None
+# Same per-dim suffix syntax as _DYNAMIC_SOURCES: optional ":N" restricts the
+# match to dim N of the matched tensor.
+_UNBACKED_SOURCES: list[tuple[str, int | None]] | None = None
 _UNBACKED_SOURCES_CONFIG_HASH: int | None = None
 
 
-def get_unbacked_sources() -> set[str]:
+def get_unbacked_sources() -> list[tuple[str, int | None]]:
     global _UNBACKED_SOURCES, _UNBACKED_SOURCES_CONFIG_HASH
 
     current_hash = hash(torch.compiler.config.unbacked_sources)
@@ -3912,26 +3948,31 @@ def get_unbacked_sources() -> set[str]:
         return _UNBACKED_SOURCES
 
     # Config has changed or first time, (re)calculate the sources
-    _UNBACKED_SOURCES = {
-        s
+    _UNBACKED_SOURCES = [
+        _parse_source_entry(s)
         for s in torch.compiler.config.unbacked_sources.replace(" ", "").split(",")
         if s
-    }
+    ]
     _UNBACKED_SOURCES_CONFIG_HASH = current_hash
 
     return _UNBACKED_SOURCES
 
 
-def is_unbacked_source(source_name: str) -> bool:
+def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the unbacked-sources list.
+
+    See :func:`is_dynamic_source` for the ``dim`` argument semantics.
+    """
     unbacked_sources = get_unbacked_sources()
-    for pattern in unbacked_sources:
+    for pattern, pat_dim in unbacked_sources:
         if pattern == source_name or re.match(pattern, source_name):
-            log.debug(
-                "%s was marked unbacked due to unbacked source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            return True
+            if dim is None or pat_dim is None or pat_dim == dim:
+                log.debug(
+                    "%s was marked unbacked due to unbacked-sources entry: %s",
+                    source_name,
+                    pattern if pat_dim is None else f"{pattern}:{pat_dim}",
+                )
+                return True
     return False
 
 
@@ -4133,12 +4174,12 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if is_dynamic_source(name):
-            log.debug("%s marked dynamic via source whitelist", name)
+        if is_dynamic_source(name, i):
+            log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
             automatic_dynamic_size = True
 
-        if is_unbacked_source(name):
-            log.debug("%s marked unbacked via source whitelist", name)
+        if is_unbacked_source(name, i):
+            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
             automatic_dynamic_size = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
@@ -4191,7 +4232,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked or is_unbacked_source(name):
+        if marked_unbacked or is_unbacked_source(name, i):
             dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
