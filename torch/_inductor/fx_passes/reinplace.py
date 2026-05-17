@@ -83,78 +83,224 @@ class ViewOp:
     kwargs: Mapping[str, Any]
 
 
-EncodedViewOp = tuple[int, tuple[Any, ...], tuple[tuple[str, Any], ...]]
-EncodedViewOps = tuple[EncodedViewOp, ...]
+EncodedViewOps = tuple[
+    tuple[int, ...],
+    tuple[Any, ...],
+    tuple[int, ...],
+    tuple[bool, ...],
+]
 
 _VIEW_OPS = tuple(_VIEW_OP_TO_SCATTER)
 _VIEW_OP_TO_CODE = {target: idx for idx, target in enumerate(_VIEW_OPS)}
 
 
-def _encode_view_op(target, args, kwargs) -> EncodedViewOp:
-    return (
-        _VIEW_OP_TO_CODE[target],
-        tuple(args),
-        tuple(kwargs.items()),
+_MISSING = object()
+
+
+def _get_view_arg(
+    target: torch._ops.OpOverload,
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+    name: str,
+    index: int,
+    default: object = _MISSING,
+) -> Any:
+    if index < len(args):
+        return args[index]
+    if name in kwargs:
+        return kwargs[name]
+    if default is not _MISSING:
+        return default
+    raise AssertionError(f"missing argument {name} for {target}")
+
+
+def _normalize_view_op(
+    target: torch._ops.OpOverload, args: Sequence[Any], kwargs: Mapping[str, Any]
+) -> ViewOp:
+    args = tuple(args)
+    if target is aten.diagonal.default:
+        names = ("offset", "dim1", "dim2")
+        defaults = (0, 0, 1)
+    elif target is aten.select.int:
+        names = ("dim", "index")
+        defaults = (_MISSING, _MISSING)
+    elif target is aten.slice.Tensor:
+        names = ("dim", "start", "end", "step")
+        defaults = (0, None, None, 1)
+    elif target is aten.as_strided.default:
+        names = ("size", "stride", "storage_offset")
+        defaults = (_MISSING, _MISSING, None)
+    else:
+        raise AssertionError(f"unsupported view op {target}")
+
+    unexpected_kwargs = [name for name in kwargs if name not in names]
+    assert not unexpected_kwargs, f"unexpected kwargs for {target}: {unexpected_kwargs}"
+    normalized_args = tuple(
+        _get_view_arg(target, args, kwargs, name, idx, default)
+        for idx, (name, default) in enumerate(zip(names, defaults))
     )
+    if target is aten.as_strided.default:
+        size, stride, storage_offset = normalized_args
+        normalized_args = (tuple(size), tuple(stride), storage_offset)
+    return ViewOp(target, normalized_args, {})
+
+
+def _flatten_view_op_args(view_op: ViewOp) -> tuple[Any, ...]:
+    if view_op.target is aten.as_strided.default:
+        size, stride, storage_offset = view_op.args
+        return (len(size), *size, len(stride), *stride, storage_offset)
+    return view_op.args
 
 
 def _encode_view_ops(view_ops: Sequence[ViewOp]) -> EncodedViewOps:
-    return tuple(
-        _encode_view_op(view_op.target, view_op.args, view_op.kwargs)
-        for view_op in view_ops
+    view_codes = []
+    view_args = []
+    view_arg_counts = []
+    view_arg_none = []
+
+    for view_op in view_ops:
+        view_codes.append(_VIEW_OP_TO_CODE[view_op.target])
+        flattened_args = _flatten_view_op_args(view_op)
+        view_arg_counts.append(len(flattened_args))
+        for arg in flattened_args:
+            view_arg_none.append(arg is None)
+            view_args.append(0 if arg is None else arg)
+
+    return (
+        tuple(view_codes),
+        tuple(view_args),
+        tuple(view_arg_counts),
+        tuple(view_arg_none),
     )
 
 
-def _decode_view_op(view_op: EncodedViewOp) -> ViewOp:
-    target_code, args, kwargs_items = view_op
-    return ViewOp(_VIEW_OPS[target_code], args, dict(kwargs_items))
+def _unflatten_view_op_args(
+    target: torch._ops.OpOverload, flattened_args: Sequence[Any]
+) -> tuple[Any, ...]:
+    if target is aten.as_strided.default:
+        size_len = int(flattened_args[0])
+        stride_len_idx = 1 + size_len
+        stride_len = int(flattened_args[stride_len_idx])
+        stride_start = stride_len_idx + 1
+        storage_offset_idx = stride_start + stride_len
+        return (
+            tuple(flattened_args[1:stride_len_idx]),
+            tuple(flattened_args[stride_start:storage_offset_idx]),
+            flattened_args[storage_offset_idx],
+        )
+    return tuple(flattened_args)
+
+
+def _decode_view_op(target_code: int, flattened_args: Sequence[Any]) -> ViewOp:
+    target = _VIEW_OPS[target_code]
+    return ViewOp(target, _unflatten_view_op_args(target, flattened_args), {})
 
 
 def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
-    return tuple(_decode_view_op(view_op) for view_op in view_ops)
+    view_codes, view_args, view_arg_counts, view_arg_none = view_ops
+    assert len(view_codes) == len(view_arg_counts)
+    assert len(view_args) == len(view_arg_none)
+
+    arg_offset = 0
+    decoded_view_ops = []
+    for target_code, arg_count in zip(view_codes, view_arg_counts):
+        flattened_args = tuple(
+            None if view_arg_none[idx] else view_args[idx]
+            for idx in range(arg_offset, arg_offset + arg_count)
+        )
+        decoded_view_ops.append(_decode_view_op(target_code, flattened_args))
+        arg_offset += arg_count
+
+    assert arg_offset == len(view_args)
+    return tuple(decoded_view_ops)
 
 
 def _inplace_generalized_scatter_impl(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: EncodedViewOps
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
 ) -> torch.Tensor:
     tmp = inp
-    for encoded_view in view_ops:
-        view = _decode_view_op(encoded_view)
-        fake_args, fake_kwargs = pytree.tree_map(
-            lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
-            (view.args, view.kwargs),
-        )
-        # slice and select can allocate new unbacked symints, but those won't be reflected
-        # in the output of this function, hence shall be ignored.
-        fake_mode = detect_fake_mode(fake_args)
-        with (
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode and fake_mode.shape_env
-            else nullcontext()
+    fake_mode = detect_fake_mode((inp, src, view_args))
+    with fake_mode if fake_mode else nullcontext():
+        for view in _decode_view_ops(
+            (
+                tuple(view_codes),
+                tuple(view_args),
+                tuple(view_arg_counts),
+                tuple(view_arg_none),
+            )
         ):
-            tmp = view.target(tmp, *fake_args, **fake_kwargs)
-    try:
-        tmp.copy_(src)
-    except RuntimeError as e:
-        raise RuntimeError(
-            f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
-        ) from e
+            fake_args, fake_kwargs = pytree.tree_map(
+                lambda node: node.meta["val"]
+                if isinstance(node, torch.fx.Node)
+                else node,
+                (view.args, view.kwargs),
+            )
+            # slice and select can allocate new unbacked symints, but those won't
+            # be reflected in the output of this function, hence shall be ignored.
+            with (
+                fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                if fake_mode and fake_mode.shape_env
+                else nullcontext()
+            ):
+                tmp = view.target(tmp, *fake_args, **fake_kwargs)
+        try:
+            tmp.copy_(src)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
+            ) from e
     return inp
 
 
 def _generalized_scatter_impl(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: EncodedViewOps
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
 ) -> torch.Tensor:
     out = inp.clone()
-    return _inplace_generalized_scatter_impl(out, src, view_ops)
+    return _inplace_generalized_scatter_impl(
+        out, src, view_codes, view_args, view_arg_counts, view_arg_none
+    )
+
+
+def _generalized_scatter_meta(
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
+) -> torch.Tensor:
+    return torch.empty_strided(
+        inp.size(), inp.stride(), dtype=inp.dtype, device=inp.device
+    )
+
+
+def _inplace_generalized_scatter_meta(
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
+) -> torch.Tensor:
+    return inp
 
 
 _reinplace_lib = torch.library.Library("_inductor_reinplace", "FRAGMENT")
 _reinplace_lib.define(
-    "generalized_scatter(Tensor inp, Tensor src, Any view_ops) -> Tensor"
+    "generalized_scatter(Tensor inp, Tensor src, int[] view_codes, SymInt[] view_args, int[] view_arg_counts, bool[] view_arg_none) -> Tensor"
 )
 _reinplace_lib.define(
-    "inplace_generalized_scatter_(Tensor(a!) inp, Tensor src, Any view_ops) -> Tensor(a!)"
+    "inplace_generalized_scatter_(Tensor(a!) inp, Tensor src, int[] view_codes, SymInt[] view_args, int[] view_arg_counts, bool[] view_arg_none) -> Tensor(a!)"
 )
 _reinplace_lib.impl(
     "generalized_scatter",
@@ -166,6 +312,12 @@ _reinplace_lib.impl(
     _inplace_generalized_scatter_impl,
     "CompositeExplicitAutograd",
 )
+_reinplace_lib.impl("generalized_scatter", _generalized_scatter_meta, "Meta")
+_reinplace_lib.impl(
+    "inplace_generalized_scatter_",
+    _inplace_generalized_scatter_meta,
+    "Meta",
+)
 _generalized_scatter = torch.ops._inductor_reinplace.generalized_scatter.default
 _inplace_generalized_scatter = (
     torch.ops._inductor_reinplace.inplace_generalized_scatter_.default
@@ -174,18 +326,17 @@ _inplace_generalized_scatter = (
 
 def _decompose_scatter_functional_helper(
     graph: torch.fx.Graph,
-    inp: torch.Tensor,
-    src: torch.Tensor,
-    view_ops: EncodedViewOps,
+    inp: Any,
+    src: Any,
+    view_ops: Sequence[ViewOp],
 ) -> torch.fx.Node:
-    encoded_view_op, view_ops_tail = view_ops[0], view_ops[1:]
-    view_op = _decode_view_op(encoded_view_op)
+    view_op, view_ops_tail = view_ops[0], view_ops[1:]
 
     if view_ops_tail:
         view = graph_call_function(
             graph, view_op.target, inp, *view_op.args, **view_op.kwargs
         )
-        src = _decompose_scatter_functional_helper(graph, view, src, view_ops[1:])  # type: ignore[assignment]
+        src = _decompose_scatter_functional_helper(graph, view, src, view_ops_tail)  # type: ignore[assignment]
 
     return graph_call_function(
         graph,
@@ -211,7 +362,10 @@ def _decompose_scatter_functional(
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
     assert node.target is _generalized_scatter
-    return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
+    inp, src, *view_ops = node.args
+    return _decompose_scatter_functional_helper(
+        graph, inp, src, _decode_view_ops(cast(EncodedViewOps, tuple(view_ops)))
+    )  # type: ignore[arg-type]
 
 
 def _decompose_scatter_mutating(
@@ -230,16 +384,14 @@ def _decompose_scatter_mutating(
 
     """
     assert node.target in (_generalized_scatter, _inplace_generalized_scatter)
-    inp, src, view_ops = node.args
+    inp, src, *view_ops = node.args
     assert not node.kwargs
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
 
     tmp = inp
-    view_ops = cast(EncodedViewOps, view_ops)
-    for encoded_view in view_ops:
-        view = _decode_view_op(encoded_view)
+    for view in _decode_view_ops(cast(EncodedViewOps, tuple(view_ops))):
         tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)  # type: ignore[union-attr]
         # we need to set unbacked bindings that could have been created in the view ops.
         if (V.fake_mode.shape_env) and (
@@ -264,10 +416,9 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
 
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
-    _, _, view_ops = node.args
     return any(
-        _decode_view_op(view).target in _ALWAYS_MUTATING_SCATTER_OPS
-        for view in cast(EncodedViewOps, view_ops)
+        view.target in _ALWAYS_MUTATING_SCATTER_OPS
+        for view in _decode_view_ops(cast(EncodedViewOps, tuple(node.args[2:])))
     )
 
 
@@ -279,7 +430,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _src, _view_ops = node.args
+    inp = node.args[0]
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -365,11 +516,19 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             args=node.args[2:],
             kwargs=node.kwargs,
         )
+        encoded_scatter_view_op = _normalize_view_op(
+            scatter_view_op.target,
+            scatter_view_op.args,
+            scatter_view_op.kwargs,
+        )
 
         def can_fuse():
-            if src.target is not _generalized_scatter:  # type: ignore[union-attr]
+            if (
+                not isinstance(src, torch.fx.Node)
+                or src.target is not _generalized_scatter
+            ):
                 return False
-            src_inp, _src_src, _src_scatter_view_ops = src.args  # type: ignore[union-attr]
+            src_inp = src.args[0]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
             src_base = node_to_view_base.get(src_inp, src_inp)  # type: ignore[arg-type]
@@ -385,21 +544,23 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     _generalized_scatter,
                     inp,
                     src,
-                    _encode_view_ops((scatter_view_op,)),
+                    *_encode_view_ops((encoded_scatter_view_op,)),
                 )
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
 
-        _src_inp, src_src, src_scatter_view_ops = src.args  # type: ignore[union-attr]
-        src_scatter_view_ops = _decode_view_ops(src_scatter_view_ops)
+        _src_inp, src_src, *src_scatter_view_ops = src.args  # type: ignore[union-attr]
+        src_scatter_view_ops = _decode_view_ops(
+            cast(EncodedViewOps, tuple(src_scatter_view_ops))
+        )
         with graph.inserting_before(src):  # type: ignore[arg-type]
             new_node = graph_call_function(
                 graph,
                 _generalized_scatter,
                 inp,
                 src_src,
-                _encode_view_ops((scatter_view_op, *src_scatter_view_ops)),
+                *_encode_view_ops((encoded_scatter_view_op, *src_scatter_view_ops)),
             )
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
