@@ -1501,21 +1501,32 @@ def _trace_arg_info(argnames: Sequence[str], args: Sequence[Any]) -> _TraceArgIn
 
 
 def _unflatten_match_kwargs(
-    kwargs: Mapping[str, Any], arg_info: _TraceArgInfo
+    kwargs: Mapping[str, Any],
+    arg_info: _TraceArgInfo,
+    defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     kwargs = dict(kwargs)
     result: dict[str, Any] = {}
 
     for argname in arg_info.argnames:
         flat_names = arg_info.arg_flat_names[argname]
+        found_names = [flat_name for flat_name in flat_names if flat_name in kwargs]
+        if len(found_names) != len(flat_names):
+            if defaults is not None and argname in defaults and not found_names:
+                result[argname] = defaults[argname]
+                continue
+            missing_names = [
+                flat_name for flat_name in flat_names if flat_name not in kwargs
+            ]
+            raise RuntimeError(
+                f"Not all inputs to pattern found in match.kwargs. Perhaps one "
+                f"of the inputs is unused? argname={argname}, "
+                f"flat_argnames={flat_names}, missing_argnames={missing_names}, "
+                f"match.kwargs={kwargs}"
+            )
+
         flat_values = []
         for flat_name in flat_names:
-            if flat_name not in kwargs:
-                raise RuntimeError(
-                    f"Not all inputs to pattern found in match.kwargs. Perhaps one "
-                    f"of the inputs is unused? argname={argname}, "
-                    f"flat_argnames={flat_names}, match.kwargs={kwargs}"
-                )
             flat_values.append(kwargs.pop(flat_name))
         result[argname] = pytree.tree_unflatten(
             flat_values, arg_info.arg_specs[argname]
@@ -1757,7 +1768,9 @@ def register_replacement(
 
             if is_match(specific_pattern_match):
                 specific_pattern_match.kwargs = _unflatten_match_kwargs(
-                    specific_pattern_match.kwargs, specific_arg_info
+                    specific_pattern_match.kwargs,
+                    specific_arg_info,
+                    defaults=structured_match_kwargs,
                 )
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
@@ -1777,6 +1790,8 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> list[Any]:
+        # Flat kwargs come from the initial match; structured kwargs are restored
+        # after check_fn accepts the match.
         if not all(name in kwargs for name in argnames_static):
             kwargs = _unflatten_match_kwargs(kwargs, initial_arg_info)
         structured_args = [kwargs.pop(name) for name in argnames_static]
