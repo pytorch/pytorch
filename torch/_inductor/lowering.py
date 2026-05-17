@@ -2957,6 +2957,8 @@ def _bucketize_indices(
     flattened_index = tb.get_layout().offset + sum(
         (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
     )
+    if not index and isinstance(flattened_index, sympy.Integer):
+        return int(flattened_index)
     return ops.index_expr(flattened_index, index_dtype)
 
 
