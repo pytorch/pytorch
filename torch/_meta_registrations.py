@@ -4543,15 +4543,33 @@ def meta_zero_(self):
 @register_meta(
     [
         aten.mul_.Scalar,
-        aten.div_.Scalar,
         aten.mul_.Tensor,
-        aten.div_.Tensor,
         aten.logical_and_.default,
         aten.logical_or_.default,
         aten.logical_xor_.default,
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
+    return self
+
+
+@register_meta([aten.div_.Scalar, aten.div_.Tensor])
+def meta_div_inplace(self, other):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    torch._check(
+        utils.can_safe_cast_to(cast_from=result_dtype, cast_to=self.dtype),
+        lambda: (
+            f"result type {result_dtype} can't be cast to the desired "
+            f"output type {self.dtype}"
+        ),
+    )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
@@ -5828,6 +5846,11 @@ def meta_select_scatter(self, src, dim, index):
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
+    return _scatter_meta_output(self)
+
+
+@register_meta(aten.diagonal_scatter.default)
+def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
     return _scatter_meta_output(self)
 
 

@@ -6995,6 +6995,26 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_infinitely_differentiable_gelu_backward_bfloat16(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        if not SM80OrLater:
+            raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
+
+        def fn(grad, self):
+            return aten.infinitely_differentiable_gelu_backward(grad, self)
+
+        torch.manual_seed(0)
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+            ),
+            check_lowp=False,
+            reference_in_float=False,
+        )
+
     def test_clone(self):
         def fn(x):
             return aten.clone(x) + 2, aten.clone(x + 1)
@@ -9859,6 +9879,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     torch.randn((8, 38), dtype=torch.float32),
                 ],
             )
+
+    def test_diagonal_scatter_backward(self):
+        def fn(x, a, offset, dim1, dim2):
+            return torch.diagonal_scatter(x, a, offset, dim1, dim2).sum()
+
+        cases = [
+            ((5, 5), (5,), 0, 0, 1),
+            ((5, 4, 5), (4, 4), 1, 0, 2),
+            ((3, 5, 5), (3, 4), 1, 1, 2),
+            ((5, 5), (4,), -1, 0, 1),
+        ]
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        for x_shape, y_shape, offset, dim1, dim2 in cases:
+            with self.subTest(
+                x_shape=x_shape, y_shape=y_shape, offset=offset, dim1=dim1, dim2=dim2
+            ):
+                x = torch.zeros(*x_shape, device=self.device, requires_grad=True)
+                y = torch.ones(*y_shape, device=self.device, requires_grad=True)
+
+                x_ref = x.detach().clone().requires_grad_(True)
+                y_ref = y.detach().clone().requires_grad_(True)
+
+                out_ref = fn(x_ref, y_ref, offset, dim1, dim2)
+                out_ref.backward()
+
+                out = compiled_fn(x, y, offset, dim1, dim2)
+                out.backward()
+
+                self.assertEqual(out, out_ref)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(y.grad, y_ref.grad)
 
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):

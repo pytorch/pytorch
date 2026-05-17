@@ -6624,6 +6624,35 @@ class CPUReproTests(TestCase):
         actual = torch.compile(f, backend="inductor")(buf, idx)
         self.assertEqual(actual, expected)
 
+    def test_layernorm_nan_with_inf_cpu_float16(self):
+        # https://github.com/pytorch/pytorch/issues/173885
+        # LayerNorm with torch.compile on CPU produces NaN when input has Inf
+        # values due to inf - inf = NaN in Welford variance calculation.
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.ln = torch.nn.LayerNorm(4)
+
+                def forward(self, x):
+                    return self.ln(x)
+
+            mod = Model().to(dtype).eval()
+            # Create input that overflows during Welford M2 accumulation
+            x = torch.tensor(
+                [[65504.0, 65504.0, -65504.0, -65504.0]], dtype=torch.float32
+            ).to(dtype)
+
+            with torch.no_grad():
+                eager_out = mod(x)
+                compiled_mod = torch.compile(mod, backend="inductor")
+                compiled_out = compiled_mod(x)
+                # Compiled output should match eager mode (whether Eager produces
+                # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
+                self.assertEqual(eager_out, compiled_out)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
