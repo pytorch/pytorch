@@ -1,7 +1,11 @@
 #ifndef PYTORCH_MOBILE_METAL_DEVICE_H_
 #define PYTORCH_MOBILE_METAL_DEVICE_H_
 
+#include <c10/macros/Macros.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 
 #include <string>
 
