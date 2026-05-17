@@ -61,7 +61,8 @@ license-files = [
     "third_party/**/LICENSE",
     "third_party/**/LICENSE.txt",
     "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING.BSD",
+    "third_party/**/COPYING",
+    "third_party/**/COPYING.txt",
 ]
 
 [tool.scikit-build.editable]
@@ -117,7 +118,8 @@ license-files = [
     "third_party/**/LICENSE",
     "third_party/**/LICENSE.txt",
     "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING.BSD",
+    "third_party/**/COPYING",
+    "third_party/**/COPYING.txt",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]

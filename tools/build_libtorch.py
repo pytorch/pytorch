@@ -10,6 +10,21 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).absolute().parent.parent
 
 
+def _check_env_flag(name: str, default: str = "") -> bool:
+    return os.getenv(name, default).upper() in ("ON", "1", "YES", "TRUE", "Y")
+
+
+# Hotpatch CMAKE_BUILD_TYPE based on DEBUG / REL_WITH_DEB_INFO env flags so
+# CMake picks up the build type when build_libtorch.py is invoked directly
+# (the scikit-build-core path handles this via [[tool.scikit-build.overrides]]
+# in pyproject.toml). Explicit CMAKE_BUILD_TYPE wins.
+if "CMAKE_BUILD_TYPE" not in os.environ:
+    if _check_env_flag("DEBUG"):
+        os.environ["CMAKE_BUILD_TYPE"] = "Debug"
+    elif _check_env_flag("REL_WITH_DEB_INFO"):
+        os.environ["CMAKE_BUILD_TYPE"] = "RelWithDebInfo"
+
+
 def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
     build_dir = REPO_ROOT / "build"
     build_dir.mkdir(exist_ok=True)
