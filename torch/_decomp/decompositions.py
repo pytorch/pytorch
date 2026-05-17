@@ -1157,6 +1157,20 @@ def unfold_backward(
 
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
+    def _sym_min_if_needed(a, b):
+        if statically_known_true(a <= b):
+            return a
+        if statically_known_true(b <= a):
+            return b
+        return torch.sym_min(a, b)
+
+    def _sym_max_if_needed(a, b):
+        if statically_known_true(a >= b):
+            return a
+        if statically_known_true(b >= a):
+            return b
+        return torch.sym_max(a, b)
+
     def _reshape_source(source: Tensor, target_shape: list[int]) -> Tensor:
         ndim = len(target_shape)
         source_ndim = source.dim()
@@ -1176,11 +1190,11 @@ def unfold_backward(
 
     input_dim_size = input_size[dim]
     grad_dim_size = grad.size(dim)
-    for offset in range(size):
-        valid_len = torch.sym_min(
-            grad_dim_size,
-            torch.sym_max((input_dim_size - offset + step - 1) // step, 0),
+    for offset in reversed(range(size)):
+        max_valid_len = _sym_max_if_needed(
+            (input_dim_size - offset + step - 1) // step, 0
         )
+        valid_len = _sym_min_if_needed(grad_dim_size, max_valid_len)
         idx = torch.arange(valid_len, device=grad.device, dtype=torch.int32)
         idx = idx * step + offset
         source = grad.select(-1, offset).narrow(dim, 0, valid_len)
