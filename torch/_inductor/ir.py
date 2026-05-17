@@ -8328,6 +8328,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
 
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
         storage_tensor.freeze_layout()
         super().__init__(
             storage_tensor.get_layout(),

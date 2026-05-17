@@ -928,6 +928,27 @@ class CPUReproTests(TestCase):
             self.assertNotIn("kernel_src", code)
             self.assertEqual(expected, result)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
+    def test_set_source_tensor_with_view_source(self):
+        def fn(x):
+            x = torch.sigmoid(x).view(x.size(0), -1)
+            param1 = nn.Parameter(x)
+            with torch.no_grad():
+                x.mul_(1.4386868137611386)
+            y = torch.cat([x, x], dim=1)
+            param2 = nn.Parameter(y)
+            z = torch.zeros_like(x) + x
+            param3 = nn.Parameter(z)
+            return param1, param2, param3
+
+        inp = torch.randn(2, 3, 4)
+        with torch.no_grad():
+            expected = fn(inp)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with torch.no_grad():
+            result = opt_fn(inp)
+        self.assertEqual(expected, result)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
