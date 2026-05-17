@@ -11431,6 +11431,15 @@ class TestSDPA(TestCaseMPS):
             is_causal = True
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
+    def test_caching_scale(self):
+        # TODO remove this test once sdpa_general becomes a metal kernel
+        torch.manual_seed(42)
+        q = torch.randn(1, 2, 4, 8, device="mps")
+        # first call with default scale (1/sqrt(8) = 0.3536)
+        y_default = F.scaled_dot_product_attention(q, q, q)
+        # second call with explicit scale=2.0
+        y_scale2 = F.scaled_dot_product_attention(q, q, q, scale=2.0)
+        self.assertNotEqual(y_default, y_scale2)
 
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
     """
