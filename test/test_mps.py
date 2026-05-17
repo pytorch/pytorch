@@ -30,7 +30,8 @@ from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_mo
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
-from torch.distributions import Uniform, Exponential
+from torch.distributions import Dirichlet, Uniform, Exponential
+from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
@@ -8550,6 +8551,131 @@ class TestMPS(TestCaseMPS):
         for _ in range(100):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
+
+    @parametrize("dtype", [torch.float32])
+    def test_sample_dirichlet(self, dtype):
+        """Test _sample_dirichlet on MPS matches expected statistical properties."""
+        n_samples = 1000
+
+        for k in [3, 5, 10]:
+            alpha = torch.ones((n_samples, k), device='mps', dtype=dtype)
+            samples = torch._sample_dirichlet(alpha)
+
+            self.assertEqual(samples.shape, (n_samples, k))
+
+            self.assertTrue((samples > 0).all(),
+                            f"Dirichlet samples should be positive for k={k}")
+
+            # Samples should sum to 1 along last dimension
+            sums = samples.sum(dim=-1)
+            self.assertTrue(torch.allclose(sums, torch.ones_like(sums), atol=1e-4),
+                            f"Dirichlet samples should sum to 1 for k={k}")
+
+            # Check mean is close to 1/k for uniform alpha
+            expected_mean = 1.0 / k
+            mean = samples.float().mean(dim=0)
+            for i in range(k):
+                self.assertAlmostEqual(mean[i].item(), expected_mean, delta=0.05,
+                                    msg=f"Mean[{i}] should be close to {expected_mean} for k={k}")
+
+        # Test empty tensor
+        empty_alpha = torch.empty(0, 3, device='mps', dtype=dtype)
+        empty_samples = torch._sample_dirichlet(empty_alpha)
+        self.assertEqual(empty_samples.numel(), 0)
+
+    def test_dirichlet_multivariate_mps(self):
+        alpha_crit = 0.25 * (5.0**0.5 - 1.0)
+        num_samples = 100000
+        for shift in [-0.1, -0.05, -0.01, 0.0, 0.01, 0.05, 0.10]:
+            alpha = torch.tensor([alpha_crit + shift], dtype=torch.float, device="mps", requires_grad=True)
+            alpha_vec = torch.cat([alpha, alpha, alpha.new_tensor([1.0])])
+            z = Dirichlet(alpha_vec.expand(num_samples, 3)).rsample()
+            mean_z3 = 1.0 / (2.0 * alpha + 1.0)
+            loss = torch.pow(z[:, 2] - mean_z3, 2.0).mean()
+            actual_grad = torch.autograd.grad(loss, [alpha])[0]
+            num = 1.0 - 2.0 * alpha - 4.0 * alpha**2
+            den = (1.0 + alpha) ** 2 * (1.0 + 2.0 * alpha) ** 3
+            expected_grad = num / den
+            self.assertEqual(actual_grad, expected_grad, atol=0.002, rtol=0)
+
+    def test_dirichlet_tangent_field_mps(self):
+        interior_x = torch.tensor(
+            [[0.2, 0.3, 0.5], [0.25, 0.25, 0.5], [0.4, 0.35, 0.25], [0.6, 0.2, 0.2]],
+            dtype=torch.float,
+            device="mps",
+        ).repeat(5, 1)
+        num_samples = interior_x.size(0)
+        alpha_grid = [0.5, 1.0, 2.0]
+
+        def compute_v(x, alpha):
+            eye = torch.eye(3, 3, device="mps")
+            return torch.stack([_Dirichlet_backward(x, alpha, eye[i].expand_as(x))[:, 0] for i in range(3)], dim=-1)
+
+        for a1, a2, a3 in product(alpha_grid, alpha_grid, alpha_grid):
+            alpha = torch.tensor([a1, a2, a3], dtype=torch.float, device="mps", requires_grad=True).expand(
+                num_samples, 3
+            )
+            x = interior_x.clone().requires_grad_()
+            dlogp_da = torch.autograd.grad(
+                [Dirichlet(alpha).log_prob(x.detach()).sum()],
+                [alpha],
+                retain_graph=True,
+            )[0][:, 0]
+            dlogp_dx = torch.autograd.grad(
+                [Dirichlet(alpha.detach()).log_prob(x).sum()], [x], retain_graph=True
+            )[0]
+            v = compute_v(x, alpha)
+            dx = torch.tensor([[2.0, -1.0, -1.0], [0.0, 1.0, -1.0]], device="mps")
+            dx /= dx.norm(2, -1, True)
+            eps = 1e-2 * x.min(-1, True)[0]
+            dv0 = (compute_v(x + eps * dx[0], alpha) - compute_v(x - eps * dx[0], alpha)) / (2 * eps)
+            dv1 = (compute_v(x + eps * dx[1], alpha) - compute_v(x - eps * dx[1], alpha)) / (2 * eps)
+            div_v = (dv0 * dx[0] + dv1 * dx[1]).sum(-1)
+            error = dlogp_da + (dlogp_dx * v).sum(-1) + div_v
+            self.assertLess(torch.abs(error).max(), 0.005)
+
+    def test_dirichlet_on_diagonal_mps(self):
+        import scipy.stats
+        num_samples = 20
+        grid = [1e-1, 1e0, 1e1]
+        for a0, a1, a2 in product(grid, grid, grid):
+            alphas = torch.tensor(
+                [[a0, a1, a2]] * num_samples,
+                dtype=torch.float,
+                device="mps",
+                requires_grad=True,
+            )
+            x = Dirichlet(alphas).rsample()[:, 0]
+            x.sum().backward()
+            x, ind = x.sort()
+            x_np = x.detach().cpu().numpy()
+            actual_grad = alphas.grad[ind].cpu().numpy()[:, 0]
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            alpha, beta = a0, a1 + a2
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x_np, alpha + eps, beta) - cdf(x_np, alpha - eps, beta)) / (
+                2 * eps
+            )
+            cdf_x = pdf(x_np, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(
+                np.quantile(rel_error, 0.95),
+                0.005,
+                "\n".join(
+                    [
+                        f"Bad gradient dx[0]/dalpha[0] for Dirichlet([{a0}, {a1}, {a2}])",
+                        f"x {x_np}",
+                        f"expected {expected_grad}",
+                        f"actual {actual_grad}",
+                        f"rel error {rel_error}",
+                        f"max error {rel_error.max()}",
+                        f"at x={x_np[rel_error.argmax()]}",
+                        f"quantiles: {np.quantile(rel_error, [0.5, 0.9, 0.95])}",
+                    ]
+                ),
+            )
 
     def test_distributions(self):
         ops = [
