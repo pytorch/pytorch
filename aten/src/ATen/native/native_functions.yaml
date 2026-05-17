@@ -723,8 +723,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA: all_out
-    MPS: all_out_mps
+    CPU, CUDA, MPS: all_out
     MTIA: all_out_mtia
   tags: reduction
 
@@ -771,8 +770,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA: any_out
-    MPS: any_out_mps
+    CPU, CUDA, MPS: any_out
   tags: reduction
 
 - func: any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
@@ -3923,8 +3921,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA: aminmax_out
-    MPS: aminmax_out_mps
+    CPU, CUDA, MPS: aminmax_out
   tags: reduction
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
@@ -3978,8 +3975,7 @@
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: amax_out
-    MPS: amax_out_mps
+    CPU, CUDA, MPS: amax_out
   tags: reduction
 
 # Return: (Tensor output, Tensor indices)
@@ -4166,8 +4162,7 @@
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: amin_out
-    MPS: amin_out_mps
+    CPU, CUDA, MPS: amin_out
   tags: reduction
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
@@ -10472,9 +10467,8 @@
   device_check: NoCheck
   structured: True
   dispatch:
-    CPU, CUDA: all_all_out
+    CPU, CUDA, MPS: all_all_out
     MTIA: all_all_out_mtia
-    MPS: all_all_out_mps
   tags: reduction
 
 - func: any(Tensor self) -> Tensor
@@ -10489,8 +10483,7 @@
   device_check: NoCheck
   structured: True
   dispatch:
-    CPU, CUDA: any_all_out
-    MPS: any_all_out_mps
+    CPU, CUDA, MPS: any_all_out
   tags: reduction
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)

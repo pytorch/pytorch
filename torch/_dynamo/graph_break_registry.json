@@ -2245,6 +2245,16 @@
       ]
     }
   ],
+  "GB3792": [
+    {
+      "Gb_type": "numpy_scalar_nan_hash",
+      "Context": "self.numpy_type.__name__",
+      "Explanation": "Dynamo cannot safely specialize hash() of a NumPy NaN scalar because NaN hashes are object-specific.",
+      "Hints": [
+        "Avoid calling hash() on NumPy NaN scalars inside compiled code."
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",
@@ -4590,6 +4600,24 @@
       "Explanation": "_autograd_grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
       "Hints": [
         "Ensure outputs and inputs arguments are tensors or sequences of tensors."
+      ]
+    }
+  ],
+  "GB7294": [
+    {
+      "Gb_type": "numpy_scalar_comparison_result",
+      "Context": "context",
+      "Explanation": "Dynamo cannot safely lower this NumPy scalar comparison result as a Python scalar.",
+      "Hints": [
+        "Convert the NumPy scalar to a Python scalar outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "numpy_scalar_comparison_result",
+      "Context": "{self.numpy_type.__name__}.{name}",
+      "Explanation": "Dynamo cannot safely lower this NumPy scalar comparison result as a Python scalar.",
+      "Hints": [
+        "Convert the NumPy scalar to a Python scalar outside the compiled region."
       ]
     }
   ],
