@@ -14071,6 +14071,10 @@ def _autograd_grad_inputs(op, sample, grad_outputs):
     leaves = pytree.tree_leaves(([sample.input, *sample.args], sample.kwargs))
     diff_out = tuple(t for t in out if isinstance(t, torch.Tensor) and t.requires_grad)
     diff_arg = tuple(t for t in leaves if isinstance(t, torch.Tensor) and t.requires_grad)
+    if len(diff_out) != len(grad_outputs):
+        raise RuntimeError(
+            f"diff_out has {len(diff_out)} tensors but grad_outputs has {len(grad_outputs)}"
+        )
     return torch.autograd.grad(diff_out, diff_arg, grad_outputs=grad_outputs, allow_unused=True)
 
 
@@ -14105,6 +14109,14 @@ class TestDriftFallbackHelper(TestCaseMPS):
         mps = torch.tensor([1.0, 3.0], dtype=torch.float32, device="mps")
         with self.assertRaises(AssertionError):
             self._call(cpu, mps, cpu.float(), dtype=torch.float32)
+
+    def test_python_scalar_outputs_reraise_immediately(self):
+        # Ops returning Python scalars (item, allclose, equal) shouldn't enter
+        # the drift path -- the assertEqual failure must propagate as-is.
+        with self.assertRaises(AssertionError):
+            self._call(1.0, 2.0, 1.0)
+        with self.assertRaises(AssertionError):
+            self._call(True, False, True)
 
     def test_cpu_meets_budget_is_real_regression(self):
         # CPU exactly matches fp32 reference; MPS is off. Real regression.

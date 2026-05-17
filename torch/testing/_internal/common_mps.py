@@ -9,6 +9,8 @@ from .opinfo.core import DecorateInfo, OpInfo
 
 
 _DRIFT_FALLBACK_DTYPES = (torch.float16, torch.bfloat16)
+# Worst case for two independent correct implementations with anti-correlated
+# rounding at the same precision (triangle inequality on individual drifts).
 _DRIFT_SLACK = 2.0
 
 
@@ -39,6 +41,9 @@ def assert_mps_match_or_drift(
         return
     except AssertionError:
         if dtype not in _DRIFT_FALLBACK_DTYPES:
+            raise
+        # Drift only applies to tensors; let Python scalars propagate as-is.
+        if not isinstance(cpu_outs, (torch.Tensor, tuple, list)):
             raise
 
     if atol is None or rtol is None:
