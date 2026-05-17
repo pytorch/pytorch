@@ -174,6 +174,17 @@ static void scatter_fill_metal(const Tensor& self, int64_t dim, const Tensor& in
   });
 }
 
+// XOR every element's sign bit. Used as the pre- and post-pass that brackets
+// a signed int64 amin/amax scatter (Metal's atomic_min/max work on ulong,
+// so we encode signed values by flipping the sign bit to make signed order
+// match unsigned order; the encoding is its own inverse).
+static void dispatch_signbit_xor_long(id<MTLComputeCommandEncoder> encoder, MPSStream* stream, const Tensor& self) {
+  TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 requires contiguous self");
+  auto pso = lib.getPipelineStateForFunc("scatter_signbit_xor_long");
+  [encoder setComputePipelineState:pso];
+  dispatch_chunked(encoder, pso, self.numel(), [&](int64_t tid_offset) { mtl_setArgs(encoder, self, tid_offset); });
+}
+
 // Atomic Metal scatter for one of {add, prod, amin, amax}. Picks the dense
 // kernel when output/src/index are contiguous and shape-aligned outside dim,
 // strided kernel otherwise.
@@ -191,11 +202,21 @@ static void scatter_reduce_metal(const Tensor& self,
   const int64_t output_dim_size = self.size(dim);
   const int64_t total = index.numel();
   const bool use_dense = can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
+  // Signed int64 amin/amax needs an encode/decode bracket so signed ordering
+  // maps onto the unsigned atomic_min/max Metal exposes. Requires contiguous
+  // self so we can sweep it as a flat ulong buffer.
+  const bool needs_signbit_xor =
+      self.scalar_type() == ScalarType::Long && (std::string_view(op) == "amin" || std::string_view(op) == "amax");
+  TORCH_CHECK(!needs_signbit_xor || self.is_contiguous(),
+              "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      if (needs_signbit_xor) {
+        dispatch_signbit_xor_long(encoder, stream, self);
+      }
       if (use_dense) {
         const int64_t inner_size = dense_inner_size(self, dim);
         const int64_t index_dim_size = index.size(dim);
@@ -233,6 +254,9 @@ static void scatter_reduce_metal(const Tensor& self,
                       tid_offset,
                       stream->getErrorBuffer());
         });
+      }
+      if (needs_signbit_xor) {
+        dispatch_signbit_xor_long(encoder, stream, self);
       }
     }
   });

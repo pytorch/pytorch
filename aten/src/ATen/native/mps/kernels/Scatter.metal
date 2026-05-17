@@ -185,6 +185,41 @@ struct ScatterAtomicApply<T, ScatterReduceOp::Amax> {
   }
 };
 
+// Signed int64 amin/amax via Metal's atomic_min/max on ulong (Metal 3.1+).
+// The output buffer is pre-encoded (sign bit XOR'd, done by the host
+// scatter_signbit_xor_long kernel) so signed order matches unsigned order;
+// per-thread we encode the src value the same way.
+template <>
+struct ScatterAtomicApply<long, ScatterReduceOp::Amin> {
+  static inline void apply(device long* output, long out_offset, long src_val) {
+    const ulong encoded = ulong(src_val) ^ (1ul << 63);
+    ::metal::atomic_min_explicit(
+        reinterpret_cast<device ::metal::atomic<ulong>*>(output) + out_offset,
+        encoded,
+        ::metal::memory_order_relaxed);
+  }
+};
+template <>
+struct ScatterAtomicApply<long, ScatterReduceOp::Amax> {
+  static inline void apply(device long* output, long out_offset, long src_val) {
+    const ulong encoded = ulong(src_val) ^ (1ul << 63);
+    ::metal::atomic_max_explicit(
+        reinterpret_cast<device ::metal::atomic<ulong>*>(output) + out_offset,
+        encoded,
+        ::metal::memory_order_relaxed);
+  }
+};
+
+// Toggle the sign bit of every element. Used as the pre- and post-pass that
+// brackets a signed int64 amin/amax scatter (the encoding is its own inverse).
+kernel void scatter_signbit_xor_long(
+    device ulong* data [[buffer(0)]],
+    constant long& tid_offset [[buffer(1)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long tid = long(thread_index) + tid_offset;
+  data[tid] ^= (1ul << 63);
+}
+
 // Dense atomic scatter for one of {add, prod, amin, amax}. Shape requirements
 // match scatter_set_dense.
 template <typename T, typename index_t, ScatterReduceOp Op>
@@ -341,11 +376,17 @@ kernel void scatter_reduce_strided(
 
 // prod/amin/amax use atomic_binary_op (CAS loop). Restricted to dtypes for
 // which AtomicType<T> provides atomic_binary_op: float, int, half, bfloat,
-// short, char, uchar. bool / long / complex aren't supported here -- amin/amax
-// for complex is mathematically undefined and rejected at the meta-func level;
-// long lacks atomic_binary_op (only an eventually-consistent atomic_add).
+// short, char, uchar, bool. amin/amax for complex is undefined and rejected
+// at the meta-func level. long has its own specialization for amin/amax (via
+// Metal's 64-bit atomic_min/max on ulong with sign-flip encoding) but no
+// equivalent for prod.
 #define REGISTER_SCATTER_PROD_MIN_MAX_DTYPE(DTYPE)   \
   REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, prod, Prod); \
+  REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amin, Amin); \
+  REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amax, Amax)
+
+// long: amin/amax only (no atomic prod for 64-bit).
+#define REGISTER_SCATTER_AMIN_AMAX_DTYPE(DTYPE)      \
   REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amin, Amin); \
   REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amax, Amax)
 
@@ -374,5 +415,6 @@ REGISTER_SCATTER_OPS_FULL(uchar);
 REGISTER_SCATTER_OPS_FULL(bool);
 
 REGISTER_SCATTER_OPS_SET_ADD(long);
+REGISTER_SCATTER_AMIN_AMAX_DTYPE(long);
 REGISTER_SCATTER_OPS_SET_ADD(float2);
 REGISTER_SCATTER_OPS_SET_ADD(half2);
