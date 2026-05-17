@@ -91,13 +91,25 @@ def fuse_conv_bn_weights(
     bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
 
     if transpose:
-        shape = [1, -1] + [1] * (len(conv_w.shape) - 2)
+        # ConvTranspose weight layout: [in_channels, out_channels/groups, *kernel_size].
+        # BN scale has shape [out_channels].  When groups > 1, out_channels/groups < out_channels
+        # so the naive reshape([1, -1, ...]) broadcasts incorrectly (issue #180995).
+        # Infer groups, then tile the per-output-channel scale so that every slice of
+        # in_channels/groups input-channel rows that belongs to the same group shares
+        # the same out_channels/groups output-channel scales.
+        G = conv_w.shape[1]              # out_channels / groups
+        g = bn_rm.shape[0] // G          # groups (inferred)
+        in_per_g = conv_w.shape[0] // g  # in_channels / groups
+        bn_scale = (bn_w * bn_var_rsqrt).reshape(g, 1, G).expand(g, in_per_g, G).reshape(conv_w.shape[0], G)
+        extra = [1] * (len(conv_w.shape) - 2)
+        fused_conv_w = (conv_w * bn_scale.reshape([conv_w.shape[0], G] + extra)).to(
+            dtype=conv_weight_dtype
+        )
     else:
         shape = [-1, 1] + [1] * (len(conv_w.shape) - 2)
-
-    fused_conv_w = (conv_w * (bn_w * bn_var_rsqrt).reshape(shape)).to(
-        dtype=conv_weight_dtype
-    )
+        fused_conv_w = (conv_w * (bn_w * bn_var_rsqrt).reshape(shape)).to(
+            dtype=conv_weight_dtype
+        )
     fused_conv_b = ((conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b).to(
         dtype=conv_bias_dtype
     )
