@@ -193,7 +193,6 @@ ops_dde_xfail = {
     xfail("ormqr"),
     xfail("pca_lowrank"),
     xfail("pinverse"),
-    xfail("qr"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randn_like"),
