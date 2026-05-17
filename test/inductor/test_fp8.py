@@ -174,6 +174,48 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
         torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
 
+    @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm
+    @onlyCUDA
+    def test_fp8_to_bf16_mm_template_prologue_not_fused_pre_sm90(
+        self, device: torch.device
+    ):
+        def fn(a, b, bias):
+            return a @ b.t().to(torch.bfloat16) + bias
+
+        m, k, n = 64, 128, 64
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+        b = torch.randn(n, k, device=device, dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        )
+        bias = torch.randn(n, device=device, dtype=torch.bfloat16)
+        expected = fn(a, b, bias)
+
+        with config.patch(
+            {
+                "cuda.arch": "89",
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_mm_",
+            }
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, mode="max-autotune"),
+                a,
+                b,
+                bias,
+            )
+
+        torch.testing.assert_close(actual, expected, rtol=1e-2, atol=5e-2)
+        dot_kernels = [
+            source.split("''',", 1)[0]
+            for source in "\n".join(code).split("async_compile.triton(")
+            if "tl.dot" in source
+        ]
+        self.assertEqual(len(dot_kernels), 1)
+        self.assertNotIn(".to(tl.bfloat16)", dot_kernels[0])
+        self.assertNotIn("*fp8", dot_kernels[0])
+
     @skipIfXpu(
         msg="Conversions between float8_e5m2 and float8_e4m3fn is not supported, torch-xpu-ops: 2888"
     )
