@@ -2603,6 +2603,14 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     The TMA and non-TMA should build on top of this
     """
 
+    @staticmethod
+    def _get_scaled_mm_scalars(kernel_inputs: KernelInputs) -> dict[str, float | int]:
+        return {
+            "has_bias": int(kernel_inputs.get_scalar("has_bias")),
+            "has_scale_result": int(kernel_inputs.get_scalar("has_scale_result")),
+            "apply_scale_result": int(kernel_inputs.get_scalar("apply_scale_result")),
+        }
+
     def adjust_kernel_inputs(
         self, kernel_inputs: KernelInputs, op_name: str
     ) -> KernelInputs:
@@ -2615,9 +2623,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *optional_nodes = nodes
-        scalars = getattr(kernel_inputs, "_scalars", {})
-        has_bias = bool(scalars.get("has_bias", len(optional_nodes) > 0))
-        has_scale_result = bool(scalars.get("has_scale_result", False))
+        scalars = self._get_scaled_mm_scalars(kernel_inputs)
+        has_bias = bool(scalars["has_bias"])
+        has_scale_result = bool(scalars["has_scale_result"])
 
         bias = optional_nodes[0] if has_bias else None
         scale_result_idx = 1 if has_bias else 0
@@ -2652,8 +2660,8 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes.append(scale_result)
         return MMKernelInputs(
             nodes,
-            scalars=getattr(kernel_inputs, "_scalars", None),
-            out_dtype=getattr(kernel_inputs, "_out_dtype", None),
+            scalars=scalars,
+            out_dtype=kernel_inputs.out_dtype(),
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
         )
@@ -2736,10 +2744,10 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
         from ..kernel.mm_common import scale_mm_epilogue
 
-        scalars = getattr(kernel_inputs, "_scalars", {})
-        has_bias = bool(scalars.get("has_bias", kernel_inputs.count > 4))
-        has_scale_result = bool(scalars.get("has_scale_result", False))
-        apply_scale_result = bool(scalars.get("apply_scale_result", False))
+        scalars = self._get_scaled_mm_scalars(kernel_inputs)
+        has_bias = bool(scalars["has_bias"])
+        has_scale_result = bool(scalars["has_scale_result"])
+        apply_scale_result = bool(scalars["apply_scale_result"])
 
         return {
             **kwargs,

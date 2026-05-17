@@ -1410,6 +1410,11 @@ class TritonTemplateKernel(TritonKernel):
                         lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
                         old_name = lookup_output.symbol()
                         lookup_output.set_name(name)
+                        # Keep Triton block-shape inference in sync with the
+                        # TMA epilogue rename to xindex/yindex.
+                        self.range_tree_nodes[symbol] = self.range_tree_nodes.pop(
+                            old_name
+                        )
                         # Update var_list and var_range
                         range_tree.var_list[range_tree.var_list.index(old_name)] = (
                             symbol

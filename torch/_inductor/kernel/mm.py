@@ -957,6 +957,8 @@ def tuned_scaled_mm(
     if scale_result_real is not None:
         input_nodes.append(scale_result_real)
 
+    # FP8 Triton templates must divide by scale_result in their epilogue.
+    # Other dtypes pass scale_result through to the extern ATen kernel.
     apply_scale_result = (
         scale_result_real is not None and layout.dtype in _SCALED_MM_SCALE_RESULT_DTYPES
     )

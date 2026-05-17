@@ -114,9 +114,9 @@ def scale_mm_epilogue(
     using the given scale factors.
 
     Args:
-        dtype: The data type of the output
-        scale_a: Scale factor for matrix A
-        scale_b: Scale factor for matrix B
+        has_bias: Whether the epilogue receives and applies a bias argument.
+        has_scale_result: Whether the epilogue receives a scale_result argument.
+        apply_scale_result: Whether the epilogue divides by scale_result.
 
     Returns:
         Epilogue function that takes the accumulator and applies scaling
