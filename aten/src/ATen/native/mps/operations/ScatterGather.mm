@@ -204,11 +204,15 @@ static void scatter_reduce_metal(const Tensor& self,
   const bool use_dense = can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
   // Signed int64 amin/amax needs an encode/decode bracket so signed ordering
   // maps onto the unsigned atomic_min/max Metal exposes. Requires contiguous
-  // self so we can sweep it as a flat ulong buffer.
+  // self so we can sweep it as a flat ulong buffer. The ulong atomic_min/max
+  // intrinsic is only available at runtime on macOS 15+.
   const bool needs_signbit_xor =
       self.scalar_type() == ScalarType::Long && (std::string_view(op) == "amin" || std::string_view(op) == "amax");
-  TORCH_CHECK(!needs_signbit_xor || self.is_contiguous(),
-              "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
+  if (needs_signbit_xor) {
+    TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS),
+                "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
+    TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
+  }
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {

@@ -23369,6 +23369,12 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+        # MPS: int64 amin requires macOS 15+ (ulong atomic_min intrinsic).
+        dtypesIfMPS=(
+            _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
+            if MACOS_VERSION < 15.0
+            else all_types_and(torch.float16, torch.bfloat16, torch.bool)
+        ),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
@@ -23380,6 +23386,12 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+        # MPS: int64 amax requires macOS 15+ (ulong atomic_max intrinsic).
+        dtypesIfMPS=(
+            _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
+            if MACOS_VERSION < 15.0
+            else all_types_and(torch.float16, torch.bfloat16, torch.bool)
+        ),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
