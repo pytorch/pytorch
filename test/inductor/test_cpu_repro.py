@@ -1343,6 +1343,31 @@ class CPUReproTests(TestCase):
             res = cfn(*inp_clone3)
             self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
 
+    def test_randperm_advanced_indexing_issue_158457(self):
+        def full_index(x):
+            perm = torch.randperm(x.size(0))
+            return x[perm]
+
+        def sliced_index(x):
+            perm = torch.randperm(x.size(0))[:2]
+            return x[perm]
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+        full_actual = torch.compile(full_index, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(full_actual.shape, x.shape)
+        self.assertEqual(torch.sort(full_actual[:, 0]).values, x[:, 0])
+
+        sliced_actual = torch.compile(sliced_index, backend="inductor", fullgraph=True)(
+            x
+        )
+        self.assertEqual(sliced_actual.shape, (2, x.size(1)))
+        self.assertEqual(sliced_actual[:, 1:], sliced_actual[:, :1] + x[0, 1:])
+        self.assertTrue((sliced_actual[:, :1] == x[:, 0]).any(dim=1).all().item())
+        self.assertEqual(
+            torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
+        )
+
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
