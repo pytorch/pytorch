@@ -21,6 +21,7 @@ from torch._inductor.pattern_matcher import (
     is_mutation_op,
     KeywordArg,
     Match,
+    MultiOutputPattern,
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
@@ -1947,6 +1948,84 @@ class TestPatternMatcher(TestCase):
         # print(my_func_static(*inputs))
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
+
+    def _make_add_add_multioutput_patterns(self):
+        tensor_a = KeywordArg("A")
+        tensor_b = KeywordArg("B")
+        tensor_c = KeywordArg("C")
+        add_1 = CallFunction(aten.add.Tensor, tensor_a, tensor_b, _users=2)
+        add_2 = CallFunction(aten.add.Tensor, add_1, tensor_c)
+        pattern = MultiOutputPattern([add_1, add_2])
+
+        def empty_pattern(A, B, C):
+            return
+
+        def replacement(A, B, C):
+            x = torch.ops.aten.add.Tensor(A, B)
+            return x, torch.ops.aten.add.Tensor(x, C)
+
+        patterns = PatternMatcherPass()
+        register_replacement(
+            empty_pattern,
+            replacement,
+            [],
+            fwd_only,
+            patterns,
+            search_fn_pattern=pattern,
+        )
+        return patterns
+
+    def test_multioutput_replacement_inserted_after_later_input(self):
+        def fn(A, B, C, D):
+            x = A + B
+            y = C * D
+            z = x + y
+            return torch.abs(z)
+
+        gm = make_fx(fn, tracing_mode="fake")(
+            *(torch.randn(4, dtype=torch.float32) for _ in range(4))
+        )
+        patterns = self._make_add_add_multioutput_patterns()
+
+        self.assertEqual(patterns.apply(gm.graph), 1)
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+
+        call_targets = [
+            node.target for node in gm.graph.nodes if node.op == "call_function"
+        ]
+        self.assertEqual(call_targets[0], aten.mul.Tensor)
+
+    def test_multioutput_replacement_allows_early_external_user(self):
+        def fn(A, B, C, D):
+            x = A + B
+            y = x * C
+            z = x + D
+            return torch.abs(y * z)
+
+        gm = make_fx(fn, tracing_mode="fake")(
+            *(torch.randn(4, dtype=torch.float32) for _ in range(4))
+        )
+        patterns = self._make_add_add_multioutput_patterns()
+
+        self.assertEqual(patterns.apply(gm.graph), 1)
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+
+    def test_multioutput_replacement_rejects_pre_insertion_user(self):
+        def fn(A, B, C, D):
+            x = A + B
+            y = x * D
+            z = x + y
+            return torch.abs(z)
+
+        gm = make_fx(fn, tracing_mode="fake")(
+            *(torch.randn(4, dtype=torch.float32) for _ in range(4))
+        )
+        patterns = self._make_add_add_multioutput_patterns()
+
+        self.assertEqual(patterns.apply(gm.graph), 0)
+        gm.graph.lint()
 
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):
