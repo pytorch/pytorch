@@ -3091,6 +3091,7 @@ class ExternKernelChoice:
         input_nodes,
         layout,
         ordered_kwargs_for_cpp_kernel=(),
+        call_args: Sequence[Any] | None = None,
         **kwargs,
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
@@ -3099,6 +3100,7 @@ class ExternKernelChoice:
             input_nodes,
             layout,
             kwargs,
+            call_args=call_args,
             has_out_variant=self.has_out_variant,
         )
 
@@ -3251,11 +3253,13 @@ class ExternKernelCaller(ChoiceCaller):
         layout,
         kwargs=None,
         *,
+        call_args: Sequence[Any] | None = None,
         has_out_variant=True,
     ) -> None:
         super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
         self.kwargs = kwargs or {}
+        self.call_args = call_args
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
@@ -3303,6 +3307,7 @@ class ExternKernelCaller(ChoiceCaller):
             extra_args=(),
             callable_path=self.choice.call_name(),
             kwargs=self.kwargs,
+            call_args=self.call_args,
             has_out_variant=self.has_out_variant,
         )
 
@@ -3323,29 +3328,37 @@ class ExternKernelCaller(ChoiceCaller):
             return
 
         algo = self.to_callable()
+        args = self.resolve_call_args(args)
         if self.has_out_variant:
             algo(*args, out=out)
         else:
             algo(*args)
+
+    def resolve_call_args(self, args: Sequence[Any]) -> tuple[Any, ...]:
+        return ir.resolve_extern_kernel_call_args(args, self.call_args)
 
     def to_callable(self):
         # pyrefly: ignore [missing-attribute]
         return self.bmreq.to_callable()
 
     def hash_key(self):
-        return "-".join(
+        parts = [self.choice.name]
+        if self.call_args is not None:
+            parts.append(f"call_args={repr(self.call_args)}")
+        parts.extend(
             [
-                self.choice.name,
-                *[
-                    f"{kwarg}={repr(self.kwargs[kwarg])}"
-                    for kwarg in sorted(self.kwargs.keys())
-                ],
-                self.choice.hash_key(),
+                f"{kwarg}={repr(self.kwargs[kwarg])}"
+                for kwarg in sorted(self.kwargs.keys())
             ]
         )
+        parts.append(self.choice.hash_key())
+        return "-".join(parts)
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
+            assert self.call_args is None, (
+                "call_args are unsupported for fallback kernels"
+            )
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
@@ -3353,6 +3366,9 @@ class ExternKernelCaller(ChoiceCaller):
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
+            assert self.call_args is None, (
+                "call_args are unsupported for kernel creators"
+            )
             inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
@@ -3364,6 +3380,7 @@ class ExternKernelCaller(ChoiceCaller):
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,
+                call_args=self.call_args,
             )
 
         # Pass KTC annotation to the buffer for encoding
