@@ -1533,19 +1533,14 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
-        from torch.utils._pytree import tree_map
-
-        def _check_symint(val: object) -> object:
-            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                raise RuntimeError(
-                    f"Raw {type(val).__name__} value ({val}) passed as argument to "
-                    f"Graph.create_node(op='{op}', target={target}). "
-                    f"Use create_*_node() helpers (e.g. create_size_node, create_numel_node) instead."
-                )
-            return val
-
-        tree_map(_check_symint, args)
-        tree_map(_check_symint, kwargs)
+        if args or kwargs:
+            for val in pytree.tree_iter((args, kwargs)):
+                if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                    raise RuntimeError(
+                        f"Raw {type(val).__name__} value ({val}) passed as argument to "
+                        f"Graph.create_node(op='{op}', target={target}). "
+                        f"Use create_*_node() helpers (e.g. create_size_node, create_stride_node, create_storage_offset_node) instead."
+                    )
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -1908,11 +1903,10 @@ class Graph:
         ``meta['val']`` (export / proxy_tensor convention) or
         ``meta['example_value']`` (dynamo convention).
         """
-        if "val" in tensor_node.meta:
-            return tensor_node.meta["val"]
-        if "example_value" in tensor_node.meta:
-            return tensor_node.meta["example_value"]
-        return None
+        val = tensor_node.meta.get("val")
+        if val is not None:
+            return val
+        return tensor_node.meta.get("example_value")
 
     @compatibility(is_backward_compatible=False)
     def create_size_node(self, tensor_node: Node, dim: int) -> Node:
