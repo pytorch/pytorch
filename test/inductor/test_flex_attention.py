@@ -5386,6 +5386,44 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    def test_cpu_qk_chunk_same_addmm_buffer(self, device):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.H = 2
+                self.D = 16
+                self.S = 128
+                self.project_qk = nn.Linear(self.H * self.D, self.H * self.D * 2)
+                self.project_v = nn.Linear(self.H * self.D, self.H * self.D)
+
+            def forward(self, hidden_states):
+                B = hidden_states.size(0)
+                qk = self.project_qk(hidden_states)
+                query, key = qk.chunk(2, dim=-1)
+
+                query = query.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                key = key.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                value = (
+                    self.project_v(hidden_states)
+                    .view(B, self.S, self.H, self.D)
+                    .permute(0, 2, 1, 3)
+                )
+
+                return flex_attention(query, key, value, score_mod=_identity)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 128, 32, device=device)
+        model = Model().to(device).eval()
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model)(x)
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
