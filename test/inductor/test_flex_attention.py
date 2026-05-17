@@ -5146,6 +5146,70 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    def test_direct_backward_fp8_out_delta(self, device):
+        block_mask = create_block_mask(
+            noop_mask,
+            B=1,
+            H=1,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        scale = 1.0 / 16**0.5
+        dtype = torch.bfloat16 if PLATFORM_SUPPORTS_BF16 else torch.float16
+        q = torch.randn((1, 1, 128, 16), dtype=dtype, device=device)
+        k = torch.randn((1, 1, 128, 16), dtype=dtype, device=device)
+        v = torch.randn((1, 1, 128, 16), dtype=dtype, device=device)
+        grad_out = torch.randn((1, 1, 128, 16), dtype=dtype, device=device)
+
+        out, logsumexp, _ = flex_attention_hop(
+            q,
+            k,
+            v,
+            _identity,
+            block_mask.as_tuple(),
+            scale,
+            {"BACKEND": "TRITON"},
+        )
+        out_fp8 = out.to(e4m3_type)
+
+        @torch.compile(fullgraph=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad,
+                None,
+                _identity,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (),
+                (),
+            )
+
+        with torch.no_grad():
+            dq, dk, dv, captured_grads = compiled_bw(
+                q,
+                k,
+                v,
+                out_fp8,
+                logsumexp,
+                grad_out,
+            )
+
+        self.assertEqual(dq.dtype, dtype)
+        self.assertEqual(dk.dtype, dtype)
+        self.assertEqual(dv.dtype, dtype)
+        self.assertEqual(captured_grads, ())
+
+    @supported_platform
+    @skip_on_cpu
     def test_direct_backward_supports_symint_score_mod_buffers(self, device):
         def score_mod(score, b, h, m, n, head_dim):
             return score
