@@ -1164,19 +1164,20 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    minifier(
-        mod,
-        args,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state, compiler_name=compiler_name
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
-    )
+    with config.patch(repro_after=None):
+        minifier(
+            mod,
+            args,
+            module_fails=functools.partial(module_fails, check_str=options.check_str),
+            dump_state=functools.partial(
+                dump_compiler_graph_state, compiler_name=compiler_name
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
 
 
 def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
