@@ -1424,13 +1424,14 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug("  via %s", lowerings[target])  # type: ignore[index]
 
             n = self.current_node
+            should_fallback = "should_fallback" in n.meta or n.meta.get(
+                "custom", {}
+            ).get("fallback_to_eager")
             args, kwargs, mutation_args = self._apply_layout_constraints(
-                target, n, args, kwargs
+                target, n, args, kwargs, with_default=should_fallback
             )
 
-            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
-                "fallback_to_eager"
-            ):
+            if should_fallback:
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1527,11 +1528,13 @@ class GraphLowering(torch.fx.Interpreter):
     @staticmethod
     def _layout_constraints_for_target(
         target: Callable[..., Any],
+        *,
+        with_default: bool = False,
     ) -> Callable[..., tuple[Any, Any]] | None:
         layout_constraints = maybe_layout_constraints(target)
         if layout_constraints is not None:
             return layout_constraints
-        if isinstance(target, torch._ops.OpOverload):
+        if with_default and isinstance(target, torch._ops.OpOverload):
             return tag_to_layout_constraint(
                 get_layout_constraint_tag(target, with_default=True)
             )
@@ -1543,8 +1546,12 @@ class GraphLowering(torch.fx.Interpreter):
         node: torch.fx.Node,
         args: Any,
         kwargs: dict[str, Any],
+        *,
+        with_default: bool = False,
     ) -> tuple[Any, dict[str, Any], tuple[Any, Any] | None]:
-        layout_constraints = self._layout_constraints_for_target(target)
+        layout_constraints = self._layout_constraints_for_target(
+            target, with_default=with_default
+        )
         if layout_constraints is None:
             return args, kwargs, None
 
@@ -1934,6 +1941,7 @@ class GraphLowering(torch.fx.Interpreter):
                     n,
                     args,  # type: ignore[possibly-undefined]
                     kwargs,  # type: ignore[possibly-undefined]
+                    with_default=True,
                 )
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]
@@ -1957,6 +1965,7 @@ class GraphLowering(torch.fx.Interpreter):
                     n,
                     args,  # type: ignore[possibly-undefined]
                     kwargs,  # type: ignore[possibly-undefined]
+                    with_default=True,
                 )
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]
