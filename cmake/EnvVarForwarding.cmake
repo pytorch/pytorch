@@ -136,3 +136,30 @@ if(Python_EXECUTABLE)
     list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
   endif()
 endif()
+
+# MAX_JOBS -> CMAKE_BUILD_PARALLEL_LEVEL (scikit-build-core respects this)
+if(DEFINED ENV{MAX_JOBS} AND NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
+  set(ENV{CMAKE_BUILD_PARALLEL_LEVEL} "$ENV{MAX_JOBS}")
+endif()
+
+# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON. This matches setup.py
+# behavior where BUILD_PYTHON_ONLY unconditionally forces BUILD_LIBTORCHLESS.
+if(BUILD_PYTHON_ONLY)
+  set(BUILD_LIBTORCHLESS ON CACHE BOOL "Build without libtorch" FORCE)
+endif()
+
+# USE_NIGHTLY bypasses the build entirely and downloads a pre-built wheel.
+# This is not supported via CMake -- use the standalone script instead.
+if(USE_NIGHTLY)
+  message(FATAL_ERROR
+    "USE_NIGHTLY is not supported with the scikit-build-core build system. "
+    "Use 'python tools/nightly_wheel.py' instead, or install directly with pip: "
+    "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu"
+  )
+endif()
+
+# Conflict check
+if(BUILD_LIBTORCH_WHL AND BUILD_PYTHON_ONLY)
+  message(FATAL_ERROR
+    "Conflict: BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY cannot both be ON.")
+endif()
