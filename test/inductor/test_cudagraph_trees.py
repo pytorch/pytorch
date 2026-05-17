@@ -1739,6 +1739,10 @@ if HAS_CUDA_AND_TRITON:
                 loss.backward()
                 optimizer.step()
 
+            for fn_to_count in self.get_manager().num_rerecord.values():
+                for count in fn_to_count.values():
+                    self.assertLessEqual(count, 1)
+
         def test_aliased_static_parameter(self):
             inp = torch.rand([20, 20], device="cuda")
 

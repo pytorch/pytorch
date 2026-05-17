@@ -1034,13 +1034,16 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 data = torch.randn((16, 46, 8, 8), dtype=torch.float32, device="cuda")
                 opt_net(data).sum().backward()
 
-            # 2 fwd and 2 bwd graph such that 4 graphs in total
+            # At least 2 fwd and 2 bwd graphs should be recorded. Some liveness
+            # patterns require replacement backward recordings, but this should
+            # stabilize instead of rerecording every iteration.
             graph_id = (
                 torch._inductor.cudagraph_trees.get_container(self.rank)
                 .tree_manager.new_graph_id()
                 .id
             )
-            self.assertTrue(graph_id == 4)
+            self.assertGreaterEqual(graph_id, 4)
+            self.assertLessEqual(graph_id, 7)
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)

@@ -893,6 +893,7 @@ class CUDAGraphNode:
         stream: torch.cuda.Stream,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
+        preserve_input_idxs: Sequence[int] = (),
     ) -> None:
         assert isinstance(inputs, (list, tuple))
 
@@ -1037,6 +1038,7 @@ class CUDAGraphNode:
         # path_weakrefs.
         self.expected_dead_indices_before_graph: list[PathOutputIndex] = []
         self.expected_dead_indices_after_graph: list[PathOutputIndex] = []
+        self.preserve_input_idxs_for_liveness_rerecord: list[int] = []
 
         # all live indices after graph recording
         self.live_indices_after_graph: list[PathOutputIndex] = []
@@ -1053,6 +1055,11 @@ class CUDAGraphNode:
             self.expected_dead_indices_before_graph = different_indices
 
         rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
+
+        # On an after-graph liveness mismatch, the replacement recording must keep
+        # the same prior graph outputs live. Otherwise clearing inputs below would
+        # recreate the same recording-time deallocation and lead to repeated rerecords.
+        preserved_recording_inputs = [inputs[idx] for idx in preserve_input_idxs]
 
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
@@ -1140,6 +1147,7 @@ class CUDAGraphNode:
                 self.outputs_metadata.append(out)
 
         self.graph.replay()
+        del preserved_recording_inputs
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: list[InputType], srcs: list[InputType]
@@ -1864,6 +1872,17 @@ class CUDAGraphNode:
         if not self._check_liveness(
             self.expected_dead_indices_after_graph, self.path_weakrefs
         ):
+            live_expected_dead_indices = OrderedSet(
+                (depth, output_index)
+                for depth, output_index in self.expected_dead_indices_after_graph
+                if is_live(self.path_weakrefs[depth][output_index])
+            )
+            self.preserve_input_idxs_for_liveness_rerecord = [
+                idx
+                for idx in self.cudagraph_managed_idxs
+                if self.live_cudagraph_managed_path_refs[idx]
+                in live_expected_dead_indices
+            ]
             for idx, inp in cleared_inputs:
                 inputs[idx] = inp
             status = CheckInvariantStatus.ExpectedDeadIndicesAfterGraphMismatch
@@ -2277,6 +2296,7 @@ class CUDAGraphTreeManager:
             self.roots if self.current_node is None else self.current_node.children
         )
 
+        preserve_input_idxs_for_rerecord: OrderedSet[int] = OrderedSet()
         if not self.in_recording:
             unexpected_rerecord = False
             unexpected_rerecord_reason = None
@@ -2297,6 +2317,13 @@ class CUDAGraphTreeManager:
                     # other mismatch reasons do count.
                     if status != CheckInvariantStatus.StaticInputIdxMismatch:
                         unexpected_rerecord = True
+                    if (
+                        status
+                        == CheckInvariantStatus.ExpectedDeadIndicesAfterGraphMismatch
+                    ):
+                        preserve_input_idxs_for_rerecord.update(
+                            child.preserve_input_idxs_for_liveness_rerecord
+                        )
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2361,7 +2388,9 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        return self.record_function(
+            new_inputs, function_id, list(preserve_input_idxs_for_rerecord)
+        )
 
     def shutdown(self) -> None:
         """
@@ -2385,7 +2414,10 @@ class CUDAGraphTreeManager:
         self.current_node = None
 
     def record_function(
-        self, new_inputs: list[InputType], function_id: FunctionID
+        self,
+        new_inputs: list[InputType],
+        function_id: FunctionID,
+        preserve_input_idxs: Sequence[int] = (),
     ) -> OutputType:
         assert not isinstance(self.current_node, CUDAWarmupNode)
         with torch._dynamo.callback_handler.install_callbacks(
@@ -2412,6 +2444,7 @@ class CUDAGraphTreeManager:
                 self.stream,
                 self.mode,
                 self.compile_id,
+                preserve_input_idxs,
             )
             if self.current_node is None:
                 self.roots[function_id].append(node)
