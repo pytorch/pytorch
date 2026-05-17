@@ -1903,43 +1903,51 @@ class Graph:
         )
 
     @staticmethod
-    def _get_tensor_meta_val(tensor_node: Node) -> Any:
+    def _get_tensor_meta_val(tensor_node: Node) -> tuple[Any, str]:
         """Read the example tensor stored on ``tensor_node`` under either
         ``meta['val']`` (export / proxy_tensor convention) or
         ``meta['example_value']`` (dynamo convention).
+
+        Returns ``(value, key)`` where ``key`` is the meta key the value was
+        found under (defaulting to ``"val"`` if no meta is present). Callers
+        that emit a new node should mirror ``key`` so the new node matches
+        the surrounding graph's convention.
         """
         val = tensor_node.meta.get("val")
         if val is not None:
-            return val
-        return tensor_node.meta.get("example_value")
+            return val, "val"
+        val = tensor_node.meta.get("example_value")
+        if val is not None:
+            return val, "example_value"
+        return None, "val"
 
     @compatibility(is_backward_compatible=False)
     def create_size_node(self, tensor_node: Node, dim: int) -> Node:
         """Create an FX node for ``tensor_node.size(dim)``."""
-        val = self._get_tensor_meta_val(tensor_node)
+        val, key = self._get_tensor_meta_val(tensor_node)
         node = self.call_function(torch.ops.aten.sym_size.int, (tensor_node, dim))
         if val is not None:
-            node.meta["val"] = val.size(dim)
+            node.meta[key] = val.size(dim)
         return node
 
     @compatibility(is_backward_compatible=False)
     def create_stride_node(self, tensor_node: Node, dim: int) -> Node:
         """Create an FX node for ``tensor_node.stride(dim)``."""
-        val = self._get_tensor_meta_val(tensor_node)
+        val, key = self._get_tensor_meta_val(tensor_node)
         node = self.call_function(torch.ops.aten.sym_stride.int, (tensor_node, dim))
         if val is not None:
-            node.meta["val"] = val.stride(dim)
+            node.meta[key] = val.stride(dim)
         return node
 
     @compatibility(is_backward_compatible=False)
     def create_storage_offset_node(self, tensor_node: Node) -> Node:
         """Create an FX node for ``tensor_node.storage_offset()``."""
-        val = self._get_tensor_meta_val(tensor_node)
+        val, key = self._get_tensor_meta_val(tensor_node)
         node = self.call_function(
             torch.ops.aten.sym_storage_offset.default, (tensor_node,)
         )
         if val is not None:
-            node.meta["val"] = val.storage_offset()
+            node.meta[key] = val.storage_offset()
         return node
 
     @compatibility(is_backward_compatible=False)
@@ -1996,7 +2004,7 @@ class Graph:
         sym_size_sources: dict[sympy.Symbol, tuple[Node, int]] = {}
 
         for node in self.nodes:
-            val = self._get_tensor_meta_val(node)
+            val, _ = self._get_tensor_meta_val(node)
             # SymInt-valued node (placeholder or other sym op): the node
             # itself is the symbol's producer.
             if isinstance(val, py_sym_types):
@@ -2026,9 +2034,9 @@ class Graph:
                 continue
             ph, dim = sym_size_sources[sym]
             sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
-            tensor = self._get_tensor_meta_val(ph)
+            tensor, key = self._get_tensor_meta_val(ph)
             if isinstance(tensor, torch.Tensor):
-                sym_node.meta["val"] = tensor.shape[dim]
+                sym_node.meta[key] = tensor.shape[dim]
             expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
 
         out: list[Node | int] = []

@@ -4685,26 +4685,32 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
         )
 
 
-    def test_materialize_symints_basic(self):
-        """``Graph.materialize_symints`` lowers each SymInt input into an FX
-        subgraph rooted at existing symbol producers."""
+    @staticmethod
+    def _capture_gm(fn, *example_inputs):
+        """Compile ``fn`` with dynamic shapes, return the captured GraphModule."""
         from torch._dynamo.testing import EagerAndRecordGraphs
 
         backend = EagerAndRecordGraphs()
+        torch.compile(fn, dynamic=True, backend=backend)(*example_inputs)
+        return backend.graphs[-1]
 
-        def f(x):
-            return x + 1
-
-        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
-        gm = backend.graphs[-1]
-
-        # Pick a tensor placeholder so we can derive its symbolic dims.
-        tensor_placeholder = next(
+    @staticmethod
+    def _find_placeholder(gm, example_value_type):
+        """Return the first placeholder whose ``meta['example_value']`` is an
+        instance of ``example_value_type``."""
+        return next(
             n
             for n in gm.graph.nodes
             if n.op == "placeholder"
-            and isinstance(n.meta.get("example_value"), torch.Tensor)
+            and isinstance(n.meta.get("example_value"), example_value_type)
         )
+
+    def test_materialize_symints_basic(self):
+        """``Graph.materialize_symints`` lowers each SymInt input into an FX
+        subgraph rooted at existing symbol producers."""
+        gm = self._capture_gm(lambda x: x + 1, torch.randn(8, 4))
+        # Pick a tensor placeholder so we can derive its symbolic dims.
+        tensor_placeholder = self._find_placeholder(gm, torch.Tensor)
         h, _ = tensor_placeholder.meta["example_value"].shape  # h is a SymInt
         self.assertIsInstance(h, torch.SymInt)
 
@@ -4734,22 +4740,8 @@ graph():
     def test_materialize_symints_constant_symint(self):
         """A SymInt whose expression has folded to a constant is unwrapped
         to a plain ``int`` rather than emitting any FX nodes."""
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        backend = EagerAndRecordGraphs()
-
-        def f(x):
-            return x + 1
-
-        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
-        gm = backend.graphs[-1]
-
-        tensor_placeholder = next(
-            n
-            for n in gm.graph.nodes
-            if n.op == "placeholder"
-            and isinstance(n.meta.get("example_value"), torch.Tensor)
-        )
+        gm = self._capture_gm(lambda x: x + 1, torch.randn(8, 4))
+        tensor_placeholder = self._find_placeholder(gm, torch.Tensor)
         h = tensor_placeholder.meta["example_value"].shape[0]
         self.assertIsInstance(h, torch.SymInt)
 
@@ -4761,26 +4753,14 @@ graph():
     def test_materialize_symints_missing_symbol_rejects(self):
         """Materializing a SymInt whose symbol has no producer in the graph
         raises ``AssertionError`` rather than producing a dangling node."""
-        from torch._dynamo.testing import EagerAndRecordGraphs
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        # First, capture a graph that has symbolic shapes so we can grab a SymInt.
-        backend = EagerAndRecordGraphs()
-
-        def f(x):
-            return x + 1
-
-        torch.compile(f, dynamic=True, backend=backend)(torch.randn(8, 4))
-        captured_gm = backend.graphs[-1]
-        captured_tensor_placeholder = next(
-            n
-            for n in captured_gm.graph.nodes
-            if n.op == "placeholder"
-            and isinstance(n.meta.get("example_value"), torch.Tensor)
-        )
-        h = captured_tensor_placeholder.meta["example_value"].shape[0]
+        # Manufacture a SymInt with a non-constant symbol (no graph needed).
+        shape_env = ShapeEnv()
+        h = shape_env.create_unbacked_symint()
         self.assertIsInstance(h, torch.SymInt)
 
-        # Build a NEW empty graph (no symbol producers) and try to materialize.
+        # Empty graph has no producer for `h`'s symbol → must reject.
         empty_graph = torch.fx.Graph()
         with self.assertRaisesRegex(AssertionError, "no producer in the graph"):
             empty_graph.materialize_symints([h])
@@ -4789,24 +4769,8 @@ graph():
         """When the symbol is produced by a top-level SymInt placeholder, the
         placeholder itself is used as the symbol's producer — no
         `sym_size.int` node is emitted."""
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        backend = EagerAndRecordGraphs()
-
-        def f(n: int):
-            # A pure-int input keeps `n` as a top-level Sym(...) placeholder
-            # (Dynamo represents it directly, no tensor backing).
-            return torch.zeros(n + 1)
-
-        torch.compile(f, dynamic=True, backend=backend)(8)
-        gm = backend.graphs[-1]
-
-        sym_placeholder = next(
-            n
-            for n in gm.graph.nodes
-            if n.op == "placeholder"
-            and isinstance(n.meta.get("example_value"), torch.SymInt)
-        )
+        gm = self._capture_gm(lambda n: torch.zeros(n + 1), 8)
+        sym_placeholder = self._find_placeholder(gm, torch.SymInt)
         s = sym_placeholder.meta["example_value"]
         self.assertIsInstance(s, torch.SymInt)
 

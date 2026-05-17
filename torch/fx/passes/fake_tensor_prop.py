@@ -87,12 +87,6 @@ class FakeTensorProp(torch.fx.Interpreter):
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
             elif isinstance(obj, (*py_sym_types, int, float, bool)):
-                # Plain numeric results (e.g. aten.sym_stride.int returning a
-                # concrete int for a contiguous-channels-last inner stride of
-                # 1) must also overwrite any prior meta value, otherwise a
-                # stale value left by an earlier pass (e.g. freezing's
-                # create_stride_node) survives and produces an inconsistent
-                # stride snapshot mixed with newly-re-derived SymInts.
                 return obj
             else:
                 return None
