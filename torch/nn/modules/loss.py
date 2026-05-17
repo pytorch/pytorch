@@ -325,6 +325,13 @@ class PoissonNLLLoss(_Loss):
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
+    .. note::
+        When :attr:`log_input` is ``False``, ``input`` represents a Poisson rate and
+        **must be non-negative**.  Negative values will raise a ``ValueError``
+        because :math:`\log(\text{input}+\text{eps})` is undefined.  Apply
+        :func:`~torch.nn.functional.softplus` or clamp to raw model outputs
+        before passing them to this loss.
+
     Examples:
 
         >>> loss = nn.PoissonNLLLoss()

@@ -3230,6 +3230,12 @@ def poisson_nll_loss(
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
+    .. note::
+        When :attr:`log_input` is ``False``, ``input`` represents a Poisson rate and
+        **must be non-negative**.  Negative values cause :math:`\log(\text{input}+\text{eps})`
+        to return ``NaN`` silently.  Clamp or apply :func:`~torch.nn.functional.softplus`
+        to raw model outputs before passing them to this loss.
+
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3249,6 +3255,12 @@ def poisson_nll_loss(
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
         raise ValueError(reduction + " is not a valid value for reduction")
+    if not log_input and torch.is_floating_point(input) and bool((input < 0).any()):
+        raise ValueError(
+            "PoissonNLLLoss / poisson_nll_loss: input contains negative values, "
+            "which are invalid when log_input=False (input parameterises a Poisson "
+            "rate and must be non-negative). Use softplus or clamp before this loss."
+        )
 
     ret = torch.poisson_nll_loss(
         input, target, log_input, full, eps, _Reduction.get_enum(reduction)
