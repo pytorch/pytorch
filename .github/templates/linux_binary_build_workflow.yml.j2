@@ -15,6 +15,15 @@ name: !{{ build_environment }}
 {%- set xpu_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'xpu') | list %}
 {%- set test_standard_configs = build_configs | rejectattr('gpu_arch_type', 'in', ['rocm', 'xpu']) | list %}
 
+{#- gpu_arch_types listed here are grouped into a single runner that loops over
+    CPython versions, reusing build/ across iterations (cmake.py cache
+    invalidation handles the per-Python ABI bits). Everything else still runs
+    on the per-Python matrix below. Add more arch types here as their inline
+    build job is wired up. -#}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64'] %}
+{%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
+{%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
+
 {#- Per-OS values that shape the build/test runner labels.
     s390x runners are self-hosted, register only with the bare `linux.s390x`
     label (no `lf.` prefix), and lack a host-level `docker` CLI compatible
@@ -93,7 +102,71 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-{%- if build_configs %}
+{#- One inline build job per unified gpu_arch_type group (e.g. one for cpu,
+    one for cpu-aarch64). Each loops over all CPython versions in the group on
+    a single runner, reusing build/ across iterations. libtorch_cpu is
+    Python-ABI-free; only libtorch_python + _C are recompiled per interpreter
+    via the cmake.py cache invalidation. -#}
+{%- set unified_job_names = [] %}
+{%- for arch_type, group in unified_build_configs | groupby('gpu_arch_type') %}
+  {%- set group = group | list %}
+  {%- set first = group[0] %}
+  {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
+  {%- set _ = unified_job_names.append(job_name) %}
+
+  !{{ job_name }}:
+    name: !{{ job_name }}
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: get-label-type
+    runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
+    timeout-minutes: !{{ timeout_minutes }}
+    container:
+      image: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: !{{ first['package_type'] }}
+      DESIRED_CUDA: !{{ first['desired_cuda'] }}
+      GPU_ARCH_TYPE: !{{ arch_type }}
+      DOCKER_IMAGE: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHONS: "!{{ group | map(attribute='python_version') | join(' ') }}"
+      BUILD_NAME_PREFIX: "manywheel-py"
+      BUILD_NAME_SUFFIX: "-!{{ arch_type }}"
+    steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          submodules: recursive
+          show-progress: false
+      - name: Populate binary env
+        shell: bash
+        run: |
+          export PYTORCH_FINAL_PACKAGE_DIR="${RUNNER_TEMP}/artifacts"
+          mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${PYTORCH_FINAL_PACKAGE_DIR}" >> "${GITHUB_ENV}"
+          bash .ci/pytorch/binary_populate_env.sh
+      - name: Build all wheels
+        shell: bash
+        run: |
+          # shellcheck disable=SC1091
+          source "${BINARY_ENV_FILE}"
+          bash .ci/manywheel/build_all.sh
+      # One artifact per built Python -- names must match what the test/upload
+      # matrix below downloads.
+  {%- for config in group %}
+      - uses: !{{ common.upload_artifact_action }}
+        with:
+          name: !{{ config['build_name'] }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/!{{ config['build_name'] }}/*
+  {%- endfor %}
+{%- endfor %}
+
+{%- if matrix_build_configs %}
 
   manywheel-build:
     name: ${{ matrix.build_name }}-build
@@ -104,7 +177,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        {%- for config in build_configs %}
+        {%- for config in matrix_build_configs %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
@@ -125,7 +198,7 @@ jobs:
         {%- endfor %}
     with:
       PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
+      PACKAGE_TYPE: !{{ matrix_build_configs[0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
@@ -149,7 +222,7 @@ jobs:
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    needs: [get-label-type{%- if matrix_build_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -263,7 +336,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: [manywheel-build, manywheel-test{%- if rocm_configs %}, manywheel-test-rocm{%- endif %}{%- if xpu_configs %}, manywheel-test-xpu{%- endif %}]
+    needs: [{%- if matrix_build_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}, {% endfor %}manywheel-test{%- if rocm_configs %}, manywheel-test-rocm{%- endif %}{%- if xpu_configs %}, manywheel-test-xpu{%- endif %}]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
