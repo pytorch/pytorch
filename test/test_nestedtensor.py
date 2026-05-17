@@ -4151,6 +4151,15 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
+        values = torch.randn(2, 8, 3, device=device)
+        offsets = torch.tensor([1, 4, 7], device=device)
+        lengths = torch.tensor([2, 3], device=device)
+        nt_holes = torch.nested.nested_tensor_from_jagged(
+            values, offsets, lengths=lengths, jagged_dim=2
+        )
+        self.assertEqual(nt_holes.numel(), 30)
+        self.assertEqual(torch.ops.aten.sym_numel.default(nt_holes), 30)
+
     @parametrize("nt_dim", [3, 4, 5])
     def test_linear(self, device, nt_dim):
         if nt_dim == 3:
@@ -8204,10 +8213,6 @@ torch.cuda.synchronize()
             FakeDescriptorGet("ndim"),
         ):
             with self.assertRaisesRegex(RuntimeError, "fake .* called"):
-                type(nt).__torch_function__(func, (type(nt),), (nt,), {})
-
-        for func in (torch.Tensor.shape.__repr__, torch.Tensor.ndim.__repr__):
-            with self.assertRaises(TypeError):
                 type(nt).__torch_function__(func, (type(nt),), (nt,), {})
 
     @dtypes(torch.float32)

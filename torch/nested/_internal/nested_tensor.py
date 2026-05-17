@@ -46,6 +46,23 @@ def _load_val_from_tensor(t: torch.Tensor):
     return t.shape[0]
 
 
+def _jagged_numel(inp, func):
+    if inp._lengths is None:
+        return inp._values.numel()
+
+    fixed_shape = (*inp._size[1 : inp._ragged_idx], *inp._size[inp._ragged_idx + 1 :])
+    fixed_numel = math.prod(fixed_shape)
+
+    from torch._subclasses.fake_tensor import DynamicOutputShapeException, is_fake
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+    lengths = mb_unwrap_functional_tensor(inp._lengths)
+    if is_fake(lengths):
+        raise DynamicOutputShapeException(func)
+
+    return int(inp._lengths.sum().item()) * fixed_numel
+
+
 # serialization function must be defined at top level
 def _rebuild_njt(constructor_kwargs):
     return NestedTensor(**constructor_kwargs)
@@ -367,9 +384,7 @@ class NestedTensor(torch.Tensor):
             if func is torch.ops.aten.dim.default:
                 return len(inp._size)
             if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
-                if inp._lengths is not None:
-                    return int(sum(inp._lengths) * math.prod(inp._size[2:]))
-                return inp._values.numel()
+                return _jagged_numel(inp, func)
             if func is torch.ops.aten.sym_stride.default:
                 return inp._strides
             if func is torch.ops.aten.sym_storage_offset.default:

@@ -6159,6 +6159,14 @@ class ShapeEnv:
                         constraint.warn_only, self._debug_name(source), msg
                     )
 
+        def track_singletonint_source(source: Source, val: IntLikeType) -> None:
+            if isinstance(val, SymInt) and is_symbolic(val):
+                s = val.node.expr
+                if isinstance(s, sympy.Symbol) and isinstance(
+                    self.backed_var_to_val.get(s), SingletonInt
+                ):
+                    symbol_to_source[s].append(source)
+
         def track_symfloat(source: Source, val: FloatLikeType) -> None:
             log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
             if isinstance(val, SymFloat) and not is_symbolic(val):
@@ -6221,6 +6229,15 @@ class ShapeEnv:
                             context.constraint_strides,
                         )
                     )
+                else:
+                    for i, ss in enumerate(t.size()):
+                        track_singletonint_source(
+                            TensorPropertySource(source, TensorProperty.SIZE, i), ss
+                        )
+                    for i, ss in enumerate(t.stride()):
+                        track_singletonint_source(
+                            TensorPropertySource(source, TensorProperty.STRIDE, i), ss
+                        )
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
                     match getattr(t, attr):
