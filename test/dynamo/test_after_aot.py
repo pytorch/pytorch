@@ -242,11 +242,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIs(result, args)
 
     def test_get_compile_args_e2e_symbolic_compile(self):
-        """E2E: compile_fx_inner fails with concrete args but succeeds
-        with _get_compile_args for symbolically-traced graphs.
-
-        This is the minimal repro for the 'NameError: name s48 is not
-        defined' bug in fx_graph_runnable repro scripts.
+        """E2E: _get_compile_args produces args usable by compile_fx_inner
+        for symbolically-traced graphs (regression test for the
+        'NameError: name s48 is not defined' issue in fx_graph_runnable
+        repro scripts).
         """
         from torch._inductor.compile_fx import compile_fx_inner
 
@@ -259,13 +258,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         concrete_args = [N, torch.randn(32), torch.randn(32)]
         gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
 
-        # BUG: concrete args cause NameError on undefined symbolic variable
-        with self.assertRaises(NameError):
-            compiled = compile_fx_inner(gm, concrete_args)
-            self.assertNotIsInstance(compiled, str)
-            compiled(list(concrete_args))
-
-        # FIX: _get_compile_args extracts symbolic metadata
         symbolic_args = _get_compile_args(gm, concrete_args)
         compiled = compile_fx_inner(gm, symbolic_args)
         self.assertNotIsInstance(compiled, str)
