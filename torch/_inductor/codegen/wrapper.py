@@ -66,7 +66,7 @@ from ..utils import (
     sympy_subs,
     triton_version_uses_attrs_dict,
 )
-from ..virtualized import V
+from ..virtualized import NullHandler, V
 from .common import (
     ArgName,
     CodeGen,
@@ -108,7 +108,7 @@ class BenchmarkStorageGroup:
     nbytes: int
     device: Any
     dtype: Any
-    inputs: dict[str, tuple[list[int], list[int]]]
+    inputs: dict[str, tuple[list[int], list[int], Any]]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -2543,6 +2543,37 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
+        get_args_imports_pickle = False
+
+        def should_preserve_tensor_value(value: Any) -> bool:
+            return (
+                isinstance(value, torch.Tensor)
+                and config.benchmark_harness_preserve_input_values
+                and value.layout == torch.strided
+                and value.device.type != "meta"
+                and not isinstance(value, torch._subclasses.FakeTensor)
+                and not value.is_quantized
+                and not value.dtype.is_floating_point
+                and not value.dtype.is_complex
+                and torch._debug_has_internal_overlap(value) == 0
+            )
+
+        def add_preserved_tensor_value(name: str, value: Any, device: Any) -> None:
+            nonlocal get_args_imports_pickle
+            if not should_preserve_tensor_value(value):
+                return
+
+            import pickle
+
+            if not get_args_imports_pickle:
+                output.writeline("import pickle")
+                get_args_imports_pickle = True
+            output.writeline(
+                f"{name}.copy_("
+                f"pickle.loads({pickle.dumps(value.detach().cpu().clone())!r})"
+                f".to(device='{device}'))"
+            )
+
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
@@ -2563,13 +2594,32 @@ class PythonWrapperCodegen(CodeGen):
         # Preserve shared non-empty input storages so benchmark code does not
         # explode large aliased views into separate allocations.
         storage_groups: dict[StorageWeakRef, BenchmarkStorageGroup] = {}
-        aliased_input_specs: dict[str, tuple[str, Any, Any]] = {}
+        aliased_input_specs: dict[str, tuple[str, Any, Any, Any]] = {}
+        example_input_values: dict[str, torch.Tensor] = {}
         example_inputs = V.graph.example_inputs
+        benchmark_input_values = example_inputs
+        if config.benchmark_harness_preserve_input_values:
+            benchmark_input_values = (
+                example_inputs
+                if isinstance(V.real_inputs, NullHandler)
+                else V.real_inputs
+            )
+            tracing_context = torch._guards.TracingContext.try_get()
+            if tracing_context is not None and not isinstance(
+                V.real_inputs, NullHandler
+            ):
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                benchmark_input_values = list(chain(params_flat, V.real_inputs))
 
-        if example_inputs is not None:
-            for name, ex in zip(V.graph.graph_inputs.keys(), example_inputs):
+        if benchmark_input_values is not None:
+            for name, ex in zip(V.graph.graph_inputs.keys(), benchmark_input_values):
                 if not isinstance(ex, torch.Tensor):
                     continue
+                example_input_values[name] = ex
                 storage = ex.untyped_storage()
                 nbytes = storage.nbytes()
                 storage_key = StorageWeakRef(storage)
@@ -2584,7 +2634,11 @@ class PythonWrapperCodegen(CodeGen):
                     )
                     storage_groups[storage_key] = group
 
-                group.inputs[name] = (list(ex.shape), list(ex.stride()))
+                group.inputs[name] = (
+                    list(ex.shape),
+                    list(ex.stride()),
+                    ex.storage_offset(),
+                )
 
         # Generate get_args() to create input tensors separately from benchmarking
         output.writelines(["", "", "def get_args():"])
@@ -2603,6 +2657,7 @@ class PythonWrapperCodegen(CodeGen):
                 add_fake_input(
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
+                add_preserved_tensor_value(name, value, value.device)
 
             if len(V.graph.torchbind_constants) > 0:
                 output.writeline("import pickle")
@@ -2620,8 +2675,13 @@ class PythonWrapperCodegen(CodeGen):
                 output.writeline(
                     f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{group.device}', dtype={group.dtype})"
                 )
-                for name, (shape, stride) in group.inputs.items():
-                    aliased_input_specs[name] = (group.buffer_name, shape, stride)
+                for name, (shape, stride, storage_offset) in group.inputs.items():
+                    aliased_input_specs[name] = (
+                        group.buffer_name,
+                        shape,
+                        stride,
+                        storage_offset,
+                    )
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
@@ -2654,11 +2714,15 @@ class PythonWrapperCodegen(CodeGen):
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")
                 elif name in aliased_input_specs:
-                    buf_name, shape, stride = aliased_input_specs[name]
+                    buf_name, shape, stride, storage_offset = aliased_input_specs[name]
                     output.writeline(
                         f"{name} = torch.as_strided({buf_name}, "
                         f"{self.codegen_python_shape_tuple(shape)}, "
-                        f"{self.codegen_python_shape_tuple(stride)})"
+                        f"{self.codegen_python_shape_tuple(stride)}, "
+                        f"{storage_offset})"
+                    )
+                    add_preserved_tensor_value(
+                        name, example_input_values.get(name), value.get_device()
                     )
                 else:
                     shape = V.graph.sizevars.optimization_hints(
@@ -2674,6 +2738,9 @@ class PythonWrapperCodegen(CodeGen):
                         stride,
                         value.get_device(),
                         value.get_dtype(),
+                    )
+                    add_preserved_tensor_value(
+                        name, example_input_values.get(name), value.get_device()
                     )
 
             output.writeline(f"return [{', '.join(V.graph.graph_inputs.keys())}]")

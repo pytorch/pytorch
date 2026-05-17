@@ -270,6 +270,14 @@ memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.enviro
 # codegen benchmark harness
 benchmark_harness = True
 
+# Preserve integer/bool input values in the benchmark harness. This can make
+# generated repros more faithful for data-dependent indexing, but it embeds
+# user input values in generated source, so keep it opt-in.
+benchmark_harness_preserve_input_values: bool = Config(
+    env_name_force="TORCHINDUCTOR_BENCHMARK_HARNESS_PRESERVE_INPUT_VALUES",
+    default=False,
+)
+
 # fuse pointwise into templates epilogues
 epilogue_fusion = True
 
