@@ -723,6 +723,9 @@ class ComboKernel(Kernel):
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
+        triton_meta_common = TritonKernel.triton_meta_common()
+        if any(sub.has_fp_self_sub for sub in self.sub_kernels):
+            triton_meta_common["enable_fp_fusion"] = False
         triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
@@ -731,7 +734,7 @@ class ComboKernel(Kernel):
             "constants": {},
             # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
             # compile with the same Triton options as standalone kernels.
-            **TritonKernel.triton_meta_common(),
+            **triton_meta_common,
         }
 
         for arg_num in equal_1_arg_indices(signature):
@@ -940,6 +943,10 @@ class ComboKernel(Kernel):
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
+        for sub_kernel in self.sub_kernels:
+            sub_kernel.codegen_body()
+            sub_kernel._filter_pdl(sub_kernel.body)
+
         seen_helpers: OrderedSet[str] = OrderedSet()
         for sub_kernel in self.sub_kernels:
             for helper in sub_kernel.helper_functions:
@@ -986,8 +993,6 @@ class ComboKernel(Kernel):
                     uniquify = self.codegen_static_numels_sub_kernel(
                         code, sub_kernel, num
                     )
-                    sub_kernel.codegen_body()
-                    sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
                         sub_kernel.body, num, uniquify
                     )

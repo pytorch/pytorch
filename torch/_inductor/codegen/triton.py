@@ -1338,6 +1338,19 @@ class TritonOverrides(OpOverrides):
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
 
+    @staticmethod
+    def sub(x, y):
+        if (
+            isinstance(x, CSEVariable)
+            and x == y
+            and x.dtype is not None
+            and x.dtype.is_floating_point
+        ):
+            # Triton fp fusion can reassociate tmp - tmp through tmp's producer
+            # and emit an FMA that is not exactly zero for finite tmp.
+            V.kernel.has_fp_self_sub = True
+        return f"{x} - {y}"
+
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
         if isinstance(arg, torch._prims_common.Number):
@@ -2897,6 +2910,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: dict[str, Any] | None = None
+        self.has_fp_self_sub = False
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -5979,6 +5993,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self.codegen_body()
         self._filter_pdl(self.body)
+        if self.has_fp_self_sub:
+            triton_meta["enable_fp_fusion"] = False
 
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
