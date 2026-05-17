@@ -2403,7 +2403,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype.is_floating_point and dtype.itemsize < torch.float32.itemsize:
+        if dtype in (torch.float16, torch.bfloat16):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
