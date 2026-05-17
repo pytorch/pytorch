@@ -56,14 +56,9 @@ strip = false
 install-dir = "torch"
 # Python packages to include in the wheel.
 packages = ["torch", "torchgen", "functorch"]
-license-files = [
-    "LICENSE",
-    "third_party/**/LICENSE",
-    "third_party/**/LICENSE.txt",
-    "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING",
-    "third_party/**/COPYING.txt",
-]
+# license-files is declared once under [project] (PEP 639 canonical location);
+# scikit-build-core honors it directly. Declaring it here too would trigger
+# AssertionError in scikit-build-core >= 0.12.
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files are found in the source
