@@ -7775,6 +7775,44 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_mm_addmm_alias_out(self, device, dtype):
+        # Regression for https://github.com/pytorch/pytorch/issues/85852: when
+        # the out tensor aliases an input, mm/addmm on CPU silently produced
+        # wrong results because gemm cannot operate in-place.
+        for n in (4, 50):
+            A = torch.randn(n, n, device=device, dtype=dtype)
+            B = torch.randn(n, n, device=device, dtype=dtype)
+            bias = torch.randn(n, n, device=device, dtype=dtype)
+            ref_AA = torch.mm(A, A)
+            ref_AB = torch.mm(A, B)
+            ref_addmm = torch.addmm(bias, A, B)
+
+            # mm(C, C, out=C): both inputs alias out
+            C = A.clone()
+            torch.mm(C, C, out=C)
+            self.assertEqual(C, ref_AA)
+
+            # mm(C, B, out=C): mat1 aliases out
+            C = A.clone()
+            torch.mm(C, B, out=C)
+            self.assertEqual(C, ref_AB)
+
+            # mm(A, C, out=C): mat2 aliases out
+            C = B.clone()
+            torch.mm(A, C, out=C)
+            self.assertEqual(C, ref_AB)
+
+            # addmm(bias, C, B, out=C): mat1 aliases out
+            C = A.clone()
+            torch.addmm(bias, C, B, out=C)
+            self.assertEqual(C, ref_addmm)
+
+            # addmm(bias, A, C, out=C): mat2 aliases out
+            C = B.clone()
+            torch.addmm(bias, A, C, out=C)
+            self.assertEqual(C, ref_addmm)
+
     @onlyCUDA
     @skipCUDAIfNotRocm
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,

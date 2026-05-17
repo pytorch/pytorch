@@ -1407,6 +1407,15 @@ static void addmm_impl_cpu_(
     m1.dtype() == m2.dtype(),
     "expected m1 and m2 to have the same dtype, but got: ", m1.dtype(), " != ", m2.dtype()
   )
+
+  // Clone inputs that alias the output; gemm cannot operate in-place. See #85852.
+  if (m1.is_same(result)) {
+    m1 = m1.clone();
+  }
+  if (m2.is_same(result)) {
+    m2 = m2.clone();
+  }
+
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
