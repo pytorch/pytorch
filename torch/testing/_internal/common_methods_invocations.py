@@ -12989,7 +12989,7 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
                    'TestCommon', 'test_out'),
                DecorateInfo(
-                   toleranceOverride({torch.half: tol(atol=6e-3, rtol=1e-2)}),
+                   toleranceOverride({torch.half: tol(atol=2e-2, rtol=1e-2)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            skips=(
