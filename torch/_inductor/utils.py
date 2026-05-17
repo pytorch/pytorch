@@ -973,6 +973,7 @@ def get_kernel_metadata(
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
         all_reads: OrderedSet[str] = OrderedSet()
         all_writes: list[str] = []
+        scheduler_formatted_nodes: list[str | None] | None = None
         if not isinstance(node_schedule, ir.ExternKernel):
             from .virtualized import V
 
@@ -1011,19 +1012,199 @@ def get_kernel_metadata(
                     f'{stride_annotation}{device_annotation}"'
                 )
 
-            for n in node_schedule:
+            def is_reduction_stage(n: BaseSchedulerNode) -> bool:
+                return (
+                    isinstance(n.node, ir.ComputedBuffer)
+                    and n.node.get_reduction_type() is not None
+                )
+
+            def _format_node_with_actual_io(
+                node: Node,
+                input_names: list[str],
+                output_name: str | None = None,
+                output_layout: ir.Layout | None = None,
+            ) -> str | None:
+                formatted_node = node.format_node(include_tensor_metadata=True)
+                if formatted_node is None:
+                    return None
+
+                if output_name is not None:
+                    lhs, sep, rhs = formatted_node.partition(" = ")
+                    if sep:
+                        match = re.match(
+                            r"%[A-Za-z_][A-Za-z0-9_]* : Tensor "
+                            r'(?P<layout>"[^"]*"|)(?P<suffix>.*)',
+                            lhs,
+                        )
+                        if match is not None:
+                            layout_str = stringfy_layout(output_layout)
+                            suffix = match.group("suffix")
+                            if layout_str:
+                                lhs = f"%{output_name} : Tensor {layout_str}{suffix}"
+                            else:
+                                lhs = f"%{output_name} : Tensor{suffix}"
+                            formatted_node = f"{lhs} = {rhs}"
+
+                input_nodes = node.all_input_nodes
+                original_input_names = [input_node.name for input_node in input_nodes]
+                if input_names == original_input_names:
+                    return formatted_node
+                if OrderedSet(input_names) == OrderedSet(original_input_names):
+                    return formatted_node
+                if len(input_nodes) != len(input_names):
+                    return formatted_node
+
+                for input_node, input_name in zip(input_nodes, input_names):
+                    formatted_node = re.sub(
+                        rf"%{re.escape(input_node.name)}\b",
+                        f"%{input_name}",
+                        formatted_node,
+                    )
+                return formatted_node
+
+            def format_scheduler_reduction_nodes(
+                node_io: list[
+                    tuple[
+                        BaseSchedulerNode,
+                        list[str],
+                        list[tuple[str, ir.Layout | None]],
+                    ]
+                ],
+                external_reads: OrderedSet[str],
+            ) -> list[str | None] | None:
+                if not inductor_nodes or not node_io:
+                    return None
+
+                node_order = {node: i for i, node in enumerate(inductor_nodes)}
+                output_info: dict[Node, tuple[str, ir.Layout | None]] = {}
+                reduction_reads: dict[Node, list[str]] = {}
+                has_reduction_stage = False
+
+                for n, node_reads, node_writes in node_io:
+                    if n.node is None:
+                        continue
+                    node_origins = [
+                        origin
+                        for origin in n.node.get_origins()
+                        if origin in node_order and origin.op == "call_function"
+                    ]
+                    node_origins.sort(key=node_order.__getitem__)
+                    if not node_origins:
+                        continue
+
+                    if node_writes:
+                        if len(node_writes) > len(node_origins):
+                            return None
+                        output_info.update(
+                            dict(zip(node_origins[-len(node_writes) :], node_writes))
+                        )
+
+                    if is_reduction_stage(n):
+                        has_reduction_stage = True
+                        reduction_reads[node_origins[-1]] = node_reads
+
+                if not has_reduction_stage:
+                    return None
+
+                available_names = OrderedSet(external_reads)
+                name_map = {name: name for name in external_reads}
+                changed = False
+                emitted_reduction = False
+                formatted_nodes: list[str | None] = []
+
+                for node in inductor_nodes:
+                    input_names: list[str] = []
+                    unsatisfied_positions: list[int] = []
+                    for i, input_node in enumerate(node.all_input_nodes):
+                        mapped_name = name_map.get(input_node.name)
+                        if mapped_name is not None and mapped_name in available_names:
+                            input_names.append(mapped_name)
+                        else:
+                            input_names.append("")
+                            unsatisfied_positions.append(i)
+
+                    if unsatisfied_positions:
+                        replacement_reads = reduction_reads.get(node)
+                        if replacement_reads is None:
+                            continue
+                        if (
+                            len(unsatisfied_positions) == 1
+                            and len(replacement_reads) == 1
+                        ):
+                            replacements = replacement_reads
+                        elif len(unsatisfied_positions) == len(replacement_reads):
+                            replacements = replacement_reads
+                        else:
+                            return None
+                        for i, replacement in zip(unsatisfied_positions, replacements):
+                            input_names[i] = replacement
+                        changed = True
+
+                    formatted_output_name = None
+                    formatted_output_layout = None
+                    emitted_name = node.name
+                    if node in output_info:
+                        output_name, output_layout = output_info[node]
+                        if output_name != node.name:
+                            formatted_output_name = output_name
+                            formatted_output_layout = output_layout
+                            emitted_name = output_name
+                            changed = True
+                    if node in reduction_reads:
+                        emitted_reduction = True
+
+                    formatted_nodes.append(
+                        _format_node_with_actual_io(
+                            node,
+                            input_names,
+                            formatted_output_name,
+                            formatted_output_layout,
+                        )
+                    )
+                    available_names.add(emitted_name)
+                    name_map[node.name] = emitted_name
+
+                if not changed or not emitted_reduction:
+                    return None
+
+                return formatted_nodes
+
+            node_io: list[
+                tuple[BaseSchedulerNode, list[str], list[tuple[str, ir.Layout | None]]]
+            ] = []
+            external_reads: OrderedSet[str] = OrderedSet()
+            produced_buffers: OrderedSet[str] = OrderedSet()
+            scheduler_nodes = [
+                snode
+                for n in node_schedule
+                for snode in (n.get_nodes() if hasattr(n, "get_nodes") else (n,))
+            ]
+            for n in scheduler_nodes:
                 if not hasattr(n, "read_writes") or n.read_writes is None:
                     continue
+                node_reads: list[str] = []
+                node_read_buffer_names: OrderedSet[str] = OrderedSet()
+                node_writes: list[tuple[str, ir.Layout | None]] = []
                 if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
                     for r in n.read_writes.reads:
-                        # Remove the dupricated inputs
-                        if r.name in all_reads:
+                        if r.name in node_read_buffer_names:
                             continue
-                        all_reads.add(r.name)
+                        node_read_buffer_names.add(r.name)
+
                         buffer = V.graph.try_get_buffer(r.name)
                         if buffer is None:
                             continue
                         input_name, layout = get_buffer_info(buffer, r.name)
+                        node_reads.append(input_name)
+
+                        if r.name in produced_buffers:
+                            continue
+                        external_reads.add(input_name)
+
+                        # Remove the dupricated inputs
+                        if r.name in all_reads:
+                            continue
+                        all_reads.add(r.name)
                         detailed_metadata.append(
                             f"{wrapper.comment}   %{input_name} : Tensor "
                             f"{stringfy_layout(layout)} = PlaceHolder[target={input_name}]"
@@ -1037,12 +1218,29 @@ def get_kernel_metadata(
                         buffer = V.graph.try_get_buffer(w.name)
                         if buffer is None:
                             continue
-                        output_name, _ = get_buffer_info(buffer, w.name)
+                        output_name, layout = get_buffer_info(buffer, w.name)
 
+                        node_writes.append((output_name, layout))
                         all_writes.append("%" + output_name)
+                        produced_buffers.add(w.name)
+                node_io.append((n, node_reads, node_writes))
 
-        for node in inductor_nodes:
-            formatted_node = node.format_node(include_tensor_metadata=True)
+            scheduler_formatted_nodes = format_scheduler_reduction_nodes(
+                node_io, external_reads
+            )
+
+        formatted_nodes: Iterable[str | None]
+        if scheduler_formatted_nodes is not None:
+            # Split reduction stages share the original FX reduction origin, so
+            # use scheduler IO to print the per-kernel flow.
+            formatted_nodes = scheduler_formatted_nodes
+        else:
+            formatted_nodes = (
+                node.format_node(include_tensor_metadata=True)
+                for node in inductor_nodes
+            )
+
+        for formatted_node in formatted_nodes:
             if formatted_node is not None and torch.version.hip:
                 # AMDGCN asm strings can contain newlines, which propagate
                 # into format_node() output.  Split so every line gets the

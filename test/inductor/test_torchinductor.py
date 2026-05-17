@@ -17945,6 +17945,136 @@ if RUN_GPU:
                     in code
                 )
 
+        @skip_if_cpp_wrapper(
+            "split reduction graph fragment test checks Python wrapper metadata",
+        )
+        @config.patch("split_reductions", True)
+        def test_split_reduction_comment_graph_fragment(self):
+            from torch._inductor.utils import fresh_inductor_cache
+
+            def check_metadata(code, reduction_kind):
+                graph_fragments = [
+                    block
+                    for block in re.findall(
+                        r"# kernel path:.*?(?=\n[^#]|\Z)", code, re.DOTALL
+                    )
+                    if "Graph fragment" in block
+                    and "torch.ops.aten.sum.dim_IntList" in block
+                ]
+                self.assertEqual(len(graph_fragments), 2, code)
+
+                has_fused_producer = reduction_kind == "producer"
+                partial_output = ""
+                if has_fused_producer:
+                    partial_pattern = re.compile(
+                        r'#   %(sin(?:_\d+)?) : Tensor "bf16\[1792, 3200\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.sin\.default\]"
+                        r"\(args = \(%arg0_1,\), kwargs = \{\}\)\n"
+                        r'#   %(buf\d+) : Tensor "f32\[1, 3200, \d+\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.sum\.dim_IntList\]"
+                        r"\(args = \(%\1, \[0\], True\), kwargs = \{dtype: torch.float32\}\)\n"
+                        r"#   return %\2",
+                        re.DOTALL,
+                    )
+                else:
+                    partial_pattern = re.compile(
+                        r'#   %(buf\d+) : Tensor "f32\[1, 3200, \d+\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.sum\.dim_IntList\]"
+                        r"\(args = \(%arg0_1, \[0\], True\), kwargs = \{dtype: torch.float32\}\)\n"
+                        r"#   return %\1",
+                        re.DOTALL,
+                    )
+                for fragment in graph_fragments:
+                    if match := partial_pattern.search(fragment):
+                        partial_output = match.group(2 if has_fused_producer else 1)
+                        break
+                self.assertTrue(partial_output, "\n\n".join(graph_fragments))
+
+                final_fragment = ""
+                if reduction_kind == "consumer":
+                    final_pattern = re.compile(
+                        rf"#   %{partial_output} : Tensor "
+                        rf'"f32\[1, 3200, \d+\].* = PlaceHolder\[target={partial_output}\]\n'
+                        r'#   %sum_1 : Tensor "f32\[1, 3200\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.sum\.dim_IntList\]"
+                        rf"\(args = \(%{partial_output}, \[0\], True\), kwargs = \{{dtype: torch.float32\}}\)\n"
+                        r'#   %(relu(?:_\d+)?) : Tensor "f32\[1, 3200\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.relu\.default\]"
+                        r"\(args = \(%sum_1,\), kwargs = \{\}\)\n"
+                        r"#   return %sum_1,%\1",
+                        re.DOTALL,
+                    )
+                else:
+                    final_pattern = re.compile(
+                        rf"#   %{partial_output} : Tensor "
+                        rf'"f32\[1, 3200, \d+\].* = PlaceHolder\[target={partial_output}\]\n'
+                        r'#   %sum_1 : Tensor "f32\[1, 3200\].*'
+                        r"= call_function\[target=torch\.ops\.aten\.sum\.dim_IntList\]"
+                        rf"\(args = \(%{partial_output}, \[0\], True\), kwargs = \{{dtype: torch.float32\}}\)\n"
+                        r"#   return %sum_1",
+                        re.DOTALL,
+                    )
+                for fragment in graph_fragments:
+                    if final_pattern.search(fragment):
+                        final_fragment = fragment
+                        break
+                self.assertTrue(final_fragment, "\n\n".join(graph_fragments))
+                self.assertNotIn("args = (%arg0_1", final_fragment)
+                self.assertNotIn("PlaceHolder[target=sum_1]", final_fragment)
+                if has_fused_producer:
+                    self.assertNotIn("torch.ops.aten.sin.default", final_fragment)
+
+            test_cases = [
+                (False, "plain"),
+                (True, "plain"),
+                (False, "producer"),
+                (True, "producer"),
+                (False, "consumer"),
+            ]
+            for mix_order_reduction, reduction_kind in test_cases:
+                with self.subTest(
+                    mix_order_reduction=mix_order_reduction,
+                    reduction_kind=reduction_kind,
+                ):
+                    if reduction_kind == "producer":
+
+                        @torch.compile(backend="inductor")
+                        def fn(x):
+                            return torch.sum(
+                                torch.sin(x),
+                                dim=[0],
+                                keepdim=True,
+                                dtype=torch.float32,
+                            )
+
+                    elif reduction_kind == "consumer":
+
+                        @torch.compile(backend="inductor")
+                        def fn(x):
+                            return torch.relu(
+                                torch.sum(x, dim=[0], keepdim=True, dtype=torch.float32)
+                            )
+
+                    else:
+
+                        @torch.compile(backend="inductor")
+                        def fn(x):
+                            return torch.sum(
+                                x, dim=[0], keepdim=True, dtype=torch.float32
+                            )
+
+                    with (
+                        config.patch("triton.mix_order_reduction", mix_order_reduction),
+                        fresh_inductor_cache(),
+                    ):
+                        inp = torch.randn(
+                            1792, 3200, dtype=torch.bfloat16, device=GPU_TYPE
+                        )
+                        code = run_and_get_triton_code(fn, inp)
+                        fn(inp)
+
+                    check_metadata(code, reduction_kind)
+
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
