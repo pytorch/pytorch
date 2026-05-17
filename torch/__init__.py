@@ -2486,6 +2486,18 @@ class _TorchCompileInductorWrapper:
             compile_region_name=self.name,
         )
 
+    def backend_ctx_ctor(self):
+        from contextlib import nullcontext
+
+        import torch._dynamo.config as dynamo_config
+        import torch._inductor.config as inductor_config
+
+        if self.config.get("cpp_wrapper", inductor_config.cpp_wrapper):
+            return nullcontext()
+        if self.config.get("graph_deduplication", inductor_config.graph_deduplication):
+            return dynamo_config.patch(use_graph_deduplication=True)
+        return nullcontext()
+
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
 

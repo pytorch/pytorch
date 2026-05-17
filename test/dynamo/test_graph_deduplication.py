@@ -1234,6 +1234,79 @@ graph():
         fn_opt(*args)
 
 
+class GraphDeduplicationInductorWrapperTests(TestCase):
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    def _compile_and_count_invoke_subgraphs(
+        self, *, graph_deduplication=True, cpp_wrapper=False
+    ):
+        class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
+            def __init__(self):
+                super().__init__(
+                    mode=None,
+                    options={
+                        "cpp_wrapper": cpp_wrapper,
+                        "graph_deduplication": graph_deduplication,
+                    },
+                    dynamic=None,
+                )
+                self.graphs = []
+
+            def __call__(self, gm, example_inputs, *, config_patches=None):
+                self.graphs.append(gm)
+                return gm.forward
+
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return x + self.linear(x).relu()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Block() for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        backend = RecordingInductorWrapper()
+        opt_model = torch._dynamo.optimize(backend)(Model())
+        opt_model(torch.randn(2, 4))
+        self.assertEqual(len(backend.graphs), 1)
+        return sum(
+            node.op == "call_function"
+            and node.target is torch.ops.higher_order.invoke_subgraph
+            for node in backend.graphs[0].graph.nodes
+        )
+
+    def test_inductor_wrapper_enables_graph_deduplication(self):
+        self.assertGreater(
+            self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
+            0,
+        )
+
+    def test_inductor_wrapper_can_disable_graph_deduplication(self):
+        self.assertEqual(
+            self._compile_and_count_invoke_subgraphs(graph_deduplication=False),
+            0,
+        )
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_cpp_wrapper(self):
+        self.assertEqual(
+            self._compile_and_count_invoke_subgraphs(
+                graph_deduplication=True, cpp_wrapper=True
+            ),
+            0,
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
