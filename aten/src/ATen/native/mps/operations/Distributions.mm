@@ -13,6 +13,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_dirichlet_grad_native.h>
+#include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
@@ -668,4 +670,54 @@ Tensor multinomial_mps(const Tensor& self, int64_t n_sample, bool with_replaceme
   return result;
 }
 
+Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  if (alpha.numel() == 0) {
+    return at::empty_like(alpha);
+  }
+
+  using namespace mps;
+
+  Tensor alpha_for_gamma = alpha;
+  if (alpha.scalar_type() == kHalf || alpha.scalar_type() == kBFloat16) {
+    alpha_for_gamma = alpha.to(kFloat);
+  }
+
+  Tensor ret = _s_gamma_mps(alpha_for_gamma, gen);
+  Tensor gamma_sum = ret.sum(/*dim=*/-1, /*keepdim=*/true);
+
+  auto iter = TensorIteratorConfig().add_output(ret).add_input(ret).add_input(gamma_sum).build();
+  lib.exec_binary_kernel(iter, "dirichlet");
+  if (ret.scalar_type() != alpha.scalar_type()) {
+    ret = ret.to(alpha.scalar_type());
+  }
+
+  return ret;
+}
+
+Tensor _dirichlet_grad_mps(const Tensor& x, const Tensor& alpha, const Tensor& total) {
+  if (x.numel() == 0) {
+    return at::empty_like(x);
+  }
+
+  using namespace mps;
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(x, x.options(), at::MemoryFormat::Contiguous);
+  const auto x_contig = x.contiguous();
+  const auto alpha_contig = alpha.contiguous();
+  const auto total_contig = total.contiguous();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("dirichlet_grad_" + scalarToMetalTypeString(ret));
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, x_contig, alpha_contig, total_contig);
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+  return ret;
+}
 } // namespace at::native

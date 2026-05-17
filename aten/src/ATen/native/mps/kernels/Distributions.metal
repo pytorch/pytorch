@@ -1,3 +1,4 @@
+#include <c10/metal/indexing.h>
 #include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
@@ -493,3 +494,207 @@ kernel void standard_gamma_grad(
 REGISTER_GAMMA_GRAD(float);
 REGISTER_GAMMA_GRAD(half);
 REGISTER_GAMMA_GRAD(bfloat);
+
+// Adapted from aten/src/ATen/native/Distributions.h _beta_grad_alpha_mid(),
+// _beta_grad_alpha_small() and _beta_grad_beta_small().
+
+inline float beta_grad_alpha_small(float x, float alpha, float beta) {
+  const float factor = c10::metal::digamma(alpha) -
+      c10::metal::digamma(alpha + beta) - ::metal::precise::log(x);
+  float numer = 1.0f;
+  float series = numer / alpha * (factor + 1.0f / alpha);
+  for (int i = 1; i <= 10; ++i) {
+    const float casted_i = static_cast<float>(i);
+    numer *= (casted_i - beta) * x / casted_i;
+    const float denom = alpha + casted_i;
+    series += numer / denom * (factor + 1.0f / denom);
+  }
+  const float result = x * ::metal::precise::pow(1.0f - x, -beta) * series;
+  return isnan(result) ? 0.0f : result;
+}
+
+inline float beta_grad_beta_small(float x, float alpha, float beta) {
+  const float factor =
+      c10::metal::digamma(alpha + beta) - c10::metal::digamma(beta);
+  float numer = 1.0f, betas = 1.0f, dbetas = 0.0f, series = factor / alpha;
+  for (int i = 1; i <= 8; ++i) {
+    const float casted_i = static_cast<float>(i);
+    numer *= -x / casted_i;
+    dbetas = dbetas * (beta - casted_i) + betas;
+    betas = betas * (beta - casted_i);
+    series += numer / (alpha + casted_i) * (dbetas + factor * betas);
+  }
+  const float result = -::metal::precise::pow(1.0f - x, 1.0f - beta) * series;
+  return isnan(result) ? 0.0f : result;
+}
+
+inline float beta_grad_alpha_mid(float x, float alpha, float beta) {
+  const float total = alpha + beta;
+  const float mean = alpha / total;
+  const float std =
+      ::metal::precise::sqrt(alpha * beta / (total + 1.0f)) / total;
+  if (mean - 0.1f * std <= x && x <= mean + 0.1f * std) {
+    const float poly = 47 * x * (beta * beta) * (beta * beta) +
+        alpha *
+            ((43.0f + 20.0f * (16.0f + 27.0f * beta) * x) * (beta * beta) *
+                 beta +
+             alpha *
+                 (3.0f * (59.0f + 180.0f * beta - 90.0f * x) * (beta * beta) +
+                  alpha *
+                      ((453.0f + 1620.0f * beta * (1.0f - x) - 455.0f * x) *
+                           beta +
+                       alpha * (8.0f * (1.0f - x) * (135.0f * beta - 11.0f)))));
+    const float prefactor_num =
+        (1.0f + 12.0f * alpha) * (1.0f + 12.0f * beta) / (total * total);
+    const float prefactor_den =
+        12960.0f * alpha * alpha * alpha * beta * beta * (1.0f + 12.0f * total);
+    return prefactor_num / (1.0f - x) * poly / prefactor_den;
+  }
+  const float prefactor =
+      -x / ::metal::precise::sqrt(2.0f * alpha * beta / total);
+  const float stirling =
+      (1.0f + 1.0f / (12.0f * alpha) + 1.0f / (288.0f * alpha * alpha)) *
+      (1.0f + 1.0f / (12.0f * beta) + 1.0f / (288.0f * beta * beta)) /
+      (1.0f + 1.0f / (12.0f * total) + 1.0f / (288.0f * total * total));
+  const float term1_num = 2.0f * (alpha * alpha) * (x - 1.0f) +
+      alpha * beta * (x - 1.0f) - x * (beta * beta);
+  const float axbx = alpha * (x - 1.0f) + beta * x;
+  const float term1_den = ::metal::precise::sqrt(2.0f * alpha / beta) *
+      ::metal::precise::pow(total, 1.5f) * axbx * axbx;
+  const float term1 = term1_num / term1_den;
+  const float term2 = 0.5f * ::metal::precise::log(alpha / (total * x));
+  const float term3_num = ::metal::precise::sqrt(8.0f * alpha * beta / total);
+  const float term3_den = beta * x + alpha * (x - 1.0f);
+  const float term3 = term3_num / term3_den;
+  const float term4_base =
+      beta * ::metal::precise::log(beta / (total * (1.0f - x))) +
+      alpha * ::metal::precise::log(alpha / (total * x));
+  const float term4 = ::metal::precise::pow(term4_base, -1.5f);
+  const float term1234 = term1 + term2 * (term3 + (x < mean ? term4 : -term4));
+  return stirling * prefactor * term1234;
+}
+
+// Adapted from aten/src/ATen/native/cuda/Distributions.cu
+// launch_dirichlet_kernel().
+
+struct dirichlet_functor {
+  template <typename T>
+  inline T operator()(const T gamma, const T gamma_sum) {
+    auto ret_val = gamma / gamma_sum;
+    auto min_val = ::metal::numeric_limits<T>::min();
+    auto max_val = static_cast<T>(1) - ::metal::numeric_limits<T>::epsilon();
+    ret_val = c10::metal::max(ret_val, min_val);
+    ret_val = c10::metal::min(ret_val, max_val);
+    return ret_val;
+  }
+};
+
+REGISTER_BINARY_OP(dirichlet, float, float);
+
+// Reparameterized gradient for Dirichlet distribution.
+// Adapted from aten/src/ATen/native/Distributions.h dirichlet_grad_one().
+
+constant constexpr float DIRICHLET_GRAD_C[2][3][3][4] = {
+    {{{1.003668233f, -0.01061107488f, -0.0657888334f, 0.01201642863f},
+      {0.6336835991f, -0.3557432599f, 0.05486251648f, -0.001465281033f},
+      {-0.03276231906f, 0.004474107445f, 0.002429354597f, -0.0001557569013f}},
+     {{0.221950385f, -0.3187676331f, 0.01799915743f, 0.01074823814f},
+      {-0.2951249643f, 0.06219954479f, 0.01535556598f, 0.001550077057f},
+      {0.02155310298f, 0.004170831599f, 0.001292462449f, 6.976601077e-05f}},
+     {{-0.05980841433f, 0.008441916499f, 0.01085618172f, 0.002319392565f},
+      {0.02911413504f, 0.01400243777f, -0.002721828457f, 0.000751041181f},
+      {0.005900514878f,
+       -0.001936558688f,
+       -9.495446725e-06f,
+       5.385558597e-05f}}},
+    {{{1.0f, -0.02924021934f, -0.04438342661f, 0.007285809825f},
+      {0.6357567472f, -0.3473456711f, 0.05454656494f, -0.002407477521f},
+      {-0.03301322327f, 0.004845219414f, 0.00231480583f, -0.0002307248149f}},
+     {{0.5925320577f, -0.1757678135f, 0.01505928619f, 0.000564515273f},
+      {0.1014815858f, -0.06589186703f, 0.01272886114f, -0.0007316646956f},
+      {-0.007258481865f, 0.001096195486f, 0.0003934994223f, -4.12701925e-05f}},
+     {{0.06469649321f, -0.0236701437f, 0.002902096474f, -5.896963079e-05f},
+      {0.001925008108f, -0.002869809258f, 0.0008000589141f, -6.063713228e-05f},
+      {-0.0003477407336f,
+       6.959756487e-05f,
+       1.097287507e-05f,
+       -1.650964693e-06f}}},
+};
+
+template <typename T>
+kernel void dirichlet_grad(
+    device T* output [[buffer(0)]],
+    device const T* x [[buffer(1)]],
+    device const T* alpha [[buffer(2)]],
+    device const T* total [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  float x_ = static_cast<float>(x[tid]);
+  float alpha_ = static_cast<float>(alpha[tid]);
+  float total_ = static_cast<float>(total[tid]);
+
+  const float beta_ = total_ - alpha_;
+  const float boundary = total_ * x_ * (1.0f - x_);
+
+  if (x_ <= 0.5f && boundary < 2.5f) {
+    output[tid] = static_cast<T>(beta_grad_alpha_small(x_, alpha_, beta_));
+    return;
+  }
+
+  if (x_ >= 0.5f && boundary < 0.75f) {
+    output[tid] =
+        static_cast<T>(-beta_grad_beta_small(1.0f - x_, beta_, alpha_));
+    return;
+  }
+
+  // Use an asymptotic approximation when alpha and (total - alpha) are both
+  // large.
+  if (alpha_ > 6.0f && beta_ > 6.0f) {
+    output[tid] = static_cast<T>(beta_grad_alpha_mid(x_, alpha_, beta_));
+    return;
+  }
+
+  // Use a rational correction to an analytic approximation.
+  const float u = ::metal::precise::log(x_);
+  const float a = ::metal::precise::log(alpha_) - u;
+  const float b = ::metal::precise::log(total_) - a;
+  const float pow_u[3] = {1.0f, u, u * u};
+  const float pow_a[3] = {1.0f, a, a * a};
+  float p = 0.0f;
+  float q = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      const float ua = pow_u[i] * pow_a[j];
+      p += ua *
+          (DIRICHLET_GRAD_C[0][i][j][0] +
+           b *
+               (DIRICHLET_GRAD_C[0][i][j][1] +
+                b *
+                    (DIRICHLET_GRAD_C[0][i][j][2] +
+                     b * DIRICHLET_GRAD_C[0][i][j][3])));
+      q += ua *
+          (DIRICHLET_GRAD_C[1][i][j][0] +
+           b *
+               (DIRICHLET_GRAD_C[1][i][j][1] +
+                b *
+                    (DIRICHLET_GRAD_C[1][i][j][2] +
+                     b * DIRICHLET_GRAD_C[1][i][j][3])));
+    }
+  }
+  const float approx =
+      x_ * (c10::metal::digamma(total_) - c10::metal::digamma(alpha_)) / beta_;
+  output[tid] = static_cast<T>(p / q * approx);
+  return;
+}
+
+#define REGISTER_DIRICHLET_GRAD(DTYPE)             \
+  template [[host_name("dirichlet_grad_" #DTYPE)]] \
+  kernel void dirichlet_grad<DTYPE>(               \
+      device DTYPE*,                               \
+      device const DTYPE*,                         \
+      device const DTYPE*,                         \
+      device const DTYPE*,                         \
+      uint)
+
+REGISTER_DIRICHLET_GRAD(float);
+REGISTER_DIRICHLET_GRAD(half);
+REGISTER_DIRICHLET_GRAD(bfloat);
