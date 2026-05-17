@@ -5,8 +5,8 @@ import functools
 import inspect
 import logging
 import math
-import traceback
 import sys
+import traceback
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager

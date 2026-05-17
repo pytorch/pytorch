@@ -34,8 +34,8 @@ import subprocess
 import sys
 import tempfile
 import threading
-import traceback
 import time
+import traceback
 import types
 import unittest
 import warnings

@@ -11,7 +11,6 @@ import inspect
 import itertools
 import logging
 import math
-import traceback
 import operator
 import os
 import os.path
@@ -19,6 +18,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from collections import namedtuple
 from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeVar
 

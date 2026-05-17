@@ -5,7 +5,6 @@ import atexit
 import contextvars
 import ctypes
 import dataclasses
-import traceback
 import functools
 import logging
 import multiprocessing as mp
@@ -17,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor

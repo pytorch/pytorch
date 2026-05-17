@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from exception_traceback_linter import LINTER_CODE, check_file  # noqa: E402
+from exception_traceback_linter import LINTER_CODE, check_file
 
 
 def _lint(source: str) -> list[dict]:
