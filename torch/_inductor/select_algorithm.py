@@ -1408,15 +1408,7 @@ class TritonTemplateKernel(TritonKernel):
                         symbol = range_tree.symbol()
                         epilogue_index_symbols.append(symbol)
                         lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
-                        old_name = lookup_output.symbol()
                         lookup_output.set_name(name)
-                        # Update var_list and var_range
-                        range_tree.var_list[range_tree.var_list.index(old_name)] = (
-                            symbol
-                        )
-                        range_val = range_tree.var_ranges[old_name]
-                        del range_tree.var_ranges[old_name]
-                        range_tree.var_ranges[symbol] = range_val
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
@@ -5359,7 +5351,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
-    def _flex_attention_log_dim(dim: Any) -> int:
+    def _flex_attention_log_dim(dim: int | torch.SymInt | sympy.Expr) -> int:
         if isinstance(dim, torch.SymInt):
             dim = dim.node.expr
 
@@ -5374,7 +5366,9 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def _flex_attention_log_shape(size: Sequence[Any]) -> str:
+    def _flex_attention_log_shape(
+        size: Sequence[int | torch.SymInt | sympy.Expr],
+    ) -> str:
         dims = [AlgorithmSelectorCache._flex_attention_log_dim(dim) for dim in size]
         return f"[{', '.join(map(str, dims))}]"
 
