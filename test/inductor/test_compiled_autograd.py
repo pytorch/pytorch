@@ -1069,7 +1069,12 @@ main()
         )
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
-        torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
+        if len(torch.ops.inductor.accumulate_grad_.default._schema.arguments) == 2:
+            torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
+        else:
+            param_proxy.grad = torch.ops.inductor.accumulate_grad_.default(
+                param_proxy, param_proxy.grad, buf
+            )
         runtime_wrapper, compiled_fn = compiler.end_capture(buf)
 
         def bytecode_hook(code, out_code):
@@ -2084,6 +2089,91 @@ main()
             yield model[1].weight.grad
 
         self.check_output_and_recompiles(fn, 1)
+
+    def test_accumulate_grad_capture_lifts_current_grad(self):
+        from torch._dynamo.external_utils import call_accumulate_grad
+
+        graphs = []
+
+        def compiler_fn(gm):
+            graphs.append(gm)
+            return gm
+
+        w = torch.ones(2, 2, requires_grad=True)
+        w.grad = torch.ones_like(w)
+        with compiled_autograd._enable(compiler_fn):
+            (w * 2).sum().backward()
+
+        self.assertEqual(w.grad, torch.full_like(w, 3))
+        self.assertEqual(len(graphs), 1)
+        acc_grad_nodes = [
+            node
+            for node in graphs[0].graph.nodes
+            if node.op == "call_function" and node.target is call_accumulate_grad
+        ]
+        self.assertEqual(len(acc_grad_nodes), 1)
+        if (
+            len(acc_grad_nodes[0].args) == 3
+            and len(torch.ops.inductor.accumulate_grad_.default._schema.arguments) == 2
+        ):
+            self.skipTest("requires rebuilt compiled-autograd C++ interface")
+        self.assertEqual(len(acc_grad_nodes[0].args), 4)
+        self.assertIsInstance(acc_grad_nodes[0].args[1], torch.fx.Node)
+
+    def test_accumulate_grad_op_functional_contract(self):
+        if len(torch.ops.inductor.accumulate_grad_.default._schema.arguments) == 2:
+            self.skipTest("requires rebuilt accumulate_grad_ schema")
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, variable_grad, new_grad):
+            return torch.ops.inductor.accumulate_grad_.default(
+                x, variable_grad, new_grad
+            )
+
+        x = torch.randn(2, 2, requires_grad=True)
+        variable_grad = torch.ones_like(x)
+        new_grad = torch.ones_like(x) * 2
+        gm = make_fx(torch.func.functionalize(fn))(x, variable_grad, new_grad)
+
+        self.assertEqual(
+            gm(x, variable_grad.clone(), new_grad), variable_grad + new_grad
+        )
+        self.assertIn("accumulate_grad_", gm.code)
+
+        dense_new_grad = torch.ones_like(x) * 4
+        dense_expected = dense_new_grad.clone()
+        with torch.no_grad():
+            initialized_grad = torch.ops.inductor.accumulate_grad_.default(
+                x, None, dense_new_grad
+            )
+        self.assertEqual(initialized_grad, dense_expected)
+        self.assertNotEqual(
+            initialized_grad.untyped_storage().data_ptr(),
+            dense_new_grad.untyped_storage().data_ptr(),
+        )
+        dense_new_grad.add_(1)
+        self.assertEqual(initialized_grad, dense_expected)
+
+        sparse_new_grad = torch.sparse_coo_tensor(
+            torch.tensor([[0, 1], [0, 1]], dtype=torch.int64),
+            torch.tensor([3.0, 4.0]),
+            x.size(),
+        )
+        with torch.no_grad():
+            initialized_sparse_grad = torch.ops.inductor.accumulate_grad_.default(
+                x, None, sparse_new_grad
+            )
+        self.assertTrue(initialized_sparse_grad.is_sparse)
+        self.assertEqual(initialized_sparse_grad.to_dense(), sparse_new_grad.to_dense())
+        self.assertNotEqual(
+            initialized_sparse_grad._indices().untyped_storage().data_ptr(),
+            sparse_new_grad._indices().untyped_storage().data_ptr(),
+        )
+        self.assertNotEqual(
+            initialized_sparse_grad._values().untyped_storage().data_ptr(),
+            sparse_new_grad._values().untyped_storage().data_ptr(),
+        )
 
     def test_trace_run_with_rng_state(self):
         def sdpa(xq, xk):
@@ -3696,11 +3786,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False, 6), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False, 6)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
         getitem_39 = validate_outputs_2[0]
 
-        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_4, getitem_39, False);  getitem_4 = getitem_39 = call_accumulate_grad_1 = None
+        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_4, None, getitem_39, False);  getitem_4 = getitem_39 = call_accumulate_grad_1 = None
 
         getitem_40 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_3, getitem_40, False);  getitem_3 = getitem_40 = call_accumulate_grad = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_3, None, getitem_40, False);  getitem_3 = getitem_40 = call_accumulate_grad = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3966,7 +4056,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False, 6)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, None, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,
@@ -4046,7 +4136,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
         getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, None, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,
@@ -4126,7 +4216,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_11], [((None, None, device(type='cpu'), 6, 0, None), [getitem_3], False)]);  getitem_11 = getitem_3 = None
         getitem_12 = validate_outputs_2[0];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, None, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,
