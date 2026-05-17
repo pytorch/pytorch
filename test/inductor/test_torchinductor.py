@@ -6948,7 +6948,9 @@ class CommonTemplate:
             check_lowp=False,
         )
         if self.device != "cpu":
-            assertGeneratedKernelCountEqual(self, 2)
+            # zeros_like initialization is emitted as a wrapper zero_(), leaving
+            # only the scatter_add_ Triton kernel.
+            assertGeneratedKernelCountEqual(self, 1)
 
     @config.patch(max_fusion_size=1)
     def test_no_mega_fusion_during_lowering(self):
@@ -11157,9 +11159,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion,
+        # and CPU Triton can emit zero initialization without a Triton kernel.
         # Correctness is validated by self.common() above.
-        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        if self.device != "cpu":
+            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_max_pool2d_with_indices_backward5(self):
         # Large window size - decomposition handles via scatter_add
