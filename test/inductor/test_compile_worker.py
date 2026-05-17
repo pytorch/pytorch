@@ -138,13 +138,14 @@ class TestCompileWorker(TestCase):
             print("shutdown returned")
             """
         )
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
         self.assertEqual(
             result.returncode,
             0,
