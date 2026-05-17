@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 import operator
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
 from threading import Event
 
 import torch._inductor.config as config
@@ -102,6 +105,53 @@ class TestCompileWorker(TestCase):
                 self.assertEqual(os.path.exists(temp_log.name), True)
             finally:
                 pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_terminates_sidecar_worker_pool(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import subprocess
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(time.sleep, 5)
+            time.sleep(0.5)
+
+            wait = pool.process.wait
+
+            def short_wait(timeout=None):
+                return wait(timeout=2)
+
+            pool.process.wait = short_wait
+
+            try:
+                pool.shutdown()
+            except subprocess.TimeoutExpired:
+                pool.process.kill()
+                pool.process.wait()
+                raise
+
+            print("shutdown returned")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
 
 
 @config.patch("quiesce_async_compile_time", 0.1)
