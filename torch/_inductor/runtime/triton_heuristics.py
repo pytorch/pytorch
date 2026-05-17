@@ -2117,8 +2117,9 @@ class CachingAutotuner(KernelInterface):
                 if val is not None:
                     setattr(new_launcher, attr, val)
             return new_launcher
-        except (AttributeError, TypeError, KeyError):
-            # Expected failures - silent fallback is OK
+        except (AttributeError, TypeError, KeyError, ValueError):
+            # Expected failures - silent fallback is OK.
+            # ValueError is raised when nArgs > MAX_ARGS in the C extension.
             return None
         except Exception:
             # Unexpected failures - log for debugging
