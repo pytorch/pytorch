@@ -125,7 +125,6 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -729,12 +728,34 @@ class DynamoTLS(threading.local):
     # temporal order.
     traced_frame_infos: list[str] = []
 
+    # Accumulated skip reasons during a fullgraph compile_wrapper call.
+    # Each entry is a formatted string like "fn (file.py:42): reason".
+    # None when not collecting (fullgraph not active).
+    skip_reasons: list[str] | None = None
+
 
 dynamo_tls = DynamoTLS()
 
 
+def reset_skip_reasons() -> None:
+    dynamo_tls.skip_reasons = []
+
+
+def add_skip_reason(reason: str, frame: DynamoFrameType) -> None:
+    if dynamo_tls.skip_reasons is not None:
+        code = frame.f_code
+        dynamo_tls.skip_reasons.append(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno}): {reason}"
+        )
+
+
+def get_skip_reasons() -> list[str]:
+    return dynamo_tls.skip_reasons or []
+
+
 def clear_dynamo_tls() -> None:
     dynamo_tls.traced_frame_infos.clear()
+    dynamo_tls.skip_reasons = None
 
 
 @atexit.register
@@ -792,7 +813,6 @@ class _TorchDynamoContext:
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         super().__init__()
         if not (callable(callback) or callback is False or callback is None):
@@ -807,7 +827,6 @@ class _TorchDynamoContext:
         self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
-        self._shapes_spec = shapes_spec
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -822,19 +841,8 @@ class _TorchDynamoContext:
         backend = innermost_backend(callback)  # type: ignore[arg-type]
         cached_backends.setdefault(id(backend), backend)  # type: ignore[arg-type]
 
-        if dynamic is not None and shapes_spec is not None:
-            raise ValueError(
-                "`dynamic` and `shapes_spec` cannot both be set. "
-                "`shapes_spec` controls dynamic behavior."
-            )
-
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
-
-        if shapes_spec is not None:
-            self.enter_exit_hooks.append(
-                config._make_closure_patcher(_shapes_spec=shapes_spec)
-            )
 
         if on_enter is not nothing:
             # this case is not common
@@ -1059,6 +1067,8 @@ class _TorchDynamoContext:
                 )
                 if not self.export:
                     fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
+                    if fullgraph_count_enabled:
+                        reset_skip_reasons()
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1151,12 +1161,20 @@ class _TorchDynamoContext:
                         set_eval_frame(None)
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0:
-                                raise RuntimeError(
-                                    "torch.compile with fullgraph=True found no compiled frames. "
-                                    "The frame was likely skipped (e.g., a non-infra torch dispatch "
-                                    "mode was active, dynamo was disabled, or the frame was skipped."
-                                )
+                            if count == 0 and _stance.stance == "default":
+                                skip_reasons = get_skip_reasons()
+                                msg = "torch.compile with fullgraph=True found no compiled frames."
+                                if skip_reasons:
+                                    reasons_str = "\n".join(
+                                        f"  - {r}" for r in skip_reasons
+                                    )
+                                    msg += f" Skipped frames:\n{reasons_str}"
+                                else:
+                                    msg += (
+                                        " Compilation was not attempted and no cached compiled"
+                                        " code was found."
+                                    )
+                                raise RuntimeError(msg)
                         if prior_error_on_graph_break is not None:
                             _set_error_on_graph_break(prior_error_on_graph_break)
                         if prior_error_on_nested_compile is not None:
@@ -1177,6 +1195,7 @@ class _TorchDynamoContext:
             finally:
                 if fullgraph_count_enabled:
                     set_fullgraph_compiled_frame_count(-1)
+                    dynamo_tls.skip_reasons = None
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
@@ -1263,7 +1282,6 @@ class OptimizeContext(_TorchDynamoContext):
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1282,7 +1300,6 @@ class OptimizeContext(_TorchDynamoContext):
             package=package,
             hooks=hooks,
             isolate_recompiles=isolate_recompiles,
-            shapes_spec=shapes_spec,
         )
 
         if config.compiled_autograd:
@@ -1439,7 +1456,6 @@ def _optimize_catch_errors(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1454,7 +1470,6 @@ def _optimize_catch_errors(
         package=package,
         hooks=hooks,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
     )
 
 
@@ -1649,7 +1664,6 @@ def _optimize(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1715,7 +1729,6 @@ def _optimize(
             package=package,
             recompile_limit=recompile_limit,
             isolate_recompiles=isolate_recompiles,
-            shapes_spec=shapes_spec,
         )
 
     backend = get_compiler_fn(backend)
@@ -1755,7 +1768,6 @@ def _optimize(
         rebuild_ctx=rebuild_ctx,
         package=package,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
     )
 
 
@@ -2622,7 +2634,6 @@ def _optimize_assert(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2663,7 +2674,6 @@ def _optimize_assert(
         rebuild_ctx=rebuild_ctx,
         package=package,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
     )
 
 

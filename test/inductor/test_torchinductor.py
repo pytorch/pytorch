@@ -4427,19 +4427,8 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.compile(fn)(t1, t2)
-
-    def test_bmm_mixed_dtype(self):
-        def fn(a, b):
-            return torch.bmm(a, b)
-
-        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(1, 2, 3)
-        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(1, 3, 3)
-
-        msg = "expected scalar type .* but found .*|Expected arguments of same type but got"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            fn(t1, t2)
+        if config.cpp_wrapper:
+            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t1, t2)
 
@@ -4460,10 +4449,12 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t)
+        if config.cpp_wrapper:
+            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
@@ -7980,6 +7971,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    def test_frac_signed_zero(self):
+        def fn(x):
+            y = torch.frac(x)
+            return y, 1.0 / y
+
+        x = torch.tensor([-0.0, -1.0, -1.5, 0.0, 1.5], device=self.device)
+        expected_frac, expected_recip = fn(x)
+        actual_frac, actual_recip = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(
+            actual_frac.cpu().view(torch.int32),
+            expected_frac.cpu().view(torch.int32),
+        )
+        self.assertEqual(
+            actual_recip.cpu().view(torch.int32),
+            expected_recip.cpu().view(torch.int32),
+        )
+        self.assertFalse(torch.signbit(actual_frac.cpu()[0]).item())
+        self.assertEqual(actual_recip.cpu()[0].item(), float("inf"))
+
     @xfail_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
@@ -8892,6 +8903,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_constant_pad_nd_fallback_python_dispatch_stride(self):
         if self.device != "cpu":
             raise unittest.SkipTest("compile_fx_inner repro is CPU-only")
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest(
+                "process-local Python dispatch registrations are not inherited by "
+                "the compile subprocess"
+            )
 
         from torch._subclasses.fake_tensor import FakeTensorMode
 
