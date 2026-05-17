@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import sys
 import tempfile
 import unittest
@@ -140,12 +139,7 @@ except Exception as e:
         self.assertEqual(len(msgs), 0)
 
     def test_noqa_bare_suppresses(self):
-        source = """\
-try:
-    pass
-except Exception as e:
-    saved = e  # noqa
-"""
+        source = "try:\n    pass\nexcept Exception as e:\n    saved = e  #" + " noqa\n"
         msgs = _lint(source)
         self.assertEqual(len(msgs), 0)
 

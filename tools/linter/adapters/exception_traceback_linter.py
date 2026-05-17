@@ -162,16 +162,15 @@ class _FileChecker(ast.NodeVisitor):
         if lineno is None:
             return False
         line = self.source_lines[lineno - 1]
-        if "# noqa" not in line:
+        noqa_tag = "#" + " noqa"
+        if noqa_tag not in line:
             return False
-        # `# noqa` alone suppresses all linters
-        idx = line.index("# noqa")
-        rest = line[idx + 6:]
+        idx = line.index(noqa_tag)
+        rest = line[idx + len(noqa_tag) :]
         if not rest.strip() or rest.strip().startswith(":"):
-            # `# noqa` or `# noqa: CODE1, CODE2`
             if not rest.strip():
                 return True
-            codes = rest.strip()[1:]  # strip the ":"
+            codes = rest.strip()[1:]
             return LINTER_CODE in codes
         return False
 

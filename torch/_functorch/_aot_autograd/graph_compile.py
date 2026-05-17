@@ -2329,6 +2329,7 @@ def _aot_stage2b_bw_compile(
                 except Exception as e:
                     if aot_config.force_non_lazy_backward_lowering:
                         raise
+                    exc = e
                     trace_structured(
                         "artifact",
                         metadata_fn=lambda: {
@@ -2336,7 +2337,9 @@ def _aot_stage2b_bw_compile(
                             "encoding": "string",
                         },
                         payload_fn=lambda: "\n".join(
-                            traceback.format_exception(type(e), e, e.__traceback__)
+                            traceback.format_exception(
+                                type(exc), exc, exc.__traceback__
+                            )
                         ),
                     )
                     log.warning(
