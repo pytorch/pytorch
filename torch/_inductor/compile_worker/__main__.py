@@ -3,20 +3,12 @@ import argparse
 import base64
 import functools
 import importlib
+import importlib.util
 import logging
 import os
+import signal
 import sys
 from typing import TypeVar
-
-from torch._inductor.async_compile import pre_fork_setup
-from torch._inductor.codecache import torch_key
-from torch._inductor.compile_worker.subproc_pool import (
-    SubprocKind,
-    SubprocMain,
-    SubprocPickler,
-)
-from torch._inductor.compile_worker.utils import _async_compile_initializer
-from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
 
 
 _T = TypeVar("_T")
@@ -24,14 +16,30 @@ _T = TypeVar("_T")
 
 log = logging.getLogger(__name__)
 
-_set_triton_ptxas_path()
 
-try:
-    import triton
+def _load_subproc_pool_worker():
+    # Keep this entrypoint torch-free until after SubprocMain forks/spawns the
+    # actual compile workers. Importing through the torch package here can start
+    # native threads in the sidecar process, recreating fork-after-thread-start
+    # hazards for the default fork worker pool.
+    module_name = "torch._inductor.compile_worker.subproc_pool_worker"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
 
-    assert triton is not None  # preload in parent
-except ImportError:
-    pass
+    path = os.path.join(os.path.dirname(__file__), "subproc_pool_worker.py")
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load {module_name} from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_subproc_pool_worker = _load_subproc_pool_worker()
+SubprocKind = _subproc_pool_worker.SubprocKind
+SubprocMain = _subproc_pool_worker.SubprocMain
+SubprocPickler = _subproc_pool_worker.SubprocPickler
 
 
 def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
@@ -40,7 +48,9 @@ def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     that it's of the given type and then instantiate it.
     """
     pkg, name = qname.rsplit(".", 1)
-    mod = importlib.import_module(pkg)
+    mod = sys.modules.get(pkg)
+    if mod is None:
+        mod = importlib.import_module(pkg)
     ty = getattr(mod, name)
     if not issubclass(ty, base):
         raise TypeError(f"Type {ty} is not a subtype of {base}")
@@ -64,14 +74,13 @@ def main():
             sys.exit(0)
         read_fd = os.fdopen(args.read_fd, "rb")
         write_fd = os.fdopen(args.write_fd, "wb")
+        torch_key_data = base64.b64decode(args.torch_key.encode("utf-8"))
 
-        pre_fork_setup()
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-        torch_key.set(base64.b64decode(args.torch_key.encode("utf-8")))  # type: ignore[attr-defined]
-
-        _async_compile_initializer(args.parent)
-
-        SubprocMain(args.pickler, args.kind, args.workers, read_fd, write_fd).main()
+        SubprocMain(
+            args.pickler, args.kind, args.workers, read_fd, write_fd, torch_key_data
+        ).main()
     except Exception:
         log.exception("Uncaught exception in compile_worker subprocess")
 

@@ -1,19 +1,106 @@
 # Owner(s): ["module: inductor"]
+import base64
 import operator
 import os
+import subprocess
+import sys
 import tempfile
+import time
+import unittest
 from threading import Event
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
+
+
+class TestCompileWorkerStartup(TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires /proc")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_fork_sidecar_stays_single_threaded_before_first_job(self):
+        from torch._inductor.codecache import torch_key
+        from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+
+        entry = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "torch",
+            "_inductor",
+            "compile_worker",
+            "__main__.py",
+        )
+        subproc_read_fd, write_fd = os.pipe()
+        read_fd, subproc_write_fd = os.pipe()
+        torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
+        cmd = [
+            sys.executable,
+            entry,
+            "--pickler=torch._inductor.compile_worker.subproc_pool_worker.SubprocPickler",
+            "--kind=fork",
+            "--workers=2",
+            f"--parent={os.getpid()}",
+            f"--read-fd={subproc_read_fd}",
+            f"--write-fd={subproc_write_fd}",
+            f"--torch-key={torch_key_str}",
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            env={
+                **python_subprocess_env(),
+                "TORCH_WARM_POOL": "0",
+                "LD_LIBRARY_PATH": get_ld_library_path(),
+            },
+            pass_fds=(subproc_read_fd, subproc_write_fd),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        os.close(subproc_read_fd)
+        os.close(subproc_write_fd)
+        try:
+            stat_path = f"/proc/{proc.pid}/stat"
+            task_path = f"/proc/{proc.pid}/task"
+            deadline = time.monotonic() + 10
+            state = None
+            threads = os.listdir(task_path)
+            while time.monotonic() < deadline:
+                self.assertIsNone(proc.poll())
+                with open(stat_path) as f:
+                    state = f.read().split()[2]
+                threads = os.listdir(task_path)
+                if state in ("S", "I"):
+                    break
+                time.sleep(0.05)
+
+            self.assertIn(state, ("S", "I"))
+            self.assertEqual(len(threads), 1)
+        finally:
+            os.close(write_fd)
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=30)
+                raise
+            finally:
+                os.close(read_fd)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_spawn_basic_jobs(self):
+        pool = SubprocPool(2, kind=SubprocKind.SPAWN)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
 
 
 class TestCompileWorker(TestCase):
