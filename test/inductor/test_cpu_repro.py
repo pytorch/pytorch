@@ -1065,6 +1065,38 @@ class CPUReproTests(TestCase):
                     self.common(fn, (_x,))
                     check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
+    def test_asinh_large_float32_inplace(self):
+        # https://github.com/pytorch/pytorch/issues/152299
+
+        def fn(input):
+            return input.asinh_()
+
+        x = torch.tensor(
+            [
+                [
+                    -1e30,
+                    1e30,
+                    -5e28,
+                    5e28,
+                    -7.5e29,
+                    7.5e29,
+                    -2e30,
+                    2e30,
+                    0.0,
+                ]
+            ],
+            dtype=torch.float32,
+        ).repeat(3, 1)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for simdlen in bit_widths:
+            with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x.clone(),))
+                check_metrics_vec_kernel_count(1)
+
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
