@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -473,7 +473,9 @@ lib.define(
 lib.define(
     "fused_nvfp4_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor A_global_scale, Tensor B_scale, Tensor B_global_scale, "
-    "str reduce_op, str group_name, int tile_m=128, int tile_n=256) -> Tensor",
+    "str reduce_op, str group_name, int tile_m=128, int tile_n=256, "
+    "Tensor? A_workspace0=None, Tensor? A_workspace1=None, "
+    "Tensor? partial_workspace0=None, Tensor? partial_workspace1=None) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
@@ -1592,11 +1594,46 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter_meta(
     group_name: c10d.GroupName,
     tile_m: int = 128,
     tile_n: int = 256,
+    A_workspace0: Optional[torch.Tensor] = None,
+    A_workspace1: Optional[torch.Tensor] = None,
+    partial_workspace0: Optional[torch.Tensor] = None,
+    partial_workspace1: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    del A_scale, A_global_scale, B_scale, B_global_scale, reduce_op, tile_m, tile_n
+    del (
+        A_scale,
+        A_global_scale,
+        B_scale,
+        B_global_scale,
+        reduce_op,
+        tile_m,
+        tile_n,
+        A_workspace0,
+        A_workspace1,
+        partial_workspace0,
+        partial_workspace1,
+    )
     group_size = c10d._get_group_size_by_name(group_name)
     local_m = A.shape[0] // group_size
     return A.new_empty((local_m, B.shape[-2]), dtype=torch.bfloat16)
+
+
+def _nvfp4_workspace_empty(
+    shape: tuple[int, ...],
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    try:
+        return empty(shape, dtype=dtype, device=device)
+    except Exception:
+        return torch.empty(shape, dtype=dtype, device=device)
+
+
+def _get_nvfp4_nccl_rs_stripes(chunk_m: int) -> int:
+    if chunk_m >= 16384:
+        return 4
+    if chunk_m >= 8192:
+        return 2
+    return 1
 
 
 @torch.library.impl(lib, "fused_nvfp4_scaled_matmul_reduce_scatter", "CUDA")
@@ -1611,6 +1648,10 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
     group_name: c10d.GroupName,
     tile_m: int = 128,
     tile_n: int = 256,
+    A_workspace0: Optional[torch.Tensor] = None,
+    A_workspace1: Optional[torch.Tensor] = None,
+    partial_workspace0: Optional[torch.Tensor] = None,
+    partial_workspace1: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     del tile_n
     if reduce_op != "sum":
@@ -1668,6 +1709,135 @@ def _fused_nvfp4_scaled_matmul_reduce_scatter(
             "A_global_scale * B_global_scale must broadcast to either one value "
             "or group_size values"
         )
+
+    num_stripes = _get_nvfp4_nccl_rs_stripes(chunk_m)
+    if num_stripes > 1:
+        num_stripe_quanta = chunk_m // 128
+        num_stripes = min(num_stripes, num_stripe_quanta)
+        base_quanta = num_stripe_quanta // num_stripes
+        extra_quanta = num_stripe_quanta % num_stripes
+        stripe_ms = [
+            (base_quanta + (1 if stripe_idx < extra_quanta else 0)) * 128
+            for stripe_idx in range(num_stripes)
+        ]
+        stripe_offsets = [0]
+        for stripe_m in stripe_ms:
+            stripe_offsets.append(stripe_offsets[-1] + stripe_m)
+        max_stripe_m = max(stripe_ms)
+
+        output = A.new_empty((chunk_m, n), dtype=torch.bfloat16)
+        expected_a_workspace_shape = (max_stripe_m * world_size, A.shape[1])
+        expected_partial_workspace_shape = (max_stripe_m * world_size, n)
+        if (A_workspace0 is None) != (A_workspace1 is None):
+            raise ValueError("A ping-pong workspaces must be provided together")
+        if (partial_workspace0 is None) != (partial_workspace1 is None):
+            raise ValueError("partial ping-pong workspaces must be provided together")
+        if A_workspace0 is not None:
+            a_workspaces = [A_workspace0, A_workspace1]
+        else:
+            a_workspaces = [
+                _nvfp4_workspace_empty(
+                    expected_a_workspace_shape, A.dtype, A.device
+                )
+                for _ in range(2)
+            ]
+        if partial_workspace0 is not None:
+            partial_workspaces = [partial_workspace0, partial_workspace1]
+        else:
+            partial_workspaces = [
+                _nvfp4_workspace_empty(
+                    expected_partial_workspace_shape, torch.bfloat16, A.device
+                )
+                for _ in range(2)
+            ]
+        for workspace in a_workspaces:
+            if (
+                workspace is None
+                or tuple(workspace.shape) != expected_a_workspace_shape
+                or workspace.dtype != A.dtype
+                or workspace.device != A.device
+                or not workspace.is_contiguous()
+            ):
+                raise ValueError(
+                    "A workspace must be contiguous with shape "
+                    f"{expected_a_workspace_shape}, dtype {A.dtype}, device {A.device}"
+                )
+        for workspace in partial_workspaces:
+            if (
+                workspace is None
+                or tuple(workspace.shape) != expected_partial_workspace_shape
+                or workspace.dtype != torch.bfloat16
+                or workspace.device != A.device
+                or not workspace.is_contiguous()
+            ):
+                raise ValueError(
+                    "partial workspace must be contiguous with shape "
+                    f"{expected_partial_workspace_shape}, dtype torch.bfloat16, "
+                    f"device {A.device}"
+                )
+        producer_stream = torch.cuda.current_stream(A.device)
+        comm_stream = torch.cuda.Stream(device=A.device)
+        producer_done = [torch.cuda.Event() for _ in range(2)]
+        comm_done = [torch.cuda.Event() for _ in range(2)]
+        works: list[Any] = [None, None]
+
+        for stripe_idx, stripe_m in enumerate(stripe_ms):
+            slot = stripe_idx % 2
+            if stripe_idx >= 2:
+                if works[slot] is not None:
+                    works[slot].wait()
+                producer_stream.wait_event(comm_done[slot])
+
+            stripe_start = stripe_offsets[stripe_idx]
+            stripe_stop = stripe_offsets[stripe_idx + 1]
+            m_sizes = torch.full(
+                (world_size,), stripe_m, device=A.device, dtype=torch.long
+            )
+            a_workspace = a_workspaces[slot][: stripe_m * world_size]
+            partial_workspace = partial_workspaces[slot][: stripe_m * world_size]
+            row_starts = (
+                torch.arange(world_size + 1, device=A.device, dtype=torch.long)
+                * chunk_m
+                + stripe_start
+            )
+            for group_idx in range(world_size):
+                a_workspace[
+                    group_idx * stripe_m : (group_idx + 1) * stripe_m
+                ].copy_(
+                    A[
+                        group_idx * chunk_m + stripe_start : group_idx * chunk_m
+                        + stripe_stop
+                    ]
+                )
+            torch.ops.mslk.f4f4bf16_grouped_stacked_out.default(
+                a_workspace,
+                B,
+                A_scale,
+                B_scale,
+                m_sizes,
+                partial_workspace,
+                alpha,
+                row_starts,
+                False,
+            )
+            producer_done[slot].record(producer_stream)
+
+            with torch.cuda.stream(comm_stream):
+                comm_stream.wait_event(producer_done[slot])
+                works[slot] = c10d.reduce_scatter_tensor(
+                    output[stripe_start:stripe_stop],
+                    partial_workspace,
+                    op=c10d.ReduceOp.SUM,
+                    group=group,
+                    async_op=True,
+                )
+                comm_done[slot].record(comm_stream)
+
+        for work in works:
+            if work is not None:
+                work.wait()
+        producer_stream.wait_stream(comm_stream)
+        return output
 
     partials = A.new_empty((total_m, n), dtype=torch.bfloat16)
     torch.ops.mslk.f4f4bf16_grouped_stacked_out.default(
