@@ -18,6 +18,7 @@ from torch._inductor.fx_utils import (
 )
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -493,6 +494,114 @@ class TestFakeTensorUpdater(TestCase):
         b = torch.randint(0, (1 << 16), (8, 4, 2, 1), dtype=torch.int32)
         graph = self._get_graph(fn, a, b)
         self._add_delete_nodes_test(graph)
+
+    def test_hop_subgraph_dtype_change(self):
+        def true_fn(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def false_fn(x: torch.Tensor) -> torch.Tensor:
+            return x - 1
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            y = x.view(torch.int32)
+            return torch.cond(x.sum() > 0, true_fn, false_fn, (y,))
+
+        def tensor_dtypes(gm: torch.fx.GraphModule) -> list[torch.dtype]:
+            return [
+                fake.dtype
+                for node in gm.graph.nodes
+                if isinstance((fake := node.meta.get("val")), torch.Tensor)
+            ]
+
+        graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        view_dtype_node = next(
+            n for n in graph.graph.nodes if n.target == torch.ops.aten.view.dtype
+        )
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.int32)
+        for subgraph_name in _get_subgraph_names(graph):
+            self.assertEqual(
+                tensor_dtypes(getattr(graph, subgraph_name)), [torch.int32] * 2
+            )
+
+        updater = FakeTensorUpdater(graph)
+        view_dtype_node.args = (view_dtype_node.args[0], torch.float32)
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            updater.incremental_update()
+
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.float32)
+        for subgraph_name in _get_subgraph_names(graph):
+            self.assertEqual(
+                tensor_dtypes(getattr(graph, subgraph_name)), [torch.float32] * 2
+            )
+
+    def test_auto_functionalized_dtype_change(self):
+        with torch.library._scoped_library("fake_tensor_updater", "FRAGMENT") as lib:
+            torch.library.define(
+                "fake_tensor_updater::mutate_x",
+                "(Tensor(a!) x) -> ()",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "fake_tensor_updater::mutate_x", "CompositeExplicitAutograd", lib=lib
+            )
+            def mutate_x_impl(x: torch.Tensor) -> None:
+                x.add_(1)
+
+            @torch.library.register_fake("fake_tensor_updater::mutate_x", lib=lib)
+            def mutate_x_fake(x: torch.Tensor) -> None:
+                return None
+
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                y = x.view(torch.int32)
+                _, new_y = torch.ops.higher_order.auto_functionalized(
+                    torch.ops.fake_tensor_updater.mutate_x.default, x=y
+                )
+                return new_y + 1
+
+            graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+            view_dtype_node = next(
+                n for n in graph.graph.nodes if n.target == torch.ops.aten.view.dtype
+            )
+            auto_functionalized_node = next(
+                n
+                for n in graph.graph.nodes
+                if n.target == torch.ops.higher_order.auto_functionalized
+            )
+            add_node = next(
+                n for n in graph.graph.nodes if n.target == torch.ops.aten.add.Tensor
+            )
+
+            def updated_tensor_dtype() -> torch.dtype:
+                val = auto_functionalized_node.meta["val"]
+                self.assertIsNone(val[0])
+                self.assertIsInstance(val[1], torch.Tensor)
+                return val[1].dtype
+
+            self.assertEqual(view_dtype_node.meta["val"].dtype, torch.int32)
+            self.assertEqual(updated_tensor_dtype(), torch.int32)
+            self.assertEqual(add_node.meta["val"].dtype, torch.int32)
+
+            updater = FakeTensorUpdater(graph)
+            view_dtype_node.args = (view_dtype_node.args[0], torch.float32)
+
+            hop = torch.ops.higher_order.auto_functionalized
+            sentinel = object()
+            old_lowering_marker = getattr(hop, "_inductor_lowering_function", sentinel)
+            hop._inductor_lowering_function = True
+            try:
+                with V.set_fake_mode(self._get_faketensormode(graph)):
+                    updater.incremental_update()
+            finally:
+                if old_lowering_marker is sentinel:
+                    delattr(hop, "_inductor_lowering_function")
+                else:
+                    hop._inductor_lowering_function = old_lowering_marker
+
+            self.assertEqual(view_dtype_node.meta["val"].dtype, torch.float32)
+            self.assertEqual(updated_tensor_dtype(), torch.float32)
+            self.assertEqual(add_node.meta["val"].dtype, torch.float32)
 
     def test_reorder_nodes(self):
         def fn(*args: torch.Tensor) -> torch.Tensor:

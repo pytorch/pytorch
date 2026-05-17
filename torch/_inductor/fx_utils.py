@@ -197,8 +197,8 @@ class FakeTensorUpdater:
 
     Since this runs in the context of Inductor, we assume that the input and
     output semantics for the outermost graph are not subject to change after class
-    initialization, but we allow striding changes for subgraphs.  Any other changes will
-    result in errors or undefined behavior.
+    initialization, but we allow dtype and striding changes for subgraphs.  Any other
+    changes will result in errors or undefined behavior.
     """
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
@@ -238,8 +238,10 @@ class FakeTensorUpdater:
             get_hash_or_ids(chain.from_iterable(node.kwargs.items())),
         )
 
-    def incremental_update(self) -> int:
+    def incremental_update(self, nodes_to_process: Iterable[torch.fx.Node] = ()) -> int:
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work.
+
+        nodes_to_process: nodes to force update even if their hashes are unchanged.
 
         Returns the number of nodes updated, including recursive updates on subgraphs."""
         existing_storages: defaultdict[int | None, int] = defaultdict(int)
@@ -253,6 +255,7 @@ class FakeTensorUpdater:
             new,
             old,
             *,
+            check_dtype: bool = True,
             check_strides: bool = True,
             check_storage: bool = True,
             node: torch.fx.Node | None = None,
@@ -261,6 +264,7 @@ class FakeTensorUpdater:
             including storage locations if enabled.
 
             check_strides: disabling this flag will remove checks for striding.
+            check_dtype: disabling this flag will remove checks for dtype.
             check_storage: disabling this flag will remove checks for storage offset and
             location.  This is useful for subgraph argument and output updating, where
             storage location can change without invalidating the subgraph."""
@@ -277,6 +281,7 @@ class FakeTensorUpdater:
                         is_fake_tensor_same(
                             new_i,
                             old_i,
+                            check_dtype=check_dtype,
                             check_strides=check_strides,
                             check_storage=check_storage,
                             node=node,
@@ -301,6 +306,9 @@ class FakeTensorUpdater:
                 return False
 
             if new.device != old.device:
+                return False
+
+            if check_dtype and new.dtype != old.dtype:
                 return False
 
             if (
@@ -379,6 +387,9 @@ class FakeTensorUpdater:
             return False
 
         def should_process_node(node: torch.fx.Node) -> bool:
+            if isinstance(node.target, torch._ops.HigherOrderOperator):
+                return True
+
             return (
                 callable(node.target)
                 # node.target will called with FakeTensor arguments, which are not
@@ -414,9 +425,12 @@ class FakeTensorUpdater:
         current_graph_hashes = OrderedSet[_FxNodeHash]()
 
         nodes_updated: int = 0
-        to_process = OrderedSet[int]()
+        to_process = OrderedSet(id(node) for node in nodes_to_process)
         # Value records whether subgraph outputs have been updated.
         subgraph_updatings: dict[torch.fx.GraphModule, bool] = {}
+        subgraph_nodes_to_process: dict[
+            torch.fx.GraphModule, OrderedSet[torch.fx.Node]
+        ] = {}
         for node in self.gm.graph.nodes:
             current_graph_hashes.add(hash := self.hash_node(node))
             is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
@@ -468,18 +482,25 @@ class FakeTensorUpdater:
                                 assert update_subgraph, (
                                     "subgraph args must have consistent values!"
                                 )
-                                # Check that only the stride has changed.  Other changes
-                                # cannot be handled without manual intervention.
+                                # Check that only dtype or stride has changed.  Other
+                                # changes cannot be handled without manual intervention.
                                 assert is_fake_tensor_same(
-                                    a, p_fake, check_strides=False, check_storage=False
+                                    a,
+                                    p_fake,
+                                    check_dtype=False,
+                                    check_strides=False,
+                                    check_storage=False,
                                 ), (
-                                    "A subgraph argument other than striding has been "
-                                    "modified; FakeTensorUpdater cannot update this "
-                                    "argument!"
+                                    "A subgraph argument other than dtype or striding "
+                                    "has been modified; FakeTensorUpdater cannot "
+                                    "update this argument!"
                                 )
 
                                 p.meta["val"] = a
                                 nodes_updated += 1
+                                subgraph_nodes_to_process.setdefault(
+                                    subgraph, OrderedSet()
+                                ).update(p.users)
 
                     if update_subgraph:
                         _, orig_output_args, _ = get_fake_args_kwargs(
@@ -487,7 +508,9 @@ class FakeTensorUpdater:
                         )
                         nodes_updated += self.subgraph_updaters[
                             subgraph
-                        ].incremental_update()
+                        ].incremental_update(
+                            subgraph_nodes_to_process.get(subgraph, ())
+                        )
                         _, new_output_args, _ = get_fake_args_kwargs(
                             subgraph.graph.output_node(), subgraph
                         )
