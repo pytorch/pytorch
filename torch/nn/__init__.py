@@ -21,6 +21,16 @@ from torch.nn import (
 from torch.nn.parallel import DataParallel as DataParallel
 
 
+# ``LinearCrossEntropyOptions`` lives in
+# ``torch.nn.modules.linear_cross_entropy`` and is exposed lazily here.
+# It cannot be imported eagerly from ``torch.nn.modules.__init__``
+# because ``linear_cross_entropy.py`` uses ``@torch.library.custom_op``
+# at module level, and during ``torch/__init__.py`` startup that module
+# would be loaded before ``torch.library`` is initialised
+# (``AttributeError: module 'torch' has no attribute 'library'``). The
+# ``__getattr__`` shim defers the import until first access, by which
+# time ``torch`` is fully set up. Same pattern as the function-local
+# import of the private op in ``torch.nn.functional.linear_cross_entropy``.
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
 

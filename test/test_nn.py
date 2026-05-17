@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
-    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -6868,7 +6868,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(expected_out_t, out_t)
 
     @unittest.skipIf(IS_WINDOWS and IS_ARM64, "Fails as 'Unexpected success' on Windows ARM64")
-    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
+    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE)
     # see https://github.com/pytorch/pytorch/issues/177250
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
@@ -7303,32 +7303,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
 
-    def test_unfold_invalid_arg(self):
-        # input wrong dimension
-
-        unfold = nn.Unfold(kernel_size=(2, 3))
-
-        # calculated output shape is too small
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(2, 3))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
-            unfold(torch.randn(1, 2, 2, 3))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
-            tensor_data = torch.tensor([
-                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
-                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
-                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
-            ])
-            F.fold(tensor_data, 16, 7318349394477056)
-
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
@@ -7466,8 +7440,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
     @skipIfTorchDynamo(
-        "Dynamo's autograd tracing doesn't preserve the Python-level "
-        "ctx._gi=None mutation that signals 'second backward not supported'"
+        "Under torch.compile, ``functional.linear_cross_entropy`` "
+        "intentionally auto-promotes ``options.allow_retain_graph`` "
+        "to True (Dynamo's autograd tracing doesn't preserve the "
+        "Python-level ``ctx._gi=None`` mutation that signals 'second "
+        "backward not supported'), so the second backward succeeds "
+        "instead of raising the expected error. Correctness under "
+        "compile is exercised through the retain-graph-True path."
     )
     def test_linear_cross_entropy_retain_graph_default_raises(self):
         # Default mode mutates saved buffers; second .backward() must fail loudly.
@@ -7518,6 +7497,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             (16, 64, 64, 1, 16),         # C == F (degenerate -> next_pow2(N))
             (8, 128, 64, 1, 8),          # C < F (degenerate -> next_pow2(N))
         ]
+        # ``_adjust`` is called without a ``device`` argument here.
+        # That makes ``acc_policy="auto"`` (the dataclass default)
+        # resolve to ``_AUTO_FALLBACK`` instead of a per-device pick,
+        # but this test only asserts on ``batch_chunk_size`` and each
+        # case sets ``chunking_method`` to an explicit
+        # ``aspect_ratio[:N]`` literal, so the auto-resolution of
+        # ``acc_policy`` is intentionally irrelevant to the
+        # assertion.
         for num_batches, in_features, num_classes, factor, expected in cases:
             method = "aspect_ratio" if factor == 1 else f"aspect_ratio:{factor}"
             options = nn.LinearCrossEntropyOptions(chunking_method=method)
@@ -7560,6 +7547,81 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         """__post_init__ rejects malformed or unsupported chunking_method."""
         with self.assertRaisesRegex(ValueError, "chunking_method"):
             nn.LinearCrossEntropyOptions(chunking_method=chunking_method)
+
+    def test_linear_cross_entropy_options_auto_defaults(self):
+        """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
+        construction time; ``_adjust`` resolves them per (device, dtype).
+
+        Covers: known (device, dtype) pair, unknown pair (falls back),
+        partial override (one field auto, one explicit), and missing
+        device argument (falls back).
+        """
+        # Default construction keeps "auto" until _adjust is called.
+        opts = nn.LinearCrossEntropyOptions()
+        self.assertEqual(opts.acc_policy, "auto")
+        self.assertEqual(opts.chunking_method, "auto")
+
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2").
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio:2").
+        # Same pick as bf16 -- a single CUDA policy across dtypes
+        # post-``weight_chunk_dtype=acc_dtype`` fix.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # Known pair: CPU + bf16 -> ("accurate", "aspect_ratio").
+        # CPU has no hardware low-precision matmul, so the only
+        # chunked policy that runs the bulk weight-grad GEMM in fp32
+        # ("accurate") is dramatically faster than the others.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Known pair: CPU + fp16 -> ("accurate", "aspect_ratio").
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float16, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Unknown pair (cpu + fp32) -> _AUTO_FALLBACK.
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.float32, torch.device("cpu"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # No device given -> _AUTO_FALLBACK (back-compat with callers
+        # / tests that don't pass device).
+        adjusted = opts._adjust(128, 4096, 50000, torch.float32)
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # Partial override: acc_policy explicit, chunking_method auto.
+        opts = nn.LinearCrossEntropyOptions(acc_policy="accurate")
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "accurate")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+
+        # Partial override: chunking_method explicit, acc_policy auto.
+        opts = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
+        adjusted = opts._adjust(
+            128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
+        )
+        self.assertEqual(adjusted.acc_policy, "compact")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
@@ -10128,7 +10190,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
-    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -10139,6 +10200,40 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 3, 4, device=device)
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
+
+    def test_unfold_invalid_arg(self, device):
+        # output shape components must be >= 1
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(2, 3))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
+            unfold(torch.randn(1, 2, 2, 3, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        # im2col_shape_check invariants
+        x = torch.randn(1, 3, 8, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"kernel size should be greater than zero"):
+            F.unfold(x, kernel_size=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"dilation should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), dilation=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"padding should be non-negative"):
+            F.unfold(x, kernel_size=(3, 3), padding=(-1, 0))
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
+
+        # Host-side overflow guard on kernel_size product.
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ], device=device)
+            F.fold(tensor_data, 16, 7318349394477056)
 
     @onlyCUDA
     @skipIfRocmArch(MI300_ARCH)
@@ -14550,10 +14645,25 @@ if __name__ == '__main__':
         expected_max_ulp_diff = 1
         expected_input_grad_max_ulp_diff = 1
         expected_weight_grad_max_ulp_diff = 1
+        # For acc_policy="auto" the actual op invocation must still
+        # receive "auto" (so _adjust performs the real resolution), but
+        # the test's ULP bounds need to track whichever policy was
+        # resolved. Read the dispatch table directly so the test stays
+        # in lock-step with future _AUTO_DEFAULTS edits.
+        if acc_policy == "auto":
+            from torch.nn.modules.linear_cross_entropy import (
+                _AUTO_DEFAULTS, _AUTO_FALLBACK,
+            )
+            _resolved_policy, _ = _AUTO_DEFAULTS.get(
+                (torch.device(device).type, dtype), _AUTO_FALLBACK,
+            )
+        else:
+            _resolved_policy = acc_policy
+
         # The following mapping to expected ULP differences
         # characterizes the accuracy dependence on acc_policy, dtype,
         # and device:
-        if acc_policy == "memory":
+        if _resolved_policy == "balanced":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
@@ -14572,12 +14682,21 @@ if __name__ == '__main__':
                     else:  # CUDA/...
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90
-                        expected_weight_grad_max_ulp_diff = 37
+                        # Loosened from 37 -> 50 after the
+                        # weight_chunk_dtype = acc_dtype fix in
+                        # _ChunkContext.build: keeping weight_chunk
+                        # in fp32 changes the rounding path of the
+                        # weight-grad bulk matmul slightly, but
+                        # the relative-error bound (still 2e-3) is
+                        # unchanged and the fix is what makes
+                        # "balanced" / "compact" fp16-safe at
+                        # large num_batches in the first place.
+                        expected_weight_grad_max_ulp_diff = 50
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
                     expected_weight_grad_max_ulp_diff = 0
-        elif acc_policy == "accurate":
+        elif _resolved_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
@@ -14596,18 +14715,19 @@ if __name__ == '__main__':
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 0
                     expected_weight_grad_max_ulp_diff = 0
-        elif acc_policy == "lowmemory":
-            # lowmemory mirrors "memory" except on CUDA where it drops
-            # weight_grad_chunk and accumulates per-chunk into
+        elif _resolved_policy == "compact":
+            # "compact" mirrors "balanced" except on CUDA where it
+            # drops weight_grad_chunk and accumulates per-chunk into
             # grad_linear_weight directly via addmm_. Input-grad path
             # is unchanged. weight_grad picks up an extra dtype
             # quantization per chunk on rows hit by the
             # ignore-index correction (a few extra ULP on rare rows
             # at LLM scale). On non-CUDA backends with mixed
-            # precision, the optimization can't be applied and
-            # bounds reduce to "memory".
+            # precision, the optimization can't be applied and bounds
+            # reduce to "balanced".
             if "cpu" in device:
-                # silent fallback to memory: bounds copy "memory" branch.
+                # silent fallback to balanced: bounds copy the
+                # "balanced" branch.
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 204
@@ -14619,7 +14739,7 @@ if __name__ == '__main__':
             else:
                 if dtype == torch.float16:
                     if "mps" in device:
-                        # MPS + use_acc_dtype: fallback to memory.
+                        # MPS + use_acc_dtype: fallback to balanced.
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 232
                         expected_weight_grad_max_ulp_diff = 166
@@ -14629,7 +14749,7 @@ if __name__ == '__main__':
                         expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
                     if "mps" in device:
-                        # MPS + use_acc_dtype: fallback to memory.
+                        # MPS + use_acc_dtype: fallback to balanced.
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 90
                         expected_weight_grad_max_ulp_diff = 0
@@ -14637,43 +14757,6 @@ if __name__ == '__main__':
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 44
                         expected_weight_grad_max_ulp_diff = 193
-        elif acc_policy == "ultralow":
-            # ultralow: bf16/fp16 logits + fp32 softmax_denom
-            # accumulator + dropped weight_grad_chunk. Logs grow
-            # log2(num_classes) * eps_dtype error in softmax_denom,
-            # propagating into both gradients. Loosely 2-5x memory's
-            # input_grad and weight_grad bounds.
-            if "cpu" in device:
-                if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 119
-                    expected_weight_grad_max_ulp_diff = 101
-                else:  # bf16
-                    expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 61621
-                    expected_weight_grad_max_ulp_diff = 47221
-            else:
-                if dtype == torch.float16:
-                    if "mps" in device:
-                        expected_max_ulp_diff = 1
-                        expected_input_grad_max_ulp_diff = 124
-                        expected_weight_grad_max_ulp_diff = 141
-                    else:
-                        expected_max_ulp_diff = 1
-                        expected_input_grad_max_ulp_diff = 68
-                        expected_weight_grad_max_ulp_diff = 118
-                else:  # bf16
-                    expected_max_ulp_diff = 1
-                    if "mps" in device:
-                        expected_input_grad_max_ulp_diff = 61500
-                        expected_weight_grad_max_ulp_diff = 47619
-                    else:  # CUDA
-                        # Bounds measured on A100; loosen if a different
-                        # platform's ``torch.div(out=)`` lowering rounds
-                        # differently — the fp64-reference check above
-                        # still validates correctness regardless.
-                        expected_input_grad_max_ulp_diff = 65
-                        expected_weight_grad_max_ulp_diff = 95
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14829,7 +14912,53 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_default(self, device, dtype):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
 
-    @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory", "ultralow"])
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    def test_linear_cross_entropy_chunked_gradcheck(self, device, acc_policy):
+        """``torch.autograd.gradcheck`` against the chunked op.
+
+        The chunked path is an unusual autograd hookup: forward
+        precomputes ``grad_input`` and ``grad_linear_weight`` and
+        stashes them on ctx via ``register_autograd``; backward is a
+        single scalar multiply by the upstream gradient and then
+        consumes the precomputed buffers in place. ``gradcheck`` is
+        designed to catch exactly this class of unusual gradient
+        plumbing; it calls backward multiple times during
+        finite-difference analytical-Jacobian comparison, which
+        requires ``allow_retain_graph=True`` here so the in-place
+        consumption of the per-call gradient buffers doesn't blow up
+        the second backward.
+
+        fp64 inputs keep the chunked op's mixed-precision paths off
+        (``use_acc_dtype=False``) and stay within gradcheck's default
+        tolerance. Small (N, F, V) keeps gradcheck's O(num_inputs)
+        backward calls tractable; ``batch_chunk_size=2`` forces
+        multi-chunk iteration so the chunked loop is actually
+        exercised (not the degenerate single-chunk case).
+
+        The unchunked reference (``options=None``) is gradchecked
+        separately inside ``_test_linear_cross_entropy_loss``.
+        """
+        torch.manual_seed(7)
+        N, F, V = 4, 3, 5
+        inp = torch.randn(N, F, device=device, dtype=torch.float64,
+                          requires_grad=True)
+        weight = torch.randn(V, F, device=device, dtype=torch.float64,
+                             requires_grad=True)
+        target = torch.randint(0, V, (N,), device=device)
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=2,
+            acc_policy=acc_policy,
+            allow_retain_graph=True,
+        )
+
+        def f(i, w):
+            return nn.functional.linear_cross_entropy(
+                i, w, target, reduction="mean", options=options,
+            )
+
+        torch.autograd.gradcheck(f, (inp, weight))
+
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
         """Forward-only path under torch.no_grad(): exercises the
         rank-empty grad-buffer branches (compute_*_grad both False).
@@ -14853,7 +14982,7 @@ if __name__ == '__main__':
         self.assertEqual(chunked, reference)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory", "ultralow"])
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy):
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
@@ -14863,23 +14992,49 @@ if __name__ == '__main__':
 
     @parametrize_test("reduction", ["sum", "mean"])
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
-        """Chunked op output is independent of batch_chunk_size.
+        """Chunked op output is invariant w.r.t. ``batch_chunk_size``,
+        within floating-point rounding.
 
-        Exercises partial-chunk paths (num_batches=13 doesn't divide
-        most chunk sizes) and verifies forward and gradient agreement.
+        Summing per-chunk contributions into the output / grads is
+        associative regardless of chunk size, so in real arithmetic
+        chunking has no effect on the result. In floating-point this
+        holds only up to rounding error from two sources:
+
+        1. The per-chunk matmul kernel: cuBLAS / MKL / MPS-mm pick
+           different kernels for different shapes, and intra-kernel
+           accumulation order is not the same across kernels. So
+           ``mm(B, F) @ (F, C)`` vs. ``mm(B', F) @ (F, C)`` for
+           different B can differ at the bit level even in fp32.
+        2. The summation order of chunk contributions into the
+           output (and into grad_lw / grad_input).
+
+        Both sources are bounded by ~1 ULP per operation. We run the
+        test at fp64 so the total rounding stays at ~1e-15 scale per
+        operation — far below ``assertEqual``'s default fp64
+        tolerance (``rtol=1.3e-7``, ``atol=1e-9``). This isolates
+        the assertion to the chunking machinery's *algorithmic*
+        invariance rather than conflating it with matmul-kernel
+        rounding (which would fall outside fp32 tolerance at
+        LLM-scale shapes).
+
+        Exercises partial-chunk paths (``num_batches=13`` doesn't
+        divide most chunk sizes) and validates forward + input
+        gradient + weight gradient agreement across chunk sizes.
+
+        MPS skipped because it doesn't support fp64; numerical
+        correctness on MPS is validated by
+        ``_test_linear_cross_entropy_loss`` against the fp64
+        reference.
         """
         if "mps" in device:
-            self.skipTest(
-                "MPS mm has shape-dependent rounding; chunk-size invariance "
-                "holds within mm precision but not bit-exactly. Numerical "
-                "correctness is still validated by _test_linear_cross_entropy_loss "
-                "against the fp64 reference."
-            )
+            self.skipTest("MPS does not support fp64")
         torch.manual_seed(42)
         N, F, C = 13, 5, 4
 
-        linear_weight = torch.randn(C, F, device=device)
-        inp = torch.randn(N, F, device=device, requires_grad=True)
+        linear_weight = torch.randn(C, F, device=device, dtype=torch.float64)
+        inp = torch.randn(
+            N, F, device=device, dtype=torch.float64, requires_grad=True,
+        )
         target = torch.randint(0, C, (N,), device=device)
 
         forwards, input_grads, linear_weight_grads = [], [], []

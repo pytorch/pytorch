@@ -12606,6 +12606,11 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
+               # Dynamo wraps the ValueError from the fractional-step / integer-out check,
+               # so test_errors can't match the eager exception type/regex under inductor.
+               DecorateInfo(unittest.skip("error type wrapped under torch.compile"),
+                            'TestCommon', 'test_errors', active_if=TEST_WITH_TORCHINDUCTOR),
+
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
@@ -15749,6 +15754,18 @@ op_db: list[OpInfo] = [
             # (test_fn_gradgrad, test_fn_fwgrad_bwgrad) needs
             # precomputed second derivatives, which the chunked op
             # does not produce.
+            #
+            # User-facing impact (torch.compile, torch.func.grad,
+            # vmap(grad(...)), higher-order AD, forward-mode AD) is
+            # documented in the "Autograd, functional-transform and
+            # torch.compile limitations" note in
+            # torch.nn.functional.linear_cross_entropy and mirrored
+            # in torch.nn.LinearCrossEntropyLoss. Keep those notes
+            # in sync with this list: if an infrastructure change
+            # makes one of these tests start passing, the
+            # expectedFailure will surface as unexpectedSuccess
+            # (loud) -- promote it (remove the decorator and update
+            # the user-facing notes).
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
@@ -25118,17 +25135,6 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_out=True,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
@@ -25327,17 +25333,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     #
     # Elementwise Binary Reference OpInfos

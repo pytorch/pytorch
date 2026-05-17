@@ -3717,7 +3717,61 @@ def linear_cross_entropy(
             for more details. Enabling chunking will decrease the
             memory usage.  To enable reference implementation of
             ``linear_cross_entropy``, use `options=None`. Default:
-            ``None``.
+            ``None``. See the autograd / compile note below for
+            which higher-level APIs (``torch.compile``,
+            ``torch.func.grad``, ``torch.func.vmap(grad(...))``,
+            higher-order or forward-mode AD) only work on the
+            ``options=None`` reference path.
+
+    .. note::
+        **Autograd, functional-transform and ``torch.compile``
+        limitations of the chunked path**
+
+        When ``options`` is a
+        :class:`~torch.nn.LinearCrossEntropyOptions` instance,
+        ``linear_cross_entropy`` dispatches to a chunked op that
+        precomputes ``grad_input`` and ``grad_linear_weight`` inside
+        forward and consumes them via in-place mutation in
+        backward. This is what makes the chunking memory-efficient,
+        but it places the op outside the standard autograd contract
+        that several higher-level APIs assume. Specifically:
+
+        - **Higher-order AD** (``torch.autograd.grad(...,
+          create_graph=True)``, ``torch.func.grad(torch.func.grad(...))``,
+          ``torch.func.hessian``): the chunked op produces only
+          first-order derivatives.
+        - **Forward-mode AD** (``torch.func.jvp``, ``torch.func.jacfwd``):
+          no jvp formula is registered.
+        - **Composable function transforms that build on jvp / vjp**
+          (``torch.func.vjp``, ``torch.func.vmap(grad(...))``, and
+          higher-order combinations like ``jvpvjp`` / ``vjpvjp``):
+          only partial support; standard
+          ``output.backward()`` works but
+          ``torch.func.grad`` / ``vmap(grad(...))`` does not.
+        - **``torch.compile`` / Inductor lowering**: the chunked
+          custom op has no Inductor lowering. Models compiled with
+          ``torch.compile`` will fall back to eager execution at
+          this op (correctness preserved; no compile-time speedup
+          at the chunked step). Additionally, under
+          ``torch.compile`` the default-mode (in-place
+          gradient-buffer) backward's second-call guard cannot be
+          enforced (Dynamo's autograd tracing does not preserve
+          the Python-level ctx mutation that signals "consumed").
+          To keep double-backward correct under compile,
+          ``linear_cross_entropy`` internally derives a new
+          ``options`` with ``allow_retain_graph=True`` when called
+          from a compiled region and emits a one-time warning so
+          the per-call extra-allocation cost is visible.
+        - **TorchScript scripting**:
+          :class:`LinearCrossEntropyOptions` is a Python dataclass
+          and not scriptable.
+
+        The reference path (``options=None``) is the standard
+        ``linear`` + ``cross_entropy`` composition and supports
+        all of the APIs above. Use ``options=None`` when you need
+        them; use the chunked path when you need its peak-memory
+        savings at long context / large vocabulary.
+
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
         - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
@@ -3814,7 +3868,50 @@ def linear_cross_entropy(
             input = input.unsqueeze(0)
             target = target.unsqueeze(0)
 
-        options = options._adjust(num_batches, in_features, num_classes, input.dtype)
+        # Cross into ``LinearCrossEntropyOptions``' internal-API
+        # contract: ``_adjust`` resolves "auto" sentinels, picks
+        # ``batch_chunk_size``, and substitutes ``acc_dtype=None``,
+        # returning a fully concrete options instance for the op
+        # call below. The leading underscore reflects "not for end
+        # users"; this call site is the documented consumer.
+        # Signature changes must be kept in sync with the method's
+        # docstring in ``torch/nn/modules/linear_cross_entropy.py``.
+        options = options._adjust(
+            num_batches,
+            in_features,
+            num_classes,
+            input.dtype,
+            input.device,
+        )
+
+        # Under torch.compile, force ``allow_retain_graph=True`` even
+        # if the user left it at False. The default-mode chunked
+        # backward signals "second backward not supported" via a
+        # Python-level ``ctx._gi = None`` mutation, which Dynamo's
+        # autograd tracing does not preserve. Without this override,
+        # double-backward under torch.compile would silently return
+        # ``original_grad * grad_output_first_call * grad_output_second_call``
+        # (the in-place ``mul_`` from the first backward stays
+        # visible to the second). Forcing the retain-graph path
+        # uses non-mutating multiplies and is correct under both
+        # single- and double-backward at the cost of one extra
+        # gradient-sized allocation per call.
+        if not options.allow_retain_graph and torch.compiler.is_compiling():
+            import warnings as _warnings
+
+            _warnings.warn(
+                "linear_cross_entropy: forcing "
+                "allow_retain_graph=True under torch.compile because "
+                "the chunked op's default-mode second-backward guard "
+                "cannot be enforced under Dynamo tracing. This adds "
+                "one gradient-sized allocation per call. To silence "
+                "this warning, construct options with "
+                "``LinearCrossEntropyOptions(allow_retain_graph=True, ...)``.",
+                stacklevel=2,
+            )
+            import dataclasses as _dataclasses
+
+            options = _dataclasses.replace(options, allow_retain_graph=True)
 
         # Local import: a top-level import here would trigger
         # a circular init through torch.library.custom_op.
