@@ -6,9 +6,9 @@ Distributed training allows accelerators to scale workloads across multiple devi
 
 The integration surface can be broken down into three layers:
 
-1. **C++ Backend implementation** — A subclass of [`c10d::Backend`][Backend.hpp] that implements the collective, point-to-point, and synchronization operations.
-2. **Python bindings** — Expose the C++ backend class to Python via [pybind11](https://pybind11.readthedocs.io/).
-3. **Backend registration** — Register the backend with [`torch.distributed.Backend.register_backend()`][distributed_c10d.py] so that `init_process_group` can discover and instantiate it.
+1. **C++ Backend implementation** – A subclass of [`c10d::Backend`][Backend.hpp] that implements the collective, point-to-point, and synchronization operations.
+2. **Python bindings** – Expose the C++ backend class to Python via [pybind11](https://pybind11.readthedocs.io/).
+3. **Backend registration** – Register the backend with [`torch.distributed.Backend.register_backend()`][distributed_c10d.py] so that `init_process_group` can discover and instantiate it.
 
 ```{note}
 [OpenReg](https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg) (`torch_openreg`) is PyTorch's official reference implementation for out-of-tree accelerator integration. It ships a minimal distributed backend called **OCCL** (OpenReg Collective Communications Library) that demonstrates the full `ProcessGroup` integration. All code examples in this chapter reference the OCCL implementation.
@@ -121,8 +121,8 @@ For production backends, `Work` typically wraps an asynchronous handle from the 
 The backend class inherits from `c10d::Backend` and overrides the collective operations. Each method should validate that input tensors reside on the expected device type (e.g., `PrivateUse1`) and then dispatch to the vendor's communication library. Key implementation details:
 
 - **`getBackendName()`** must return the same string used during Python registration (e.g., `"occl"`).
-- **Input validation** — Each collective should verify tensor device types. The OCCL reference uses `CHECK_TENSOR` and `CHECK_TENSOR_LIST` macros for this.
-- **Return value** — All collectives return a `c10::intrusive_ptr<Work>`.
+- **Input validation** – Each collective should verify tensor device types. The OCCL reference uses `CHECK_TENSOR` and `CHECK_TENSOR_LIST` macros for this.
+- **Return value** – All collectives return a `c10::intrusive_ptr<Work>`.
 
 See [`ProcessGroupOCCL.hpp`][ProcessGroupOCCL.hpp] and [`ProcessGroupOCCL.cpp`][ProcessGroupOCCL.cpp] for the full reference implementation.
 
@@ -175,7 +175,7 @@ import torch.distributed as dist
 # Import triggers autoload, which registers the "occl" backend
 import torch_openreg
 
-# Initialize process group — OCCL is auto-selected for openreg devices
+# Initialize process group – OCCL is auto-selected for openreg devices
 dist.init_process_group(
     backend="occl",
     init_method="env://",
@@ -190,7 +190,7 @@ dist.all_reduce(tensor)
 dist.destroy_process_group()
 ```
 
-Alternatively, the backend name can be omitted if a `device_id` is provided — PyTorch resolves the backend from the device-to-backend mapping:
+Alternatively, the backend name can be omitted if a `device_id` is provided – PyTorch resolves the backend from the device-to-backend mapping:
 
 ```python
 dist.init_process_group(
