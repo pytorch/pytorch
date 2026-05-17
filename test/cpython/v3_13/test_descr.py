@@ -198,10 +198,6 @@ class OperatorsTest(CPythonTestCase):
         bm(slice(b, c), d)
         self.assertEqual(dictionary['a'], res)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_lists(self):
         # Testing list operations...
         # Asserts are within individual test methods
@@ -219,10 +215,6 @@ class OperatorsTest(CPythonTestCase):
         self.setsliceop_test([1,2,3,4], 1, 3, [5,6], [1,5,6,4], "a[b:c]=d",
                         "__setitem__")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_dicts(self):
         # Testing dict operations...
         self.binop_test({1:2,3:4}, 1, 1, "b in a", "__contains__")
@@ -270,10 +262,6 @@ class OperatorsTest(CPythonTestCase):
                     res = eval(expr, dict)
                     self.unop_test(a, res, expr, name)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_ints(self):
         # Testing int operations...
         self.number_operators(100, 3)
@@ -292,18 +280,10 @@ class OperatorsTest(CPythonTestCase):
         else:
             self.fail("NotImplemented should have caused TypeError")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_floats(self):
         # Testing float operations...
         self.number_operators(100.0, 3.0)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_complexes(self):
         # Testing complex operations...
         self.number_operators(100.0j, 3.0j, skip=['lt', 'le', 'gt', 'ge',
@@ -342,10 +322,6 @@ class OperatorsTest(CPythonTestCase):
         self.assertEqual(complex.__radd__(3j, 4.0), complex(4.0, 3.0))
         self.assertEqual(float.__rsub__(3.0, 1), -2.0)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     @support.impl_detail("the module 'xxsubtype' is internal")
     @unittest.skipIf(xxsubtype is None, "requires xxsubtype module")
     def test_spam_lists(self):
@@ -391,10 +367,6 @@ class OperatorsTest(CPythonTestCase):
         a.setstate(42)
         self.assertEqual(a.getstate(), 42)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     @support.impl_detail("the module 'xxsubtype' is internal")
     @unittest.skipIf(xxsubtype is None, "requires xxsubtype module")
     def test_spam_dicts(self):
@@ -2022,10 +1994,6 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         del a[0:10]
         self.assertEqual(a.delitem, (slice(0, 10)))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_load_attr_extended_arg(self):
         # https://github.com/python/cpython/issues/91625
         class Numbers:
@@ -2034,7 +2002,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         attrs = ", ".join(f"Z._{n:03d}" for n in range(280))
         code = f"def number_attrs(Z):\n    return [ {attrs} ]"
         ns = {}
-        exec(code, ns)
+        with torch._dynamo.error_on_graph_break(False):
+            exec(code, ns)
         number_attrs = ns["number_attrs"]
         # Warm up the function for quickening (PEP 659)
         for _ in range(30):
@@ -3147,10 +3116,6 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIn(cistr('ONe'), d)
         self.assertEqual(d.get(cistr('thrEE')), 3)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_classic_comparisons(self):
         # Testing classic comparisons...
         class classic:
@@ -3215,10 +3180,6 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                                      eval("x %s y" % op),
                                      "x=%d, y=%d" % (x, y))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_rich_comparisons(self):
         # Testing rich comparisons...
         class Z(complex):
@@ -4646,10 +4607,6 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(list.append.__name__, 'append')
         self.assertIs(list.append.__objclass__, list)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_not_implemented(self):
         # Testing NotImplemented...
         # all binary methods should be able to return a NotImplemented
@@ -4662,7 +4619,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.subTest(expr=expr, x=x, y=y),
                 self.assertRaises(TypeError),
             ):
-                exec(expr, {'x': x, 'y': y})
+                with torch._dynamo.error_on_graph_break(False):
+                    exec(expr, {'x': x, 'y': y})
 
         N1 = sys.maxsize + 1    # might trigger OverflowErrors instead of
                                 # TypeErrors

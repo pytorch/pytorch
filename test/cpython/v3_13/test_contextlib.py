@@ -12,11 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    run_tests,
-    slowTest,
-    TEST_WITH_TORCHDYNAMO,
-)
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -301,10 +297,6 @@ class ContextManagerTestCase(__TestCase):
                 else:
                     self.fail(f'{stop_exc} was suppressed')
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_contextmanager_except_pep479(self):
         code = """\
 from __future__ import generator_stop

@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests
 
 # ======= END DYNAMO PATCH =======
 
@@ -117,10 +117,6 @@ class FunctionPropertiesTest(FuncAttrsTest):
         self.cannot_set_attr(self.b, '__globals__', 2,
                              (AttributeError, TypeError))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test___builtins__(self):
         if __name__ == "__main__":
             builtins_dict = __builtins__.__dict__
@@ -206,10 +202,6 @@ class FunctionPropertiesTest(FuncAttrsTest):
         with self.assertRaises(UnboundLocalError):
             print(a)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test___name__(self):
         self.assertEqual(self.b.__name__, 'b')
         self.b.__name__ = 'c'

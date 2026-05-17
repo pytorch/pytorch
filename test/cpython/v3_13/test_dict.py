@@ -85,10 +85,6 @@ class DictTest(__TestCase):
         self.assertEqual(dict(), {})
         self.assertIsNot(dict(), {})
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_literal_constructor(self):
         # check literal constructor for different sized dicts
         # (to exercise the BUILD_MAP oparg).
@@ -877,10 +873,6 @@ class DictTest(__TestCase):
             d[(1,)]
         self.assertEqual(c.exception.args, ((1,),))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_bad_key(self):
         # Dictionary lookups should fail if __eq__() raises an exception.
         class CustomException(Exception):
@@ -907,7 +899,8 @@ class DictTest(__TestCase):
                      'd.pop(x2)',
                      'd.update({x2: 2})']:
             with self.assertRaises(CustomException):
-                exec(stmt, locals())
+                with torch._dynamo.error_on_graph_break(False):
+                    exec(stmt, locals())
 
     def test_resize1(self):
         # Dict resizing bug, found by Jack Jansen in 2.2 CVS development.

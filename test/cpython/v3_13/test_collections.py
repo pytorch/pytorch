@@ -12,11 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    run_tests,
-    slowTest,
-    TEST_WITH_TORCHDYNAMO,
-)
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -111,10 +107,6 @@ class TestUserObjects(__TestCase):
 
 class TestChainMap(__TestCase):
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_basics(self):
         c = ChainMap()
         c['a'] = 1
@@ -2237,10 +2229,6 @@ class TestCounter(__TestCase):
         self.assertRaises(TypeError, Counter().update, {}, {})
         self.assertRaises(TypeError, Counter.update)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "eval outside constant expressions not supported",
-    )
     def test_copying(self):
         # Check that counters are copyable, deepcopyable, picklable, and
         #have a repr/eval round-trip

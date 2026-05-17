@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests
 
 # Dummy decorator for CPython test compatibility
 def no_rerun(reason):
@@ -2437,10 +2437,6 @@ class SubinterpreterTests(CPythonTestCase):
 
     @cpython_only
     @no_rerun('channels (and queues) might have a refleak; see gh-122199')
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_static_types_inherited_slots(self):
         rch, sch = interpreters.channels.create()
 

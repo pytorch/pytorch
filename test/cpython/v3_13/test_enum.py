@@ -10,7 +10,7 @@
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 # ======= END DYNAMO PATCH =======
@@ -2980,18 +2980,16 @@ class TestSpecial(__TestCase):
         self.assertTrue(isinstance(missing, JS))
         self.assertFalse(missing.valid)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "exec outside constant assignments not supported",
-    )
     def test_empty_globals(self):
         # bpo-35717: sys._getframe(2).f_globals['__name__'] fails with KeyError
         # when using compile and exec because f_globals is empty
         code = "from enum import Enum; Enum('Animal', 'ANT BEE CAT DOG')"
-        code = compile(code, "<string>", "exec")
+        with torch._dynamo.error_on_graph_break(False):
+            code = compile(code, "<string>", "exec")
         global_ns = {}
         local_ls = {}
-        exec(code, global_ns, local_ls)
+        with torch._dynamo.error_on_graph_break(False):
+            exec(code, global_ns, local_ls)
 
     def test_strenum(self):
         class GoodStrEnum(StrEnum):
