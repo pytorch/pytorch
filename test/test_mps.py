@@ -11402,9 +11402,8 @@ class TestSDPA(TestCaseMPS):
         # should raise
         with self.assertRaisesRegex(
                 RuntimeError,
-                r"scaled_dot_product_attention for MPS does not support dropout.",
-            ):
-                F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
+                r"scaled_dot_product_attention for MPS does not support dropout."):
+            F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])
