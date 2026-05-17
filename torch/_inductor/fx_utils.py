@@ -299,7 +299,11 @@ class FakeTensorUpdater:
                 # with no implemented __eq__ method will compare IDs.
                 return new == old
 
-            if new.layout != old.layout or not is_intlist_same(new.shape, old.shape):
+            if (
+                new.layout != old.layout
+                or new.dtype != old.dtype
+                or not is_intlist_same(new.shape, old.shape)
+            ):
                 return False
 
             if new.device != old.device:
@@ -551,6 +555,13 @@ class FakeTensorUpdater:
             ):
                 continue
 
+            storage_only_change = "val" in node.meta and is_fake_tensor_same(
+                new_fake_tensor,
+                node.meta["val"],
+                check_storage=False,
+                node=node,
+            )
+
             rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
 
             node.meta["val"] = new_fake_tensor
@@ -565,7 +576,18 @@ class FakeTensorUpdater:
 
             existing_storages[get_node_storage(node)] += 1
 
-            to_process.update(id(user) for user in node.users)
+            to_process.update(
+                id(user)
+                for user in node.users
+                if not (
+                    storage_only_change
+                    and getattr(
+                        user.target,
+                        "_inductor_lowering_output_metadata_ignores_input_storage",
+                        False,
+                    )
+                )
+            )
 
         self.processed_hashes = current_graph_hashes
         self.tracked_node_ids = OrderedSet([id(node) for node in self.gm.graph.nodes])
