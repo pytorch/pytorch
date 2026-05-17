@@ -1,0 +1,358 @@
+diff --git a/cmd/podman/system/prune.go b/cmd/podman/system/prune.go
+index f7cf7b551..739f87cde 100644
+--- a/cmd/podman/system/prune.go
++++ b/cmd/podman/system/prune.go
+@@ -48,6 +48,7 @@ func init() {
+ 	flags.BoolVarP(&force, "force", "f", false, "Do not prompt for confirmation.  The default is false")
+ 	flags.BoolVarP(&pruneOptions.All, "all", "a", false, "Remove all unused data")
+ 	flags.BoolVar(&pruneOptions.External, "external", false, "Remove container data in storage not controlled by podman")
++	flags.BoolVar(&pruneOptions.Build, "build", false, "Remove build containers")
+ 	flags.BoolVar(&pruneOptions.Volume, "volumes", false, "Prune volumes")
+ 	filterFlagName := "filter"
+ 	flags.StringArrayVar(&filters, filterFlagName, []string{}, "Provide filter values (e.g. 'label=<key>=<value>')")
+@@ -64,8 +65,12 @@ func prune(cmd *cobra.Command, args []string) error {
+ 			volumeString = `
+ 	- all volumes not used by at least one container`
+ 		}
+-
+-		fmt.Printf(createPruneWarningMessage(pruneOptions), volumeString, "Are you sure you want to continue? [y/N] ")
++		buildString := ""
++		if pruneOptions.Build {
++			buildString = `
++	- all build containers`
++		}
++		fmt.Printf(createPruneWarningMessage(pruneOptions), volumeString, buildString, "Are you sure you want to continue? [y/N] ")
+ 
+ 		answer, err := reader.ReadString('\n')
+ 		if err != nil {
+@@ -124,7 +129,7 @@ func createPruneWarningMessage(pruneOpts entities.SystemPruneOptions) string {
+ 	if pruneOpts.All {
+ 		return `WARNING! This command removes:
+ 	- all stopped containers
+-	- all networks not used by at least one container%s
++	- all networks not used by at least one container%s%s
+ 	- all images without at least one container associated with them
+ 	- all build cache
+ 
+@@ -132,7 +137,7 @@ func createPruneWarningMessage(pruneOpts entities.SystemPruneOptions) string {
+ 	}
+ 	return `WARNING! This command removes:
+ 	- all stopped containers
+-	- all networks not used by at least one container%s
++	- all networks not used by at least one container%s%s
+ 	- all dangling images
+ 	- all dangling build cache
+ 
+diff --git a/docs/source/markdown/podman-system-prune.1.md b/docs/source/markdown/podman-system-prune.1.md
+index 52f9ec1c7..95099d018 100644
+--- a/docs/source/markdown/podman-system-prune.1.md
++++ b/docs/source/markdown/podman-system-prune.1.md
+@@ -7,20 +7,28 @@ podman\-system\-prune - Remove all unused pods, containers, images, networks, an
+ **podman system prune** [*options*]
+ 
+ ## DESCRIPTION
+-**podman system prune** removes all unused containers (both dangling and unreferenced), pods, networks, and optionally, volumes from local storage.
++**podman system prune** removes all unused containers (both dangling and unreferenced), build containers, pods, networks, and optionally, volumes from local storage.
+ 
+ Use the **--all** option to delete all unused images.  Unused images are dangling images as well as any image that does not have any containers based on it.
+ 
+ By default, volumes are not removed to prevent important data from being deleted if there is currently no container using the volume. Use the **--volumes** flag when running the command to prune volumes as well.
+ 
++By default, build containers are not removed to prevent interference with builds in progress. Use the **--build** flag when running the command to remove build containers as well.
++
+ ## OPTIONS
+ #### **--all**, **-a**
+ 
+ Recursively remove all unused pods, containers, images, networks, and volume data. (Maximum 50 iterations.)
+ 
++#### **--build**
++
++Removes any build containers that were created during the build, but were not removed because the build was unexpectedly terminated.
++
++Note: **This is not safe operation and should be executed only when no builds are in progress. It can interfere with builds in progress.**
++
+ #### **--external**
+ 
+-Removes all leftover container storage files from local storage not managed by Podman. In normal circumstances, no such data exists, but in case of an unclean shutdown, the Podman database may be corrupted and cause this.
++Tries to clean up remainders of previous containers or layers that are not references in the storage json files. These can happen in the case of unclean shutdowns or regular restarts in transient storage mode.
+ 
+ However, when using transient storage mode, the Podman database does not persist. This means containers leave the writable layers on disk after a reboot. When using a transient store, it is recommended that the **podman system prune --external** command is run during boot.
+ 
+diff --git a/libpod/runtime.go b/libpod/runtime.go
+index 986e40f60..609fbba57 100644
+--- a/libpod/runtime.go
++++ b/libpod/runtime.go
+@@ -33,6 +33,7 @@ import (
+ 	"github.com/containers/podman/v4/libpod/lock"
+ 	"github.com/containers/podman/v4/libpod/plugin"
+ 	"github.com/containers/podman/v4/libpod/shutdown"
++	"github.com/containers/podman/v4/pkg/domain/entities/reports"
+ 	"github.com/containers/podman/v4/pkg/rootless"
+ 	"github.com/containers/podman/v4/pkg/systemd"
+ 	"github.com/containers/podman/v4/pkg/util"
+@@ -1250,3 +1251,52 @@ func (r *Runtime) LockConflicts() (map[uint32][]string, []uint32, error) {
+ 
+ 	return toReturn, locksHeld, nil
+ }
++
++// Exists checks whether a file or directory exists at the given path.
++// If the path is a symlink, the symlink is followed.
++func Exists(path string) error {
++	// It uses unix.Faccessat which is a faster operation compared to os.Stat for
++	// simply checking the existence of a file.
++	err := unix.Faccessat(unix.AT_FDCWD, path, unix.F_OK, 0)
++	if err != nil {
++		return &os.PathError{Op: "faccessat", Path: path, Err: err}
++	}
++	return nil
++}
++
++// PruneBuildContainers removes any build containers that were created during the build,
++// but were not removed because the build was unexpectedly terminated.
++//
++// Note: This is not safe operation and should be executed only when no builds are in progress. It can interfere with builds in progress.
++func (r *Runtime) PruneBuildContainers() ([]*reports.PruneReport, error) {
++	stageContainersPruneReports := []*reports.PruneReport{}
++
++	containers, err := r.store.Containers()
++	if err != nil {
++		return stageContainersPruneReports, err
++	}
++	for _, container := range containers {
++		path, err := r.store.ContainerDirectory(container.ID)
++		if err != nil {
++			return stageContainersPruneReports, err
++		}
++		if err := Exists(filepath.Join(path, "buildah.json")); err != nil {
++			continue
++		}
++
++		report := &reports.PruneReport{
++			Id: container.ID,
++		}
++		size, err := r.store.ContainerSize(container.ID)
++		if err != nil {
++			report.Err = err
++		}
++		report.Size = uint64(size)
++
++		if err := r.store.DeleteContainer(container.ID); err != nil {
++			report.Err = errors.Join(report.Err, err)
++		}
++		stageContainersPruneReports = append(stageContainersPruneReports, report)
++	}
++	return stageContainersPruneReports, nil
++}
+diff --git a/pkg/api/handlers/libpod/system.go b/pkg/api/handlers/libpod/system.go
+index 70d4493f8..7c129b1ba 100644
+--- a/pkg/api/handlers/libpod/system.go
++++ b/pkg/api/handlers/libpod/system.go
+@@ -22,6 +22,7 @@ func SystemPrune(w http.ResponseWriter, r *http.Request) {
+ 		All      bool `schema:"all"`
+ 		Volumes  bool `schema:"volumes"`
+ 		External bool `schema:"external"`
++		Build    bool `schema:"build"`
+ 	}{}
+ 
+ 	if err := decoder.Decode(&query, r.URL.Query()); err != nil {
+@@ -43,6 +44,7 @@ func SystemPrune(w http.ResponseWriter, r *http.Request) {
+ 		Volume:   query.Volumes,
+ 		Filters:  *filterMap,
+ 		External: query.External,
++		Build:    query.Build,
+ 	}
+ 	report, err := containerEngine.SystemPrune(r.Context(), pruneOptions)
+ 	if err != nil {
+diff --git a/pkg/bindings/system/types.go b/pkg/bindings/system/types.go
+index 89e093f68..b4a4ff064 100644
+--- a/pkg/bindings/system/types.go
++++ b/pkg/bindings/system/types.go
+@@ -18,6 +18,7 @@ type PruneOptions struct {
+ 	Filters  map[string][]string
+ 	Volumes  *bool
+ 	External *bool
++	Build    *bool
+ }
+ 
+ // VersionOptions are optional options for getting version info
+diff --git a/pkg/bindings/system/types_prune_options.go b/pkg/bindings/system/types_prune_options.go
+index d00498520..5f3bd652c 100644
+--- a/pkg/bindings/system/types_prune_options.go
++++ b/pkg/bindings/system/types_prune_options.go
+@@ -76,3 +76,18 @@ func (o *PruneOptions) GetExternal() bool {
+ 	}
+ 	return *o.External
+ }
++
++// WithBuild set field Build to given value
++func (o *PruneOptions) WithBuild(value bool) *PruneOptions {
++	o.Build = &value
++	return o
++}
++
++// GetBuild returns value of field Build
++func (o *PruneOptions) GetBuild() bool {
++	if o.Build == nil {
++		var z bool
++		return z
++	}
++	return *o.Build
++}
+diff --git a/pkg/domain/entities/system.go b/pkg/domain/entities/system.go
+index 473db3530..f6938652a 100644
+--- a/pkg/domain/entities/system.go
++++ b/pkg/domain/entities/system.go
+@@ -22,6 +22,7 @@ type SystemPruneOptions struct {
+ 	Volume   bool
+ 	Filters  map[string][]string `json:"filters" schema:"filters"`
+ 	External bool
++	Build    bool
+ }
+ 
+ // SystemPruneReport provides report after system prune is executed.
+diff --git a/pkg/domain/infra/abi/system.go b/pkg/domain/infra/abi/system.go
+index 24ee64d29..ea3e5f203 100644
+--- a/pkg/domain/infra/abi/system.go
++++ b/pkg/domain/infra/abi/system.go
+@@ -150,16 +150,16 @@ func (ic *ContainerEngine) SetupRootless(_ context.Context, noMoveProcess bool)
+ 	return nil
+ }
+ 
+-// SystemPrune removes unused data from the system. Pruning pods, containers, networks, volumes and images.
++// SystemPrune removes unused data from the system. Pruning pods, containers, build container, networks, volumes and images.
+ func (ic *ContainerEngine) SystemPrune(ctx context.Context, options entities.SystemPruneOptions) (*entities.SystemPruneReport, error) {
+ 	var systemPruneReport = new(entities.SystemPruneReport)
+ 
+ 	if options.External {
+-		if options.All || options.Volume || len(options.Filters) > 0 {
++		if options.All || options.Volume || len(options.Filters) > 0 || options.Build {
+ 			return nil, fmt.Errorf("system prune --external cannot be combined with other options")
+ 		}
+-		err := ic.Libpod.GarbageCollect()
+-		if err != nil {
++
++		if err := ic.Libpod.GarbageCollect(); err != nil {
+ 			return nil, err
+ 		}
+ 		return systemPruneReport, nil
+@@ -170,6 +170,17 @@ func (ic *ContainerEngine) SystemPrune(ctx context.Context, options entities.Sys
+ 		filters = append(filters, fmt.Sprintf("%s=%s", k, v[0]))
+ 	}
+ 	reclaimedSpace := (uint64)(0)
++
++	// Prune Build Containers
++	if options.Build {
++		stageContainersPruneReports, err := ic.Libpod.PruneBuildContainers()
++		if err != nil {
++			return nil, err
++		}
++		reclaimedSpace += reports.PruneReportsSize(stageContainersPruneReports)
++		systemPruneReport.ContainerPruneReports = append(systemPruneReport.ContainerPruneReports, stageContainersPruneReports...)
++	}
++
+ 	found := true
+ 	for found {
+ 		found = false
+diff --git a/pkg/domain/infra/tunnel/system.go b/pkg/domain/infra/tunnel/system.go
+index fc82e7b2b..142a9fa5c 100644
+--- a/pkg/domain/infra/tunnel/system.go
++++ b/pkg/domain/infra/tunnel/system.go
+@@ -19,7 +19,7 @@ func (ic *ContainerEngine) SetupRootless(_ context.Context, noMoveProcess bool)
+ 
+ // SystemPrune prunes unused data from the system.
+ func (ic *ContainerEngine) SystemPrune(ctx context.Context, opts entities.SystemPruneOptions) (*entities.SystemPruneReport, error) {
+-	options := new(system.PruneOptions).WithAll(opts.All).WithVolumes(opts.Volume).WithFilters(opts.Filters).WithExternal(opts.External)
++	options := new(system.PruneOptions).WithAll(opts.All).WithVolumes(opts.Volume).WithFilters(opts.Filters).WithExternal(opts.External).WithBuild(opts.Build)
+ 	return system.Prune(ic.ClientCtx, options)
+ }
+ 
+diff --git a/test/e2e/prune_test.go b/test/e2e/prune_test.go
+index 01e848478..57bd5582d 100644
+--- a/test/e2e/prune_test.go
++++ b/test/e2e/prune_test.go
+@@ -4,6 +4,8 @@ import (
+ 	"fmt"
+ 	"os"
+ 	"path/filepath"
++	"syscall"
++	"time"
+ 
+ 	. "github.com/containers/podman/v4/test/utils"
+ 	. "github.com/onsi/ginkgo/v2"
+@@ -22,6 +24,11 @@ FROM scratch
+ ENV test1=test1
+ ENV test2=test2`
+ 
++var longBuildImage = fmt.Sprintf(`
++FROM %s
++RUN echo "Hello, World!"
++RUN RUN echo "Please use signal 9 this will never ends" && sleep 10000s`, ALPINE)
++
+ var _ = Describe("Podman prune", func() {
+ 
+ 	It("podman container prune containers", func() {
+@@ -593,4 +600,63 @@ var _ = Describe("Podman prune", func() {
+ 		Expect(err).ToNot(HaveOccurred())
+ 		Expect(dirents).To(HaveLen(3))
+ 	})
++
++	It("podman system prune --build clean up after terminated build", func() {
++		useCustomNetworkDir(podmanTest, tempdir)
++
++		podmanTest.BuildImage(pruneImage, "alpine_notleaker:latest", "false")
++
++		create := podmanTest.Podman([]string{"create", "--name", "test", BB, "sleep", "10000"})
++		create.WaitWithDefaultTimeout()
++		Expect(create).Should(ExitCleanly())
++
++		containerFilePath := filepath.Join(podmanTest.TempDir, "ContainerFile-podman-leaker")
++		err := os.WriteFile(containerFilePath, []byte(longBuildImage), 0755)
++		Expect(err).ToNot(HaveOccurred())
++
++		build := podmanTest.Podman([]string{"build", "-f", containerFilePath, "-t", "podmanleaker"})
++		// Build will never finish so let's wait for build to ask for SIGKILL to simulate a failed build that leaves stage containers.
++		matchedOutput := false
++		for range 900 {
++			if build.LineInOutputContains("Please use signal 9") {
++				matchedOutput = true
++				build.Signal(syscall.SIGKILL)
++				break
++			}
++			time.Sleep(100 * time.Millisecond)
++		}
++		if !matchedOutput {
++			Fail("Did not match special string in podman build")
++		}
++
++		// Check Intermediate image of stage container
++		none := podmanTest.Podman([]string{"images", "-a"})
++		none.WaitWithDefaultTimeout()
++		Expect(none).Should(ExitCleanly())
++		Expect(none.OutputToString()).Should(ContainSubstring("none"))
++
++		// Check if Container and Stage Container exist
++		count := podmanTest.Podman([]string{"ps", "-aq", "--external"})
++		count.WaitWithDefaultTimeout()
++		Expect(count).Should(ExitCleanly())
++		Expect(count.OutputToStringArray()).To(HaveLen(3))
++
++		prune := podmanTest.Podman([]string{"system", "prune", "--build", "-f"})
++		prune.WaitWithDefaultTimeout()
++		Expect(prune).Should(ExitCleanly())
++
++		// Container should still exist, but no stage containers
++		count = podmanTest.Podman([]string{"ps", "-aq", "--external"})
++		count.WaitWithDefaultTimeout()
++		Expect(count).Should(ExitCleanly())
++		Expect(count.OutputToString()).To(BeEmpty())
++
++		Expect(podmanTest.NumberOfContainers()).To(Equal(0))
++
++		after := podmanTest.Podman([]string{"images", "-a"})
++		after.WaitWithDefaultTimeout()
++		Expect(after).Should(ExitCleanly())
++		Expect(after.OutputToString()).ShouldNot(ContainSubstring("none"))
++		Expect(after.OutputToString()).Should(ContainSubstring("notleaker"))
++	})
+ })
+

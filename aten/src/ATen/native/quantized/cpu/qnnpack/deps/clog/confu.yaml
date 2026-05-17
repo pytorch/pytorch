@@ -1,0 +1,5 @@
+name: clog
+title: C-style (a-la printf) logging library
+license: Simplified BSD
+deps:
+  - name: googletest
