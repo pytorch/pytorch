@@ -716,7 +716,7 @@ class TritonTemplateKernel(TritonKernel):
             # pyrefly: ignore [not-callable]
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
-        with context():
+        with context():  # type: ignore[operator]
             yield
         self.subgraph_bodies[body_name] = SubgraphInfo(
             **{
@@ -849,7 +849,7 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        for arg_num in equal_1_arg_indices(signature):
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
@@ -1408,15 +1408,7 @@ class TritonTemplateKernel(TritonKernel):
                         symbol = range_tree.symbol()
                         epilogue_index_symbols.append(symbol)
                         lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
-                        old_name = lookup_output.symbol()
                         lookup_output.set_name(name)
-                        # Update var_list and var_range
-                        range_tree.var_list[range_tree.var_list.index(old_name)] = (
-                            symbol
-                        )
-                        range_val = range_tree.var_ranges[old_name]
-                        del range_tree.var_ranges[old_name]
-                        range_tree.var_ranges[symbol] = range_val
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
@@ -5211,7 +5203,7 @@ class AlgorithmSelectorCache(PersistentCache):
         pruned_choices = [
             choice
             for choice in choices
-            if choice.kernel_hash_key() not in candidates_to_prune
+            if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         # Cache the hash_key of winners of prescreening
