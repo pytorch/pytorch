@@ -632,6 +632,37 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
 
+    def test_marked_inductor_lowering_node_ignores_storage_only_kwarg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (),
+            {"other": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
     def test_unmarked_inductor_lowering_node_rejects_storage_only_dependency_change(
         self,
     ):

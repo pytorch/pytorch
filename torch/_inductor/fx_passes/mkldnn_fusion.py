@@ -825,6 +825,7 @@ if torch._C._has_mkldnn:
             extra_check=_is_valid_computation_binary_inplace(
                 computation_op, binary_op, other_index
             ),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
