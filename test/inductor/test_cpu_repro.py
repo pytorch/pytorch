@@ -158,6 +158,21 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    def test_embedding_backward_out_of_range_index_dstack(self):
+        def fn():
+            grad = torch.triu_indices(row=4, col=3, offset=-100)
+            indices = torch.randperm(n=2)
+            grad_weight = torch.ops.aten.embedding_backward(
+                grad, indices, 1, 0, False, False
+            )
+            return torch.dstack((grad_weight.unflatten(dim=-1, sizes=(12,)),))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="inductor")()
+
+        self.assertEqual(actual.shape, torch.Size([1, 12, 1]))
+        self.assertEqual(actual, expected)
+
     def _check_conv_stride_constraints(self, formats):
         for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason
