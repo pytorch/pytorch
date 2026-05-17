@@ -205,6 +205,11 @@ kernel_side_table = KernelSideTable()
 def clone_preserve_strides_for_triton_kernel_wrapper(x: Tensor) -> Tensor:
     storage_offset = cast(int, x.storage_offset())
     needed_size = compute_required_storage_length(x.size(), x.stride(), storage_offset)
+    if torch._debug_has_internal_overlap(x) == 1:
+        raise RuntimeError(
+            "Cannot safely clone an internally overlapping mutated Triton kernel "
+            "argument."
+        )
     buffer = torch.empty_strided((needed_size,), (1,), dtype=x.dtype, device=x.device)
     out = torch.as_strided(buffer, x.size(), x.stride(), storage_offset)
     # Copy logical elements only. Inductor may use a compact internal
@@ -1559,7 +1564,7 @@ def triton_kernel_wrapper_functional_dense(
     tensors_to_clone: list[str],
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
+    # strided clone calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
     kwargs = {
@@ -1592,7 +1597,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     tensors_to_clone: list[str],
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
+    # strided clone calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
     with mode:

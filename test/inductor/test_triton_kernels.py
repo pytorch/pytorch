@@ -477,8 +477,8 @@ def forward(self, x_1, output_1):
 
             output_code = log_stream.getvalue()
 
-        FileCheck().check("del buf3").check(
-            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
+        FileCheck().check_regex(r"del buf[0-9]*").check_regex(
+            r"dual_output_kernel_with_inline_asm_0\.run\(x_1, buf[0-9]*, buf[0-9]*,"
         ).run(output_code)
 
         eager_result = f(t.clone())[0]
@@ -1326,6 +1326,44 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(compiled_out, eager_out)
         self.assertEqual(compiled_out.stride(), eager_out.stride())
+
+    @requires_gpu
+    def test_triton_kernel_mutates_expanded_intermediate_errors(self):
+        @triton.jit
+        def add_one_expanded_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements: tl.constexpr,
+            stride_n: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            offsets = tl.arange(0, BLOCK_N)
+            mask = offsets < n_elements
+            value = tl.load(in_ptr)
+            tl.store(out_ptr + offsets * stride_n, value + 1.0, mask=mask)
+
+        def triton_update(x):
+            out = x
+            add_one_expanded_kernel[(1,)](
+                x,
+                out,
+                x.numel(),
+                x.stride(0),
+                BLOCK_N=16,
+            )
+            return out
+
+        def f(base):
+            x = (base + 1).expand(4)
+            return triton_update(x)
+
+        base = torch.randn(1, device=GPU_TYPE)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot safely clone an internally overlapping mutated Triton kernel "
+            "argument.",
+        ):
+            torch.compile(f, fullgraph=True)(base.clone())
 
     @inductor_config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
