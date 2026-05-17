@@ -740,8 +740,7 @@ def _get_partition_fn(
     | None,
 ) -> tuple[bool, Callable[..., tuple[torch.fx.GraphModule, torch.fx.GraphModule]]]:
     """
-    Return either the default `partition_fn` in aot_config or a HOP specific partition
-    function.
+    Return either `default_partition_fn` or a HOP specific partition function.
 
     If a HOP specific partition function is returned, used_hop_custom_partition is True.
 
