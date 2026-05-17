@@ -1272,6 +1272,7 @@ RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
         # Need to make attention implementation local tensor friendly, e.g.
         # rewrite "rank local" logic
         "test_ring_attention_sdpa",
+        "test_context_parallel_sdpa_short_sequence",
     ],
 )
 
