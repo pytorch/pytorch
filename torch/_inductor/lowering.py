@@ -85,6 +85,7 @@ from .utils import (
     decode_device,
     is_dynamic,
     is_gpu,
+    is_nvidia_sm100_or_later,
     is_pointwise_use,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8786,15 +8787,10 @@ def prepare_softmax_online(x, dim):
         return amax, xsum
 
 
-def _is_sm100_or_later():
-    """Check if we're on SM100+ hardware (Blackwell)."""
-    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
-
-
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -8802,9 +8798,9 @@ def cvt_e8m0_rceil_lowering(inp):
     # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
     # that loads adjacent elements, applies PTX to both, and uses a follow-up
     # kernel to extract the packed uint16 results as uint8.
-    if not _is_sm100_or_later():
+    if not is_nvidia_sm100_or_later():
         raise NotImplementedError(
-            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+            "cvt_e8m0_rceil requires NVIDIA SM100+ (Blackwell) for PTX instruction support"
         )
 
     dtype = inp.get_dtype()
