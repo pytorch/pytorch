@@ -87,6 +87,7 @@ from torch.export.dynamic_shapes import (
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
+from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     make_fx,
@@ -820,11 +821,251 @@ class _ExportModuleSpecTrackerDict(dict):
     pass
 
 
+def _validate_shapes_spec_against_args(
+    f: Callable,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    shapes_spec: ShapesSpec,
+) -> None:
+    """Validate that a user-provided ``ShapesSpec`` is structurally
+    compatible with the actual ``(args, kwargs)`` the user passed.
+
+    Currently checks: any leaf spec (``TensorSpec`` / ``IntVar`` / ``int``)
+    in ``ParamsSpec.named_args`` or ``ParamsSpec.varargs`` must correspond
+    to an arg whose pytree-flattened value is a single leaf. A leaf spec
+    for a multi-leaf arg (e.g. ``TensorSpec`` for a ``list[Tensor]`` input)
+    is a structural mismatch and raises ``ValueError`` so the user sees
+    their mistake loudly.
+
+    This is a pure validator: it raises or returns ``None`` and never
+    transforms the spec.
+    """
+    params_spec = shapes_spec._params
+    if params_spec is None:
+        return
+    kwargs = kwargs or {}
+    user_named_args = params_spec._named_args
+    user_varargs = params_spec._varargs
+
+    sig = (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+    pos_params = list(sig.parameters.values())
+    n_pos_params = len(pos_params)
+
+    # Walk positional args.
+    i = 0
+    while i < len(args):
+        if (
+            i < n_pos_params
+            and pos_params[i].kind is not inspect.Parameter.VAR_POSITIONAL
+        ):
+            arg_name = pos_params[i].name
+            user_spec = user_named_args.get(arg_name)
+            if user_spec is not None:
+                leaves, _ = pytree.tree_flatten(args[i])
+                if len(leaves) != 1:
+                    raise ValueError(
+                        f"ParamsSpec entry for forward param {arg_name!r} is "
+                        f"a leaf spec ({type(user_spec).__name__}), but the "
+                        f"actual value pytree-flattens to {len(leaves)} "
+                        f"leaves. The spec must structurally match the arg. "
+                        f"ParamsSpec does not yet support nested specs for "
+                        f"list/dict/tuple inputs; use the legacy "
+                        f"`dynamic_shapes` API for these."
+                    )
+            i += 1
+        else:
+            # *args region.
+            vararg_start = i
+            for j in range(i, len(args)):
+                user_idx = j - vararg_start
+                if (
+                    user_varargs is not None
+                    and user_idx < len(user_varargs)
+                ):
+                    user_spec = user_varargs[user_idx]
+                    if user_spec is not None:
+                        sub_leaves, _ = pytree.tree_flatten(args[j])
+                        if len(sub_leaves) != 1:
+                            raise ValueError(
+                                f"ParamsSpec varargs[{user_idx}] is a leaf "
+                                f"spec ({type(user_spec).__name__}), but the "
+                                f"actual value at that *args position "
+                                f"pytree-flattens to {len(sub_leaves)} "
+                                f"leaves. The spec must structurally match "
+                                f"the arg."
+                            )
+            break
+
+    # Walk kwargs.
+    for arg_name, arg_value in kwargs.items():
+        user_spec = user_named_args.get(arg_name)
+        if user_spec is None:
+            continue
+        leaves, _ = pytree.tree_flatten(arg_value)
+        if len(leaves) != 1:
+            raise ValueError(
+                f"ParamsSpec entry for forward kwarg {arg_name!r} is a leaf "
+                f"spec ({type(user_spec).__name__}), but the actual value "
+                f"pytree-flattens to {len(leaves)} leaves. The spec must "
+                f"structurally match the arg."
+            )
+
+
+def _flatten_shapes_spec(
+    f: Callable,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    shapes_spec: ShapesSpec,
+) -> ShapesSpec:
+    """Re-key a user-provided ``ShapesSpec`` for export's intermediate
+    trace module.
+
+    Export traces an intermediate module (``ModuleToTrace``) instead of
+    the user's original module. The intermediate module's forward
+    signature is ``forward(*flat_args)`` — a single varargs that holds
+    all original inputs flattened. The user, however, wrote their spec
+    against the *original* module's parameter names. This function
+    rewrites the spec so it targets the intermediate module's flat layout
+    (i.e. produces a ``ParamsSpec`` whose ``varargs`` slots line up with
+    positions in ``flat_args``).
+
+    Sources of user spec entries supported:
+
+    * **Named forward args** (``ParamsSpec({"x": leaf_x, ...})``) →
+      mapped to whichever flat slot the value of ``x`` lands at.
+    * **User's `*args`** (``ParamsSpec(varargs=[s0, s1, ...])`` for a
+      ``def forward(self, ..., *args)``) 
+
+    The flat layout is learned from the example input pytree
+    (``pytree.tree_flatten((args, kwargs))``).
+    """
+    params_spec = shapes_spec._params
+    kwargs = kwargs or {}
+    if params_spec is None:
+        # Legal: ShapesSpec() with no params means "all static".
+        flat_inputs, _ = pytree.tree_flatten((args, kwargs))
+        return ShapesSpec(ParamsSpec(varargs=[None] * len(flat_inputs)))
+
+    user_named_args = params_spec._named_args
+    user_varargs = params_spec._varargs  # may be None
+
+    sig = (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+    pos_params = list(sig.parameters.values())
+    n_pos_params = len(pos_params)
+
+    # Walk the user's actual call structure (NOT sig.bind, which re-orders
+    # kwargs to signature order). This must match `pytree.tree_flatten((args,
+    # kwargs))` exactly so each user-spec entry lands at the right flat
+    # position.
+    flat_inputs, _ = pytree.tree_flatten((args, kwargs))
+    out_varargs: list[Any] = [None] * len(flat_inputs)
+
+    flat_idx = 0
+    i = 0
+    while i < len(args):
+        # If we're still inside the named positional region of the
+        # signature (i.e. before any `*args`), look up by name.
+        if (
+            i < n_pos_params
+            and pos_params[i].kind is not inspect.Parameter.VAR_POSITIONAL
+        ):
+            arg_name = pos_params[i].name
+            leaves, _ = pytree.tree_flatten(args[i])
+            n = len(leaves)
+            if arg_name in user_named_args:
+                user_spec = user_named_args[arg_name]
+                # `None` means "static" — always fine. A real leaf spec
+                # (TensorSpec / IntVar / int) describes a single tensor or
+                # scalar; if the actual arg pytree-flattens to anything
+                # other than 1 leaf, the spec is structurally incompatible
+                # with the arg and we raise loudly. (Future: nested specs
+                # mirroring the user's pytree will resolve the multi-leaf
+                # case.)
+                if user_spec is not None and n != 1:
+                    raise ValueError(
+                        f"ParamsSpec entry for forward param {arg_name!r} is "
+                        f"a leaf spec ({type(user_spec).__name__}), but the "
+                        f"actual value pytree-flattens to {n} leaves. The "
+                        f"spec must structurally match the arg. ParamsSpec "
+                        f"does not yet support nested specs for "
+                        f"list/dict/tuple inputs; use the legacy "
+                        f"`dynamic_shapes` API for these."
+                    )
+                if user_spec is not None:
+                    out_varargs[flat_idx] = user_spec
+            flat_idx += n
+            i += 1
+        else:
+            # We've reached the user's `*args` (or extras beyond signature).
+            # Apply user's `_varargs` indexed from this position.
+            vararg_start = i
+            for j in range(i, len(args)):
+                sub_leaves, _ = pytree.tree_flatten(args[j])
+                sub_n = len(sub_leaves)
+                user_idx = j - vararg_start
+                if (
+                    user_varargs is not None
+                    and user_idx < len(user_varargs)
+                ):
+                    user_spec = user_varargs[user_idx]
+                    if user_spec is not None and sub_n != 1:
+                        raise ValueError(
+                            f"ParamsSpec varargs[{user_idx}] is a leaf spec "
+                            f"({type(user_spec).__name__}), but the actual "
+                            f"value at that *args position pytree-flattens "
+                            f"to {sub_n} leaves. The spec must structurally "
+                            f"match the arg."
+                        )
+                    if user_spec is not None:
+                        out_varargs[flat_idx] = user_spec
+                flat_idx += sub_n
+            break
+
+    for arg_name, arg_value in kwargs.items():
+        leaves, _ = pytree.tree_flatten(arg_value)
+        n = len(leaves)
+        if arg_name in user_named_args:
+            user_spec = user_named_args[arg_name]
+            if user_spec is not None and n != 1:
+                raise ValueError(
+                    f"ParamsSpec entry for forward kwarg {arg_name!r} is a "
+                    f"leaf spec ({type(user_spec).__name__}), but the actual "
+                    f"value pytree-flattens to {n} leaves. The spec must "
+                    f"structurally match the arg."
+                )
+            if user_spec is not None:
+                out_varargs[flat_idx] = user_spec
+        flat_idx += n
+
+    # Invariant: our per-arg leaf accumulation must equal the same global
+    # `pytree.tree_flatten((args, kwargs))` the export tracer
+    # (`_dynamo_graph_capture_for_export.inner`) computes. If this ever
+    # asserts, the translator and the tracer have drifted in their flatten
+    # logic and per-input source lookups will silently mis-align.
+    if flat_idx != len(flat_inputs):
+        raise AssertionError(
+            f"_flatten_shapes_spec leaf-count drift: walked {flat_idx} leaves "
+            f"but pytree.tree_flatten((args, kwargs)) yields {len(flat_inputs)}. "
+            f"This means the translator and the export tracer disagree on the "
+            f"flat input layout."
+        )
+
+    return ShapesSpec(ParamsSpec(varargs=out_varargs))
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None" = None,
     *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -853,9 +1094,26 @@ def _export_to_torch_ir(
     # dynamic. We will unwrap ints in fakify later.
     args, kwargs = pytree.tree_map_only(int, _IntWrapper, (args, kwargs))
 
-    combined_args = _combine_args(f, args, kwargs)
-    _check_dynamic_shapes(combined_args, dynamic_shapes)
-    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+    # `dynamic_shapes` is overloaded: it can be the legacy spec OR the new
+    # ShapesSpec/ParamsSpec. Skip legacy constraint processing in the new case;
+    # downstream `torch._dynamo.export` will detect and route appropriately.
+    is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
+
+    if not is_shapes_spec:
+        combined_args = _combine_args(f, args, kwargs)
+        _check_dynamic_shapes(combined_args, dynamic_shapes)
+        constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+        flat_shapes_spec: ShapesSpec | None = None
+    else:
+        constraints = []
+        # Auto-wrap ParamsSpec → ShapesSpec so the translator only deals
+        # with the canonical container type.
+        user_spec = (
+            ShapesSpec(dynamic_shapes)
+            if isinstance(dynamic_shapes, ParamsSpec)
+            else dynamic_shapes
+        )
+        flat_shapes_spec = _flatten_shapes_spec(f, args, kwargs, user_spec)
 
     # Unwrap static ints -- in the case where we have an empty graph
     # containing just integer computation, dynamo will run its generated
@@ -878,7 +1136,7 @@ def _export_to_torch_ir(
     def use_legacy_dynamo_graph_capture() -> bool:
         return bool(
             constraints  # dynamic shape
-            or dynamic_shapes  # dynamic shape
+            or dynamic_shapes  # dynamic shape (legacy or ShapesSpec)
             or isinstance(f, torch.fx.GraphModule)  # retracing
             or preserve_module_call_signature  # unflatten
             or torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
@@ -896,37 +1154,19 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                if torch._export.config.use_new_tracer_experimental:
-                    from torch._dynamo.functional_export import (
-                        _dynamo_graph_capture_for_export,
-                        dynamo_graph_capture_for_export,
-                    )
+                # When NOT going through the new tracer at all (legacy escape
+                # hatch), use the legacy v1 `torch._dynamo.export` path. This
+                # also covers the very-old `use_new_tracer_experimental=False`
+                # case which is still the default in some internal builds.
+                use_dynamo_export = (
+                    not torch._export.config.use_new_tracer_experimental
+                )
 
-                    if use_legacy_dynamo_graph_capture():
-                        dynamo_graph_capture = _dynamo_graph_capture_for_export(
-                            f, constraints=constraints, dynamic_shapes=dynamic_shapes
-                        )
-                    else:
-                        dynamo_graph_capture = torch._dynamo.config.patch(
-                            replay_side_effects=False
-                        )(dynamo_graph_capture_for_export(f))
-                    # We can't serialize entire fake mode yet, so this is to make sure
-                    # things like copy.deepcopy(ep.graph_module) not crash.
-                    # see test_export.py::test_custom_tag_metadata_re_export
-                    # Once we delete the old strict export, we can use
-                    gm_torch_level = dynamo_graph_capture(*args, **kwargs)
-                    # We can't serialize entire fake mode yet, so this is to make sure
-                    # things like copy.deepcopy(ep.graph_module) not crash.
-                    # see test_export.py::test_custom_tag_metadata_re_export
-                    # Once we delete the old strict export, we can use this fake mode in the
-                    # subsequent logic when lowering to aten IR.
-                    del gm_torch_level.meta["fake_mode"]
-
-                else:
+                if use_dynamo_export:
                     gm_torch_level, _ = torch._dynamo.export(
                         f,
                         dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                        constraints=constraints,  # type: ignore[arg-type]
+                        constraints=constraints if not is_shapes_spec else None,
                         assume_static_by_default=True,
                         tracing_mode="symbolic",
                         disable_constraint_solver=disable_constraint_solver,
@@ -938,6 +1178,47 @@ def _export_to_torch_ir(
                         **kwargs,
                     )
                     gm_torch_level.meta["module_call_specs"] = module_call_specs
+                else:
+                    from torch._dynamo.functional_export import (
+                        _dynamo_graph_capture_for_export,
+                        dynamo_graph_capture_for_export,
+                    )
+
+                    if use_legacy_dynamo_graph_capture():
+                        # Pass `dynamic_shapes=None` and `constraints=[]` for
+                        # the ShapesSpec path — the spec is plumbed via
+                        # `config._shapes_spec` and the per-input source
+                        # under ModuleToTrace doesn't carry the user arg
+                        # names anyway. The flat-keyed spec re-key happens
+                        # in `_flatten_shapes_spec` above.
+                        if is_shapes_spec:
+                            ds_for_capture = None
+                            cs_for_capture: list[Any] = []
+                            shapes_spec_ctx = torch._dynamo.config.patch(
+                                _shapes_spec=flat_shapes_spec
+                            )
+                        else:
+                            ds_for_capture = dynamic_shapes  # type: ignore[assignment]
+                            cs_for_capture = constraints
+                            shapes_spec_ctx = nullcontext()
+                        with shapes_spec_ctx:
+                            dynamo_graph_capture = _dynamo_graph_capture_for_export(
+                                f,
+                                constraints=cs_for_capture,
+                                dynamic_shapes=ds_for_capture,  # type: ignore[arg-type]
+                            )
+                            gm_torch_level = dynamo_graph_capture(*args, **kwargs)
+                    else:
+                        dynamo_graph_capture = torch._dynamo.config.patch(
+                            replay_side_effects=False
+                        )(dynamo_graph_capture_for_export(f))
+                        gm_torch_level = dynamo_graph_capture(*args, **kwargs)
+                    # We can't serialize entire fake mode yet, so this is to make sure
+                    # things like copy.deepcopy(ep.graph_module) not crash.
+                    # see test_export.py::test_custom_tag_metadata_re_export
+                    # Once we delete the old strict export, we can use this fake mode in the
+                    # subsequent logic when lowering to aten IR.
+                    del gm_torch_level.meta["fake_mode"]
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
@@ -1586,7 +1867,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None",
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2073,7 +2354,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None",
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2082,6 +2363,14 @@ def _non_strict_export(
     """
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
     """
+
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        raise NotImplementedError(
+            "ShapesSpec/ParamsSpec in dynamic_shapes is not yet supported "
+            "in non-strict export. Use strict=True for now."
+        )
 
     out_spec: TreeSpec | None = None
     in_spec: TreeSpec | None = None
@@ -2265,7 +2554,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None" = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2274,6 +2563,20 @@ def _export_for_training(
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
+    # See note in `_export`: ShapesSpec encodes constraints in shape_env, so
+    # legacy constraint passes should see None.
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+    is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
+
+    if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
+        raise ValueError(
+            "`prefer_deferred_runtime_asserts_over_guards=True` cannot be "
+            "combined with `dynamic_shapes=ShapesSpec(...)`. ShapesSpec "
+            "currently uses unbacked symbols only, which already emit "
+            "runtime assertions; the flag has no effect."
+        )
+
     (
         args,
         kwargs,
@@ -2281,6 +2584,8 @@ def _export_for_training(
         dynamic_shapes,
         verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
 
     original_state_dict = _get_original_state_dict(mod)
 
@@ -2340,7 +2645,7 @@ def _export_for_training(
         export_artifact,
         args,
         kwargs,
-        dynamic_shapes,
+        range_constraints_dynamic_shapes,
     )
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
@@ -2436,7 +2741,7 @@ def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None" = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2488,6 +2793,24 @@ def _export(
     """
 
     from torch._utils_internal import export_training_ir_rollout_check
+
+    # `dynamic_shapes` is overloaded: it accepts the legacy spec OR the new
+    # ShapesSpec/ParamsSpec API. The legacy code path expects None when the
+    # spec is the new one (since constraints are encoded in the shape_env via
+    # dynamo's `_symbolic_context_from_shapes_spec`). We compute this once
+    # here and reuse for `_get_range_constraints`.
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+    is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
+    range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
+
+    if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
+        raise ValueError(
+            "`prefer_deferred_runtime_asserts_over_guards=True` cannot be "
+            "combined with `dynamic_shapes=ShapesSpec(...)`. ShapesSpec "
+            "currently uses unbacked symbols only, which already emit "
+            "runtime assertions; the flag has no effect."
+        )
 
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2560,7 +2883,7 @@ def _export(
         export_artifact,
         args,
         kwargs,
-        dynamic_shapes,
+        range_constraints_dynamic_shapes,
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
