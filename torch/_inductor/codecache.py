@@ -1010,11 +1010,17 @@ class CacheabilityValidator:
         for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 self.bypass("Unsupported joint custom pass")
+        for p in custom_backend_passes.values():
+            if p and (not isinstance(p, CustomGraphModulePass) or not p.uuid()):
+                self.bypass("Unsupported custom backend pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
-        if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
-                self.bypass("Unsupported _pre_fusion_custom_pass")
+        for name, p in (
+            ("_pre_fusion_custom_pass", config._pre_fusion_custom_pass),
+            ("_post_fusion_custom_pass", config._post_fusion_custom_pass),
+        ):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                self.bypass(f"Unsupported {name}")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
@@ -1101,7 +1107,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     )
 
     if timing == "default":
-        supports_late = custom_pass is None or has_uuid
+        supports_late = not custom_pass or has_uuid
         timing = "late" if supports_late else "early"
         if timing == "early" and custom_pass:
             if pass_name not in _warned_pre_grad_pass_missing_uuid:
@@ -1304,6 +1310,9 @@ class FxGraphHashDetails:
         self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
             config._pre_fusion_custom_pass
         )
+        self._post_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+            config._post_fusion_custom_pass
+        )
         self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
             config._fuse_ddp_communication_passes
         )
@@ -1340,9 +1349,10 @@ class FxGraphHashDetails:
                 )
             }
 
-    # This is mainly added to handle these two inductor configs, which are (unfortunately)
-    # sometimes cache safe:
+    # This is mainly added to handle these inductor configs, which are
+    # (unfortunately) sometimes cache safe:
     # - _pre_fusion_custom_pass
+    # - _post_fusion_custom_pass
     # - _fuse_ddp_communication_passes
     # Their types can be found in `torch/_inductor/config.py`, but:
     # - if they are string names, we can cache them safely (one is by default)

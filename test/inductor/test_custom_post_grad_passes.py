@@ -2,6 +2,7 @@
 import contextlib
 import operator
 from collections import defaultdict
+from unittest import mock
 
 import torch
 import torch._inductor.pattern_matcher as pattern_matcher
@@ -9,7 +10,9 @@ import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.common import get_custom_backend_pass_for_device
+from torch._inductor.compile_fx import FxCompileMode
 from torch._inductor.custom_graph_pass import (
+    custom_pass_context,
     CustomGraphModulePass,
     CustomGraphPass,
     CustomInferenceAwareGraphPass,
@@ -159,6 +162,69 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
     def test_custom_joint_pass_post(self):
         with config.patch(joint_custom_post_pass=ChangeCosCustomPass()):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_context_post_grad_pass(self):
+        with custom_pass_context(post_grad_post_passes=[ChangeCosCustomPass()]):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+        self.assertIsNone(config.post_grad_custom_post_pass)
+
+    def test_custom_context_nested_ordering(self):
+        order = []
+
+        class RecordingPass(CustomGraphPass):
+            def __init__(self, label):
+                self.label = label
+
+            def __call__(self, graph: torch.fx.graph.Graph):
+                order.append(self.label)
+
+            def uuid(self) -> bytes | str | None:
+                return f"recording-pass-{self.label}"
+
+        def f(x):
+            return x + 1
+
+        x = torch.randn(8, dtype=torch.float32)
+        with custom_pass_context(post_grad_post_passes=[RecordingPass("outer")]):
+            with custom_pass_context(post_grad_post_passes=[RecordingPass("inner")]):
+                torch.testing.assert_close(torch.compile(f)(x), f(x))
+
+        self.assertEqual(order, ["inner", "outer"])
+
+    def test_custom_context_conflicts_with_config_hook(self):
+        with config.patch(post_grad_custom_post_pass=ChangeCosCustomPass()):
+            with self.assertRaisesRegex(
+                RuntimeError, "post_grad_custom_post_pass is set"
+            ):
+                with custom_pass_context(post_grad_post_passes=[ChangeCosCustomPass()]):
+                    pass
+
+    def test_custom_context_falls_back_from_subprocess_compile(self):
+        with (
+            mock.patch(
+                "torch._inductor.compile_fx.fx_compile_mode",
+                FxCompileMode.SUBPROCESS,
+            ),
+            custom_pass_context(post_grad_post_passes=[ChangeCosCustomPass()]),
+        ):
 
             def g(x):
                 return x.sin().sin().sin()
