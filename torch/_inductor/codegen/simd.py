@@ -1460,9 +1460,11 @@ class SIMDScheduling(BaseScheduling):
         if node1.is_split_scan() and not node2.is_split_scan():
             if node2.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
         elif node2.is_split_scan() and not node1.is_split_scan():
             if node1.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
 
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
