@@ -42,16 +42,19 @@ from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    ReductionHint,
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _enforce_reduction_config_block_minimums,
+    _persistent_reduction_configs,
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
+    match_target_block_product,
     template,
     triton_config,
 )
@@ -96,6 +99,41 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_match_target_block_product_breaks_ties_by_coalescing_score(self):
+        block_sizes = match_target_block_product(
+            {"x": 128, "y": 4096},
+            {"x": 1, "y": 16},
+            target_block_product=32,
+        )
+
+        self.assertEqual(block_sizes, {"x": 1, "y": 32})
+
+    def test_persistent_tiled_inner_reduction_default_config(self):
+        configs = _persistent_reduction_configs(
+            {"y": 4096, "x": 128, "r0_": 32},
+            ReductionHint.INNER,
+            {
+                "tiling_scores": {
+                    "y": 33554432,
+                    "x": 2097152,
+                    "r0_": 67108864,
+                },
+                "max_autotune": False,
+                "max_autotune_pointwise": False,
+            },
+            {"native_matmul": False},
+        )
+
+        self.assertTrue(
+            any(
+                cfg.kwargs == {"YBLOCK": 32, "XBLOCK": 1}
+                and cfg.num_warps == 1
+                and cfg.num_stages == 1
+                for cfg in configs
+            ),
+            configs,
+        )
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
