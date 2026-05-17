@@ -2209,8 +2209,10 @@ class MultiOutputReduction(Reduction):
 
 
 class OnlineSoftmaxReduction(MultiOutputReduction):
+    """Multi-output reduction that computes softmax max/sum in one pass."""
+
     @classmethod
-    def create(  # type: ignore[override]
+    def _create_no_split(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -2222,9 +2224,6 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
     ) -> Sequence[TensorBox]:
-        """
-        Create the reduction disregarding splitting.
-        """
         results = tuple(
             TensorBox.create(
                 MultiOutputReduction(
@@ -2244,6 +2243,151 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         for t in results:
             t.realize()
         return results
+
+    @classmethod
+    def create(  # type: ignore[override]
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
+        num_output: int,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: IRNode | None = None,
+    ) -> Sequence[TensorBox]:
+        reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+        hint, split = Reduction.num_splits(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type="online_softmax_reduce",
+            reduction_numel=reduction_numel,
+            input_node=input_node,
+        )
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+        if split > 1:
+            return cls.create_multilayer(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                num_output,
+                split,
+                reduction_hint,
+                input_node,
+            )
+        return cls._create_no_split(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            num_output,
+            reduction_hint,
+            input_node,
+        )
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
+        num_output: int,
+        split: _IntLike,
+        reduction_hint: ReductionHint,
+        input_node: IRNode | None = None,
+    ) -> Sequence[TensorBox]:
+        reduction_numel = sympy_product(reduction_ranges)
+        block_size = FloorDiv(reduction_numel + (split - 1), split)
+        dense_index = cls.check_for_split_dense_dim_reindexing(
+            reduction_numel, input_node
+        )
+        reindex = View.dynamic_reshape_indexer(
+            reduction_ranges, [reduction_numel], dense_index
+        )
+        need_mask = not V.graph.sizevars.statically_known_true(
+            sympy.Eq(Mod(reduction_numel, split), 0)
+        )
+
+        def wrapper_fn(
+            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+        ) -> tuple[OpsValue, OpsValue]:
+            (reduction_index,) = reduction_index
+            *new_index, reduction_block = index
+            indices = block_size * reduction_block + reduction_index
+
+            def body() -> OpsValue:
+                return inner_fn(new_index, reindex([indices]))
+
+            one = ops.constant(1, src_dtype)
+            if need_mask:
+                index_dtype = dtype_from_size(reduction_numel)
+                mask = ops.lt(
+                    ops.index_expr(indices, index_dtype),
+                    ops.index_expr(reduction_numel, index_dtype),
+                )
+                return (
+                    ops.masked(mask, body, float("-inf")),
+                    ops.where(mask, one, ops.constant(0, src_dtype)),
+                )
+            else:
+                return body(), one
+
+        intermediate_dtype = (
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        intermediates = cls._create_no_split(
+            device,
+            intermediate_dtype,
+            src_dtype,
+            wrapper_fn,
+            [*ranges, split],
+            [block_size],
+            num_output,
+            reduction_hint,
+        )
+        for i in intermediates:
+            i.realize()
+
+        intermediate_loaders = tuple(i.make_loader() for i in intermediates)
+
+        def intermediate_fn(
+            index: Sequence[_IntLike], reduction_index: Sequence[_IntLike]
+        ) -> tuple[OpsValue, ...]:
+            return tuple(
+                loader([*index, *reduction_index]) for loader in intermediate_loaders
+            )
+
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
+        reduction_hint = cls._multilayer_second_step_hint(
+            split, numel_hint, reduction_hint
+        )
+
+        return cls._create_no_split(
+            device,
+            dst_dtype,
+            intermediate_dtype,
+            intermediate_fn,
+            ranges,
+            [split],
+            num_output,
+            reduction_hint,
+        )
 
 
 class WelfordReduction(MultiOutputReduction):
