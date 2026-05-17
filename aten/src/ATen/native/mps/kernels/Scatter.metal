@@ -7,17 +7,14 @@
 using namespace metal;
 using namespace c10::metal;
 
-// scatter_set kernel: implements PyTorch's scatter with reduce='set'.
+// Metal kernels implementing PyTorch's scatter with reduce='set'.
 //
-// For each coordinate `c` in `index`'s shape (one thread per element of
-// `index`), compute:
-//   idx = index[c]
-//   bounds-check idx in [0, dim_size); on failure, report async error.
-//   output[c with c[dim] replaced by idx] = src[c]
-//
-// The caller is responsible for pre-copying `self` into `output` when
-// they refer to different storages (out= variants); this kernel only
-// writes the scattered positions.
+// All three kernels accept a `tid_offset` baked into the linear thread
+// index. The host chunks dispatch into <=UINT_MAX-thread launches so that
+// scatter works on tensors with > 2^32 index elements (Metal's
+// `[[thread_position_in_grid]]` is at most a `uint`).
+
+// Strided generic version for non-contiguous tensors.
 template <typename T, typename index_t>
 kernel void scatter_set(
     device T* output [[buffer(0)]],
@@ -29,13 +26,15 @@ kernel void scatter_set(
     constant long* index_strides [[buffer(6)]],
     constant uint3& ndim_dim [[buffer(7)]],
     constant long& dim_size [[buffer(8)]],
-    device ErrorMessages* error_buf [[buffer(9)]],
+    constant long& tid_offset [[buffer(9)]],
+    device ErrorMessages* error_buf [[buffer(10)]],
     uint thread_index [[thread_position_in_grid]]) {
   const uint ndim = ndim_dim.x;
   const uint dim = ndim_dim.y;
+  const long tid = long(thread_index) + tid_offset;
 
   ::metal::array<long, max_ndim> pos;
-  pos_from_thread_index<long>(long(thread_index), &pos[0], index_sizes, ndim);
+  pos_from_thread_index<long>(tid, &pos[0], index_sizes, ndim);
 
   const long index_offs = offset_from_coord<long>(&pos[0], index_strides, ndim);
   long idx = long(index[index_offs]);
@@ -57,14 +56,10 @@ kernel void scatter_set(
   output[out_offs] = src[src_offs];
 }
 
-// Fast path for the common case where output, src, and index are all
-// contiguous, src and index share the same shape, and that shape matches
-// the output's shape outside `dim`. Each thread:
-//   inner = tid % inner_size       (coords below dim)
-//   outer = tid / (inner_size * index_dim_size)   (coords above dim)
-//   output[outer * output_dim_size * inner_size + idx * inner_size + inner]
-//       = src[tid]
-// inner_size = prod(output.sizes()[dim+1:]).
+// Fast path: contiguous output/src/index, src and index share shape,
+// shape matches output outside `dim`. Indexing collapses to one div + one
+// mod per thread. inner_size = prod(output.sizes()[dim+1:]) precomputed
+// on the host.
 template <typename T, typename index_t>
 kernel void scatter_set_dense(
     device T* output [[buffer(0)]],
@@ -73,9 +68,11 @@ kernel void scatter_set_dense(
     constant long& inner_size [[buffer(3)]],
     constant long& index_dim_size [[buffer(4)]],
     constant long& output_dim_size [[buffer(5)]],
-    device ErrorMessages* error_buf [[buffer(6)]],
+    constant long& tid_offset [[buffer(6)]],
+    device ErrorMessages* error_buf [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  long idx = long(index[thread_index]);
+  const long tid = long(thread_index) + tid_offset;
+  long idx = long(index[tid]);
   if (idx < 0 || idx >= output_dim_size) {
     TORCH_REPORT_ERROR(
         error_buf,
@@ -85,11 +82,43 @@ kernel void scatter_set_dense(
         output_dim_size);
     return;
   }
-  const long inner = long(thread_index) % inner_size;
-  const long outer = long(thread_index) / (inner_size * index_dim_size);
+  const long inner = tid % inner_size;
+  const long outer = tid / (inner_size * index_dim_size);
   const long out_offset =
       outer * (inner_size * output_dim_size) + idx * inner_size + inner;
-  output[out_offset] = src[thread_index];
+  output[out_offset] = src[tid];
+}
+
+// Same as `scatter_set_dense` but the source is a single scalar value,
+// avoiding the per-thread src read and the host-side `at::empty + fill_`
+// the legacy MPSGraph path needed for `scatter.value`.
+template <typename T, typename index_t>
+kernel void scatter_set_dense_value(
+    device T* output [[buffer(0)]],
+    constant T& value [[buffer(1)]],
+    constant index_t* index [[buffer(2)]],
+    constant long& inner_size [[buffer(3)]],
+    constant long& index_dim_size [[buffer(4)]],
+    constant long& output_dim_size [[buffer(5)]],
+    constant long& tid_offset [[buffer(6)]],
+    device ErrorMessages* error_buf [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long tid = long(thread_index) + tid_offset;
+  long idx = long(index[tid]);
+  if (idx < 0 || idx >= output_dim_size) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "scatter: index ",
+        idx,
+        " is out of bounds for dimension with size ",
+        output_dim_size);
+    return;
+  }
+  const long inner = tid % inner_size;
+  const long outer = tid / (inner_size * index_dim_size);
+  const long out_offset =
+      outer * (inner_size * output_dim_size) + idx * inner_size + inner;
+  output[out_offset] = value;
 }
 
 #define REGISTER_SCATTER_SET_OP(DTYPE, IDXTYPE)                                \
@@ -104,7 +133,8 @@ kernel void scatter_set_dense(
       constant long* index_strides [[buffer(6)]],                              \
       constant uint3& ndim_dim [[buffer(7)]],                                  \
       constant long& dim_size [[buffer(8)]],                                   \
-      device ErrorMessages* error_buf [[buffer(9)]],                           \
+      constant long& tid_offset [[buffer(9)]],                                 \
+      device ErrorMessages* error_buf [[buffer(10)]],                          \
       uint thread_index [[thread_position_in_grid]]);                          \
   template [[host_name("scatter_set_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
   scatter_set_dense<DTYPE, IDXTYPE>(                                           \
@@ -114,7 +144,20 @@ kernel void scatter_set_dense(
       constant long& inner_size [[buffer(3)]],                                 \
       constant long& index_dim_size [[buffer(4)]],                             \
       constant long& output_dim_size [[buffer(5)]],                            \
-      device ErrorMessages* error_buf [[buffer(6)]],                           \
+      constant long& tid_offset [[buffer(6)]],                                 \
+      device ErrorMessages* error_buf [[buffer(7)]],                           \
+      uint thread_index [[thread_position_in_grid]]);                          \
+  template [[host_name("scatter_set_dense_value_" #DTYPE                       \
+                       "_" #IDXTYPE)]] kernel void                             \
+  scatter_set_dense_value<DTYPE, IDXTYPE>(                                     \
+      device DTYPE * output [[buffer(0)]],                                     \
+      constant DTYPE & value [[buffer(1)]],                                    \
+      constant IDXTYPE * index [[buffer(2)]],                                  \
+      constant long& inner_size [[buffer(3)]],                                 \
+      constant long& index_dim_size [[buffer(4)]],                             \
+      constant long& output_dim_size [[buffer(5)]],                            \
+      constant long& tid_offset [[buffer(6)]],                                 \
+      device ErrorMessages* error_buf [[buffer(7)]],                           \
       uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_SCATTER_SET_DTYPE(DTYPE) \
