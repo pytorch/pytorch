@@ -1127,16 +1127,11 @@ def get_kernel_metadata(
                         replacement_reads = reduction_reads.get(node)
                         if replacement_reads is None:
                             continue
-                        if (
-                            len(unsatisfied_positions) == 1
-                            and len(replacement_reads) == 1
-                        ):
-                            replacements = replacement_reads
-                        elif len(unsatisfied_positions) == len(replacement_reads):
-                            replacements = replacement_reads
-                        else:
+                        if len(unsatisfied_positions) != len(replacement_reads):
                             return None
-                        for i, replacement in zip(unsatisfied_positions, replacements):
+                        for i, replacement in zip(
+                            unsatisfied_positions, replacement_reads
+                        ):
                             input_names[i] = replacement
                         changed = True
 
@@ -1201,7 +1196,7 @@ def get_kernel_metadata(
                             continue
                         external_reads.add(input_name)
 
-                        # Remove the dupricated inputs
+                        # Remove the duplicated inputs
                         if r.name in all_reads:
                             continue
                         all_reads.add(r.name)

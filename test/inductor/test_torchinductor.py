@@ -18030,6 +18030,7 @@ if RUN_GPU:
                 (False, "producer"),
                 (True, "producer"),
                 (False, "consumer"),
+                (True, "consumer"),
             ]
             for mix_order_reduction, reduction_kind in test_cases:
                 with self.subTest(
