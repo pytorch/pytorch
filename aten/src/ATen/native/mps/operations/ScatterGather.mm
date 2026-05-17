@@ -464,7 +464,8 @@ static void scatter_fill_mps_kernel(const Tensor& self, int64_t dim, const Tenso
 }
 
 // Shared scatter-reduce dispatch used by add / reduce / scalar_reduce /
-// reduce_two stubs. mean is rejected via reduce_op_to_mps_string.
+// reduce_two stubs. mean accumulates as sum here; the divide-by-count
+// post-pass for scatter_reduce.two happens in shared scatter_reduce_two.
 static void scatter_reduce_dispatch(const Tensor& self,
                                     int64_t dim,
                                     const Tensor& index,
@@ -473,6 +474,9 @@ static void scatter_reduce_dispatch(const Tensor& self,
   if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
     return;
   }
+  // Match CPU: scatter_reduce(mean) isn't defined for bool.
+  TORCH_CHECK(reduce != ReductionType::MEAN || self.scalar_type() != ScalarType::Bool,
+              "scatter_reduce: reduce='mean' not implemented for 'Bool'");
   auto self_view = self.dim() == 0 ? self.view({1}) : self;
   auto src_view = maybe_expand_0_dim(src);
   auto index_view = maybe_expand_0_dim(index);
