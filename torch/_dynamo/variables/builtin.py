@@ -1469,68 +1469,6 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
 
-    def call_exec(
-        self,
-        tx: "InstructionTranslator",
-        source: VariableTracker,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        if len(args) > 1:
-            return None
-        if "globals" in kwargs:
-            if args:
-                return None
-            args = (kwargs.pop("globals"),)
-        if kwargs:
-            return None
-        if not source.is_python_constant():
-            return None
-        source_str = source.as_python_constant()
-        if not isinstance(source_str, str):
-            return None
-
-        try:
-            tree = ast.parse(source_str.strip(), mode="exec")
-        except SyntaxError as exc:
-            raise_observed_exception(SyntaxError, tx, args=[exc.msg])
-
-        globals_ns = args[0] if args else None
-        if globals_ns is not None and not (
-            isinstance(globals_ns, ConstDictVariable) and globals_ns.is_mutable()
-        ):
-            return None
-        for stmt in tree.body:
-            if isinstance(stmt, ast.Pass):
-                continue
-            if isinstance(stmt, ast.Expr):
-                value = self._constant_eval_result(
-                    tx, ast.Expression(stmt.value), "<torch._dynamo.exec>"
-                )
-                if value is None:
-                    return None
-                continue
-            if not (
-                isinstance(stmt, ast.Assign)
-                and len(stmt.targets) == 1
-                and isinstance(stmt.targets[0], ast.Name)
-                and globals_ns is not None
-            ):
-                return None
-            value = self._constant_eval_result(
-                tx, ast.Expression(stmt.value), "<torch._dynamo.exec>"
-            )
-            if value is None:
-                return None
-            globals_ns.call_method(
-                tx,
-                "__setitem__",
-                [ConstantVariable.create(stmt.targets[0].id), value],
-                {},
-            )
-
-        return ConstantVariable.create(None)
-
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
