@@ -21,11 +21,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
+import sympy
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.reference import PythonReferenceAnalysis
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -1954,16 +1959,9 @@ class Graph:
         Sub-expressions shared across inputs are emitted exactly once with
         hash-consing on the underlying ``expr_to_proxy`` map.
 
-        This is a "frozen snapshot" alternative to ``create_stride_node`` /
-        ``create_size_node``: the resulting subgraph's value depends only on
-        the symbol producers it references (layout-invariant input placeholders
-        in the common case), so it survives later passes that may re-derive
-        layouts on the original producer tensor.
-
         Concrete example -- consider a graph with a tensor placeholder
-        ``%x`` of shape ``(s32, s32)`` (NCHW contiguous, so its trace-time
-        stride at dim 0 is ``s32``), and we want to record this stride as an
-        FX value to pass to a later op:
+        ``%x`` of shape ``(s32, s32)`` and we want to record this stride
+        as an FX value to pass to a later op:
 
         * ``g.create_stride_node(%x, 0)`` emits ``%t = aten.sym_stride.int(%x, 0)``.
           The semantics of this op are "ask ``%x`` for its current stride at
@@ -1982,11 +1980,9 @@ class Graph:
           stride is not). This is the right behavior when you want to *freeze*
           the trace-time stride into the graph.
         """
-        import sympy
-
-        from torch.fx.experimental.proxy_tensor import py_sym_types
-        from torch.utils._sympy.interp import sympy_interp
-        from torch.utils._sympy.reference import PythonReferenceAnalysis
+        # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
+        # calls (invalidated on graph mutation) — currently we walk all of
+        # `self.nodes` on every invocation, which is O(N_nodes) per call.
 
         # Build the symbol -> Proxy map once; shared across all inputs so common
         # sub-expressions across symints get hash-consed into single subgraphs.
