@@ -327,7 +327,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                std::optional<int64_t> window_size_right,
                const bool return_softmax,
                const std::optional<at::Generator>& gen_) {
-  TORCH_CHECK(!seqused_k.has_value(), "[ROCm] mha_varlen_fwd: seqused_k must be nullopt");
+  bool strided_varlen = seqused_k.has_value();
   const bool paged_KV = block_table_.has_value();
   TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
@@ -473,8 +473,6 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.Sm_scale = softmax_scale;
     params.L = mk_aotensor<2>(M, "logsumexp");
     params.Out = mk_aotensor(out_padded, "Out");
-    params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-    params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
     params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
     params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
     params.dropout_p = p_dropout;
@@ -486,7 +484,23 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
     params.persistent_atomic_counter = persistent_counter;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-    params.varlen_type = VarlenType::CompactVarlen;
+    params.varlen_type = strided_varlen ? VarlenType::StridedVarlen : VarlenType::CompactVarlen;
+    if (strided_varlen) {
+      // seqused_k holds per-batch actual kv lengths; the kernel expects cumulative
+      // offsets for cu_seqlens_k so it can compute seqlen_k via differencing.
+      // seq_strides_k carries the real memory offsets into the KV cache.
+      const auto& seqused = seqused_k.value();
+      const int num_seqs = seqused.size(0);
+      at::Tensor cu_seqlens_k_from_seqused = at::zeros({num_seqs + 1}, seqused.options());
+      cu_seqlens_k_from_seqused.slice(0, 1).copy_(seqused.cumsum(0));
+      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k_from_seqused, "cu_seqlens_k");
+      params.seq_strides_q = mk_aotensor<1>(cu_seqlens_q, "seq_strides_q");
+      params.seq_strides_k = mk_aotensor<1>(cu_seqlens_k, "seq_strides_k");
+    } else {
+      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+    }
     params.window_left = window_left;
     params.window_right = window_right;
     err = aotriton::v3::flash::attn_fwd(params,

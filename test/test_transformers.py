@@ -3292,7 +3292,6 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertFalse(dk.isnan().any())
             self.assertFalse(dv.isnan().any())
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_mask_broken_177842(self):
         # https://github.com/pytorch/pytorch/issues/177842
