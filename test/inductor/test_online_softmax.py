@@ -163,21 +163,43 @@ class TestOnlineSoftmax(TestCase):
 
     def test_split_reduction(self):
         """
-        We don't split online_softmax_reduce for now. Check
-        'Split online_softmax_reduce' note in the code.
-
-        When a split is promsing, we fallback for now.
-
-        This is just a manual example rather than something we
-        see in practice.
+        Split online_softmax_reduce into partial max/sum tuples and combine
+        the partials with another online_softmax_reduce.
         """
         # tensor shape to trigger split reduction
-        x = torch.randn(1, 2**20, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(1, 2**20 + 13, dtype=torch.bfloat16, device=GPU_TYPE)
         ref = torch.softmax(x, dim=-1)
         act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
         self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
         self.assertTrue(code.count("def triton") >= 2)
-        self.assertTrue("online_softmax_reduce" not in code)
+        self.assertTrue("online_softmax_reduce" in code)
+        self.assertTrue("online_softmax_combine_with_sum" in code)
+
+    def test_kl_div_log_softmax_backward_split_reduction(self):
+        logits = torch.randn(
+            1, 2**20, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+        )
+        targets = F.softmax(torch.randn_like(logits), dim=-1)
+        ref_logits = logits.detach().clone().requires_grad_()
+        ref_targets = targets.detach().clone()
+
+        def f(logits, targets):
+            return F.kl_div(
+                F.log_softmax(logits, dim=-1), targets, reduction="batchmean"
+            )
+
+        ref = f(ref_logits, ref_targets)
+        ref.backward()
+
+        opt_f = torch.compile(f)
+        act, codes = run_and_get_code(opt_f, logits, targets)
+        act.backward()
+        code = "\n".join(codes)
+
+        self.assertEqual(ref, act)
+        self.assertEqual(ref_logits.grad, logits.grad)
+        self.assertTrue("online_softmax_reduce" in code)
+        self.assertTrue("online_softmax_combine_with_sum" in code)
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
     def test_prepare_softmax_acc_with_fp64(self, dtype):
