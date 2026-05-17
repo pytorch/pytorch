@@ -548,6 +548,17 @@ _efficient_attention_backward(
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
                 " (gfx90a/gfx942/gfx1100/gfx1201)")
     }
+    bool deterministic{false};
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      } else {
+        deterministic = true;
+      }
+    }
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
     if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
@@ -618,9 +629,12 @@ _efficient_attention_backward(
     } else {
       params.varlen_type = VarlenType::None;
     }
+    aotriton::v3::flash::attn_options opts;
+    opts.deterministic = deterministic;
     err = aotriton::v3::flash::attn_bwd(params,
                                         aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream);
+                                        stream,
+                                        &opts);
 #else  // DISABLE_AOTRITON
     TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
 #endif

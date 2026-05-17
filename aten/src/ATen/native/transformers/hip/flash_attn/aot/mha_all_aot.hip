@@ -660,9 +660,12 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
   params.D = mklazy_empty_like<2>(&lazy_delta);
   params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+  aotriton::v3::flash::attn_options options;
+  options.deterministic = deterministic;
   err = aotriton::v3::flash::attn_bwd(params,
                                       aotriton::v3::flash::attn_bwd_params::kVersion,
-                                      stream);
+                                      stream,
+                                      &options);
 
   return { dq, dk, dv, softmax_d };
 }
@@ -859,9 +862,12 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     LazyTensorContext lazy_dq_acc { .like_tensor = dq_padded, .tensor_name = "dq_acc" };
     params.D = mklazy_empty_like<2>(&lazy_delta);
     params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+    aotriton::v3::flash::attn_options options;
+    options.deterministic = deterministic;
     err = aotriton::v3::flash::attn_bwd(params,
                                         aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream);
+                                        stream,
+                                        &options);
   } else {
     // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
     dq.zero_();
