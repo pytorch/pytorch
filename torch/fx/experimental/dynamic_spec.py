@@ -181,6 +181,13 @@ class ParamsSpec:
     Example::
 
         ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+
+    **Anything not expressed in ``ParamsSpec`` is STATIC.**
+
+    ``varkw`` (the ``**kwargs`` slot) is not yet supported as a constructor
+    argument. ``varargs`` IS supported as a single ``list[LeafSpec]``
+    indexed positionally — ``varargs[N]`` is the spec for ``args[N]`` of the
+    function's ``*args`` parameter (whatever Python name the user gave it).
     """
 
     def __init__(
@@ -190,12 +197,12 @@ class ParamsSpec:
         varargs: list[IntermediateSpec] | None = None,
         varkw: dict[str, IntermediateSpec] | None = None,
     ) -> None:
-        self._named_args: dict[str, LeafSpec] = dict(named_args) if named_args else {}
-        if varargs is not None:
-            raise NotImplementedError("varargs is not supported yet")
+        self._named_args: dict[str, IntermediateSpec] = dict(named_args) if named_args else {}
         if varkw is not None:
             raise NotImplementedError("varkw is not supported yet")
-        self._varargs: list[IntermediateSpec] | None = None
+        self._varargs: list[IntermediateSpec] | None = (
+            list(varargs) if varargs is not None else None
+        )
         self._varkw: dict[str, IntermediateSpec] | None = None
 
     def __repr__(self) -> str:

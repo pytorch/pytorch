@@ -2187,7 +2187,7 @@ def export(
     pre_dispatch: bool = False,
     decomposition_table: dict[torch._ops.OpOverload, Callable[..., Any]] | None = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None" = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -2233,6 +2233,65 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
+         **Experimental ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
+         This is the same spec API exposed via ``shapes_spec=`` in
+         :func:`torch.compile`.
+
+         The keys of ``ParamsSpec`` are **parameter names of the callable
+         being traced** (for an ``nn.Module`` this is the parameters of
+         ``forward``)::
+
+             class M(torch.nn.Module):
+                 def forward(self, x, y, z=None):
+                     ...
+
+             ep = torch.export.export(
+                 M(),
+                 args=(torch.randn(8, 3),),                 # x
+                 kwargs={"y": torch.randn(5, 3), "z": 7},   # y, z
+                 dynamic_shapes=ShapesSpec(params=ParamsSpec({
+                     "x": TensorSpec([ShapeVar("A"), None]),
+                     "y": TensorSpec([ShapeVar("B"), None]),
+                 })),
+                 strict=True,
+             )
+
+         Properties of the ``ShapesSpec`` path (v0):
+
+         * **Unbacked-only.** Inputs marked dynamic via
+           :class:`~torch.fx.experimental.dynamic_spec.IntVar` /
+           :class:`~torch.fx.experimental.dynamic_spec.ShapeVar` (whether
+           used for a tensor dim inside a
+           :class:`~torch.fx.experimental.dynamic_spec.TensorSpec` or for a
+           scalar int input) become **unbacked** SymInts (``u`` symbols).
+           Branching on them without ``min``/``max`` raises a
+           data-dependent error.
+         * **No 0/1 specialization.** Unbacked symbols are never specialized
+           to ``0`` or ``1`` even if the example input has those sizes.
+         * **``torch._check`` becomes a runtime assertion automatically**
+           (no flag required). Input-dim checks like
+           ``torch._check(x.size(0) > 5)`` refine the symbol's value range
+           and materialize as input-precondition guards on ``ep.module()``;
+           checks on intermediate unbacked symbols are emitted as inline
+           ``_assert_scalar`` nodes in the graph body.
+
+           TODO: ``insert_deferred_runtime_asserts`` (in
+           ``torch/fx/passes/runtime_assert.py``) currently prunes the
+           inline ``_assert_scalar`` for input-bound checks because the
+           ``ShapeEnv`` range info is considered to already cover them.
+           This is wrong: user-written ``torch._check`` calls should never
+           be dropped from the graph body — they're part of the model's
+           semantics, not just hints to the tracer. The pruning is
+           especially harmful under ``torch.compile`` (no ``ep.module()``
+           wrapper) where the check then has no runtime effect at all.
+           Fix should ensure user-emitted asserts are preserved while
+           still allowing dedup of compiler-internal redundant ones.
+         * Cannot be combined with ``constraints`` or with
+           ``prefer_deferred_runtime_asserts_over_guards=True`` — passing
+           either alongside a ``ShapesSpec`` raises ``ValueError``.
+
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
         disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
@@ -2252,6 +2311,33 @@ def export(
     """
     if config.debug_force_graph_break_on_leaf_return:
         raise unittest.SkipTest("Cannot force graph break on export")
+
+    # `dynamic_shapes` is overloaded: it accepts the legacy dict/tuple/list/Dim
+    # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
+    # route it through dynamo's `shapes_spec` mechanism and skip the legacy
+    # constraint processing.
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+    shapes_spec: ShapesSpec | None = None
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        if constraints:
+            raise ValueError(
+                "`dynamic_shapes=ShapesSpec(...)` cannot be combined with "
+                "`constraints`. ShapesSpec controls dynamic behavior on its own."
+            )
+        if prefer_deferred_runtime_asserts_over_guards:
+            raise ValueError(
+                "`prefer_deferred_runtime_asserts_over_guards=True` cannot "
+                "be combined with `dynamic_shapes=ShapesSpec(...)`. "
+                "ShapesSpec currently uses unbacked symbols only, which "
+                "already emit runtime assertions; the flag has no effect."
+            )
+        shapes_spec = (
+            ShapesSpec(dynamic_shapes)
+            if isinstance(dynamic_shapes, ParamsSpec)
+            else dynamic_shapes
+        )
+        dynamic_shapes = None
 
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
@@ -2438,6 +2524,11 @@ def export(
             ),
             _compiling_state_context(),
         ):
+            # `optimize_assert` is dynamo's single-graph-capture entry point
+            # (used by both `fullgraph=True` torch.compile and export). It
+            # forces graph-break-as-error and traces `f` once into a single
+            # FX graph; here the backend just captures the graph instead of
+            # compiling/running it.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -2446,6 +2537,7 @@ def export(
                 ),
                 export=True,
                 export_constraints=constraints,
+                shapes_spec=shapes_spec,
             )(f)
             # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:

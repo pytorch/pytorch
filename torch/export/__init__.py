@@ -3,13 +3,17 @@ import os
 import warnings
 import zipfile
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.types import FileLike
+
+
+if TYPE_CHECKING:
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 
 
 __all__ = [
@@ -61,7 +65,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    dynamic_shapes: "dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None" = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -126,6 +130,73 @@ def export(
          where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
+
+         **Experimental ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
+         This is a newer unfied API accross compile, pr-compile, export..etc.
+
+         Important properties of the ``ShapesSpec`` path (v0):
+
+         * **Unbacked-only.** Inputs marked dynamic via
+           :class:`~torch.fx.experimental.dynamic_spec.IntVar` /
+           :class:`~torch.fx.experimental.dynamic_spec.ShapeVar` (whether
+           used for a tensor dim inside a
+           :class:`~torch.fx.experimental.dynamic_spec.TensorSpec` or for a
+           scalar int input) are represented as **unbacked** SymInts
+           (``u`` symbols). 
+         * **No 0/1 specialization.** Unbacked symbols are never specialized
+           to ``0`` or ``1`` even if the example input happens to have those
+           sizes. The exported graph is valid for *any* size in the symbol's
+           value range.
+         * **``torch._check`` becomes a runtime assertion automatically.**
+           Calls to :func:`torch._check` (and ``torch._check_is_size``) on
+           unbacked symbols are translated to runtime checks in the
+           exported program — no flag required. Where the check lands
+           depends on what's being checked:
+
+           - If the check constrains an *input dim* (e.g.
+             ``torch._check(x.size(0) > 5)``), the symbol's value range is
+             refined and the check materializes as an **input precondition
+             guard** on ``ep.module()`` (visible in
+             ``ExportedProgram.range_constraints``).
+           - If the check is on an *intermediate* unbacked symbol (e.g.
+             ``u = y.item(); torch._check(u > 0)``), it is emitted as an
+             inline ``_assert_scalar`` node in the graph body.
+         * **Export-time soundness.** ``ShapesSpec`` is currently the only
+           ``dynamic_shapes`` mode that guarantees export-time soundness:
+           because dims become unbacked, the export trace cannot specialize
+           on their values. With the legacy ``Dim.DYNAMIC`` / ``Dim.AUTO``
+           mode the tracer may silently specialize on a dynamic dim,
+           producing a graph that is only valid for the example input
+           shape; the ``ShapesSpec`` path eliminates that class of bug.
+         * **Strict only.** Only ``strict=True`` is supported in v0; passing
+           a ``ShapesSpec`` with ``strict=False`` raises ``NotImplementedError``.
+         * **Incompatible with** ``prefer_deferred_runtime_asserts_over_guards=True``:
+           that flag exists for backed-dim guards (e.g. ``s0 * s1 == s2``) and
+           has no effect on unbacked symbols, so combining the two raises
+           ``ValueError``.
+         * **Variadic** ``*args`` **and** ``**kwargs`` **in the forward
+           signature are not supported.** ``ParamsSpec`` keys must match
+           named forward parameters (positional or with defaults).
+           Constructing a ``ParamsSpec`` with ``varargs=`` or ``varkw=``
+           raises ``NotImplementedError``.
+
+         Example::
+
+            from torch.fx.experimental.dynamic_spec import (
+                ParamsSpec, ShapesSpec, ShapeVar, TensorSpec,
+            )
+
+            ep = torch.export.export(
+                mod, (torch.randn(8, 3),),
+                dynamic_shapes=ShapesSpec(
+                    params=ParamsSpec({
+                        "x": TensorSpec([ShapeVar("batch", min=1, max=128), None]),
+                    })
+                ),
+                strict=True,
+            )
 
         strict: When disabled (default), the export function will trace the program through
          Python runtime, which by itself will not validate some of the implicit assumptions
