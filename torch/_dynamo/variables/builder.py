@@ -352,16 +352,60 @@ def safe_has_grad(t: object) -> bool:
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+    """Find the user spec entry corresponding to a given dynamo input source.
 
-    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
-    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    Two kinds of input sources are recognized:
+
+    1. **Named forward arg** — ``LocalSource(local_name=NAME, is_input=True)``
+       with ``is_varargs=False`` and ``is_varkw=False`` (a regular named
+       parameter). Looked up in ``ParamsSpec._named_args[NAME]``.
+
+    2. **Indexed varargs element** — ``GetItemSource(base=LocalSource(_, is_input=True, is_varargs=True), index=N)``.
+       This represents ``args[N]`` for the function's ``*args`` parameter
+       (whose Python name is irrelevant — the ``is_varargs`` flag is the
+       discriminator, set by dynamo from ``co_flags & CO_VARARGS``).
+       Looked up in ``ParamsSpec._varargs[N]``.
+
+    Note: indexed access into a *regular list-typed input* (e.g. ``def
+    forward(self, lst): return lst[0]``) is structurally identical at the
+    dynamo level — same ``GetItemSource`` shape — but its base
+    ``LocalSource`` has ``is_varargs=False``. Such accesses are NOT matched
+    here (those inputs stay static under the current spec API).
+
+    Returns the matching ``TensorSpec`` / ``IntVar`` / ``int`` / ``None``
+    leaf spec, or ``None`` if the source pattern is not recognized or no
+    spec is registered for that position.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
-        return None
-    return shapes_spec._params._named_args.get(source.local_name)
+    params = shapes_spec._params
+    # Case 1: direct named arg (not the *args / **kwargs slot).
+    if (
+        isinstance(source, LocalSource)
+        and source.is_input
+        and not source.is_varargs
+        and not source.is_varkw
+    ):
+        return params._named_args.get(source.local_name)
+    # Case 2: indexed access into *args.
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, LocalSource)
+        and source.base.is_input
+        and source.base.is_varargs
+    ):
+        if type(source.index) is not int:
+            raise AssertionError(
+                f"Expected int index for *args GetItemSource, got "
+                f"{type(source.index).__name__}: {source.index!r} "
+                f"(source={source!r})"
+            )
+        if (
+            params._varargs is not None
+            and 0 <= source.index < len(params._varargs)
+        ):
+            return params._varargs[source.index]
+    return None
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
