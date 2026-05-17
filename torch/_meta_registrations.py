@@ -195,6 +195,44 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta(
+    [
+        aten._transformer_encoder_layer_fwd.default,
+        aten._transformer_encoder_layer_fwd.out,
+    ]
+)
+@out_wrapper()
+def meta__transformer_encoder_layer_fwd(
+    src: Tensor,
+    embed_dim: int,
+    num_heads: int,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    use_gelu: bool,
+    norm_first: bool,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
+    ffn_weight_1: Tensor,
+    ffn_bias_1: Tensor,
+    ffn_weight_2: Tensor,
+    ffn_bias_2: Tensor,
+    mask: torch.Tensor | None = None,
+    mask_type: int | None = None,
+) -> Tensor:
+    if src.is_nested:
+        raise NotImplementedError(
+            "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
+        )
+    if src.numel() == 0:
+        return src.clone()
+    return torch.empty_like(src)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
