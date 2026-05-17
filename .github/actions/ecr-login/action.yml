@@ -37,10 +37,7 @@ runs:
       run: |
         echo "::group::Checking for IAM instance profile"
         echo "Checking EC2 metadata endpoint for IAM instance profile..."
-        # IMDS may be reachable over IPv6 [fd00:ec2::254] (IPv6-only EKS pods
-        # without NAT64) or IPv4 169.254.169.254 elsewhere; --resolve tries
-        # both. --noproxy '*' avoids any corporate proxy interception, and
-        # -m 2 bounds the total time per call.
+        # Dual-stack IMDS (IPv6 [fd00:ec2::254] / IPv4 169.254.169.254) for IPv6-only EKS support.
 
         # Try IMDSv2 first (more secure, required on some instances)
         echo "Attempting IMDSv2..."

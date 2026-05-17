@@ -103,12 +103,7 @@ runs:
       run: |
         set -euo pipefail
         function get_ec2_metadata() {
-          # Pulled from instance metadata endpoint for EC2
-          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-          # IMDS may be reachable over IPv6 [fd00:ec2::254] (IPv6-only EKS pods
-          # without NAT64) or IPv4 169.254.169.254 elsewhere; --resolve tries
-          # both. Soft-fail when neither responds (off-EC2 or v6 endpoint not
-          # enabled via HttpProtocolIpv6).
+          # EC2 IMDS, dual-stack: IPv6 [fd00:ec2::254] (IPv6-only EKS) + IPv4 169.254.169.254.
           category=$1
           # If it is GCP runner (runner name contains gcp), do not run this
           runner_name_str=${{ runner.name }}
