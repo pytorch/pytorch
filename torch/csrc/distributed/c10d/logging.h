@@ -119,7 +119,7 @@ std::string formatLogMessage(fmt::string_view fmt, T&&... args) {
 // Logs at WARNING on calls N, 2N, 3N, ... and at DEBUG otherwise.
 // Useful for retry loops where each failure is worth recording but only
 // every Nth one needs to surface as a warning.
-#define C10D_WARNING_EVERY_N_ELSE_DEBUG(n, ...)                    \
+#define C10D_WARNING_EVERY_NTH_ELSE_DEBUG(n, ...)                  \
   do {                                                             \
     static std::atomic<size_t> _c10d_counter{0};                   \
     size_t _c10d_c =                                               \

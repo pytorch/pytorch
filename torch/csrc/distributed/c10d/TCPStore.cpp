@@ -103,7 +103,7 @@ class TCPClient {
     try {
       tcputil::sendBytes(socket_.handle(), data, length);
     } catch (const std::exception& e) {
-      C10D_WARNING_EVERY_N_ELSE_DEBUG(
+      C10D_WARNING_EVERY_NTH_ELSE_DEBUG(
           10, "sendBytes failed on {}: {}", socket_.repr(), e.what());
       throw;
     }
@@ -113,7 +113,7 @@ class TCPClient {
     try {
       return tcputil::recvVector<std::uint8_t>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING_EVERY_N_ELSE_DEBUG(
+      C10D_WARNING_EVERY_NTH_ELSE_DEBUG(
           10, "recvVector failed on {}: {}", socket_.repr(), e.what());
       throw;
     }
@@ -124,7 +124,7 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING_EVERY_N_ELSE_DEBUG(
+      C10D_WARNING_EVERY_NTH_ELSE_DEBUG(
           10, "recvValue failed on {}: {}", socket_.repr(), e.what());
       throw;
     }
@@ -138,7 +138,7 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING_EVERY_N_ELSE_DEBUG(
+      C10D_WARNING_EVERY_NTH_ELSE_DEBUG(
           10,
           "recvValueWithTimeout failed on {}: {}",
           socket_.repr(),
@@ -343,7 +343,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
       auto delayDuration = backoff->nextBackoff();
 
-      C10D_WARNING_EVERY_N_ELSE_DEBUG(
+      C10D_WARNING_EVERY_NTH_ELSE_DEBUG(
           10,
           "TCP client failed to connect/validate to host {}:{} - retrying (try={}, timeout={}ms, delay={}ms): {}",
           addr_.host,

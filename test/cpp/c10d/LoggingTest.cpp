@@ -107,7 +107,7 @@ size_t countOccurrences(const std::string& s, std::string_view target) {
 // With DEBUG disabled and WARNING enabled, only the Nth,2Nth,... calls produce
 // a format invocation — the "else" path calls C10D_DEBUG which is skipped
 // at its severity gate before evaluating formatLogMessage.
-TEST(C10DWarningEveryNElseDebug, WarningPathOnlyWhenDebugDisabled) {
+TEST(C10DWarningEveryNthElseDebug, WarningPathOnlyWhenDebugDisabled) {
   // caffe2_log_level=1 -> WARNING enabled, INFO/DEBUG/TRACE disabled.
   LogLevelGuard guard(/*caffe2_level=*/1, c10d::DebugLevel::Off);
 
@@ -115,7 +115,7 @@ TEST(C10DWarningEveryNElseDebug, WarningPathOnlyWhenDebugDisabled) {
   FmtHitCounter h{&hits};
 
   for (int i = 0; i < 12; ++i) {
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(3, "hit {}", h);
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(3, "hit {}", h);
   }
 
   // 12 calls, N=3 -> warning logs on 3,6,9,12 (4 times). Debug path runs on
@@ -126,13 +126,13 @@ TEST(C10DWarningEveryNElseDebug, WarningPathOnlyWhenDebugDisabled) {
 // Distinguish the warning and debug paths in a single run by capturing stderr.
 // Each path emits a different prefix ("[c10d]" for warnings vs "[c10d - debug]"
 // for debug), so we can count each by occurrence search.
-TEST(C10DWarningEveryNElseDebug, StderrShowsBothPaths) {
+TEST(C10DWarningEveryNthElseDebug, StderrShowsBothPaths) {
   StderrLoggingGuard stderr_guard;
   LogLevelGuard guard(/*caffe2_level=*/0, c10d::DebugLevel::Info);
 
   testing::internal::CaptureStderr();
   for (int i = 0; i < 12; ++i) {
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(3, "msg");
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(3, "msg");
   }
   std::string output = testing::internal::GetCapturedStderr();
 
@@ -145,7 +145,7 @@ TEST(C10DWarningEveryNElseDebug, StderrShowsBothPaths) {
 
 // Two different call sites must have independent counters (static inside do-
 // while block is per-expansion).
-TEST(C10DWarningEveryNElseDebug, PerCallSiteCounter) {
+TEST(C10DWarningEveryNthElseDebug, PerCallSiteCounter) {
   LogLevelGuard guard(/*caffe2_level=*/1, c10d::DebugLevel::Off);
 
   size_t hits_a = 0;
@@ -154,11 +154,11 @@ TEST(C10DWarningEveryNElseDebug, PerCallSiteCounter) {
   FmtHitCounter hb{&hits_b};
 
   for (int i = 0; i < 6; ++i) {
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(2, "a {}", ha);
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(2, "a {}", ha);
   }
 
   for (int i = 0; i < 3; ++i) {
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(2, "b {}", hb);
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(2, "b {}", hb);
   }
 
   EXPECT_EQ(hits_a, 3u); // warnings on calls 2, 4, 6
@@ -166,14 +166,14 @@ TEST(C10DWarningEveryNElseDebug, PerCallSiteCounter) {
 }
 
 // N=1 means the warning path logs on every call.
-TEST(C10DWarningEveryNElseDebug, N1AllWarnings) {
+TEST(C10DWarningEveryNthElseDebug, N1AllWarnings) {
   LogLevelGuard guard(/*caffe2_level=*/1, c10d::DebugLevel::Off);
 
   size_t hits = 0;
   FmtHitCounter h{&hits};
 
   for (int i = 0; i < 5; ++i) {
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(1, "x {}", h);
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(1, "x {}", h);
   }
 
   EXPECT_EQ(hits, 5u);
@@ -181,7 +181,7 @@ TEST(C10DWarningEveryNElseDebug, N1AllWarnings) {
 
 // Dangling-else guard: the do-while wrapper means the macro is a single
 // statement and an outer else binds to an outer if, not into the macro.
-TEST(C10DWarningEveryNElseDebug, NoDanglingElse) {
+TEST(C10DWarningEveryNthElseDebug, NoDanglingElse) {
   LogLevelGuard guard(/*caffe2_level=*/1, c10d::DebugLevel::Off);
 
   size_t hits = 0;
@@ -189,7 +189,7 @@ TEST(C10DWarningEveryNElseDebug, NoDanglingElse) {
   bool taken_else = false;
 
   if (false)
-    C10D_WARNING_EVERY_N_ELSE_DEBUG(1, "x {}", h);
+    C10D_WARNING_EVERY_NTH_ELSE_DEBUG(1, "x {}", h);
   else
     taken_else = true;
 
