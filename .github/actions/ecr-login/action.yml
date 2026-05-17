@@ -38,25 +38,26 @@ runs:
         echo "::group::Checking for IAM instance profile"
         echo "Checking EC2 metadata endpoint for IAM instance profile..."
         # Dual-stack IMDS (IPv6 [fd00:ec2::254] / IPv4 169.254.169.254) for IPv6-only EKS support.
+        host=metadata
 
         # Try IMDSv2 first (more secure, required on some instances)
         echo "Attempting IMDSv2..."
         TOKEN=$(curl -sf -m 2 --noproxy '*' \
-          --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
-          -X PUT "http://metadata/latest/api/token" \
+          --resolve "${host}:80:[fd00:ec2::254],169.254.169.254" \
+          -X PUT "http://${host}/latest/api/token" \
           -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null) || TOKEN=""
 
         if [[ -n "$TOKEN" ]]; then
           echo "IMDSv2 token obtained, checking IAM info..."
           IAM_INFO=$(curl -sf -m 2 --noproxy '*' \
-            --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
+            --resolve "${host}:80:[fd00:ec2::254],169.254.169.254" \
             -H "X-aws-ec2-metadata-token: $TOKEN" \
-            "http://metadata/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
+            "http://${host}/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
         else
           echo "IMDSv2 not available, trying IMDSv1..."
           IAM_INFO=$(curl -sf -m 2 --noproxy '*' \
-            --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' \
-            "http://metadata/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
+            --resolve "${host}:80:[fd00:ec2::254],169.254.169.254" \
+            "http://${host}/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
         fi
 
         if [[ -n "$IAM_INFO" ]]; then

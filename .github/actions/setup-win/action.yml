@@ -23,13 +23,13 @@ runs:
         function get_ec2_metadata() {
           # EC2 IMDS, dual-stack: IPv6 [fd00:ec2::254] (IPv6-only EKS) + IPv4 169.254.169.254.
           category=$1
-          local token
-          token=$(curl -sS -m 2 --noproxy '*' --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' -X PUT "http://metadata/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30" 2>/dev/null || true)
+          local host=metadata token
+          token=$(curl -sS -m 2 --noproxy '*' --resolve "${host}:80:[fd00:ec2::254],169.254.169.254" -X PUT "http://${host}/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30" 2>/dev/null || true)
           if [ -z "${token}" ]; then
             echo "unavailable"
             return 0
           fi
-          curl -sS -m 2 --noproxy '*' --resolve 'metadata:80:[fd00:ec2::254],169.254.169.254' -H "X-aws-ec2-metadata-token: ${token}" -fsSL "http://metadata/latest/meta-data/${category}" 2>/dev/null || echo "unavailable"
+          curl -sS -m 2 --noproxy '*' --resolve "${host}:80:[fd00:ec2::254],169.254.169.254" -H "X-aws-ec2-metadata-token: ${token}" -fsSL "http://${host}/latest/meta-data/${category}" 2>/dev/null || echo "unavailable"
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
         echo "instance-id: $(get_ec2_metadata instance-id)"
