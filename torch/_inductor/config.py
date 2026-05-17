@@ -579,7 +579,9 @@ graph_partition: bool = (
 # repeated regions, such as transformer layers in a full-model compile, into
 # invoke_subgraph calls so Inductor can compile the repeated body once and reuse
 # it. cpp_wrapper does not support invoke_subgraph codegen yet, so the
-# torch.compile Inductor wrapper ignores this option when cpp_wrapper is active.
+# torch.compile Inductor wrapper ignores this option when cpp_wrapper is active,
+# dynamic=True is set, fallback_by_default is active, invoke_subgraph regional
+# compile is active, or compiled autograd is compiling the backward graph.
 graph_deduplication: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_DEDUPLICATION", "1") == "1"
 )

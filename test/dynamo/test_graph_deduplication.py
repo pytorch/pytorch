@@ -1216,6 +1216,48 @@ graph():
     return (add_10,)""",
             )
 
+    def test_skip_unsupported_invoke_subgraph_operand(self):
+        from torch.fx.experimental._backward_state import BackwardState
+
+        with (
+            torch._dynamo.config.patch("use_graph_deduplication", False),
+            torch._dynamo.config.patch("track_nodes_for_deduplication", True),
+        ):
+
+            def inner(x, y):
+                return (x + y).relu()
+
+            def fn(x, y):
+                return inner(x, y) + inner(x, y) + inner(x, y)
+
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.rand(2, 4), torch.rand(2, 4)
+            )
+
+            for node in graph.nodes:
+                if node.op == "placeholder" and node.target == "L_y_":
+                    node.meta["example_value"] = BackwardState()
+
+            class MockOutputGraph:
+                def __init__(self):
+                    self.graph = graph
+                    self.region_tracker = tracker
+                    self.nn_modules = FakeRootModule({})
+
+                def install_subgraph(self, name, subgraph):
+                    raise AssertionError(
+                        "unsupported operands should skip the whole region group"
+                    )
+
+            apply_graph_deduplication(MockOutputGraph())
+            self.assertFalse(
+                any(
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.invoke_subgraph
+                    for node in graph.nodes
+                )
+            )
+
     def test_param_transfer_to_submodule(self):
         def inner_fn(x, y):
             return x + y + y + x
@@ -1240,7 +1282,12 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
         super().tearDown()
 
     def _compile_and_count_invoke_subgraphs(
-        self, *, graph_deduplication=True, cpp_wrapper=False
+        self,
+        *,
+        graph_deduplication=True,
+        cpp_wrapper=False,
+        fallback_by_default=False,
+        dynamic=None,
     ):
         class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
             def __init__(self):
@@ -1248,9 +1295,10 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
                     mode=None,
                     options={
                         "cpp_wrapper": cpp_wrapper,
+                        "fallback_by_default": fallback_by_default,
                         "graph_deduplication": graph_deduplication,
                     },
-                    dynamic=None,
+                    dynamic=dynamic,
                 )
                 self.graphs = []
 
@@ -1305,6 +1353,48 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
             ),
             0,
         )
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_dynamic_shapes(self):
+        self.assertEqual(
+            self._compile_and_count_invoke_subgraphs(
+                graph_deduplication=True, dynamic=True
+            ),
+            0,
+        )
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_lite_mode(self):
+        self.assertEqual(
+            self._compile_and_count_invoke_subgraphs(
+                graph_deduplication=True, fallback_by_default=True
+            ),
+            0,
+        )
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_regional_compile(self):
+        with torch._dynamo.config.patch(enable_invoke_subgraph_regional_compile=True):
+            self.assertEqual(
+                self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
+                0,
+            )
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_compiled_autograd(self):
+        import torch._dynamo.compiled_autograd as compiled_autograd
+
+        backend = torch._TorchCompileInductorWrapper(
+            mode=None,
+            options={"graph_deduplication": True},
+            dynamic=None,
+        )
+        prior = compiled_autograd.in_compiled_autograd_region
+        try:
+            compiled_autograd.in_compiled_autograd_region = True
+            with (
+                torch._dynamo.config.patch(use_graph_deduplication=False),
+                backend.backend_ctx_ctor(),
+            ):
+                self.assertFalse(torch._dynamo.config.use_graph_deduplication)
+        finally:
+            compiled_autograd.in_compiled_autograd_region = prior
 
 
 if __name__ == "__main__":

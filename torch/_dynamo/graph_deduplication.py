@@ -15,6 +15,8 @@ from collections.abc import Generator, Iterable
 import torch
 import torch.fx
 from torch._dynamo import config
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -87,6 +89,16 @@ when they are created in output_graph.
         if not list(external_node_usages):
             continue
 
+        if any(
+            not _are_valid_invoke_subgraph_operands(
+                _get_sub_args(region, external_node_usages, node_usage_to_tuple_elems)[
+                    0
+                ]
+            )
+            for region in region_group
+        ):
+            continue
+
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
         subgraph_name = output_graph.install_subgraph("subgraph", sub_gm)
         sub_gms[subgraph_name] = sub_gm
@@ -132,13 +144,13 @@ def _replace_region_with_subgraph(
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
-    sub_args = []
-    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
+    sub_args, flattened_getitem_nodes = _get_sub_args(
+        region, external_node_usages, node_usage_to_tuple_elems
+    )
     for usages in external_node_usages:
         usage = next(iter(usages))
         node_ind, usage_ind = usage
         node = region[node_ind]
-        flattened_args_kwargs = _get_flat_args(node, {})
         for user_ind, node_usage_ind in usages:
             user = region[user_ind]
             if user in node_to_mutated_arg_positions:
@@ -147,12 +159,6 @@ def _replace_region_with_subgraph(
                         "NYI: Failed to substitute region %s due to mutation", region
                     )
                     return
-        if usage in node_usage_to_tuple_elems:
-            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
-            flattened_getitem_nodes.update(tuple_elems)
-            sub_args.extend(tuple_elems)
-        else:
-            sub_args.append(flattened_args_kwargs[usage_ind])
 
     # Input/Output aliasing not supported in HOPs today
     # Note: we should use the nodes in the original graph (the region here)
@@ -215,6 +221,50 @@ def _replace_region_with_subgraph(
         print(_detect_cycles(graph, node_to_additional_deps))
         _stable_topological_sort(graph, node_to_additional_deps)
         graph.lint()
+
+
+def _get_sub_args(
+    region: Region,
+    external_node_usages: Iterable[OrderedSet[UsageIndex]],
+    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]],
+) -> tuple[list[Node], OrderedSet[Node]]:
+    sub_args = []
+    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
+    for usages in external_node_usages:
+        usage = next(iter(usages))
+        node_ind, usage_ind = usage
+        node = region[node_ind]
+        flattened_args_kwargs = _get_flat_args(node, {})
+        if usage in node_usage_to_tuple_elems:
+            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
+            flattened_getitem_nodes.update(tuple_elems)
+            sub_args.extend(tuple_elems)
+        else:
+            sub_args.append(flattened_args_kwargs[usage_ind])
+
+    return sub_args, flattened_getitem_nodes
+
+
+def _are_valid_invoke_subgraph_operands(nodes: list[Node]) -> bool:
+    return all(_is_valid_invoke_subgraph_operand(node) for node in nodes)
+
+
+def _is_valid_invoke_subgraph_operand(node: Node) -> bool:
+    if "example_value" in node.meta:
+        example_value = node.meta["example_value"]
+    elif "val" in node.meta:
+        example_value = node.meta["val"]
+    else:
+        return False
+
+    return (
+        example_value is None
+        or isinstance(
+            example_value,
+            (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject),
+        )
+        or is_opaque_type(type(example_value))
+    )
 
 
 def _get_external_inputs(
