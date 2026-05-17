@@ -408,7 +408,6 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -1010,6 +1009,12 @@ inductor_skip_exact_stride = {
     "tensordot",
 }
 
+# On CPU, Inductor may choose a different valid layout for these ops.
+inductor_skip_exact_stride_cpu = {
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+}
+
 # On XPU, Inductor may apply additional layout optimizations that can change
 # tensor strides compared to eager mode, so exact stride checks are relaxed
 # for certain ops.
@@ -1442,6 +1447,8 @@ class TestInductorOpInfo(TestCase):
 
                         # Call the appropriate check method based on device type
                         exact_stride = op_name not in inductor_skip_exact_stride
+                        if exact_stride and device_type == "cpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_cpu
                         # XPU has additional layout optimizations that change strides differently from eager mode.
                         if exact_stride and GPU_TYPE == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu

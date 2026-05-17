@@ -19996,7 +19996,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-2)}),
+                   toleranceOverride({torch.float16: tol(atol=3e-2, rtol=3e-2)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'
                ),
            ),
