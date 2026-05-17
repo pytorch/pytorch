@@ -41,6 +41,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
+    free_symbols,
     free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
@@ -362,6 +363,8 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """Lower an FX graph into Inductor IR and wrapper metadata."""
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -417,6 +420,9 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+        self.wrapper_codegen_input_symbols = (
+            self._collect_wrapper_codegen_input_symbols(gm)
+        )
 
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
@@ -583,6 +589,60 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Cache for dep size hints to avoid expensive recomputation
         self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
+
+    def _get_scalar_input_codegen_symbol(self, expr: object) -> sympy.Symbol | None:
+        if isinstance(expr, sympy.Symbol):
+            return expr
+        if isinstance(expr, SymTypes):
+            if self.is_backward:
+                placeholder_expr = expr.node.expr
+            else:
+                placeholder_expr = _get_placeholder_expr(expr.node)
+            if isinstance(placeholder_expr, sympy.Symbol):
+                return placeholder_expr
+        return None
+
+    @staticmethod
+    def _get_tensor_dim_codegen_symbol(expr: object) -> sympy.Symbol | None:
+        expr = sympy.sympify(expr)
+        if isinstance(expr, sympy.Symbol):
+            return expr
+        return None
+
+    def _collect_wrapper_codegen_input_symbols(
+        self,
+        gm: torch.fx.GraphModule,
+    ) -> OrderedSet[sympy.Symbol]:
+        symbols = OrderedSet[sympy.Symbol]()
+        for node in gm.graph.nodes:
+            if node.op != "placeholder":
+                break
+            for key in ("val", "example_value"):
+                if key not in node.meta:
+                    continue
+                value = node.meta[key]
+                symbol = self._get_scalar_input_codegen_symbol(value)
+                if symbol is not None:
+                    symbols.add(symbol)
+                elif isinstance(value, torch.Tensor):
+                    for expr in (*value.size(), *value.stride()):
+                        symbol = self._get_tensor_dim_codegen_symbol(expr)
+                        if symbol is not None:
+                            symbols.add(symbol)
+                break
+        return symbols
+
+    def _runtime_assert_available_symbols(self) -> OrderedSet[sympy.Symbol]:
+        symbols = self.wrapper_codegen_input_symbols.copy()
+        for value in self.graph_inputs.values():
+            if isinstance(value, sympy.Symbol):
+                symbols.add(value)
+            elif isinstance(value, TensorBox):
+                for expr in (*value.get_size(), *value.get_stride()):
+                    if isinstance(expr, sympy.Symbol):
+                        symbols.add(expr)
+        symbols |= self.bound_unbacked_symbols
+        return symbols
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -2219,6 +2279,7 @@ class GraphLowering(torch.fx.Interpreter):
     def create_deferred_runtime_asserts(
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
+        """Materialize deferred runtime assertions once their symbols are bound."""
         if config.do_not_emit_runtime_assertions:
             return
         # [NOTE] Codegen runtime asserts in Inductor
@@ -2266,10 +2327,13 @@ class GraphLowering(torch.fx.Interpreter):
             if node_args[0] != True:  # noqa: E712
                 make_assert(node_args[0], f"{node_args[0]} to be True")
         else:
-            # bound_unbacked_symbols tracks the symbols that are created so far,
-            # we use it to make sure that runtime assertions are added after all
-            # symbols used in them are defined.
+            # Track which symbols are available in generated wrapper code so
+            # runtime assertions are added after all symbols they use are
+            # defined. This must include non-unbacked symbols too; stale
+            # assertions from earlier tracing passes can otherwise mention
+            # scalar-item symbols that Inductor never binds.
             self.bound_unbacked_symbols |= new_unbacked_defs
+            available_symbols = self._runtime_assert_available_symbols()
 
             shape_env = V.graph.sizevars.shape_env
 
@@ -2295,11 +2359,27 @@ class GraphLowering(torch.fx.Interpreter):
                         make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
 
                 for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
+                    fvs = free_symbols(ra.expr)
+                    missing = OrderedSet(s for s in fvs if s not in available_symbols)
                     if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                        missing_unbacked = OrderedSet(
+                            s for s in free_unbacked_symbols(ra.expr) if s in missing
+                        )
+                        if missing_unbacked:
+                            i1 = min(missing_unbacked, key=str)
+                            self.ras_by_symbol.setdefault(i1, []).append(ra)
+                        else:
+                            # Input symbols that wrapper code can define were
+                            # collected up front. If only non-unbacked symbols
+                            # are still missing, this assert is stale from an
+                            # earlier tracing pass and cannot become valid
+                            # later by waiting for another unbacked binding.
+                            log.debug(
+                                "skipping deferred runtime assert %s with "
+                                "non-codegenable symbols %s",
+                                ra.expr,
+                                sorted(missing, key=str),
+                            )
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
 
