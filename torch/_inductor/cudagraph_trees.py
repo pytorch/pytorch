@@ -2230,10 +2230,10 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            self.try_end_curr_recording(function_id, new_inputs)
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            self.try_end_curr_warmup(function_id, new_inputs)
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2555,7 +2555,40 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def _preserve_inputs_that_alias_current_path(self, inputs: list[InputType]) -> None:
+        assert self.current_node is not None
+
+        live_storage_data_ptrs = OrderedSet(
+            storage_ref.data_ptr()
+            for storage_ref in self.current_node.path_live_weakrefs()
+        )
+        if not live_storage_data_ptrs:
+            return
+
+        preserved_input = False
+        for i, inp in enumerate(inputs):
+            if (
+                isinstance(inp, torch.Tensor)
+                and inp.untyped_storage().data_ptr() in live_storage_data_ptrs
+            ):
+                # Keep the next invocation's source valid after the old path is
+                # invalidated and before normal cudagraph input copying runs.
+                preserved = static_input(inp)
+                expanded_dims = get_expanded_dims(inp)
+                indexed_preserved = index_expanded_dims(preserved, expanded_dims)
+                if torch._debug_has_internal_overlap(indexed_preserved) != 0:
+                    copy_strided_storage_(preserved, inp)
+                else:
+                    indexed_preserved.copy_(index_expanded_dims(inp, expanded_dims))
+                inputs[i] = preserved
+                preserved_input = True
+
+        if preserved_input:
+            torch.cuda.synchronize()
+
+    def try_end_curr_recording(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2566,6 +2599,7 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
+            self._preserve_inputs_that_alias_current_path(new_inputs)
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
@@ -2594,8 +2628,11 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+    def try_end_curr_warmup(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         if self.can_start_new_generation():
+            self._preserve_inputs_that_alias_current_path(new_inputs)
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return

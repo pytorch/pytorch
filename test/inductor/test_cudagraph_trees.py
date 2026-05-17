@@ -2515,6 +2515,50 @@ if HAS_CUDA_AND_TRITON:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_mark_step_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            x = torch.ones([4], device="cuda")
+            for _ in range(4):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = foo(x)
+
+            self.assertEqual(x, torch.full([4], 5.0, device="cuda"))
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            x = torch.ones([4], device="cuda")
+            y = foo(x)
+            z = foo(y)
+
+            self.assertEqual(z, torch.full([4], 3.0, device="cuda"))
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_strided_live_output_as_next_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + 1)[1::2]
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x * 2
+
+            for _ in range(3):
+                x = torch.arange(8, device="cuda", dtype=torch.float32)
+                y = foo(x)
+                self.assertEqual(y.stride(), (2,))
+                z = bar(y)
+
+                expected = torch.tensor([4.0, 8.0, 12.0, 16.0], device="cuda")
+                self.assertEqual(z, expected)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
