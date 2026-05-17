@@ -186,8 +186,7 @@ def celu(
 
     rhs: TensorLikeType
     if alpha is not None:
-        if alpha == 0:
-            raise ZeroDivisionError("alpha cannot be 0 for CELU")
+        torch._check(alpha != 0, lambda: "alpha cannot be 0 for CELU")
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
