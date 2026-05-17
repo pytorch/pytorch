@@ -91,6 +91,7 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassType,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -998,16 +999,20 @@ class CacheabilityValidator:
         # When timing is EARLY, pre-grad passes already ran before the cache
         # lookup so there's nothing to validate here.
         if resolve_pre_grad_pass_timing() != "early":
-            if config.pre_grad_custom_pass and (
-                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                or not config.pre_grad_custom_pass.uuid()
-            ):
-                self.bypass("Unsupported pre grad custom pass")
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            for p in get_custom_graph_passes(config.pre_grad_custom_pass):
+                if not isinstance(p, CustomGraphPass) or not p.uuid():
+                    self.bypass("Unsupported pre grad custom pass")
+        for p in itertools.chain(
+            get_custom_graph_passes(config.post_grad_custom_pre_pass),
+            get_custom_graph_passes(config.post_grad_custom_post_pass),
+        ):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 self.bypass("Unsupported post grad custom pass")
         # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+        for p in itertools.chain(
+            get_custom_graph_passes(config.joint_custom_pre_pass),
+            get_custom_graph_passes(config.joint_custom_post_pass),
+        ):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 self.bypass("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
@@ -1077,6 +1082,14 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
+def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+    return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
+
+
+def _custom_pass_name(custom_pass: Any) -> str:
+    return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+
+
 def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """Resolve the effective pre-grad pass timing from the config.
 
@@ -1088,22 +1101,22 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     run "late", since the cache key cannot account for it.
     """
     timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
-    custom_pass = config.pre_grad_custom_pass
-    has_uuid = (
+    custom_passes = get_custom_graph_passes(config.pre_grad_custom_pass)
+    passes_missing_uuid = [
         custom_pass
-        and isinstance(custom_pass, CustomGraphPass)
-        and custom_pass.uuid() is not None
-    )
+        for custom_pass in custom_passes
+        if not _custom_pass_has_uuid(custom_pass)
+    ]
     pass_name = (
-        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
-        if custom_pass is not None
+        ", ".join(_custom_pass_name(custom_pass) for custom_pass in passes_missing_uuid)
+        if passes_missing_uuid
         else "<none>"
     )
 
     if timing == "default":
-        supports_late = custom_pass is None or has_uuid
+        supports_late = not passes_missing_uuid
         timing = "late" if supports_late else "early"
-        if timing == "early" and custom_pass:
+        if timing == "early" and custom_passes:
             if pass_name not in _warned_pre_grad_pass_missing_uuid:
                 _warned_pre_grad_pass_missing_uuid.add(pass_name)
                 log.warning(
@@ -1118,7 +1131,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
                     pre_grad_pass_name=pass_name,
                 )
 
-    if timing == "late" and custom_pass and not has_uuid:
+    if timing == "late" and passes_missing_uuid:
         raise RuntimeError(
             f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
@@ -1354,6 +1367,8 @@ class FxGraphHashDetails:
             return None
         if isinstance(custom_pass, list):
             return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
+        if isinstance(custom_pass, tuple):
+            return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
         if isinstance(custom_pass, CustomGraphPass):
@@ -1369,6 +1384,8 @@ class FxGraphHashDetails:
     ) -> Any | None:
         if not custom_pass:
             return None
+        if isinstance(custom_pass, (list, tuple)):
+            return tuple(self._get_custom_pass_detail(x) for x in custom_pass)
         assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
 
