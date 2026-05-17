@@ -953,6 +953,14 @@ if has_triton():
         tl.store(out_ptr + offsets, ones, mask=offsets < numel)
 
     @triton.jit
+    def kernel_with_backslash_in_docstring(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+        """Docstring with literal backslash escapes: \n \t \\"""
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)
+        tl.store(out_ptr + offsets, ones, mask=offsets < numel)
+
+    @triton.jit
     def kernel_inline_asm_double_quotes(
         in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
     ):
