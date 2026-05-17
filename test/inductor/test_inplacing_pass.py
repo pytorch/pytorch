@@ -11,7 +11,12 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _generalized_scatter,
+    canonicalize_view_scatter_ops,
+    decompose_generalized_scatter,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -440,6 +445,54 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         expected = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
+
+    def test_generalized_scatter_target_is_operator(self):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+        from torch.func import functionalize
+
+        def fn(x, y):
+            z = x.sin()
+            z[:, 0].copy_(y)
+            return z.cos()
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2)
+        gm = make_fx(functionalize(fn), tracing_mode="fake")(x, y)
+        fake_mode = detect_fake_mode(
+            [node.meta["val"] for node in gm.graph.nodes if "val" in node.meta]
+        )
+
+        with V.set_fake_mode(fake_mode):
+            canonicalize_view_scatter_ops(gm.graph)
+
+        generalized_scatter_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target is _generalized_scatter
+        ]
+        self.assertEqual(len(generalized_scatter_nodes), 1)
+
+        unexpected_targets = [
+            node.target
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and not isinstance(node.target, torch._ops.OpOverload)
+            and node.target is not operator.getitem
+        ]
+        self.assertFalse(
+            unexpected_targets, f"unexpected targets: {unexpected_targets}"
+        )
+
+        with V.set_fake_mode(fake_mode):
+            decompose_generalized_scatter(gm.graph)
+
+        remaining_generalized_scatter_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target is _generalized_scatter
+        ]
+        self.assertFalse(remaining_generalized_scatter_nodes)
 
     @parametrize(
         "factory_op",
