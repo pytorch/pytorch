@@ -15,7 +15,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
-from ...ir import Buffer, FixedLayout, TensorBox
+from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -38,6 +38,22 @@ def check_cpu_supported():
         and sys.platform != "darwin"
     )
     return supported
+
+
+def _realize_duplicate_buffer_inputs(inputs):
+    names = [inp.get_name() for inp in inputs]
+    duplicate_names = OrderedSet(name for name in names if names.count(name) > 1)
+    if not duplicate_names:
+        return inputs
+
+    # The C++ template names pointer arguments by storage buffer name.
+    # ReinterpretView inputs that share storage (for example, q/k from
+    # qk.chunk()) need distinct realized buffers so their view offsets are
+    # represented correctly at the template boundary.
+    return [
+        ExternKernel.copy_input(inp) if inp.get_name() in duplicate_names else inp
+        for inp in inputs
+    ]
 
 
 def lower_cpu(
@@ -241,10 +257,7 @@ def lower_cpu(
         ]
     )
 
-    if len(OrderedSet([query.get_name(), key.get_name(), value.get_name()])) != 3:
-        raise NotImplementedError(
-            "Unsupported for now if query, key, value are the same buffer."
-        )
+    query, key, value = _realize_duplicate_buffer_inputs([query, key, value])
     if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
         raise NotImplementedError(
             "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
