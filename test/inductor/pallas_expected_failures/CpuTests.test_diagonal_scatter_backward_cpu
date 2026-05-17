@@ -1,5 +1,0 @@
-AssertionError: Scalars are not close!
-
-Expected 5.0 but got 25.0.
-Absolute difference: 20.0 (up to 1e-05 allowed)
-Relative difference: 4.0 (up to 1.3e-06 allowed)
