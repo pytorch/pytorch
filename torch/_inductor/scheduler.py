@@ -7922,7 +7922,13 @@ class Scheduler:
         # This is a horizontal/common-read locality heuristic, not a
         # producer-consumer dependency match.
         buffer_overlap_score = 0
-        if score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
+        if score == 0 and self._can_use_buffer_overlap_scoring_for_reductions(
+            node1, node2
+        ):
+            buffer_overlap_score = self._score_fusion_memory_by_reduction_overlap(
+                node1, node2
+            )
+        elif score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
             buffer_overlap_score = self._score_fusion_memory_by_buffer_overlap(
                 node1, node2
             )
@@ -7949,6 +7955,9 @@ class Scheduler:
           "q + 2" and "k - 2" both read from `a` and would get a high overlap
           score, but fusing them horizontally prevents prologue fusion into mm
           (resulting in 2 kernels instead of 1).
+
+        Same-domain reductions with overlapping input buffers are handled by
+        _can_use_buffer_overlap_scoring_for_reductions instead.
 
         We allow buffer overlap scoring when:
         - The node outputs are not actually in the template's allowed_prologue_inps,
@@ -8030,6 +8039,78 @@ class Scheduler:
                         return False
 
         return True
+
+    def _can_use_buffer_overlap_scoring_for_reductions(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        """
+        Allow same-domain sibling reductions to fuse when they read the same
+        buffer through different index expressions.
+
+        Exact MemoryDep matching misses patterns such as block reductions over
+        Mx1 and 1xM tiles: both reductions traverse the same source tensor with
+        the same (numel, rnumel), but one access is contiguous while the other is
+        transposed.  The backend can codegen those reductions together once the
+        scheduler gives the horizontal fusion a non-zero locality score.
+        """
+        if not (
+            node1.is_reduction()
+            and node2.is_reduction()
+            and _is_gpu_triton_backend(node1, node2)
+        ):
+            return False
+
+        if (node1.ancestors & node2.get_operation_names()) or (
+            node2.ancestors & node1.get_operation_names()
+        ):
+            return False
+
+        _, (numel1, rnumel1) = node1.group
+        _, (numel2, rnumel2) = node2.group
+        if not (
+            V.graph.sizevars.statically_known_equals(numel1, numel2)
+            and V.graph.sizevars.statically_known_equals(rnumel1, rnumel2)
+        ):
+            return False
+
+        common_read_names = OrderedSet(
+            dep.name for dep in node1.read_writes.reads
+        ) & OrderedSet(dep.name for dep in node2.read_writes.reads)
+        return any(
+            MixOrderReduction._is_full_access(name, node1)
+            and MixOrderReduction._is_full_access(name, node2)
+            for name in common_read_names
+        )
+
+    def _score_fusion_memory_by_reduction_overlap(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        # Match _score_fusion_memory_by_buffer_overlap: symbolic dep sizes can
+        # hint as zero, but a known common full-buffer read should still clear
+        # the horizontal fusion threshold.
+        fallback_dep_size = 10
+
+        common_read_names = OrderedSet(
+            dep.name for dep in node1.read_writes.reads
+        ) & OrderedSet(dep.name for dep in node2.read_writes.reads)
+        common_read_names = OrderedSet(
+            name
+            for name in common_read_names
+            if MixOrderReduction._is_full_access(name, node1)
+            and MixOrderReduction._is_full_access(name, node2)
+        )
+        return max(
+            (
+                self.dep_size_hint(dep) or fallback_dep_size
+                for dep in itertools.chain(
+                    node1.read_writes.reads, node2.read_writes.reads
+                )
+                if dep.name in common_read_names
+            ),
+            default=0,
+        )
 
     def _score_fusion_memory_by_buffer_overlap(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
