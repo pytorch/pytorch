@@ -340,6 +340,57 @@ class TestMemoryTracker(InductorTestCase):
                 peak1, peak2, "Different scheduling produces different peak memory"
             )
 
+    def test_memory_tracker_shared_storage_reorder(self):
+        """Shared-storage recomputations can run before the original node."""
+        with FakeTensorMode():
+            # view(-1) shares _cdata, matching SAC graph.node_copy metadata.
+            shared_storage_tensor = torch.randn(1000, device=GPU_TYPE)
+            recomp_view = shared_storage_tensor.view(-1)
+            self.assertEqual(
+                shared_storage_tensor.untyped_storage()._cdata,
+                recomp_view.untyped_storage()._cdata,
+            )
+            graph = torch.fx.Graph()
+
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(100, device=GPU_TYPE)
+
+            fwd_rms = graph.call_function(torch.ops.aten.mul.Tensor, (x, x))
+            fwd_rms.meta["val"] = shared_storage_tensor  # allocates S
+
+            fwd_getitem = graph.call_function(torch.ops.aten.add.Tensor, (fwd_rms, x))
+            fwd_getitem.meta["val"] = torch.randn(1000, device=GPU_TYPE)
+
+            bwd_input = graph.call_function(torch.ops.aten.neg.default, (x,))
+            bwd_input.meta["val"] = torch.randn(100, device=GPU_TYPE)
+
+            recomp_rms = graph.call_function(
+                torch.ops.aten.mul.Tensor, (bwd_input, bwd_input)
+            )
+            recomp_rms.meta["val"] = recomp_view  # same _cdata as fwd_rms
+
+            recomp_getitem = graph.call_function(
+                torch.ops.aten.add.Tensor, (recomp_rms, bwd_input)
+            )
+            recomp_getitem.meta["val"] = torch.randn(1000, device=GPU_TYPE)
+
+            graph.output((fwd_getitem, recomp_getitem))
+
+        compute = [
+            n for n in graph.nodes if n.op not in ("placeholder", "get_attr", "output")
+        ]
+        tracker_orig = MemoryTracker(graph, device_filter=device_filter)
+        for n in compute:
+            tracker_orig.schedule_node(n)
+
+        # The chains only share storage, not data-flow edges.
+        reorder = [bwd_input, recomp_rms, recomp_getitem, fwd_rms, fwd_getitem]
+        tracker_reorder = MemoryTracker(graph, device_filter=device_filter)
+        for n in reorder:
+            tracker_reorder.schedule_node(n)
+
+        self.assertEqual(tracker_orig.peak_memory, tracker_reorder.peak_memory)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
