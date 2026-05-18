@@ -406,6 +406,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(replace_collectives_with_low_contention)
 
+    # Apply simple overlap: moves collectives earlier and waits later.
+    # Runs after all other collective scheduling passes.
+    if config.aten_distributed_optimizations.enable_simple_overlap:
+        from torch._inductor.fx_passes.simple_overlap import simple_overlap
+
+        GraphTransformObserver(gm, "simple_overlap").apply_graph_pass(simple_overlap)
+
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
