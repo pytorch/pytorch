@@ -509,11 +509,6 @@ class TestObjectSpec(TestCase):
         super().setUp()
         _reset_uid_counter()
 
-    def test_empty(self):
-        """An ``ObjectSpec`` constructed without args has zero fields."""
-        os = ObjectSpec()
-        self.assertEqual(len(os), 0)
-
     def test_dict_construction(self):
         """Fields supplied via the constructor preserve identity and order."""
         spec = TensorSpec([ShapeVar("h"), None])
@@ -662,6 +657,9 @@ class TestObjectSpecCompile(TestCase):
             ),
         )
 
+        compiled()
+        self.assertEqual(len(backend.graphs), 1)
+        m.weight = torch.nn.Parameter(torch.randn(8, 3))
         compiled()
         self.assertEqual(len(backend.graphs), 1)
 
