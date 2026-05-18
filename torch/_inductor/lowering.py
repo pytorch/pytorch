@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -11,7 +12,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -96,7 +97,6 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
-    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -566,11 +566,7 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(
-    inputs: Sequence[_T],
-    override_return_dtype: torch.dtype | None = None,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
-) -> Sequence[_T | BaseView | BaseConstant]:
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -664,25 +660,24 @@ def _add_with_alpha_fma(a, b, alpha):
 
 
 def make_pointwise(
-    fn: Callable[..., Any],
-    override_return_dtype: torch.dtype | None = None,
-    override_device: torch.device | None = None,
-    override_fn_when_input_bool: Callable[..., Any] | None = None,
-    allow_alpha: bool = False,
-    use_fma_for_alpha: bool = False,
-    triton_fallback: Callable[..., _T] | None = None,
-) -> Callable[..., TensorBox | _T]:
+    fn,
+    override_return_dtype=None,
+    override_device=None,
+    override_fn_when_input_bool=None,
+    allow_alpha=False,
+    use_fma_for_alpha=False,
+    triton_fallback=None,
+):
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
+    def inner(*inputs: TensorBox, alpha=None):
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
-        # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -750,7 +745,6 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -770,15 +764,8 @@ def make_pointwise(
     return inner
 
 
-foreach_node_t = TypeVar("foreach_node_t", bound=IRNode)
-
-
-def make_foreach_pointwise(
-    pw_fn: Callable[..., foreach_node_t],
-    allow_alpha: bool = False,
-    scalar_kwarg: str = "alpha",
-) -> Callable[..., list[foreach_node_t]]:
-    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1) -> list[foreach_node_t]:
+def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
+    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1):
         # For ops like addcmul/addcdiv, the scalar `value` arrives as a
         # positional arg (not keyword) due to the ATen schema. Extract it
         # from the end of inputs if present.
@@ -822,7 +809,7 @@ def make_foreach_pointwise(
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        def apply_fn(args) -> foreach_node_t:
+        def apply_fn(args):
             if allow_alpha:
                 return pw_fn(*args, **{scalar_kwarg: scalar_val})
             else:
@@ -833,12 +820,7 @@ def make_foreach_pointwise(
     return inner
 
 
-def foreach_group_loop(
-    groups: Mapping[tuple[Any, bool], list[tuple[int, Any]]],
-    num_outputs: int,
-    apply_fn: Callable[..., foreach_node_t],
-    realize_outputs: bool,
-) -> list[foreach_node_t]:
+def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
     """
     Common loop over grouped foreach arguments.
 
@@ -848,7 +830,7 @@ def foreach_group_loop(
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
     """
-    outputs: list[foreach_node_t | None] = [None] * num_outputs
+    outputs = [None] * num_outputs
     for (device, use_foreach), group in groups.items():
         operation_list: list[str] = []
         for output_ind, args in group:
@@ -867,8 +849,7 @@ def foreach_group_loop(
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
-
-    return cast(list[foreach_node_t], outputs)
+    return outputs
 
 
 def to_dtype(
@@ -3495,13 +3476,6 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
-# Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
-# native implementations)
-make_fallback(aten.bincount.default, warn=False)
-make_fallback(aten._unique2.default, warn=False)
-make_fallback(aten.unique_dim.default, warn=False)
-make_fallback(aten.unique_consecutive.default, warn=False)
-make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
@@ -3510,12 +3484,6 @@ make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
-
-# AMP / GradScaler ops: both the in-place (_amp_update_scale_) and functional
-# (_amp_update_scale) variants need explicit fallbacks.  Inductor uses the
-# functional form when the input tensor is a computed (non-leaf) value.
-make_fallback(aten._amp_update_scale_.default, warn=False)
-make_fallback(aten._amp_update_scale.default, warn=False)
 
 
 # Implemented / Half implemented
@@ -6779,10 +6747,8 @@ def _make_reduction_inner(
     )
 
 
-def make_reduction(
-    reduction_type: ReductionType, override_return_dtype=None
-) -> Callable[..., TensorBox]:
-    def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
+def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
+    def inner(x, axis=None, keepdims=False, *, dtype=None):
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
