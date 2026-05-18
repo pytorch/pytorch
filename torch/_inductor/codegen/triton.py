@@ -281,7 +281,7 @@ class TritonSymbols:
         for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
-                var_shape = cse_var.shape
+                var_shape = tuple(cse_var.shape)
             elif symbol_is_type(
                 var,
                 (
