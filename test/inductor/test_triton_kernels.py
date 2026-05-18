@@ -1695,9 +1695,7 @@ def forward(self, x_1, output_1):
         def f(x):
             out = torch.empty_like(x)
             n_elements = x.numel()
-            __private_add_kernel[(n_elements,)](
-                x, out, n_elements, BLOCK_SIZE=16
-            )
+            __private_add_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=16)
             return out
 
         x = torch.randn(4, device=GPU_TYPE)
