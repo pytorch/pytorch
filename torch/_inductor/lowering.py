@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -12,7 +11,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -97,6 +96,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
+    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -188,7 +188,7 @@ def tag_to_layout_constraint(
 ) -> Callable[..., tuple[Any, Any]] | None:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
-    if tag == torch._C.Tag.needs_contiguous_strides:
+    if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
         return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
@@ -280,7 +280,7 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
-        return x.is_integer is True
+        return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
 
@@ -566,7 +566,11 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+def promote_constants(
+    inputs: Sequence[_T],
+    override_return_dtype: torch.dtype | None = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+) -> Sequence[_T | BaseView | BaseConstant]:
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -660,24 +664,25 @@ def _add_with_alpha_fma(a, b, alpha):
 
 
 def make_pointwise(
-    fn,
-    override_return_dtype=None,
-    override_device=None,
-    override_fn_when_input_bool=None,
-    allow_alpha=False,
-    use_fma_for_alpha=False,
-    triton_fallback=None,
-):
+    fn: Callable[..., Any],
+    override_return_dtype: torch.dtype | None = None,
+    override_device: torch.device | None = None,
+    override_fn_when_input_bool: Callable[..., Any] | None = None,
+    allow_alpha: bool = False,
+    use_fma_for_alpha: bool = False,
+    triton_fallback: Callable[..., _T] | None = None,
+) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: TensorBox, alpha=None):
+    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
+        # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -745,6 +750,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
+                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -755,7 +761,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type]
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -764,8 +770,15 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
-    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1):
+foreach_node_t = TypeVar("foreach_node_t", bound=IRNode)
+
+
+def make_foreach_pointwise(
+    pw_fn: Callable[..., foreach_node_t],
+    allow_alpha: bool = False,
+    scalar_kwarg: str = "alpha",
+) -> Callable[..., list[foreach_node_t]]:
+    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1) -> list[foreach_node_t]:
         # For ops like addcmul/addcdiv, the scalar `value` arrives as a
         # positional arg (not keyword) due to the ATen schema. Extract it
         # from the end of inputs if present.
@@ -809,7 +822,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        def apply_fn(args):
+        def apply_fn(args) -> foreach_node_t:
             if allow_alpha:
                 return pw_fn(*args, **{scalar_kwarg: scalar_val})
             else:
@@ -820,7 +833,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
     return inner
 
 
-def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
+def foreach_group_loop(
+    groups: Mapping[tuple[Any, bool], list[tuple[int, Any]]],
+    num_outputs: int,
+    apply_fn: Callable[..., foreach_node_t],
+    realize_outputs: bool,
+) -> list[foreach_node_t]:
     """
     Common loop over grouped foreach arguments.
 
@@ -830,7 +848,7 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
     """
-    outputs = [None] * num_outputs
+    outputs: list[foreach_node_t | None] = [None] * num_outputs
     for (device, use_foreach), group in groups.items():
         operation_list: list[str] = []
         for output_ind, args in group:
@@ -849,7 +867,8 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
-    return outputs
+
+    return cast(list[foreach_node_t], outputs)
 
 
 def to_dtype(
@@ -1190,7 +1209,7 @@ def squeeze(x, dim=None):
         if isinstance(dim, (int, sympy.Expr))
         else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1597,8 +1616,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
-        prev_end = inputs_ranges[-1][-1]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
+        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -2239,7 +2258,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1] + offset,
                 original_shape[dim2],
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
@@ -2247,7 +2266,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1],
                 original_shape[dim2] - offset,
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
 
     base_idx = (0, 0)
@@ -2408,7 +2427,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.check_leq(size, dim_size)
-    sizevars.check_lt(0, step)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.guarding_hint_or_throw(dim_size) > 0:
@@ -2754,7 +2773,7 @@ make_fallback(torch.ops.streams.synchronize_device.default)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2764,7 +2783,7 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random:
+    elif config.fallback_random or kwargs.get("pin_memory"):
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -3334,8 +3353,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
+            size = x.get_size()
+            if len(size) == 0:
+                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
@@ -3476,6 +3498,13 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
+# native implementations)
+make_fallback(aten.bincount.default, warn=False)
+make_fallback(aten._unique2.default, warn=False)
+make_fallback(aten.unique_dim.default, warn=False)
+make_fallback(aten.unique_consecutive.default, warn=False)
+make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
@@ -3484,6 +3513,12 @@ make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
+
+# AMP / GradScaler ops: both the in-place (_amp_update_scale_) and functional
+# (_amp_update_scale) variants need explicit fallbacks.  Inductor uses the
+# functional form when the input tensor is a computed (non-leaf) value.
+make_fallback(aten._amp_update_scale_.default, warn=False)
+make_fallback(aten._amp_update_scale.default, warn=False)
 
 
 # Implemented / Half implemented
@@ -3603,6 +3638,11 @@ def clone(x, *, memory_format=None):
     )
 
 
+def _realize_as_pinned(result):
+    result.realize()
+    result.data.data.get_layout().is_pinned = True
+
+
 def clone_preserve_reinterpret_view(x):
     reinterpret_view_layouts = []
     if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
@@ -3624,8 +3664,18 @@ def clone_preserve_reinterpret_view(x):
     return x
 
 
+def lift_fresh_copy(x):
+    result = clone(x)
+    input_layout = x.maybe_get_layout()
+    if input_layout is not None and input_layout.is_pinned:
+        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
+        # pinned constant followed by lift_fresh_copy.
+        _realize_as_pinned(result)
+    return result
+
+
 if hasattr(aten, "lift_fresh_copy"):
-    register_lowering(aten.lift_fresh_copy)(clone)
+    register_lowering(aten.lift_fresh_copy)(lift_fresh_copy)
 
 
 @register_lowering(prims.iota)
@@ -3686,8 +3736,8 @@ def select_scatter(x, src, dim: int, index: int):
         # unbacked index
         return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
 
-    V.graph.sizevars.check_leq(0, index)
-    V.graph.sizevars.check_lt(index, x.get_size()[dim])
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3787,7 +3837,6 @@ def _unwrap(x):
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -3830,15 +3879,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     else:
         return V.graph.add_tensor_constant(
-            torch.tensor(data, dtype=dtype, device=device)
+            torch.tensor(
+                data, dtype=dtype, device=device, pin_memory=pin_memory or False
+            )
         )
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
     )
+    if pin_memory:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(torch.as_tensor)
@@ -3979,9 +4033,7 @@ def tensor_constructor(fill_value):
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
-            # Realize the buffer
-            full_pointwise.realize()
-            full_pointwise.data.data.get_layout().is_pinned = True
+            _realize_as_pinned(full_pointwise)
 
         return full_pointwise
 
@@ -4193,9 +4245,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
-            *idx[indices_ndim:]
-        ]
+        weight_idx = [
+            ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)
+        ] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -5095,7 +5147,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -6747,8 +6799,10 @@ def _make_reduction_inner(
     )
 
 
-def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
-    def inner(x, axis=None, keepdims=False, *, dtype=None):
+def make_reduction(
+    reduction_type: ReductionType, override_return_dtype=None
+) -> Callable[..., TensorBox]:
+    def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
@@ -7698,7 +7752,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
@@ -8190,7 +8243,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitialized_val = 0.0
 
-    if V.graph.sizevars.statically_known_equals(old_numel, 0):
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
     strides = x.maybe_get_stride()
@@ -8465,7 +8518,7 @@ def associative_scan(
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
@@ -8619,7 +8672,7 @@ def prepare_softmax_online(x, dim):
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
     hint, num_split = ir.Reduction.num_splits(
         **kwargs,
-        reduction_type="online_softmax_reduce",
+        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
         reduction_numel=rnumel,
     )
 

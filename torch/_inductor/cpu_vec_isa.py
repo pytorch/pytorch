@@ -270,7 +270,7 @@ class VecAVX512VNNI(VecAVX512):
     def __str__(self) -> str:
         return super().__str__() + " avx512_vnni"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
     _avx512_vnni_code = """
 #include <cstdint>
@@ -426,7 +426,7 @@ class InvalidVecISA(VecISA):
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
 
-    def __bool__(self) -> bool:
+    def __bool__(self) -> bool:  # type: ignore[override]
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
