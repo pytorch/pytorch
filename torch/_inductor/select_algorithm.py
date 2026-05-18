@@ -3610,9 +3610,12 @@ class _PrecompileFunction:
         self._wait_on_futures = wait_on_futures
         self._release_benchmark_artifacts = release_benchmark_artifacts
         self._has_result = False
+        self._released = False
         self._result: dict[ChoiceCaller, float] = {}
 
     def __call__(self) -> dict[ChoiceCaller, float]:
+        if self._released:
+            return {}
         if not self._has_result:
             with restore_stdout_stderr():
                 self._result = self._wait_on_futures()
@@ -3620,9 +3623,14 @@ class _PrecompileFunction:
         return self._result
 
     def release_benchmark_artifacts(self) -> None:
-        self._result = {}
-        self._has_result = False
-        self._release_benchmark_artifacts()
+        if self._released:
+            return
+        self._released = True
+        try:
+            self._release_benchmark_artifacts()
+        finally:
+            self._result = {}
+            self._has_result = True
 
 
 def filter_choices_by_name_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:
@@ -4227,6 +4235,8 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
+        # Keep the original choice list for cleanup; later filtering/pruning can
+        # drop failed choices that still own benchmark-only artifacts.
         choices_to_cleanup = list(choices)
 
         def release_benchmark_artifacts() -> None:
@@ -4313,6 +4323,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             if use_pipelined_autotuning():
                 AsyncAutotuner.start(choices, inputs_key)
+                # The owning MultiTemplateBuffer will call get_timings() during
+                # scheduler finalization or benchmark fusion.  Keep benchmark
+                # artifacts alive until AsyncAutotuner results are consumed.
                 release_on_exit = False
                 return
 
@@ -4578,8 +4591,6 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_func: _PrecompileFunction
 
         def release_benchmark_artifacts() -> None:
-            if self.precompile_cache.get(precompile_key) is precompile_func:
-                self.precompile_cache.pop(precompile_key, None)
             if not pipelined_autotuning:
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
@@ -4649,10 +4660,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     exceptions.append((choice, timeout_exc))
             if exceptions:
                 _log_autotune_exceptions(exceptions)
-
-            if not pipelined_autotuning:
-                # pyrefly: ignore [missing-attribute]
-                executor.shutdown(wait=True)
 
             # Build and return dict mapping choices to their precompilation times
             precompile_times: dict[ChoiceCaller, float] = {}
@@ -5461,9 +5468,32 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
+    def _flex_attention_log_dim(dim: int | torch.SymInt | sympy.Expr) -> int:
+        if isinstance(dim, torch.SymInt):
+            dim = dim.node.expr
+
+        if type(dim) is int or isinstance(dim, sympy.Integer):
+            return int(dim)
+
+        if isinstance(dim, sympy.Expr):
+            return V.graph.sizevars.optimization_hint(dim)
+
+        raise TypeError(
+            f"Unexpected flex attention log dimension type {type(dim).__name__}: {dim}"
+        )
+
+    @staticmethod
+    def _flex_attention_log_shape(
+        size: Sequence[int | torch.SymInt | sympy.Expr],
+    ) -> str:
+        dims = [AlgorithmSelectorCache._flex_attention_log_dim(dim) for dim in size]
+        return f"[{', '.join(map(str, dims))}]"
+
+    @staticmethod
     def maybe_log_flex_attention_results(
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
+        """Log flex attention autotuning choices when logging is enabled."""
         flex_attention_filename = get_flex_attention_log_filename()
         # Support both flex_attention and flex_decoding
         if not flex_attention_filename or (
@@ -5510,13 +5540,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Create shape info dictionary
         shape_info = {
             "kernel_type": kernel_type,
-            "B": int(B),
-            "Hq": int(Hq),
-            "Hkv": int(Hkv),
-            "seq_len_q": int(seq_len_q),
-            "seq_len_kv": int(seq_len_kv),
-            "qk_head_dim": int(qk_head_dim),
-            "v_head_dim": int(v_head_dim),
+            "B": AlgorithmSelectorCache._flex_attention_log_dim(B),
+            "Hq": AlgorithmSelectorCache._flex_attention_log_dim(Hq),
+            "Hkv": AlgorithmSelectorCache._flex_attention_log_dim(Hkv),
+            "seq_len_q": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_q),
+            "seq_len_kv": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_kv),
+            "qk_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(qk_head_dim),
+            "v_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(v_head_dim),
         }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
@@ -5532,9 +5562,9 @@ class AlgorithmSelectorCache(PersistentCache):
             choices_with_shapes.append(choice_info)
 
         out_dict = {
-            "query_shape": str(query_size),
-            "key_shape": str(key_size),
-            "value_shape": str(value_size),
+            "query_shape": AlgorithmSelectorCache._flex_attention_log_shape(query_size),
+            "key_shape": AlgorithmSelectorCache._flex_attention_log_shape(key_size),
+            "value_shape": AlgorithmSelectorCache._flex_attention_log_shape(value_size),
             "kernel_type": kernel_type,
             "choices": choices_with_shapes,
         }

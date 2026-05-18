@@ -684,7 +684,7 @@ class TestAlgorithmSelectorCleanup(TestCase):
         self.assertEqual(choice.released, 1)
         self.assertEqual(precompile_fn.released, 1)
 
-    def test_precompile_release_evicts_cache(self):
+    def test_precompile_release_preserves_completed_cache_marker(self):
         class VersionInfo:
             major = 3
             minor = 12
@@ -705,13 +705,15 @@ class TestAlgorithmSelectorCleanup(TestCase):
             precompile_fn = cache.make_precompile_fn([choice], "mm", "inputs_key")
             precompile_fn()
             precompile_fn.release_benchmark_artifacts()
+            precompile_fn.release_benchmark_artifacts()
 
             precompile_fn2 = cache.make_precompile_fn([choice], "mm", "inputs_key")
-            precompile_fn2()
+            self.assertEqual(precompile_fn2(), {})
             precompile_fn2.release_benchmark_artifacts()
 
-        self.assertIsNot(precompile_fn, precompile_fn2)
-        self.assertEqual(choice.precompile_calls, 2)
+        self.assertIs(precompile_fn, precompile_fn2)
+        self.assertEqual(choice.precompile_calls, 1)
+        self.assertEqual(choice.released, 1)
 
 
 class TestExternKernelCaller(TestCase):
