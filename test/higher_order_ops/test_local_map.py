@@ -1030,6 +1030,91 @@ class GraphModule(torch.nn.Module):
             out = torch.compile(model, backend=backend)(x)
         self.assertEqual(out[0].shape, x.shape)
 
+    @unittest.skipIf(*get_skip_reasons())
+    def test_functionalization_with_index_put(self):
+        # Regression test for issue #182403
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            device_mesh=self.mesh,
+        )
+        def moe_like_routing(x, w):
+            y = x @ w
+            idx = torch.argsort(x[:, 0])
+            out = y.new_empty(y.shape)
+            out[idx, :] = y
+            return out
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(16, 16))
+
+            def forward(self, x):
+                return moe_like_routing(x, self.w)
+
+        def inputs_fn():
+            return (torch.randn(80, 16, requires_grad=True),)
+
+        model = MyModule()
+        with fx_traceback.preserve_node_meta():
+            joint_gm = ap_style_initial_capture(model, inputs_fn)
+
+        self.assertIsNotNone(joint_gm)
+
+        from torch._functorch._aot_autograd.functional_utils import _is_functional_graph
+
+        error, mutation_count = _is_functional_graph(joint_gm.graph)
+        self.assertIsNone(error, f"Graph should be functional but got error: {error}")
+
+        mutable_ops = []
+        for node in joint_gm.graph.nodes:
+            if node.op == "call_function" and isinstance(
+                node.target, torch._ops.OpOverload
+            ):
+                if node.target._schema.is_mutable:
+                    mutable_ops.append(str(node.target))
+
+        self.assertEqual(
+            len(mutable_ops),
+            0,
+            f"Found mutable operations in graph: {mutable_ops}",
+        )
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_functionalization_with_scatter(self):
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=((Replicate(), Replicate(), Replicate()),),
+            redistribute_inputs=True,
+            device_mesh=self.mesh,
+        )
+        def scatter_pattern(x):
+            out = torch.zeros_like(x)
+            idx = torch.argsort(x[:, 0]).unsqueeze(1).expand(-1, x.size(1))
+            out.scatter_(0, idx, x)
+            return out
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return scatter_pattern(x)
+
+        def inputs_fn():
+            return (torch.randn(80, 16, requires_grad=True),)
+
+        model = MyModule()
+        with fx_traceback.preserve_node_meta():
+            joint_gm = ap_style_initial_capture(model, inputs_fn)
+
+        from torch._functorch._aot_autograd.functional_utils import _is_functional_graph
+
+        error, _ = _is_functional_graph(joint_gm.graph)
+        self.assertIsNone(error, f"Graph should be functional but got: {error}")
+
 
 if __name__ == "__main__":
     run_tests()
