@@ -6085,6 +6085,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         except ValueError:
             return False
 
+    @staticmethod
+    def apply_feature_required_overrides(
+        kernel_features: SIMDKernelFeatures, kernel_kwargs: dict[str, Any]
+    ) -> None:
+        # ops.sort only works with persistent reduction, and is not bandwidth
+        # bound anyway so taking the hit of non-coalesced loads is okay.
+        if kernel_features.contains_op("sort"):
+            kernel_kwargs["override_persistent_reduction"] = True
+            kernel_kwargs["override_cooperative_reduction"] = False
+        # Cannot use persistent reduction with unknown dynamic rnumel.
+        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+            assert not kernel_kwargs.get("override_persistent_reduction")
+            kernel_kwargs["override_persistent_reduction"] = False
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -6894,16 +6908,7 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
-        # so taking the hit of non-coalesced loads is okay
-        if kernel_features.contains_op("sort"):
-            kernel_kwargs["override_persistent_reduction"] = True
-            kernel_kwargs["override_cooperative_reduction"] = False
-
-        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
-            # Cannot use persistent reduction with unknown dynamic rnumel
-            assert not kernel_kwargs.get("override_persistent_reduction")
-            kernel_kwargs["override_persistent_reduction"] = False
+        kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
