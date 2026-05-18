@@ -6597,7 +6597,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
     @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_acc_cpu(self, device, dtype, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
+    def test__int_mm_dtype_cpu(self, device, dtype, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
         # non_contig_type:
         # 0: the whole data buffer is contiguous (can be transposed)
         # 1: stride of one dimension is 1, but the whole buffer is not contiguous
@@ -6627,7 +6627,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
         b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
 
-        c = torch._int_mm_acc(a_int8, b_int8, out_dtype=dtype)
+        c = torch._int_mm(a_int8, b_int8, out_dtype=dtype)
         self.assertTrue(c.dtype is dtype)
         self.assertEqual(c.device, torch.device(device))
         self.assertEqual(c, torch.mm(a_float, b_float).to(dtype))
@@ -6635,7 +6635,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         c_result = torch.empty(c.size(), dtype=dtype, device=device)
 
         # Checking out variant
-        torch._int_mm_acc(a_int8, b_int8, out_dtype=dtype, out=c_result)
+        torch._int_mm(a_int8, b_int8, out_dtype=dtype, out=c_result)
         self.assertEqual(c_result, torch.mm(a_float, b_float).to(dtype))
 
     @onlyCPU

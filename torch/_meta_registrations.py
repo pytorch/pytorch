@@ -4019,9 +4019,7 @@ def meta__fused_adam(
     )
 
 
-@register_meta([aten._int_mm])
-@out_wrapper()
-def meta__int_mm(a, b):
+def common_meta_int_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
     torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
     torch._check(
@@ -4039,31 +4037,25 @@ def meta__int_mm(a, b):
             f"and {b.size(0)}x{b.size(1)})"
         ),
     )
+
+
+@register_meta([aten._int_mm.default, aten._int_mm.out])
+@out_wrapper()
+def meta__int_mm(a, b):
+    common_meta_int_mm(a, b)
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
-@register_meta([aten._int_mm_acc])
-@out_wrapper()
-def meta__int_mm_acc(a, b, out_dtype=None):
-    torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
-    torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
+@register_meta([aten._int_mm.dtype, aten._int_mm.dtype_out])
+@out_wrapper(exact_dtype=True)
+def meta__int_mm_dtype(a, b, out_dtype):
+    common_meta_int_mm(a, b)
+
     torch._check(
-        a.dtype in [torch.int8, torch.uint8],
-        lambda: f"expected self to be int8 or uint8, got {a.dtype}",
+        out_dtype in (torch.float32, torch.bfloat16),
+        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
     )
-    torch._check(
-        b.dtype is torch.int8,
-        lambda: f"expected mat2 to be int8, got {b.dtype}",
-    )
-    torch._check(
-        a.size(1) == b.size(0),
-        lambda: (
-            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
-            f"and {b.size(0)}x{b.size(1)})"
-        ),
-    )
-    if out_dtype is None:
-        out_dtype = torch.float32
+
     return a.new_empty((a.size(0), b.size(1)), dtype=out_dtype)
 
 

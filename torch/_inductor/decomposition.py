@@ -1333,10 +1333,12 @@ def conv1d_to_conv2d(
     return out_2d.squeeze(-1)
 
 
-@register_decomposition(torch.ops.aten._int_mm_acc.default)
-def decompose_int_mm_acc(a, b, out_dtype=None):
-    if out_dtype is None:
-        out_dtype = torch.float32
+@register_decomposition(torch.ops.aten._int_mm.dtype)
+def decompose_int_mm_dtype(a, b, out_dtype):
+    torch._check(
+        out_dtype in (torch.float32, torch.bfloat16),
+        lambda: "_int_mm.dtype only supports float32 and bfloat16 outputs",
+    )
 
     # Canonical form that Inductor understands
     return torch._int_mm(a, b).to(dtype=out_dtype)

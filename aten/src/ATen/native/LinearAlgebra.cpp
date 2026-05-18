@@ -37,7 +37,6 @@
 #include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
 #include <ATen/ops/_dyn_quant_pack_4bit_weight_native.h>
 #include <ATen/ops/_int_mm_native.h>
-#include <ATen/ops/_int_mm_acc_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
@@ -3770,17 +3769,15 @@ Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cpu(self, mat2, result);
 }
 
-Tensor& _int_mm_acc_out_cpu(
+Tensor& _int_mm_dtype_out_cpu(
     const Tensor& self,
     const Tensor& mat2,
-    std::optional<ScalarType> out_dtype,
+    ScalarType out_dtype,
     Tensor& result) {
 
 #ifndef STRIP_ERROR_MESSAGES
-  static constexpr std::string_view func_name = "_int_mm_acc_out_cpu";
+  static constexpr std::string_view func_name = "_int_mm_dtype_out_cpu";
 #endif
-  // Resolve the optional to a concrete ScalarType named 'out_dtype_'
-  const ScalarType out_dtype_ = out_dtype.value_or(at::kFloat);
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
   TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
@@ -3788,7 +3785,7 @@ Tensor& _int_mm_acc_out_cpu(
     func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
   TORCH_CHECK(result.dtype() == at::kFloat || result.dtype() == at::kBFloat16, func_name, ": result must be float32 or bfloat16");
-  TORCH_CHECK(result.scalar_type() == out_dtype_, func_name, ": result dtype mismatch. Expected ", out_dtype_, " but got ", result.scalar_type());
+  TORCH_CHECK(result.scalar_type() == out_dtype, func_name, ": result dtype mismatch. Expected ", out_dtype, " but got ", result.scalar_type());
   TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
   TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
   TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
@@ -3803,7 +3800,7 @@ Tensor& _int_mm_acc_out_cpu(
 #if defined(__aarch64__)
   if (at::globalContext().userEnabledMkldnn()) {
     try {
-      mkldnn_matmul_i8i8_acc(self, mat2, result);
+      mkldnn_matmul_i8i8_dtype(self, mat2, result);
       dispatched = true;
     } catch (const std::exception& e) {
       TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
@@ -3828,7 +3825,7 @@ Tensor& _int_mm_acc_out_cpu(
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    #define COMPUTE_WITH_A_TYPE_ACC(a_type)                             \
+    #define INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(a_type)                             \
     auto a = reinterpret_cast<const a_type*>(self.data_ptr());      \
     at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
       for (const auto idx : c10::irange(start, end)) {              \
@@ -3850,29 +3847,27 @@ Tensor& _int_mm_acc_out_cpu(
     });
 
     if (self.scalar_type() == at::kByte) {
-      COMPUTE_WITH_A_TYPE_ACC(uint8_t);
+      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(uint8_t);
     } else {
-      COMPUTE_WITH_A_TYPE_ACC(int8_t);
+      INTMM_DTYPE_OUT_COMPUTE_WITH_A_TYPE(int8_t);
     }
   }
   return result;
 }
 
-Tensor _int_mm_acc_cpu(
+Tensor _int_mm_dtype_cpu(
     const Tensor& self,
     const Tensor& mat2,
-    std::optional<ScalarType> out_dtype) {
+    ScalarType out_dtype) {
 
-  // Default out_dtype_ to Float if None is provided
-  const ScalarType out_dtype_ = out_dtype.value_or(at::kFloat);
-  TORCH_CHECK(out_dtype_ == at::kFloat || out_dtype_ == at::kBFloat16,
-      "_int_mm_acc_cpu: out_dtype_ must be float32 or bfloat16");
+  TORCH_CHECK(out_dtype == at::kFloat || out_dtype == at::kBFloat16,
+      "_int_mm_dtype_cpu: out_dtype must be float32 or bfloat16");
 
   auto result = at::empty(
       {self.size(0), mat2.size(1)},
-      self.options().dtype(out_dtype_));
+      self.options().dtype(out_dtype));
 
-  return _int_mm_acc_out_cpu(self, mat2, out_dtype_, result);
+  return _int_mm_dtype_out_cpu(self, mat2, out_dtype, result);
 }
 
 } // namespace native
