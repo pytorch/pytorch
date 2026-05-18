@@ -97,6 +97,14 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
+    @torch._inductor.config.patch(realize_opcount_threshold=30)
+    def test_high_order_diff_does_not_expand_opcount(self):
+        def fn():
+            return torch.diff(torch.ones((64,)), n=30, dim=0)
+
+        mod_opt = inductor.compile(make_fx(fn)(), [])
+        self.assertEqual(mod_opt(), torch.zeros((34,)))
+
     def test_inductor_via_bare_module(self):
         mod = MyModule3().eval()
         inp = torch.randn(10)
