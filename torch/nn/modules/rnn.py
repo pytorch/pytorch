@@ -604,6 +604,7 @@ class RNN(RNNBase):
         ``batch_first`` argument is ignored for unbatched inputs.
 
     .. include:: ../cudnn_rnn_determinism.md
+        :parser: myst_parser.sphinx_
 
     .. include:: ../cudnn_persistent_rnn.rst
 
@@ -975,6 +976,7 @@ class LSTM(RNNBase):
         ``proj_size`` should be smaller than ``hidden_size``.
 
     .. include:: ../cudnn_rnn_determinism.md
+        :parser: myst_parser.sphinx_
 
     .. include:: ../cudnn_persistent_rnn.rst
 
