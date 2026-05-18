@@ -5189,7 +5189,9 @@ class Scheduler:
 
         # We can not accurately benchmark kernel using atomic_add
         # due to how we generate random integer inputs.
-        # Skip benchmarking them by allowing fusion.
+        # Skip benchmarking them by allowing fusion. The
+        # epilogue_fusion_with_atomic_add gate only applies to Triton template
+        # epilogues, so keep the existing non-template behavior here.
         if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
 
