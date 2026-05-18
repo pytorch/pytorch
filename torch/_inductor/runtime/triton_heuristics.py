@@ -46,9 +46,11 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import (
     cache_dir,
@@ -2981,6 +2983,45 @@ def check_max_block(cfg: dict[str, int]):
             )
 
 
+def _check_native_matmul_block_numel(
+    kwargs: dict[str, int], r0_block: int | None = None
+) -> None:
+    block_numel = native_matmul_block_numel(kwargs, r0_block=r0_block)
+    if block_numel > TRITON_MAX_TENSOR_NUMEL:
+        raise AssertionError(
+            f"Block numel {block_numel} exceeds Triton maximum "
+            f"{TRITON_MAX_TENSOR_NUMEL}"
+        )
+
+
+def _native_matmul_config_under_numel_limit(
+    cfg: Config, r0_block: int | None = None
+) -> bool:
+    return (
+        native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        <= TRITON_MAX_TENSOR_NUMEL
+    )
+
+
+def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Config]:
+    capped_configs: list[Config] = []
+    for cfg in configs:
+        cfg = copy.deepcopy(cfg)
+        while not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            shrinkable_fields = [
+                field for field in ("XBLOCK", "YBLOCK") if cfg.kwargs.get(field, 1) > 16
+            ]
+            if not shrinkable_fields:
+                break
+            field = max(shrinkable_fields, key=lambda field: cfg.kwargs[field])
+            cfg.kwargs[field] //= 2
+
+        if _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            capped_configs.append(cfg)
+
+    return unique_configs(capped_configs)
+
+
 def _enforce_reduction_config_block_minimums(
     configs: list[Config],
     size_hints: dict[str, int],
@@ -3712,6 +3753,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     }
     # Remove keys with None values (i.e., missing in sizes)
     config = {k: v for k, v in config.items() if v is not None}
+    _check_native_matmul_block_numel(config)
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
