@@ -3726,8 +3726,10 @@ def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     return config.epilogue_fusion
 
 
-def _is_atomic_add_mutation_epilogue(node: BaseSchedulerNode) -> bool:
-    if not config.epilogue_fusion_with_atomic_add:
+def _is_atomic_add_mutation_epilogue(
+    node: BaseSchedulerNode, *, check_config: bool = True
+) -> bool:
+    if check_config and not config.epilogue_fusion_with_atomic_add:
         return False
     if not isinstance(node, SchedulerNode):
         return False
@@ -5155,6 +5157,12 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+        atomic_add_template_epilogue = isinstance(
+            node1.get_template_node(), ir.TritonTemplateBuffer
+        ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
+        if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
+            return FusionResult.fuse(False)
+
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
