@@ -831,11 +831,9 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman temperature sensor handles.",
     )
 
-    # Select the GPU temperature sensor matching this device:
-    #   - Tiled dGPU (subdevice_id set): use the per-tile GPU sensor
-    #     whose subdeviceId matches.
-    #   - Non-tiled: use the root-level (non-subdevice) GPU sensor.
-    # Raises RuntimeError if no matching sensor is found.
+    # Note [telemetry handle selection]:
+    # For tiled dGPUs, pick the handle whose subdeviceId matches.
+    # For non-tiled devices, pick the root-level (non-subdevice) handle.
     temperature_handle = None
     for temp_handle in temp_handles:
         temp_props = pyzes.zes_temp_properties_t()
@@ -847,12 +845,10 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         if temp_props.type != pyzes.ZES_TEMP_SENSORS_GPU:
             continue
         if subdevice_id is not None:
-            # Tiled dGPU: match the per-tile sensor for this sub-device.
             if temp_props.onSubdevice and temp_props.subdeviceId == subdevice_id:
                 temperature_handle = temp_handle
                 break
         else:
-            # Non-tiled or root device: pick the root-level GPU sensor.
             if not temp_props.onSubdevice:
                 temperature_handle = temp_handle
                 break
@@ -1109,11 +1105,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman engine group handles.",
     )
 
-    # Select the GPU engine group matching this device:
-    #   - Tiled dGPU (subdevice_id set): use the per-tile engine group
-    #     whose subdeviceId matches.
-    #   - Non-tiled: use the root-level (non-subdevice) engine group.
-    # Raises RuntimeError if no matching engine group is found.
+    # See Note [telemetry handle selection]
     engine_handle = None
     for eng_handle in engine_handles:
         eng_props = pyzes.zes_engine_properties_t()
@@ -1125,12 +1117,10 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         if eng_props.type != pyzes.ZES_ENGINE_GROUP_ALL:
             continue
         if subdevice_id is not None:
-            # Tiled dGPU: match the per-tile engine group for this sub-device.
             if eng_props.onSubdevice and eng_props.subdeviceId == subdevice_id:
                 engine_handle = eng_handle
                 break
         else:
-            # Non-tiled or root device: pick the root-level engine group.
             if not eng_props.onSubdevice:
                 engine_handle = eng_handle
                 break
