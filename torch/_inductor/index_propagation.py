@@ -360,10 +360,12 @@ class IndexPropagation(DefaultHandler):
                 else:
                     return Where(expr < 0, expr + size, expr)
 
-            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
-            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
-                -size <= expr
-            )
+            can_prove_lower = self.statically_true(0 <= expr)
+            if wrap_neg:
+                # Sometimes it's easier to prove 0 <= expr than the weaker
+                # -size <= expr. The latter is only sufficient when negative
+                # indices will be wrapped before codegen.
+                can_prove_lower = can_prove_lower or self.statically_true(-size <= expr)
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)

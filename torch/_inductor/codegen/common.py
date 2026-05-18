@@ -2789,16 +2789,12 @@ class CSEProxy(DefaultHandler):
         assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
 
-        if var.bounds.lower < 0:
-            if wrap_neg:
-                stm = ops.add(var, ops.index_expr(size, torch.long))
-                # Mixed negative and non-negative
-                if var.bounds.upper >= 0:
-                    lt = ops.lt(var, 0)
-                    stm = ops.where(lt, stm, var)
-            else:
-                stm = var
-
+        if var.bounds.lower < 0 and wrap_neg:
+            stm = ops.add(var, ops.index_expr(size, torch.long))
+            # Mixed negative and non-negative
+            if var.bounds.upper >= 0:
+                lt = ops.lt(var, 0)
+                stm = ops.where(lt, stm, var)
             # Propagate bounds as we know how to compute them properly
             new_bounds = ValueRanges.unknown()
             if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
