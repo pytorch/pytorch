@@ -12,8 +12,8 @@
 #include <optional>
 
 #if defined(USE_ROCM)
-#include <fstream>
 #include <hip/hip_runtime_api.h>
+#include <fstream>
 #include <iterator>
 #include <vector>
 #endif
