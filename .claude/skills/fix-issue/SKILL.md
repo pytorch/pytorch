@@ -79,6 +79,9 @@ error line (do not create files, do not modify GitHub, do not touch git):
 You may change your mind about INTENDED_BEHAVIOR at any later point during
 this skill (e.g. after the implementer digs in) and exit with that error.
 
+Refer to torch_compile_manual.md (same folder as this file) for more
+information on intended behavior and debugging.
+
 ## Implementation subagent
 
 Spawn a new subagent (the **implementation subagent**) with maximum reasoning.
