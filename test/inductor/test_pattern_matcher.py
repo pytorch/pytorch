@@ -1502,7 +1502,8 @@ class TestPatternMatcher(TestCase):
             match.replace_by_example(repl, [inp, mat1, mat2])
 
         with inductor_config.patch(
-            pre_grad_custom_pass=lambda *args: test_pass.apply(*args)
+            pre_grad_custom_pass=lambda *args: test_pass.apply(*args),
+            pre_grad_pass_timing="early",
         ):
             counter = 0
             expected = fn(*copy.deepcopy(args))
