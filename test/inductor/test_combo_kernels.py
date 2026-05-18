@@ -409,6 +409,39 @@ class ComboKernelTests(TestCase):
                 "R0_BLOCK : tl.constexpr"
             ).check_not("XBLOCK_0 : tl.constexpr").run(code[0])
 
+    @requires_gpu_and_triton
+    def test_combo_kernel_per_config_subkernel_poi_red_mix(self):
+        def fn(a, b, c):
+            r_persistent = a.sum(dim=-1)  # rnumel=64  -> persistent reduction
+            r_nonpersistent = b.sum(dim=-1)  # rnumel=4096 -> non-persistent reduction
+            p = c * 2.0 + 1.0  # pointwise
+            return r_persistent, r_nonpersistent, p
+
+        inps = [
+            torch.randn(1024, 64, device=GPU_TYPE),
+            torch.randn(256, 4096, device=GPU_TYPE),
+            torch.randn(1024, 64, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
+
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            FileCheck().check("'grid_type': 'SequentialFlattenComboKernelGrid'").check(
+                "'num_kernels': 3"
+            ).check("'heuristic_0': 'pointwise'").check(
+                "'heuristic_1': 'persistent_reduction'"
+            ).check("'heuristic_2': 'reduction'").check(
+                "XBLOCK_0 : tl.constexpr"
+            ).check("XBLOCK_1 : tl.constexpr").check("XBLOCK_2 : tl.constexpr").check(
+                "R0_BLOCK_2 : tl.constexpr"
+            ).run(code[0])
+        else:
+            FileCheck().check_not("XBLOCK_0 : tl.constexpr").check_not(
+                "combo_grid_meta"
+            ).run(code[0])
+
     @skipIfRocm
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
@@ -1345,12 +1378,10 @@ class ComboKernelTestsMaxAutotune(TestCase):
         return out_compiled, " ".join(code), "\n".join(cm.output)
 
     def _assert_combo_seed_launch_path(self, code, logs, seed_count):
-        FileCheck().check("start_combo_kernel_standalone_autotune(").check(
-            ".run("
-        ).run(code)
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, seed_count + 1
+        FileCheck().check("start_combo_kernel_standalone_autotune(").check(".run(").run(
+            code
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, seed_count + 1)
         self.assertIn(
             f"Combo standalone autotune seed: submit {seed_count} standalone kernels",
             logs,
