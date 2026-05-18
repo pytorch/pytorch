@@ -259,9 +259,13 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
+        b8,
+        f16,
         f32,
         f64,
-    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
+        i32,
+        i64,
+    },  # Sparse tensor outputs are not supported by torch.compile fullgraph.
     "view_as_complex": {f16},
 }
 
@@ -1016,6 +1020,7 @@ inductor_skip_exact_stride = {
 
 # On CPU, Inductor may choose a different valid layout for these ops.
 inductor_skip_exact_stride_cpu = {
+    "einsum",
     "nn.functional.max_unpool2d",
     "nn.functional.max_unpool2d.grad",
 }
