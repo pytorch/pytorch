@@ -37,6 +37,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    triton_type,
     using_b200,
 )
 from ..virtualized import V
@@ -327,6 +328,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -2393,7 +2396,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     @staticmethod
     def _dtype_to_triton(dtype: torch.dtype) -> str:
         """Convert a torch dtype to a triton type string."""
-        return f"tl.{dtype}".replace("torch.", "")
+        return triton_type(dtype)
 
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
@@ -2882,7 +2885,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,
+    ROCmConfigHeuristic,  # type: ignore[misc]
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
