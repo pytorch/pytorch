@@ -19,7 +19,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyNativeDeviceTypes,
-    onlyOn,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -577,13 +576,16 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyOn(["cuda", "xpu"])  # CPU is too slow
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"
     )  # even for CUDA test, sufficient system memory is required
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
+        # Skip CPU - too slow for 17GB tensor test
+        if self.device_type == "cpu":
+            self.skipTest("CPU is too slow for large tensor test")
+
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
         np_fn = partial(np.flip, axis=0)
