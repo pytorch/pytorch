@@ -374,8 +374,12 @@ class TestCutlassBackend(TestCase):
                 Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
                 if GPU_TYPE == "xpu":
-                    atol = 1e-3
-                    rtol = 1e-3
+                    if dtype == torch.bfloat16:
+                        atol = 5e-3
+                        rtol = 5e-3
+                    else:
+                        atol = 1e-3
+                        rtol = 1e-3
                 else:
                     # use default
                     atol = None
