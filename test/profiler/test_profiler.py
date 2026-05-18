@@ -714,6 +714,17 @@ class TestProfiler(TestCase):
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_tensor_dealloc_recorded(self):
+        with profile(activities=[ProfilerActivity.CPU]) as p:
+            with record_function("explicit_tensor_del"):
+                x = torch.empty((3, 4))
+                del x
+            gc.collect()
+
+        names = [e.name for e in p.events()]
+        self.assertIn("Tensor_dealloc", names)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
@@ -2459,10 +2470,10 @@ class TestProfilerDevice(TestCase):
             stats,
             "cpu_memory_usage",
             allocs=["aten::rand", "aten::empty"],
-            deallocs=["[memory]"],
+            deallocs=["Tensor_dealloc"],
         )
         if device_type != "cpu":
-            check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
+            check_metrics(stats, "device_memory_usage", deallocs=["Tensor_dealloc"])
 
     def test_flops(self, device):
         device_type = device.split(":")[0]
@@ -3206,19 +3217,30 @@ class TestExperimentalUtils(TestCase):
                     f"Expected 1 out event, got {len(aten_add_out_event)}"
                 )
 
-            # Without group_by_overload_name, the overload name is ignored in the key averages
+            # Without group_by_overload_name, the overload name is ignored in the key averages.
             key_averages = prof.key_averages()
-            if len(key_averages) != 2:
+            aten_add_avgs = [evt for evt in key_averages if evt.key == "aten::add"]
+            if len(aten_add_avgs) != 1:
                 raise AssertionError(
-                    f"Expected 2 key averages, got {len(key_averages)}"
+                    f"Expected 1 aten::add key average, got {len(aten_add_avgs)}"
+                )
+            if aten_add_avgs[0].count != 2:
+                raise AssertionError(
+                    f"Expected 2 aten::add calls, got {aten_add_avgs[0].count}"
                 )
             if "Overload Name" in key_averages.table():
                 raise AssertionError("Overload Name should not be in table")
 
             key_averages = prof.key_averages(group_by_overload_name=True)
-            if len(key_averages) != 3:
+            aten_add_overloads = sorted(
+                (evt.overload_name, evt.count)
+                for evt in key_averages
+                if evt.key == "aten::add"
+            )
+            if aten_add_overloads != [("Tensor", 1), ("out", 1)]:
                 raise AssertionError(
-                    f"Expected 3 key averages with group_by_overload_name, got {len(key_averages)}"
+                    "Expected separate aten::add Tensor and out overload key averages, "
+                    f"got {aten_add_overloads}"
                 )
             if "Overload Name" not in key_averages.table():
                 raise AssertionError("Overload Name should be in table")

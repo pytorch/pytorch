@@ -355,6 +355,8 @@ class TestDataFlow(TestCase):
         out: list[tuple[str, tuple[bool, ...]]] = []
         for node in _utils.traverse_dfs(tree):
             if node.tag == _EventType.TorchOp:
+                if node.name == "Tensor_dealloc":
+                    continue
                 e = node.extra_fields
                 schemas = _memory_profiler.SchemaMatcher.match_schemas(e)
                 name = node.name
