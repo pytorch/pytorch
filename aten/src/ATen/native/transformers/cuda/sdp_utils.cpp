@@ -22,6 +22,7 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
 #include <cstdint>
 
@@ -287,24 +288,32 @@ bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug
   }
   const int64_t alignment_bytes =
       minimum_gemm_alignment(params) * params.query.element_size();
-  const auto ptr_mod = [alignment_bytes](const at::Tensor& tensor) {
-    return uint64_t(tensor.const_data_ptr()) % alignment_bytes;
+  // The CUDA caching allocator returns base pointers aligned to >= 256 bytes,
+  // which exceeds the alignment_bytes the CUTLASS kernels require. So pointer
+  // alignment is fully determined by storage_offset * element_size. Computing
+  // it symbolically avoids touching data_ptr() (which calls numel() and would
+  // throw on FakeTensors with symbolic shapes during tracing).
+  const auto offset_bytes = [](const at::Tensor& tensor) {
+    return tensor.sym_storage_offset() * tensor.element_size();
   };
-  const auto is_aligned = [&ptr_mod](const at::Tensor& tensor) {
-    return tensor.numel() == 0 || ptr_mod(tensor) == 0;
+  // guard_or_true: for symbolic offsets (FakeTensors) we assume aligned so the
+  // chooser does not regress tracing; the eager runtime call re-checks.
+  const auto is_aligned = [&](const at::Tensor& tensor) {
+    return TORCH_GUARD_OR_TRUE(
+        (offset_bytes(tensor) % alignment_bytes).sym_eq(0));
   };
   if (!is_aligned(params.query) || !is_aligned(params.key) ||
       !is_aligned(params.value)) {
     if (debug) {
       TORCH_WARN(
-          "Mem efficient attention on sm80 or newer requires q, k, and v data pointers to be aligned to ",
+          "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets * element_size to be aligned to ",
           alignment_bytes,
-          " bytes. Got query.data_ptr() % alignment_bytes: ",
-          ptr_mod(params.query),
-          ", key.data_ptr() % alignment_bytes: ",
-          ptr_mod(params.key),
-          ", value.data_ptr() % alignment_bytes: ",
-          ptr_mod(params.value),
+          " bytes. Got query.storage_offset() * element_size % alignment_bytes: ",
+          (offset_bytes(params.query) % alignment_bytes).expect_int(),
+          ", key.storage_offset() * element_size % alignment_bytes: ",
+          (offset_bytes(params.key) % alignment_bytes).expect_int(),
+          ", value.storage_offset() * element_size % alignment_bytes: ",
+          (offset_bytes(params.value) % alignment_bytes).expect_int(),
           ".");
     }
     return false;

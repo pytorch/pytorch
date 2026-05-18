@@ -1845,7 +1845,7 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(actual, expected)
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "data pointers"):
+            with self.assertWarnsRegex(UserWarning, "storage offsets"):
                 self.assertRaisesRegex(
                     RuntimeError,
                     "No available kernel|No viable backend",
