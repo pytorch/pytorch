@@ -86,7 +86,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsValue, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -281,7 +281,7 @@ class TritonSymbols:
         for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
-                var_shape = cse_var.shape
+                var_shape = tuple(cse_var.shape)
             elif symbol_is_type(
                 var,
                 (
@@ -1241,6 +1241,11 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        fp8_dtypes = (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        )
+
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -1251,10 +1256,6 @@ class TritonOverrides(OpOverrides):
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
-            fp8_dtypes = (
-                torch.float8_e4m3fn,
-                torch.float8_e5m2,
-            )
             # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
             assert not (
                 src_dtype in fp8_dtypes
@@ -1292,6 +1293,13 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            src_dtype is not None
+            and dtype in fp8_dtypes
+            and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
+        ):
+            return f"{x}.to(tl.float32).to({out_dtype})"
 
         return f"{x}.to({out_dtype})"
 
@@ -2045,6 +2053,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
+        if config.eager_numerics.use_pytorch_libdevice:
+            # Strict numerics should use the backend math library entry point.
+            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+            return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
     @staticmethod
@@ -6675,6 +6687,14 @@ class TritonScheduling(SIMDScheduling):
         return False
 
     @staticmethod
+    def _unwrap_zero_fill_result(value: Any) -> Any:
+        if isinstance(value, OpsValue):
+            return value.value
+        if isinstance(value, tuple):
+            return tuple(TritonScheduling._unwrap_zero_fill_result(x) for x in value)
+        return value
+
+    @staticmethod
     def _is_zero_fill_node(node: BaseSchedulerNode) -> bool:
         if not isinstance(node, SchedulerNode):
             return False
@@ -6704,15 +6724,13 @@ class TritonScheduling(SIMDScheduling):
         try:
             with V.set_ops_handler(ZeroFillHandler()):
                 result = buffer.data.inner_fn(*buffer.data.inner_fn_args())
-        except Exception:
+        except NotImplementedError:
             # This is a speculative optimization probe.  Unsupported arithmetic
             # or ops in the pointwise body just mean it is not a zero-fill.
             return False
 
         # ZeroFillHandler returns OpsValue-wrapped (value, dtype) pairs.
-        result = getattr(result, "value", result)
-        if isinstance(result, tuple):
-            result = tuple(getattr(x, "value", x) for x in result)
+        result = TritonScheduling._unwrap_zero_fill_result(result)
         if not (isinstance(result, tuple) and len(result) == 2):
             return False
 
