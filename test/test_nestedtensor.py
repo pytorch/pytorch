@@ -8165,6 +8165,7 @@ torch.cuda.synchronize()
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test manually invokes __torch_function__")
     def test_torch_function_metadata_fast_path_exact_callables(self, device, dtype):
         nt = torch.nested.nested_tensor(
             [
