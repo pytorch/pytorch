@@ -4650,7 +4650,7 @@ class TestCustomOpFastPath(TestCase):
         test fails if the fast path doesn't handle the call."""
         if TEST_WITH_CROSSREF:
             # CrossRefMode is a TorchFunctionMode, so the fast path correctly
-            # falls back to the C++ dispatcher — skip the poison.
+            # falls back to the C++ dispatcher -- skip the poison.
             yield
             return
         overload = opdef._opoverload
