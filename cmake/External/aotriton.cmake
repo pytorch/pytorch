@@ -28,10 +28,10 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_CI_COMMIT "dd1b68b604b5258ee7a9f7b66ad95e7a82c18065")
   endif()
   set(__AOTRITON_SHA256_LIST
-      "bc58eee34cc98333b60ff3296c4138745c404938e53ad7713df546bd72b16da9"  # rocm6.4
-      "4e68f6b417d69369717cec73f998f7f3abaee8750cb25ab7d0c546a0e9cccde5"  # rocm7.0
-      "79bf46bcca3521de92f13b46c4fb9b4837a20810fc6a29a61169901c44904e5e"  # rocm7.1
-      "d4f2390a9afe3b98aca2ed1d6a26ae02e69dcad5cabdc7a56dac8f6f54019345"  # rocm7.2
+      "e57ad080bd87fdaf7fe5bbff49ab80222be3bc8eb56a197d5781bfae8c116c33"  # rocm6.4
+      "f6aba1fe59312004ccd13dfda4d0a9e35457527fec18348d2e75a294a1051ef5"  # rocm7.0
+      "a1d731745929b61598d088eeaad31d8a82a27032aa51e3a7c831e45a99e095c2"  # rocm7.1
+      "5b97e8d041b160c84085961f3d3bd7b9890642b146bacb04c991aa9ad6a8dca8"  # rocm7.2
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
