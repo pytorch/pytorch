@@ -264,12 +264,13 @@ class ComboKernelTests(TestCase):
             return orig(features, cooperative_reduction)
 
         out_eager = fn(*inps)
-        with patch.object(
-            InductorChoices,
-            "should_use_persistent_reduction",
-            force_non_persistent_for_sort,
-        ):
-            with torch._inductor.config.patch(
+        with (
+            patch.object(
+                InductorChoices,
+                "should_use_persistent_reduction",
+                force_non_persistent_for_sort,
+            ),
+            torch._inductor.config.patch(
                 {
                     "combo_kernel_per_subkernel_blocks": True,
                     "combo_kernel_max_num_nodes": 128,
@@ -277,9 +278,10 @@ class ComboKernelTests(TestCase):
                     "combo_kernels_autotune": 2,
                     "combo_kernel_autotune_grouping": True,
                 }
-            ):
-                fn_c = torch.compile(fn)
-                out_compiled, code = run_and_get_code(fn_c, *inps)
+            ),
+        ):
+            fn_c = torch.compile(fn)
+            out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
         FileCheck().check("triton_heuristics.persistent_reduction").run(code[0])
 
