@@ -57,6 +57,7 @@ class _ZesDeviceInfo:
     subdevice_id: int | None = None
     is_integrated: bool = False
     temperature_handle: c_void_p | None = None
+    frequency_handle: c_void_p | None = None
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
@@ -767,6 +768,19 @@ def _zes_check(rc: int, msg: str) -> None:
         raise RuntimeError(f"{msg} (rc={rc})")
 
 
+def _zes_ensure_device_infos(device: int):
+    """Ensure the ZES device info cache is populated and validate the device index."""
+    if not _cached_zes_device_infos:
+        if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
+            raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
+
+    total_devices = len(_cached_zes_device_infos)
+    if device >= total_devices:
+        raise RuntimeError(
+            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
+        )
+
+
 def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
     r"""Return the Level Zero Sysman GPU temperature sensor handle for the specified device.
 
@@ -787,16 +801,7 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         ) from None
 
     device = _get_device_index(device, optional=True)
-    global _cached_zes_device_infos
-    if not _cached_zes_device_infos:
-        if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
-            raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
-
-    total_devices = len(_cached_zes_device_infos)
-    if device >= total_devices:
-        raise RuntimeError(
-            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
-        )
+    _zes_ensure_device_infos(device)
 
     info = _cached_zes_device_infos[device]
     if info.temperature_handle is not None:
@@ -879,6 +884,77 @@ def temperature(device: Device = None) -> float:
     return temp.value
 
 
+def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU frequency domain handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.frequency_handle`` so that
+    repeated calls skip domain enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.frequency_handle is not None:
+        return info.frequency_handle
+
+    device_handle = info.device_handle
+
+    # Enumerate all frequency domains under this device handle.
+    freq_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumFrequencyDomains(device_handle, byref(freq_count), None),
+        "Can't get Level Zero Sysman frequency domains count.",
+    )
+    if freq_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman frequency domains found.")
+    freq_handles = (pyzes.zes_freq_handle_t * freq_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumFrequencyDomains(
+            device_handle, byref(freq_count), freq_handles
+        ),
+        "Can't get Level Zero Sysman frequency domain handles.",
+    )
+
+    # TODO: pyzes lacks zesFrequencyGetProperties, so we cannot filter by
+    # subdevice or domain type. We assume index 0 (ZES_FREQ_DOMAIN_GPU)
+    # is the GPU frequency domain.
+    frequency_handle = freq_handles[0]
+    info.frequency_handle = frequency_handle
+    return frequency_handle
+
+
+def clock_rate(device: Device = None) -> float:
+    r"""Return the GPU clock rate in MHz.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    frequency_handle = _get_zes_frequency_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    freq_state = pyzes.zes_freq_state_t()
+    rc = pyzes.zesFrequencyGetState(frequency_handle, byref(freq_state))
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU clock rate (rc={rc}).")
+    return freq_state.actual
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -921,6 +997,7 @@ __all__ = [
     "XPUGraph",
     "can_device_access_peer",
     "change_current_allocator",
+    "clock_rate",
     "current_device",
     "current_stream",
     "default_generators",

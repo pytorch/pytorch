@@ -13,6 +13,7 @@
 
     StreamContext
     can_device_access_peer
+    clock_rate
     current_device
     current_stream
     device
