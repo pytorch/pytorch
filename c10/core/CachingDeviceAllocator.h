@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -24,6 +25,11 @@ struct DeviceStats {
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
+  // SUM: bytes reserved in each private memory pool (e.g. CUDA graph pools).
+  // current drops to 0 when a pool is deleted, while peak/allocated/freed are
+  // preserved until reset.
+  ska::flat_hash_map<c10::MempoolId_t, StatArray, c10::MempoolIdHash>
+      reserved_bytes_by_private_pools;
   // SUM: bytes within active memory blocks
   StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks
