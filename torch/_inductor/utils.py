@@ -3069,10 +3069,8 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     if not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: CUDA is not available so no datasheet entry can be found. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only. "
-            "To get accurate compute estimates, add your device to "
-            "torch/_inductor/analysis/device_info.py"
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
         )
         return 0.0
 
