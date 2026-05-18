@@ -394,7 +394,10 @@ def lookup_spec_from_dynamo_source(
         and not source.is_varkw
     ):
         return params._named_args.get(source.local_name)
-    # Case 2: indexed access into *args.
+    # Case 2: indexed access into *args. In practice dynamo only reaches
+    # here with a literal int index; non-int is unexpected (slices are
+    # statically resolved upstream and data-dependent indices fail with
+    # `GuardOnDataDependentSymNode` before reaching us).
     if (
         isinstance(source, GetItemSource)
         and isinstance(source.base, LocalSource)
@@ -402,31 +405,31 @@ def lookup_spec_from_dynamo_source(
         and source.base.is_varargs
     ):
         if type(source.index) is not int:
-            raise AssertionError(
-                f"Expected int index for *args GetItemSource, got "
+            raise RuntimeError(
+                f"Unexpected non-int index for *args GetItemSource: "
                 f"{type(source.index).__name__}: {source.index!r} "
                 f"(source={source!r})"
             )
         if params._varargs is not None and 0 <= source.index < len(params._varargs):
             return params._varargs[source.index]
-    # Case 3: keyed access into **kwargs.
+        return None
+    # Case 3: keyed access into **kwargs. ``**kwargs`` keys are always
+    # strings; a non-string index here is unexpected.
     if (
         isinstance(source, DictGetItemSource)
         and isinstance(source.base, LocalSource)
         and source.base.is_input
         and source.base.is_varkw
     ):
-        # `source.index` is either a literal (string/int) or a
-        # ConstDictKeySource for non-string keys. ``**kwargs`` keys are
-        # always strings, so we only handle the literal-string case here.
         if not isinstance(source.index, str):
-            raise AssertionError(
-                f"Expected str index for **kwargs DictGetItemSource, got "
+            raise RuntimeError(
+                f"Unexpected non-str index for **kwargs DictGetItemSource: "
                 f"{type(source.index).__name__}: {source.index!r} "
                 f"(source={source!r})"
             )
         if params._varkw is not None and source.index in params._varkw:
             return params._varkw[source.index]
+        return None
     return None
 
 
