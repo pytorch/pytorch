@@ -4462,8 +4462,14 @@ class TestAutotuneCacheExtraOptions(TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.extra_options, {"backend_specific": "option"})
-        # The returned config should be the matched one
-        self.assertIs(result, original_config)
+        # The returned config is a copy of the matched one (loader does
+        # `copy.copy` before applying provenance attrs so the shared
+        # heuristic-owned configs list stays pristine).
+        self.assertIsNot(result, original_config)
+        self.assertEqual(result.kwargs, original_config.kwargs)
+        self.assertEqual(result.num_warps, original_config.num_warps)
+        self.assertEqual(result.num_stages, original_config.num_stages)
+        self.assertFalse(hasattr(original_config, "extra_options"))
 
     @requires_triton()
     def test_load_cached_autotuning_handles_none_extra_options(self):

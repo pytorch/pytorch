@@ -52,7 +52,6 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
-    NoTritonConfigsError,
     template,
     triton_config,
 )
@@ -494,9 +493,11 @@ class TestCachingAutotunerPlugin(TestCase):
         for setup in (with_configs, with_launchers, with_compile_results):
             with self.subTest(setup=setup.__name__):
                 autotuner = self._make_autotuner([])
-                autotuner.inductor_meta["combo_tuning_groups"] = [
-                    {"member_indices": [0], "skip_rblock": False}
-                ]
+                autotuner.inductor_meta["combo_grid_meta"] = {
+                    "num_kernels": 1,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                }
                 setup(autotuner)
 
                 with patch(
@@ -507,56 +508,6 @@ class TestCachingAutotunerPlugin(TestCase):
                     )
 
                 mock_get_pool.assert_not_called()
-                self.assertIsNone(autotuner.combo_standalone_autotune_seed_future)
-
-    def test_combo_seed_start_submits_one_future_per_seed(self):
-        from torch._inductor.runtime.triton_heuristics import (
-            start_combo_kernel_standalone_autotune,
-        )
-
-        autotuner = self._make_autotuner([])
-        autotuner.inductor_meta["combo_tuning_groups"] = [
-            {"member_indices": [0, 1], "skip_rblock": False}
-        ]
-        future_a = MagicMock()
-        future_b = MagicMock()
-        pool = MagicMock()
-        pool.submit.side_effect = [future_a, future_b]
-
-        with patch(
-            "torch._inductor.autotune_process.PrecompileThreadPool.get_instance",
-            return_value=pool,
-        ):
-            start_combo_kernel_standalone_autotune(
-                autotuner,
-                ((MagicMock(), ("a",)), (MagicMock(), ("b",))),
-            )
-
-        self.assertEqual(pool.submit.call_count, 2)
-        self.assertEqual(
-            autotuner.combo_standalone_autotune_seed_future,
-            [future_a, future_b],
-        )
-
-    def test_combo_seed_cancel_ignores_failed_future(self):
-        autotuner = self._make_autotuner([])
-        future = MagicMock()
-        future.cancel.return_value = False
-        future.result.side_effect = NoTritonConfigsError("seed failed")
-        autotuner.combo_standalone_autotune_seed_future = [future]
-
-        autotuner._cancel_combo_standalone_autotune_seed()
-
-        self.assertIsNone(autotuner.combo_standalone_autotune_seed_future)
-        future.cancel.assert_called_once()
-        future.result.assert_not_called()
-
-    def test_combo_seed_cancel_allows_no_submitted_future(self):
-        autotuner = self._make_autotuner([])
-
-        autotuner._cancel_combo_standalone_autotune_seed()
-
-        self.assertIsNone(autotuner.combo_standalone_autotune_seed_future)
 
     def test_coordinate_descent_save_preserves_combo_autotune_marker(self):
         autotuner = self._make_autotuner([])
@@ -593,56 +544,146 @@ class TestCachingAutotunerPlugin(TestCase):
 
         return precompile_config
 
-    def test_combo_seed_drops_conflicting_shared_kwargs(self):
+    def test_update_combo_kernel_kwargs_only_suffixes_block_keys(self):
+        """`_update_combo_kernel_kwargs` should only write block-suffixed keys.
+
+        Non-suffixed backend kwargs (e.g. `waves_per_eu`) are now handled by
+        the apply phase via cross-seed voting -- the per-seed `_update_*`
+        call should never write them into `kwargs`.
+        """
         from torch._inductor.runtime.triton_heuristics import (
             _update_combo_kernel_kwargs,
         )
         from torch.utils._ordered_set import OrderedSet
 
         signature_keys = OrderedSet(["XBLOCK_0", "XBLOCK_1"])
-        shared_kwargs = {}
         kwargs = {}
         _update_combo_kernel_kwargs(
-            kwargs,
-            {"XBLOCK": 16, "waves_per_eu": 1},
-            0,
-            False,
-            signature_keys,
-            shared_kwargs,
+            kwargs, {"XBLOCK": 16, "waves_per_eu": 1}, 0, False, signature_keys
         )
         _update_combo_kernel_kwargs(
-            kwargs,
-            {"XBLOCK": 32, "waves_per_eu": 2},
-            1,
-            False,
-            signature_keys,
-            shared_kwargs,
+            kwargs, {"XBLOCK": 32, "waves_per_eu": 2}, 1, False, signature_keys
         )
-
         self.assertEqual(kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32})
 
-        shared_kwargs = {}
-        kwargs = {}
-        _update_combo_kernel_kwargs(
-            kwargs,
-            {"XBLOCK": 16, "waves_per_eu": 2},
-            0,
-            False,
-            signature_keys,
-            shared_kwargs,
-        )
-        _update_combo_kernel_kwargs(
-            kwargs,
-            {"XBLOCK": 32, "waves_per_eu": 2},
-            1,
-            False,
-            signature_keys,
-            shared_kwargs,
-        )
+    def test_combo_seed_votes_on_num_warps_stages(self):
+        """Apply phase aggregates seed-chosen (num_warps, num_stages) via
+        most-common vote, since combo only has one kernel-level value.
+        """
+        from torch.utils._ordered_set import OrderedSet
 
-        self.assertEqual(kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32, "waves_per_eu": 2})
+        autotuner = self._make_autotuner([])
+        current_launcher = self._make_combo_seed_launcher(
+            triton.Config(
+                {"XBLOCK_0": 16, "XBLOCK_1": 16, "XBLOCK_2": 16},
+                num_warps=4,
+                num_stages=1,
+            )
+        )
+        # Three seeds: (4,1), (8,1), (8,1) -- (8,1) wins the vote.
+        seeds = [
+            triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1),
+            triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1),
+            triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1),
+        ]
+        futures = []
+        for cfg in seeds:
+            f = MagicMock()
+            f.result.return_value = cfg
+            futures.append(f)
+        autotuner.combo_standalone_autotune_seed_configs = [
+            f.result.return_value for f in futures
+        ]
 
-    def test_combo_seed_ignores_warp_stage_only_seed(self):
+        candidate_launchers = []
+        with (
+            patch.object(autotuner, "_ensure_kernel_loaded"),
+            patch.object(
+                autotuner,
+                "_precompile_config",
+                side_effect=self._make_combo_seed_precompile(candidate_launchers),
+            ),
+            patch.object(autotuner, "bench") as mock_bench,
+        ):
+            result = autotuner._apply_combo_standalone_autotune_seed(
+                current_launcher,
+                OrderedSet(["XBLOCK_0", "XBLOCK_1", "XBLOCK_2"]),
+                {
+                    "num_kernels": 3,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                    "heuristic_1": "pointwise",
+                    "size_hints_1": {"x": 1024},
+                    "heuristic_2": "pointwise",
+                    "size_hints_2": {"x": 1024},
+                },
+                *self._make_kernel_inputs(),
+            )
+
+        self.assertEqual(result.config.num_warps, 8)
+        self.assertEqual(result.config.num_stages, 1)
+        mock_bench.assert_not_called()
+
+    def test_combo_seed_votes_on_shared_backend_kwarg(self):
+        """Shared (non-suffixed) backend kwargs are aggregated by
+        Counter.most_common across seeds.
+        """
+        from torch.utils._ordered_set import OrderedSet
+
+        autotuner = self._make_autotuner([])
+        current_launcher = self._make_combo_seed_launcher(
+            triton.Config(
+                {"XBLOCK_0": 16, "XBLOCK_1": 16, "XBLOCK_2": 16},
+                num_warps=4,
+                num_stages=1,
+            )
+        )
+        # Three seeds with disagreeing waves_per_eu (2,4,4); 4 wins.
+        seeds = [
+            triton.Config({"XBLOCK": 32, "waves_per_eu": 2}, num_warps=4, num_stages=1),
+            triton.Config({"XBLOCK": 32, "waves_per_eu": 4}, num_warps=4, num_stages=1),
+            triton.Config({"XBLOCK": 32, "waves_per_eu": 4}, num_warps=4, num_stages=1),
+        ]
+        futures = []
+        for cfg in seeds:
+            f = MagicMock()
+            f.result.return_value = cfg
+            futures.append(f)
+        autotuner.combo_standalone_autotune_seed_configs = [
+            f.result.return_value for f in futures
+        ]
+
+        candidate_launchers = []
+        with (
+            patch.object(autotuner, "_ensure_kernel_loaded"),
+            patch.object(
+                autotuner,
+                "_precompile_config",
+                side_effect=self._make_combo_seed_precompile(candidate_launchers),
+            ),
+            patch.object(autotuner, "bench"),
+        ):
+            result = autotuner._apply_combo_standalone_autotune_seed(
+                current_launcher,
+                OrderedSet(["XBLOCK_0", "XBLOCK_1", "XBLOCK_2"]),
+                {
+                    "num_kernels": 3,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                    "heuristic_1": "pointwise",
+                    "size_hints_1": {"x": 1024},
+                    "heuristic_2": "pointwise",
+                    "size_hints_2": {"x": 1024},
+                },
+                *self._make_kernel_inputs(),
+            )
+
+        self.assertEqual(result.config.kwargs.get("waves_per_eu"), 4)
+
+    def test_combo_seed_applies_warp_stage_only_change(self):
+        """Even when block kwargs are unchanged, a seed-voted warp/stage that
+        differs from the base config still triggers a stitched compile.
+        """
         from torch.utils._ordered_set import OrderedSet
 
         autotuner = self._make_autotuner([])
@@ -652,22 +693,33 @@ class TestCachingAutotunerPlugin(TestCase):
         seed_config = triton.Config({"XBLOCK": 16}, num_warps=8, num_stages=1)
         future = MagicMock()
         future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_future = [future]
+        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
 
+        candidate_launchers = []
         with (
             patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(autotuner, "_precompile_config") as mock_precompile,
+            patch.object(
+                autotuner,
+                "_precompile_config",
+                side_effect=self._make_combo_seed_precompile(candidate_launchers),
+            ),
             patch.object(autotuner, "bench") as mock_bench,
         ):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
                 OrderedSet(["XBLOCK_0"]),
-                [{"member_indices": [0], "skip_rblock": False}],
+                {
+                    "num_kernels": 1,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                },
                 *self._make_kernel_inputs(),
             )
 
-        self.assertIs(result, current_launcher)
-        mock_precompile.assert_not_called()
+        # Block kwargs unchanged but seed warps differ -> stitched config
+        # built with seed-voted num_warps.
+        self.assertEqual(result.config.num_warps, 8)
+        self.assertEqual(result.config.num_stages, 1)
         mock_bench.assert_not_called()
 
     def test_combo_seed_run_does_not_stamp_unchanged_launcher(self):
@@ -680,14 +732,13 @@ class TestCachingAutotunerPlugin(TestCase):
         current_launcher.store_cubin = False
         autotuner.launchers = [current_launcher]
         autotuner.triton_meta["signature"]["XBLOCK_0"] = "constexpr"
-        autotuner.inductor_meta["combo_tuning_groups"] = [
-            {"member_indices": [0], "skip_rblock": False}
-        ]
-        future = MagicMock()
-        future.result.return_value = triton.Config(
-            {"XBLOCK": 16}, num_warps=4, num_stages=1
-        )
-        autotuner.combo_standalone_autotune_seed_future = [future]
+        autotuner.inductor_meta["combo_grid_meta"] = {
+            "num_kernels": 1,
+            "heuristic_0": "pointwise",
+            "size_hints_0": {"x": 1024},
+        }
+        seed_cfg = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=1)
+        autotuner.combo_standalone_autotune_seed_configs = [seed_cfg]
         autotuner.save_cache_hook = MagicMock()
 
         with (
@@ -703,8 +754,6 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertFalse(
             getattr(current_launcher.config, "found_by_combo_autotune", False)
         )
-        self.assertTrue(autotuner.combo_standalone_autotune_seed_attempted)
-        self.assertIsNone(autotuner.combo_standalone_autotune_seed_future)
         self.assertIsNone(autotuner.combo_standalone_autotune_seed_configs)
         autotuner.save_cache_hook.assert_not_called()
 
@@ -718,7 +767,7 @@ class TestCachingAutotunerPlugin(TestCase):
         seed_config = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
         future = MagicMock()
         future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_future = [future]
+        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
 
         candidate_launchers = []
         with (
@@ -733,7 +782,11 @@ class TestCachingAutotunerPlugin(TestCase):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
                 OrderedSet(["XBLOCK_0"]),
-                [{"member_indices": [0], "skip_rblock": False}],
+                {
+                    "num_kernels": 1,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                },
                 *self._make_kernel_inputs(),
             )
 
@@ -754,7 +807,7 @@ class TestCachingAutotunerPlugin(TestCase):
         seed_config = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=1)
         future = MagicMock()
         future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_future = [future]
+        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
 
         with (
             patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
@@ -764,7 +817,11 @@ class TestCachingAutotunerPlugin(TestCase):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
                 OrderedSet(["XBLOCK_0"]),
-                [{"member_indices": [0], "skip_rblock": False}],
+                {
+                    "num_kernels": 1,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                },
                 *self._make_kernel_inputs(),
             )
 
@@ -773,83 +830,10 @@ class TestCachingAutotunerPlugin(TestCase):
         mock_precompile.assert_not_called()
         mock_bench.assert_not_called()
 
-    def test_combo_seed_returns_input_when_seed_future_fails(self):
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
-        )
-        future = MagicMock()
-        future.result.side_effect = NoTritonConfigsError("seed failed")
-        autotuner.combo_standalone_autotune_seed_future = [future]
-
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
-            patch.object(autotuner, "_precompile_config") as mock_precompile,
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0"]),
-                [{"member_indices": [0], "skip_rblock": False}],
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertIs(result, current_launcher)
-        mock_ensure.assert_not_called()
-        mock_precompile.assert_not_called()
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_preserves_seed_index_when_one_future_fails(self):
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config(
-                {"XBLOCK_0": 16, "XBLOCK_1": 16},
-                num_warps=4,
-                num_stages=1,
-            )
-        )
-        failed_future = MagicMock()
-        failed_future.result.side_effect = NoTritonConfigsError("seed failed")
-        seed_future = MagicMock()
-        seed_future.result.return_value = triton.Config(
-            {"XBLOCK": 32}, num_warps=4, num_stages=1
-        )
-        autotuner.combo_standalone_autotune_seed_future = [
-            failed_future,
-            seed_future,
-        ]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0", "XBLOCK_1"]),
-                [
-                    {"member_indices": [0], "skip_rblock": False},
-                    {"member_indices": [1], "skip_rblock": False},
-                ],
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertIs(result, candidate_launchers[0])
-        self.assertEqual(result.config.kwargs["XBLOCK_0"], 16)
-        self.assertEqual(result.config.kwargs["XBLOCK_1"], 32)
-        mock_ensure.assert_called_once()
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_uses_current_combo_warp_stage(self):
+    def test_combo_seed_uses_seed_voted_warp_stage(self):
+        """The stitched combo config inherits seed-voted (num_warps,
+        num_stages) -- a single seed's choice wins by default.
+        """
         from torch.utils._ordered_set import OrderedSet
 
         autotuner = self._make_autotuner([])
@@ -859,7 +843,7 @@ class TestCachingAutotunerPlugin(TestCase):
         seed_config = triton.Config({"XBLOCK": 32}, num_warps=16, num_stages=1)
         future = MagicMock()
         future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_future = [future]
+        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
 
         candidate_launchers = []
         with (
@@ -874,13 +858,18 @@ class TestCachingAutotunerPlugin(TestCase):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
                 OrderedSet(["XBLOCK_0"]),
-                [{"member_indices": [0], "skip_rblock": False}],
+                {
+                    "num_kernels": 1,
+                    "heuristic_0": "pointwise",
+                    "size_hints_0": {"x": 1024},
+                },
                 *self._make_kernel_inputs(),
             )
 
         self.assertIs(result, candidate_launchers[0])
         self.assertEqual(result.config.kwargs["XBLOCK_0"], 32)
-        self.assertEqual(result.config.num_warps, 8)
+        # Seed voted 16 warps; the single-seed vote wins, not the base's 8.
+        self.assertEqual(result.config.num_warps, 16)
         self.assertEqual(result.config.num_stages, 1)
         mock_ensure.assert_called_once()
         mock_bench.assert_not_called()
@@ -1637,7 +1626,7 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
             best_config_data,
             configs_hash,
             original_configs,
-            {"combo_tuning_groups": [{"member_indices": [0], "skip_rblock": False}]},
+            {"combo_grid_meta": {"num_kernels": 1, "heuristic_0": "pointwise"}},
         )
 
         # Loader copies the matched config; provenance lives on the copy, not

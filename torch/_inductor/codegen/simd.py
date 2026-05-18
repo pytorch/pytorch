@@ -3460,17 +3460,19 @@ class SIMDScheduling(BaseScheduling):
         return src_code
 
     def generate_kernel_code_and_kernel_from_node_info(self, node_info: NodeInfo):
-        kernel = self.kernel_type(
-            node_info.tiling,
-            features=node_info.features,
-            tiling_scores=node_info.tiling_scores,
-        )
         # Seed kernels are internal autotune artifacts, not user-facing kernels
         # that run in the final graph. They should not be counted in
-        # `metrics.generated_kernel_count`. `Kernel.__init__` already
-        # incremented the counter; back it out here (same pattern used by the
-        # ComboKernel and the C++ kernel paths).
-        metrics.generated_kernel_count -= 1
+        # `metrics.generated_kernel_count`. `Kernel.__init__` increments the
+        # counter unconditionally; back it out via try/finally so a downstream
+        # exception cannot leak a stale increment.
+        try:
+            kernel = self.kernel_type(
+                node_info.tiling,
+                features=node_info.features,
+                tiling_scores=node_info.tiling_scores,
+            )
+        finally:
+            metrics.generated_kernel_count -= 1
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
         with (

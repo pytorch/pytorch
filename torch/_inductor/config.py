@@ -1044,9 +1044,6 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
-# When True, combo-kernel autotuning groups sub-kernels that share the same
-# candidate config set and kernel-analysis signature. Disabled by default.
-combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
 # Memory-aware combo kernel gating.
