@@ -146,7 +146,7 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
   return matmul_alignment_mn;
 }
 
-#ifdef USE_ROCM
+#if USE_ROCM_ATTENTION
 inline int aotriton_max_hdim() {
   static const int max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -291,7 +291,7 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     }
     return false;
   }
-#if defined(USE_ROCM) && AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+#if USE_ROCM_ATTENTION && AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
   const auto max_size = c10::SymInt(aotriton_max_hdim());
   if (!(query_size_last <= max_size && value_size_last <= max_size)) {
     if (debug) {
@@ -986,7 +986,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-#if defined(USE_ROCM) && AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
+#if USE_ROCM_ATTENTION && AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
       check_head_dim_size_flash<true /* caller_is_meff */>
 #else
       // hdim_qk != hdim_vo is supported since AOTriton 0.12
