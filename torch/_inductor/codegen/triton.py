@@ -53,6 +53,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
@@ -3738,6 +3739,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value = f"{value}.to({triton_store_type(store_dtype)})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
+        return self.codegen_descriptor_store_line(block_ptr, indexing, value)
+
+    def codegen_descriptor_load_line(self, block_descriptor, indexing):
+        """Generate the descriptor load line. Override for backend customization."""
+        return f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+
+    def codegen_descriptor_store_line(self, block_ptr, indexing, value):
+        """Generate the descriptor store line. Override for backend customization."""
         return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
 
     def check_bounds(
@@ -3986,7 +3995,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
-                    line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+                    line = self.codegen_descriptor_load_line(block_descriptor, indexing)
                 line = indexing.codegen_broadcast_and_reshape(
                     line,
                     indexing.block_shape,
@@ -5763,6 +5772,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
+        if (rblock := self._get_native_matmul_persistent_rblock()) is not None:
+            out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
         if (
@@ -6086,6 +6097,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return val
 
         return val
+
+    def _get_native_matmul_persistent_rblock(self) -> int | None:
+        if (
+            not self.is_native_matmul
+            or not self.persistent_reduction
+            or self.cooperative_reduction
+        ):
+            return None
+
+        rblocks = [
+            native_matmul_persistent_rblock(self._get_persistent_RBLOCK(tree.numel))
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+        return math.prod(rblocks) if rblocks else None
 
     @staticmethod
     def has_persistent_RBLOCK(rnumel):

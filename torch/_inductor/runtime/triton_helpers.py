@@ -281,7 +281,9 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
-    delta = mean_2 - mean_1
+    # Guard against inf - inf = NaN when both means are infinite and equal.
+    # This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
+    delta = tl.where(mean_1 == mean_2, 0.0, mean_2 - mean_1)
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
