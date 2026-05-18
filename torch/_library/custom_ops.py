@@ -18,7 +18,23 @@ from .effects import EffectType
 
 
 device_types_t = str | Sequence[str] | None
+tags_t = _C.Tag | Sequence[_C.Tag] | None
 log = logging.getLogger(__name__)
+
+
+def _normalize_tags(tags: tags_t) -> tuple[_C.Tag, ...]:
+    if tags is None:
+        return ()
+    if isinstance(tags, _C.Tag):
+        tags = (tags,)
+    return tuple(dict.fromkeys(tags))
+
+
+def _with_pt2_compliant_tag(tags: Sequence[_C.Tag]) -> list[_C.Tag]:
+    return [
+        _C.Tag.pt2_compliant_tag,
+        *(tag for tag in tags if tag != _C.Tag.pt2_compliant_tag),
+    ]
 
 
 @overload
@@ -30,7 +46,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -43,7 +59,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> "CustomOpDef": ...
 
 
@@ -56,7 +72,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -220,13 +236,13 @@ class CustomOpDef:
         name: str,
         schema: str,
         fn: Callable,
-        tags: Sequence[_C.Tag] | None = None,
+        tags: tags_t = None,
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
         self._schema = schema
-        self._tags = tags if tags is not None else []
+        self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
 
@@ -653,7 +669,7 @@ class CustomOpDef:
     def _define_dispatcher_op(self, schema_str: str, tags: Sequence[_C.Tag]) -> None:
         self._lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, *tags],
+            tags=_with_pt2_compliant_tag(tags),
         )
         self._opoverload = utils.lookup_op(self._qualname)
 

@@ -2594,6 +2594,39 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 
 class TestCustomOpAPI(TestCase):
+    @parametrize(
+        "tags, opname",
+        [
+            subtest((torch.Tag.pointwise, "single"), name="single"),
+            subtest(([torch.Tag.pointwise], "list"), name="list"),
+            subtest(((torch.Tag.pointwise,), "tuple"), name="tuple"),
+        ],
+    )
+    def test_custom_op_tags(self, tags, opname):
+        @torch.library.custom_op(
+            f"_torch_testing::tags_{opname}",
+            mutates_args=(),
+            tags=tags,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        self.assertIn(torch.Tag.pt2_compliant_tag, f._opoverload.tags)
+        self.assertIn(torch.Tag.pointwise, f._opoverload.tags)
+
+    def test_custom_op_tags_dedup_pt2_compliant(self):
+        @torch.library.custom_op(
+            "_torch_testing::tags_dedup_pt2",
+            mutates_args=(),
+            tags=[torch.Tag.pt2_compliant_tag, torch.Tag.pointwise],
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        tags = f._opoverload.tags
+        self.assertEqual(tags.count(torch.Tag.pt2_compliant_tag), 1)
+        self.assertIn(torch.Tag.pointwise, tags)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
