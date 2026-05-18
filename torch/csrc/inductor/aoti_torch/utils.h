@@ -12,7 +12,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/shim_exception_state.h>
 #include <optional>
-#include <variant>
+#include <type_traits>
 
 namespace torch::aot_inductor {
 TORCH_API const char* get_last_error();
@@ -229,71 +229,71 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   return result;
 }
 
-// Owning wrapper used as the return type of pointer_to_optional_list.
+// Wrappers returned by pointer_to_optional_list.
 //
-// pointer_to_list has two return shapes:
-//   * T == U  -> c10::ArrayRef<T> view of the wire buffer (zero-copy).
-//   * T != U  -> std::vector<T> materialized after a per-element conversion.
+// Both expose the same two implicit conversions so generated shim call sites
+// can pass the result into either c10::OptionalArrayRef<T> or
+// std::optional<c10::ArrayRef<T>> parameters uniformly.
 //
-// Returning `std::optional<c10::ArrayRef<T>>` directly was buggy in the
-// T != U path: the ArrayRef pointed into the materialized vector, which
-// died at the end of pointer_to_optional_list, leaving a dangling view
-// (heap-use-after-free at e.g. c10::SymInt::is_heap_allocated when
-// convolution_backward_symint read freed SymInt memory).
-//
-// This wrapper carries either case: the materialized vector (owned), or
-// the wire-buffer ArrayRef (borrowed from the caller's frame, which
-// outlives the call expression we are part of). The implicit conversions
-// below expose both as a view into whichever storage is active.
+// Two wrappers (not one) so the dispatch is compile-time: each call site of
+// pointer_to_optional_list resolves to exactly one type via `if constexpr`,
+// with no runtime tag.
+
+// Used when the wire element type matches T (modulo cv): the wire buffer can
+// be viewed directly as an ArrayRef. No allocation, no copy. The wire buffer
+// outlives the surrounding op call expression, so the view stays valid.
 template <class T>
-struct OwningOptionalArrayRef {
-  // monostate = nullopt (caller passed nullptr).
-  // std::vector<T> = owned (T != U materialization).
-  // c10::ArrayRef<T> = borrowed view of the wire buffer (T == U).
-  std::variant<std::monostate, std::vector<T>, c10::ArrayRef<T>> storage;
+struct BorrowedOptionalArrayRef {
+  c10::OptionalArrayRef<T> storage;
 
-  OwningOptionalArrayRef() = default;
-  /* implicit */ OwningOptionalArrayRef(std::vector<T> v)
-      : storage(std::move(v)) {}
-  /* implicit */ OwningOptionalArrayRef(c10::ArrayRef<T> v) : storage(v) {}
-
-  bool has_value() const noexcept {
-    return !std::holds_alternative<std::monostate>(storage);
+  /* implicit */ operator c10::OptionalArrayRef<T>() const noexcept {
+    return storage;
   }
-
-  c10::ArrayRef<T> view() const {
-    if (auto* v = std::get_if<std::vector<T>>(&storage)) {
-      return c10::ArrayRef<T>(*v);
-    }
-    return std::get<c10::ArrayRef<T>>(storage);
-  }
-
-  /* implicit */ operator c10::OptionalArrayRef<T>() const {
-    return has_value() ? c10::OptionalArrayRef<T>(view())
-                       : c10::OptionalArrayRef<T>(std::nullopt);
-  }
-
-  // Some generated shim call sites pass into a parameter of type
-  // std::optional<c10::ArrayRef<T>> (rather than c10::OptionalArrayRef<T>),
-  // e.g. at::cpu::_histogramdd_from_bin_cts(...,
-  // std::optional<ArrayRef<double>>).
   /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
-    return has_value() ? std::make_optional(view()) : std::nullopt;
+    return storage.has_value() ? std::make_optional(*storage) : std::nullopt;
   }
 };
 
-// Utility function to convert a pointer to an optional list of values
-template <class T, class U>
-inline OwningOptionalArrayRef<T> pointer_to_optional_list(
-    U** ptr,
-    int64_t len) {
-  if (!ptr) {
-    return OwningOptionalArrayRef<T>{};
+// Used when the wire element type differs from T and pointer_to_list has to
+// materialize a converted std::vector<T> (e.g. int64_t wire -> c10::SymInt).
+// Owning the vector keeps it alive across the receiving op call so an
+// ArrayRef projected from it stays valid.
+//
+// Returning std::optional<c10::ArrayRef<T>> directly here was the original
+// bug: the ArrayRef viewed into a temporary vector destroyed at the end of
+// pointer_to_optional_list, surfaced by ASAN as a heap-use-after-free in
+// c10::SymInt::is_heap_allocated when convolution_backward_symint read freed
+// SymInt memory.
+template <class T>
+struct OwnedOptionalArrayRef {
+  std::optional<std::vector<T>> storage;
+
+  /* implicit */ operator c10::OptionalArrayRef<T>() const {
+    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+                   : c10::OptionalArrayRef<T>(std::nullopt);
   }
-  // pointer_to_list returns ArrayRef<T> (zero-copy) when T == U, or
-  // std::vector<T> (materialized) when T != U. OwningOptionalArrayRef
-  // has constructors for both; overload resolution picks the right one.
-  return OwningOptionalArrayRef<T>(pointer_to_list<T>(*ptr, len));
+  /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
+    return storage ? std::make_optional(c10::ArrayRef<T>(*storage))
+                   : std::nullopt;
+  }
+};
+
+// Utility function to convert a pointer to an optional list of values.
+//
+// Compile-time dispatch on whether T matches the wire element type U (modulo
+// cv): same-type returns a borrowed view of the wire buffer (zero-copy);
+// different-type returns an owning wrapper around the converted vector.
+template <class T, class U>
+inline auto pointer_to_optional_list(U** ptr, int64_t len) {
+  if constexpr (std::is_same_v<T, std::remove_cv_t<U>>) {
+    return BorrowedOptionalArrayRef<T>{
+        ptr ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*ptr, len))
+            : c10::OptionalArrayRef<T>(std::nullopt)};
+  } else {
+    return OwnedOptionalArrayRef<T>{
+        ptr ? std::optional<std::vector<T>>(pointer_to_list<T>(*ptr, len))
+            : std::nullopt};
+  }
 }
 
 template <typename T>
