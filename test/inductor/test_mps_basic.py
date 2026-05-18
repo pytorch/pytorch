@@ -190,18 +190,18 @@ class MPSBasicTests(TestCase):
             ),
         )
 
-    def test_welford_reduction_dynamic_shape(self):
+    @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
+    def test_welford_reduction_dynamic_shape(self, shape):
+        # (5, 32): single-stage welford_reduce
+        # (3, 1023), (4, 5000), (7, 1025): multistage welford_reduce
+        # (1, 30000): split reduction -> welford_combine
         @torch.compile(dynamic=True)
         def fn(x):
             return x.var(dim=-1)
 
-        # (5, 32): single-stage welford_reduce
-        # (3, 1023), (4, 5000), (7, 1025): multistage welford_reduce
-        # (1, 30000): split reduction -> welford_combine
-        for shape in [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)]:
-            x = torch.randn(*shape, device=self.device)
-            torch._dynamo.mark_dynamic(x, 1)
-            self.assertEqual(fn(x), x.var(dim=-1))
+        x = torch.randn(*shape, device=self.device)
+        torch._dynamo.mark_dynamic(x, 1)
+        self.assertEqual(fn(x), x.var(dim=-1))
 
     def test_sdpa_split_qkv(self):
         # regression test for metal compiler bug where fused (x / A) % B
