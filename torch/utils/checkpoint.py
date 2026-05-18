@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import platform
+import sys
 import uuid
 import warnings
 import weakref
@@ -515,7 +516,19 @@ def checkpoint(
         )
         # Runs pre-forward logic
         next(gen)
-        ret = function(*args, **kwargs)
+        try:
+            ret = function(*args, **kwargs)
+        except BaseException:
+            try:
+                gen.throw(*sys.exc_info())
+            except StopIteration as e:
+                raise RuntimeError(
+                    "torch.utils.checkpoint: the forward context provided by "
+                    "context_fn suppressed an exception raised during the "
+                    "checkpointed forward. This is not supported because "
+                    "checkpoint cannot return a value for a failed forward."
+                ) from e
+            raise
         # Runs post-forward logic
         try:
             next(gen)
@@ -1684,8 +1697,20 @@ def _checkpoint_without_reentrant_generator(
 
     new_frame.save_inputs(*args)
 
+    forward_context_suppressed_exc = False
     with _checkpoint_hook(new_frame), forward_context:
-        yield
+        try:
+            yield
+        except BaseException:
+            forward_context_suppressed_exc = True
+            raise
+    if forward_context_suppressed_exc:
+        raise RuntimeError(
+            "torch.utils.checkpoint: the forward context provided by "
+            "context_fn suppressed an exception raised during the "
+            "checkpointed forward. This is not supported because checkpoint "
+            "cannot return a value for a failed forward."
+        )
     new_frame.forward_completed = True
 
     if getattr(device_module, "_initialized", False) and \
