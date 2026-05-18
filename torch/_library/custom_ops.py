@@ -204,8 +204,8 @@ def custom_op(
     return inner(fn)
 
 
-# Sentinel returned by fast_call when it can't handle the call.
-_FAST_CALL_FALLBACK = object()
+# Sentinel returned by fast_path when it can't handle the call.
+_DO_SLOW_PATH = object()
 
 
 class CustomOpDef:
@@ -236,7 +236,7 @@ class CustomOpDef:
 
         self._backend_fns: dict[str | None, Callable] = {}
         self._raw_fns: dict[str | None, Callable] = {}
-        self._fast_call: Callable | None = None
+        self._fast_path: Callable | None = None
         self._autograd_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
@@ -418,7 +418,7 @@ class CustomOpDef:
 
                 self._backend_fns[device_type] = wrapped_fn
                 self._raw_fns[device_type] = fn
-            self._install_fast_call()
+            self._install_fast_path()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -730,7 +730,7 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
-    def _install_fast_call(self):
+    def _install_fast_path(self):
         """Install a Python fast path that bypasses the C++ dispatcher for
         common eager-mode calls. The fast path requires all of the following:
         - All args are plain ``torch.Tensor`` (no subclasses).
@@ -740,10 +740,10 @@ class CustomOpDef:
         - The TLS dispatch include set is a subset of the normal eager set
           (covers ``inference_mode``; excludes Functionalize, Vmap, etc.).
         - The schema has no tensor-list args and is not a view op.
-        When any condition fails, ``fast_call`` returns ``_FAST_CALL_FALLBACK``
+        When any condition fails, ``fast_path`` returns ``_DO_SLOW_PATH``
         and the call falls through to the C++ dispatcher.
 
-        Uses a chain-based dispatch: fast_call → autograd_impl → [adinplaceorview_impl →]
+        Uses a chain-based dispatch: fast_path → autograd_impl → [adinplaceorview_impl →]
         backend_dispatch, connected via op.redispatch popping from a thread-local chain."""
         schema = self._opoverload._schema
         if schema._is_view_op():
@@ -755,7 +755,7 @@ class CustomOpDef:
         )
 
         # Tensor-list args can hide subclasses that the top-level arg check
-        # in fast_call wouldn't catch.
+        # in fast_path wouldn't catch.
         if has_tensorlist:
             return
 
@@ -764,29 +764,29 @@ class CustomOpDef:
         disabled_kernel = self._disabled_kernel
         keyset_cache: dict[str, _C.DispatchKeySet] = {}
 
-        def fast_call(*args, **kwargs):
+        def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
             if torch.compiler.is_compiling():
-                return _FAST_CALL_FALLBACK
+                return _DO_SLOW_PATH
             # kwargs / no-positional-arg calls need schema-level handling
             if not args or kwargs:
-                return _FAST_CALL_FALLBACK
+                return _DO_SLOW_PATH
 
             # Returns (device_type,) or None; rejects subclasses, modes,
             # autocast, multi-device, nested/sparse/quantized, tensor lists
             check = _C._custom_op_fast_path_check(args)  # pyrefly: ignore[missing-attribute]
             if check is None:
-                return _FAST_CALL_FALLBACK
+                return _DO_SLOW_PATH
 
             device_type = check[0]
 
             # meta tensors and disabled kernels need C++ fallback logic
             if device_type == "meta" or device_type in disabled_kernel:
-                return _FAST_CALL_FALLBACK
+                return _DO_SLOW_PATH
             # No registered kernel for this device
             fn = raw_fns.get(device_type) or raw_fns.get(None)
             if fn is None:
-                return _FAST_CALL_FALLBACK
+                return _DO_SLOW_PATH
 
             keyset = keyset_cache.get(device_type)
             if keyset is None:
@@ -795,10 +795,10 @@ class CustomOpDef:
                 keyset_cache[device_type] = keyset
             return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
 
-        self._fast_call = fast_call
+        self._fast_path = fast_path
 
         # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
-        # Save the original entry once so repeated `_install_fast_call` invocations
+        # Save the original entry once so repeated `_install_fast_path` invocations
         # (e.g. registering kernels for different devices) don't nest wrappers.
         # Note that OpOverload's `_op` (read by `torch.ops.ns.name(x)`) does not hit the fast path.
         overload = self._opoverload
@@ -806,8 +806,8 @@ class CustomOpDef:
             overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
 
         def fast_op(*args, **kwargs):
-            result = fast_call(*args, **kwargs)
-            if result is not _FAST_CALL_FALLBACK:
+            result = fast_path(*args, **kwargs)
+            if result is not _DO_SLOW_PATH:
                 return result
             return overload._orig_op(*args, **kwargs)  # pyrefly: ignore[missing-attribute]
 
@@ -835,9 +835,9 @@ class CustomOpDef:
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
-        if self._fast_call is not None:
-            result = self._fast_call(*args, **kwargs)
-            if result is not _FAST_CALL_FALLBACK:
+        if self._fast_path is not None:
+            result = self._fast_path(*args, **kwargs)
+            if result is not _DO_SLOW_PATH:
                 return result
         return self._opoverload(*args, **kwargs)
 

@@ -4899,7 +4899,7 @@ class TestCustomOpFastPath(TestCase):
         # original C++ entry point, not a nested fast_op wrapper.
         self.assertIs(overload._orig_op, orig)
 
-        # Exercise the fallback path (meta tensor forces fast_call to bail)
+        # Exercise the fallback path (meta tensor forces fast_path to bail)
         x_meta = torch.randn(3, device="meta")
         result = torch.ops._torch_testing.fp_chain(x_meta)
         self.assertEqual(result.shape, x_meta.shape)
