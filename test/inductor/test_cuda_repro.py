@@ -3036,6 +3036,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+    @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
+    def test_atan_special_psi_eager_parity(self):
+        def atan_fn(x):
+            return torch.ops.aten.atan(x)
+
+        def fn(x):
+            out = atan_fn(x)
+            return torch.ops.aten.special_psi(out, out=out)
+
+        atan_x = torch.tensor(
+            [
+                -float("inf"),
+                -10.0,
+                -1.5516796112060547,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                1.5516796112060547,
+                10.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device_type,
+        )
+        actual_atan = torch.compile(atan_fn, backend="inductor", fullgraph=True)(atan_x)
+        expected_atan = atan_fn(atan_x)
+        self.assertEqual(
+            actual_atan.view(torch.uint32),
+            expected_atan.view(torch.uint32),
+        )
+
+        # Selected from the original seed-0 repro where a 1 ULP atan difference
+        # was amplified by special_psi into an assert_close failure.
+        x = torch.tensor([-1.5516796112060547], device=device_type)
+        actual, code = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+        expected = fn(x)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
+
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181
         def fn(x):
