@@ -1403,7 +1403,19 @@ class ReplacementPatternEntry(PatternEntry):
             ):
                 graph.erase_node(node)
 
-        return [node for node in added_replacement_nodes if not node._erased]
+        live_replacement_nodes = [
+            node for node in added_replacement_nodes if not node._erased
+        ]
+        node_indices = {node: i for i, node in enumerate(graph.nodes)}
+        if any(
+            node_indices[input_node] > node_indices[node]
+            for node in live_replacement_nodes
+            for input_node in node.all_input_nodes
+            if input_node in node_indices
+        ):
+            stable_topological_sort(graph)
+
+        return live_replacement_nodes
 
     @staticmethod
     def _replacement_insert_node(
@@ -1427,34 +1439,29 @@ class ReplacementPatternEntry(PatternEntry):
 
         torch.fx.map_arg(args, collect_input_node)
 
-        matched_nodes = OrderedSet(match.nodes)
-        min_output_index = min(node_indices[node] for node in output_nodes)
-        max_input_index = max((node_indices[node] for node in input_nodes), default=-1)
-        # The replacement must be after all of its inputs and before every
-        # non-matched user that will be rewired to consume replacement outputs.
-        min_user_index = min(
-            (
-                node_indices[user]
-                for output_node in output_nodes
-                for user in output_node.users
-                if user not in matched_nodes
-            ),
-            default=len(nodes) - 1,
-        )
-
-        insert_index = max(min_output_index, max_input_index + 1)
-        if insert_index > min_user_index or insert_index >= len(nodes):
+        output_node_set = OrderedSet(output_nodes)
+        if output_node_set & input_nodes:
             return None
 
-        insert_before = nodes[insert_index]
-        for output_node in output_nodes:
-            for user in output_node.users:
-                if user in matched_nodes:
-                    continue
-                if node_indices[user] < insert_index:
+        # If a replacement input is produced from one of the outputs being
+        # replaced, then rewiring that output to the replacement would create a
+        # cycle. Otherwise we can insert at the first matched output and let the
+        # final topological sort move later replacement nodes after their
+        # independent inputs.
+        seen: OrderedSet[torch.fx.Node] = OrderedSet()
+        pending = list(output_nodes)
+        while pending:
+            node = pending.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            for user in node.users:
+                if user in input_nodes:
                     return None
+                pending.append(user)
 
-        return insert_before
+        min_output_index = min(node_indices[node] for node in output_nodes)
+        return nodes[min_output_index]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None

@@ -1991,10 +1991,16 @@ class TestPatternMatcher(TestCase):
         gm.graph.eliminate_dead_code()
         gm.graph.lint()
 
-        call_targets = [
-            node.target for node in gm.graph.nodes if node.op == "call_function"
-        ]
-        self.assertEqual(call_targets[0], aten.mul.Tensor)
+        call_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        mul_node = next(node for node in call_nodes if node.target == aten.mul.Tensor)
+        add_with_later_input = next(
+            node
+            for node in call_nodes
+            if node.target == aten.add.Tensor and mul_node in node.all_input_nodes
+        )
+        self.assertLess(
+            call_nodes.index(mul_node), call_nodes.index(add_with_later_input)
+        )
 
     def test_multioutput_replacement_allows_early_external_user(self):
         def fn(A, B, C, D):
@@ -2007,6 +2013,49 @@ class TestPatternMatcher(TestCase):
             *(torch.randn(4, dtype=torch.float32) for _ in range(4))
         )
         patterns = self._make_add_add_multioutput_patterns()
+
+        self.assertEqual(patterns.apply(gm.graph), 1)
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+
+    def test_multioutput_replacement_allows_later_independent_input(self):
+        tensor_a = KeywordArg("A")
+        tensor_b = KeywordArg("B")
+        tensor_c = KeywordArg("C")
+        tensor_g = KeywordArg("G")
+        add_1 = CallFunction(aten.add.Tensor, tensor_a, tensor_b, _users=2)
+        add_2 = CallFunction(aten.add.Tensor, add_1, tensor_c)
+        mul_1 = CallFunction(aten.mul.Tensor, add_2, tensor_g)
+        pattern = MultiOutputPattern([add_1, mul_1])
+
+        def empty_pattern(A, B, C, G):
+            return
+
+        def replacement(A, B, C, G):
+            x = torch.ops.aten.add.Tensor(A, B)
+            z = torch.ops.aten.add.Tensor(x, C)
+            return x, torch.ops.aten.mul.Tensor(z, G)
+
+        patterns = PatternMatcherPass()
+        register_replacement(
+            empty_pattern,
+            replacement,
+            [],
+            fwd_only,
+            patterns,
+            search_fn_pattern=pattern,
+        )
+
+        def fn(A, B, C, D, T):
+            x = A + B
+            early_user = x * D
+            grad = T * D
+            z = x + C
+            return early_user, z * grad
+
+        gm = make_fx(fn, tracing_mode="fake")(
+            *(torch.randn(4, dtype=torch.float32) for _ in range(5))
+        )
 
         self.assertEqual(patterns.apply(gm.graph), 1)
         gm.graph.eliminate_dead_code()
