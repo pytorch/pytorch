@@ -3,6 +3,7 @@
 import functools
 import inspect
 import itertools
+import re
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
@@ -402,6 +403,54 @@ def _forward_unimplemented(self, *input: Any) -> None:
     raise NotImplementedError(
         f'Module [{type(self).__name__}] is missing the required "forward" function'
     )
+
+
+# Pattern matching C++ dispatch "not implemented" errors, e.g.:
+#   "linalg_svd_cpu" not implemented for 'Half'
+_CPU_DTYPE_NOT_IMPL_RE = re.compile(r"not implemented for '(\w+)'")
+
+# Map from C++ internal ScalarType names to torch.dtype objects.
+_INTERNAL_DTYPE_MAP: dict[str, dtype] = {
+    "Half": torch.float16,
+    "BFloat16": torch.bfloat16,
+}
+
+
+def _get_cpu_dtype_hint(module: "Module", error: RuntimeError) -> Optional[str]:
+    """Return a user-friendly hint when *error* is a CPU dtype-support error.
+
+    Returns a non-empty string when all of the following are true:
+    - *error* matches the C++ "not implemented for '<DType>'" pattern,
+    - *module* has at least one parameter of that dtype residing on CPU.
+
+    Otherwise returns ``None`` so the caller can simply ``raise``.
+    """
+    try:
+        match = _CPU_DTYPE_NOT_IMPL_RE.search(str(error))
+        if match is None:
+            return None
+        internal_name = match.group(1)
+        dtype_obj = _INTERNAL_DTYPE_MAP.get(internal_name)
+        if dtype_obj is None:
+            return None
+        try:
+            param_name = next(
+                name
+                for name, p in module.named_parameters()
+                if p.dtype == dtype_obj and p.device.type == "cpu"
+            )
+        except StopIteration:
+            return None
+        dtype_str = str(dtype_obj)
+        return (
+            f"\n\nNote: Module '{type(module).__name__}' has {dtype_str} parameters on CPU "
+            f"(e.g., '{param_name}'). Running {dtype_str} on CPU is not fully "
+            f"supported for all operations. To fix this error, either:\n"
+            f"  - Convert to float32: module.float()  or  module.to(torch.float32)\n"
+            f"  - Move to GPU:        module.cuda()"
+        )
+    except Exception:
+        return None
 
 
 class Module:
@@ -1786,7 +1835,13 @@ class Module:
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
-            return forward_call(*args, **kwargs)
+            try:
+                return forward_call(*args, **kwargs)
+            except RuntimeError as e:
+                hint = _get_cpu_dtype_hint(self, e)
+                if hint:
+                    raise type(e)(str(e) + hint) from e
+                raise
 
         result = None
         called_always_called_hooks = set()
@@ -1882,7 +1937,7 @@ class Module:
 
         try:
             return inner()
-        except Exception:
+        except Exception as exc:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
             # this functionality should be added to full backward hooks as well.
@@ -1910,7 +1965,11 @@ class Module:
                         warnings.warn("module forward hook with ``always_call=True`` raised an exception "
                                       f"that was silenced as another error was raised in forward: {str(e)}", stacklevel=2)
                         continue
-            # raise exception raised in try block
+            # raise exception raised in try block, augmenting with dtype hint if applicable
+            if isinstance(exc, RuntimeError):
+                hint = _get_cpu_dtype_hint(self, exc)
+                if hint:
+                    raise type(exc)(str(exc) + hint) from exc
             raise
     # fmt: on
 

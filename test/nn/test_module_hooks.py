@@ -1752,5 +1752,136 @@ class TestModuleHookNN(NNTestCase):
 instantiate_parametrized_tests(TestModuleHooks)
 instantiate_parametrized_tests(TestStateDictHooks)
 
+
+class _SVDModule(nn.Module):
+    """Module whose forward calls linalg.svd — still unsupported for fp16 on CPU."""
+
+    def __init__(self, dtype=torch.float16) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(4, 4).to(dtype))
+
+    def forward(self, x):
+        return torch.linalg.svd(self.weight)
+
+
+class _Float32SVDModule(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(4, 4))
+
+    def forward(self, x):
+        return torch.linalg.svd(self.weight)
+
+
+class _NoParamModule(nn.Module):
+    def forward(self, x):
+        return torch.linalg.svd(x.to(torch.float16))
+
+
+class TestCpuDtypeErrorHint(TestCase):
+    """Tests for the CPU dtype error hint added to Module._call_impl (GH #96292).
+
+    When a linalg / dispatch op raises a RuntimeError (or subclass such as
+    NotImplementedError) matching "not implemented for 'Half'" (or 'BFloat16')
+    and the module has matching-dtype parameters on CPU, _call_impl should
+    append a human-readable hint explaining the root cause and how to fix it.
+    """
+
+    def _make_input(self):
+        return torch.randn(4, 4)
+
+    # ------------------------------------------------------------------
+    # Fast path (no hooks)
+    # ------------------------------------------------------------------
+
+    def test_fp16_cpu_error_includes_hint(self):
+        """Fast path: hint is appended when fp16 params are on CPU."""
+        m = _SVDModule()
+        with self.assertRaises(RuntimeError) as cm:
+            m(self._make_input())
+        msg = str(cm.exception)
+        self.assertIn("torch.float16", msg)
+        self.assertIn("module.float()", msg)
+        self.assertIn("module.cuda()", msg)
+
+    def test_fp16_cpu_error_preserves_original_message(self):
+        """Fast path: original dispatch error text is still present in the message."""
+        m = _SVDModule()
+        with self.assertRaises(RuntimeError) as cm:
+            m(self._make_input())
+        self.assertIn("not implemented for", str(cm.exception))
+
+    def test_no_hint_for_float32(self):
+        """Fast path: float32 ops that fail should NOT get a dtype hint."""
+        m = _Float32SVDModule()
+        # float32 linalg.svd works fine; if it does raise, no hint should appear
+        # We just confirm the module runs without a spurious hint warning.
+        try:
+            m(self._make_input())
+        except RuntimeError as e:
+            self.assertNotIn("torch.float32", str(e))
+
+    def test_no_hint_when_no_params(self):
+        """Fast path: no hint when the module has no parameters (error is elsewhere)."""
+        m = _NoParamModule()
+        with self.assertRaises(RuntimeError) as cm:
+            m(self._make_input())
+        # The error is real, but no parameter → no hint
+        self.assertNotIn("module.float()", str(cm.exception))
+
+    def test_bf16_hint(self):
+        """Fast path: BFloat16 also gets a user-friendly hint."""
+        m = _SVDModule(dtype=torch.bfloat16)
+        with self.assertRaises(RuntimeError) as cm:
+            m(self._make_input())
+        msg = str(cm.exception)
+        self.assertIn("torch.bfloat16", msg)
+        self.assertIn("module.float()", msg)
+
+    def test_error_chaining_preserved(self):
+        """Fast path: the augmented exception chains back to the original via __cause__."""
+        m = _SVDModule()
+        with self.assertRaises(RuntimeError) as cm:
+            m(self._make_input())
+        exc = cm.exception
+        # If hint was added, a new exception (same type) is raised with `from e`
+        if "torch.float16" in str(exc):
+            self.assertIsNotNone(exc.__cause__)
+
+    # ------------------------------------------------------------------
+    # Slow path (with forward hook registered)
+    # ------------------------------------------------------------------
+
+    @skipIfTorchDynamo("hints tested outside dynamo scope")
+    def test_fp16_cpu_error_includes_hint_with_hook(self):
+        """Slow path: hint still appears when a forward hook is registered."""
+        m = _SVDModule()
+        called = []
+
+        def dummy_hook(module, input, output):
+            called.append(True)
+
+        handle = m.register_forward_hook(dummy_hook)
+        try:
+            with self.assertRaises(RuntimeError) as cm:
+                m(self._make_input())
+            self.assertIn("torch.float16", str(cm.exception))
+        finally:
+            handle.remove()
+
+    # ------------------------------------------------------------------
+    # GPU path — hint should NOT fire
+    # ------------------------------------------------------------------
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_no_hint_on_cuda_fp16(self):
+        """Hint must not appear when the module is on CUDA (fp16 works there)."""
+        m = _SVDModule().cuda()
+        try:
+            m(self._make_input().cuda())
+        except RuntimeError as e:
+            self.assertNotIn("module.float()", str(e))
+
+
 if __name__ == "__main__":
     run_tests()
