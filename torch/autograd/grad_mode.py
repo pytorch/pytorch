@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+from typing import Any
+
 import torch
 from torch.utils._contextlib import (
     _DecoratorContextManager,
@@ -83,9 +85,9 @@ class no_grad(_NoParamDecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch.set_grad_enabled(self.prev)
 
@@ -143,9 +145,9 @@ class enable_grad(_NoParamDecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_grad_enabled(self.prev)
 
@@ -205,9 +207,9 @@ class set_grad_enabled(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_grad_enabled(self.prev)
 
@@ -307,9 +309,9 @@ class inference_mode(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
@@ -364,9 +366,9 @@ class set_multithreading_enabled(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_multithreading_enabled(self.prev)
 
@@ -423,9 +425,9 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_grad_layout_enforcement_enabled(self.prev)
 
@@ -472,9 +474,9 @@ class _force_original_view_tracking(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_view_replay_enabled(self.prev)
 

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import os
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import torch
 
@@ -221,9 +221,9 @@ class dual_level(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         exit_dual_level()
 
@@ -244,8 +244,8 @@ class _set_fwd_grad_enabled(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
     ) -> None:
         torch._C._set_fwd_grad_enabled(self.prev)

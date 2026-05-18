@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
+from typing import Any
+
 from typing_extensions import deprecated
 
 import torch
@@ -61,9 +63,9 @@ class autocast(torch.amp.autocast_mode.autocast):
     # TODO: discuss a unified TorchScript-friendly API for autocast
     def __exit__(
         self,
-        exc_type,
-        exc_val,
-        exc_tb,
+        exc_type: Any,  # noqa: PYI036
+        exc_val: Any,  # noqa: PYI036
+        exc_tb: Any,  # noqa: PYI036
     ):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return

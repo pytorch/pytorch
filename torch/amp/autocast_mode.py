@@ -2,6 +2,7 @@
 import collections
 import functools
 import warnings
+from typing import Any
 
 import torch
 from torch.types import _dtype
@@ -341,9 +342,9 @@ class autocast:
 
     def __exit__(
         self,
-        exc_type,
-        exc_val,
-        exc_tb,
+        exc_type: Any,  # noqa: PYI036
+        exc_val: Any,  # noqa: PYI036
+        exc_tb: Any,  # noqa: PYI036
     ):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
