@@ -53,6 +53,10 @@
 #include <thread>
 #include <unordered_map>
 
+namespace at::native {
+void* getCurrentCUDASolverDnHandleLazy();
+}
+
 using namespace torch;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1626,6 +1630,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getCurrentSolverHandle_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  void* handle = at::native::getCurrentCUDASolverDnHandleLazy();
+  return PyLong_FromVoidPtr(handle);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
@@ -2138,6 +2151,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCurrentBlasHandle",
      THCPModule_getCurrentBlasHandle_wrap,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getCurrentSolverHandle",
+     THCPModule_getCurrentSolverHandle_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_clearCublasWorkspaces",
