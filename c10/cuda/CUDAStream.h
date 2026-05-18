@@ -248,6 +248,13 @@ C10_CUDA_API std::ostream& operator<<(
     std::ostream& stream,
     const CUDAStream& s);
 
+/**
+ * Append one already-formatted line to the per-process stream pool diagnostic
+ * log file. No-op if the log file is not open. The caller is responsible for
+ * including a trailing newline in `line`.
+ */
+C10_CUDA_API void stream_pool_diag_writeln(const char* line);
+
 } // namespace c10::cuda
 
 // hipify v2 backward compat in external projects

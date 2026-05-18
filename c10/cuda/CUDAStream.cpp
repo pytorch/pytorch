@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_set>
 
 #if defined(__linux__)
 #include <sys/syscall.h>
@@ -452,7 +453,28 @@ cudaStream_t CUDAStream::stream() const {
         device_index,
         si);
 #endif
-    return streams[st.getStreamType() - 1][device_index][si];
+    cudaStream_t resolved = streams[st.getStreamType() - 1][device_index][si];
+    if (diag_enabled()) {
+      // Log the first time each thread resolves a given StreamId. Bounded by
+      // (#threads * #unique pool slots ever used) entries; in practice tens to
+      // low hundreds. Keeps the per-call overhead at one unordered_set lookup
+      // after the first observation.
+      thread_local std::unordered_set<int64_t> seen;
+      if (seen.insert(stream_id).second) {
+        diag_logf(
+            "seq=%lu ts=%lu tid=%ld op=stream_resolve dev=%d "
+            "stream_id=%lld stream_id_type=%d si=%zu hipstream=%p\n",
+            static_cast<unsigned long>(diag_seq()),
+            static_cast<unsigned long>(diag_ts_ns()),
+            diag_tid(),
+            static_cast<int>(device_index),
+            static_cast<long long>(stream_id),
+            static_cast<int>(streamType),
+            si,
+            reinterpret_cast<void*>(resolved));
+      }
+    }
+    return resolved;
   }
 }
 
@@ -578,6 +600,15 @@ void setCurrentCUDAStream(CUDAStream stream) {
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
   return stream << s.unwrap();
+}
+
+void stream_pool_diag_writeln(const char* line) {
+  FILE* fp = diag_file();
+  if (fp == nullptr || line == nullptr) {
+    return;
+  }
+  // fputs is internally locked per FILE*; safe under concurrent calls.
+  std::fputs(line, fp);
 }
 
 } // namespace c10::cuda
