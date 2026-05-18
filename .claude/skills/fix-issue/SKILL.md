@@ -111,7 +111,7 @@ Shepherd the implementation subagent:
 
 1. **DOES_NOT_REPRO / NEEDS_REPRO.** If the implementer cannot reproduce,
    distinguish between the bug being fixed/invalid versus the issue lacking
-   enough info or wrong architecure/dependencies. Stop with one of:
+   enough info or wrong architecture/dependencies. Stop with one of:
    - `Issue #N is DOES_NOT_REPRO — <details, including the commit hash of HEAD>`
    - `Issue #N is NEEDS_REPRO — <what info is missing>`
 
