@@ -11082,10 +11082,16 @@ class TestSDPA(TestCaseMPS):
         enable_gqa = q.shape[1] != k.shape[1]
 
         if with_mask:
-            mask_heads = 1 if broadcast_mask else q.shape[1]
-            attn_mask = torch.zeros(q.shape[0], mask_heads, q_len, s_len,
-                                    dtype=torch.bool, device=q.device)
-            attn_mask[..., s_len // 2:] = True
+            if broadcast_mask:
+                attn_mask = torch.zeros(q.shape[0], 1, q_len, s_len,
+                                        dtype=q.dtype, device=q.device)
+                for b in range(q.shape[0]):
+                    col = (b * 2) % s_len
+                    attn_mask[b, 0, :, col:col + max(1, s_len // 4)] = float("-inf")
+            else:
+                attn_mask = torch.zeros(q.shape[0], q.shape[1], q_len, s_len,
+                                        dtype=torch.bool, device=q.device)
+                attn_mask[..., s_len // 2:] = True
 
             with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
                 y = F.scaled_dot_product_attention(
@@ -11135,7 +11141,7 @@ class TestSDPA(TestCaseMPS):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
-        batch = 1
+        batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 2
         NH_q = NH_kv * gqa_factor
         q_len = 4  # <8 so that vector fast is eligible
@@ -11156,7 +11162,7 @@ class TestSDPA(TestCaseMPS):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
-        batch = 1
+        batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 8
         NH_q = NH_kv * gqa_factor
         q_len = 8
