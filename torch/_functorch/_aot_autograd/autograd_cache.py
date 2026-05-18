@@ -596,6 +596,10 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
         recompile = getattr(gm, "_real_recompile", gm.recompile)
         python_code = recompile()
+        # FxGraphCache strips user-defined Triton side-table indices from
+        # Inductor wrapper code. This reducer handles arbitrary AOT GraphModule
+        # code, so keep the generated code exact and let AOTAutogradCacheDetails
+        # carry Triton source/constant-arg metadata separately.
         dict_without_graph = gm.__dict__.copy()
         dict_without_graph.pop("_graph", None)
 
