@@ -36,6 +36,7 @@
     stream
     synchronize
     temperature
+    utilization
 ```
 
 ## Random Number Generator
