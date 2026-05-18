@@ -578,7 +578,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # don't try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors

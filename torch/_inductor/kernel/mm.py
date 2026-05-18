@@ -961,7 +961,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
