@@ -172,6 +172,9 @@ class CacheInfo(TypedDict, total=False):
     cache_event_time: int
     key: str
     components: list[str]
+    cache_bypass_exception_type: str
+    cache_bypass_traceback: list[str]
+    cache_bypass_hard_exception: bool
 
 
 if TYPE_CHECKING:
@@ -254,7 +257,6 @@ class CacheBase:
         try:
             device_info: SystemDeviceInfo = {"name": None}
             version_info: SystemVersionInfo = {"triton": triton_version}
-            system = cast(SystemInfo, {"device": device_info, "version": version_info})
             device_properties = torch.cuda.get_device_properties(
                 torch.cuda.current_device()
             )
@@ -264,13 +266,18 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
+            hash_input: dict[str, Any] = {
+                "device": device_info,
+                "version": version_info,
+            }
+            return {
+                "device": device_info,
+                "version": version_info,
+                "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
+            }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
-            system = cast(SystemInfo, {})
-
-        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system)
-
-        return system
+            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
 
     @staticmethod
     @clear_on_fresh_cache
