@@ -283,8 +283,7 @@ auto PyNode::apply_with_saved_impl(
         fwdInputMetadata.get(),
         2,
         autograd::utils::wrap(input_info.scalar_type));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata.get(), 3, to_py_size(input_info.size));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 3, to_py_size(input_info.size));
 
     PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata.release());
   }

@@ -371,10 +371,7 @@ struct PythonLogger {
       throw_python_error();
     }
     THPObjectPtr result(PyObject_CallFunction(
-        pyfunc.get(),
-        "s#",
-        msg.data(),
-        static_cast<Py_ssize_t>(msg.size())));
+        pyfunc.get(), "s#", msg.data(), static_cast<Py_ssize_t>(msg.size())));
     if (result == nullptr) {
       throw_python_error();
     }
