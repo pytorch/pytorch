@@ -23,7 +23,7 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -75,8 +75,8 @@ class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(
+        cls._exit_stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
@@ -126,7 +126,7 @@ class TestCase(TorchTestCase):
 
 class CPythonTestCase(TestCase):
     """
-    Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
+    Test class for CPython tests located in "test/cpython/v{Py_version}/*".
 
     This class enables specific features that are disabled by default, such as
     tracing through unittest methods.
@@ -193,9 +193,9 @@ class CPythonTestCase(TestCase):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
-        py_ver = re.search(r"/([\d_]+)/", inspect.getfile(test_cls))
+        py_ver = re.search(r"/v([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
-            py_ver = py_ver.group().strip(os.sep).replace("_", "")  # type: ignore[assignment]
+            py_ver = py_ver.group().strip(os.sep).replace("_", "").lstrip("v")  # type: ignore[assignment]
         else:
             return suffix
         return f"CPython{py_ver}-{test_file}-{suffix}"
@@ -208,12 +208,15 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        prefix = os.path.join("dynamo", "cpython") + os.path.sep
-        regex = re.escape(prefix) + r"\d_\d{2}"
         search_path = inspect.getfile(cls)
-        m = re.search(regex, search_path)
+
+        cpython_test_regex = (
+            re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
+        )
+
+        m = re.search(cpython_test_regex, search_path)
         if m:
-            test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
+            test_py_ver = tuple(map(int, m.groups()))
             py_ver = sys.version_info[:2]
             if py_ver != test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
@@ -227,8 +230,8 @@ class CPythonTestCase(TestCase):
             )
 
         super().setUpClass()
-        cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 enable_trace_unittest=True,
                 enable_trace_load_build_class=True,

@@ -73,15 +73,16 @@ from ..source import (
     GetItemSource,
     ImportSource,
     SkipGuardSource,
+    TypeMROSource,
     TypeSource,
 )
 from ..utils import (
-    check_args_peekable_as_constant,
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     identity,
     is_function,
+    is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -346,6 +347,7 @@ def _create_nested_fn(
 
 fn_known_dunder_attrs = {
     "__annotations__",
+    "__builtins__",
     "__closure__",
     "__code__",
     "__defaults__",
@@ -506,7 +508,7 @@ class BaseUserFunctionVariable(VariableTracker):
             result = True
         else:
             try:
-                result = hasattr(self.get_function(), name)
+                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
             except NotImplementedError:
                 result = False
         return VariableTracker.build(tx, result)
@@ -618,7 +620,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         source = self.source
 
         if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn
+            source = self.source_fn  # type: ignore[assignment]
         return source  # type: ignore[return-value]
 
     def bind_args(
@@ -1094,42 +1096,6 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
         return leaf
 
 
-class BuiltinMethodVariable(BaseUserFunctionVariable):
-    def __init__(
-        self, fn: types.BuiltinMethodType, is_constant: bool = False, **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        if not isinstance(fn, types.BuiltinMethodType):
-            raise AssertionError(f"expected BuiltinMethodType, got {type(fn)}")
-        self.fn = fn
-
-    def python_type(self) -> type:
-        return types.BuiltinMethodType
-
-    @staticmethod
-    def is_supported_builtin_method(obj: Any) -> bool:
-        method_self = obj.__self__
-        method_name = obj.__name__
-
-        # TODO(anijain2305) - Add support for more builtin methods
-        # Supports tuple.__new__ and frozenset({....}).__contains__
-        return (method_self is tuple and method_name == "__new__") or (
-            type(method_self) is frozenset and method_name == "__contains__"
-        )
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        method_self = self.fn.__self__
-        name = self.fn.__name__
-        obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
-        return obj_vt.call_method(tx, name, args, kwargs)
-
-
 class LocalGeneratorObjectVariable(VariableTracker):
     # PyGen_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L814
     _cpython_type = types.GeneratorType
@@ -1557,7 +1523,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         return self.generator_cls(
             code,
             f_globals,
-            inline_tracer,
+            inline_tracer,  # type: ignore[arg-type]
             source=self.source,
         )
 
@@ -1632,7 +1598,7 @@ class UserMethodVariable(UserFunctionVariable):
         # operates on the unbound function, most guards should target
         # `source_fn` rather than the original `source`.
         if source_fn is None and kwargs.get("source") is not None:
-            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")  # type: ignore[assignment, arg-type]
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -1717,7 +1683,7 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         elif (
             _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
@@ -1734,7 +1700,7 @@ class UserMethodVariable(UserFunctionVariable):
             # We might have a better way to access the function object, this
             # information is stored in self.source_fn, use that to construct the
             # variable tracker.
-            return VariableTracker.build(tx, self.fn, self.source_fn)
+            return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
         return super().var_getattr(tx, name)
 
     def get_real_python_backed_value(self) -> Any:
@@ -1771,7 +1737,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
+        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -1805,7 +1771,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
+        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -2576,7 +2542,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         all_args = self.self_args() + list(args)
         return VariableTracker.build(
             tx,
-            polyfills.getattr_and_trace,
+            polyfills.getattr_and_trace,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
@@ -2820,27 +2786,23 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if check_constant_args(args, kwargs) or check_args_peekable_as_constant(
-            args, kwargs
-        ):
+        constant_args = check_constant_args(args, kwargs)
+        if constant_args:
             try:
                 value = self.fn(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            except AsPythonConstantNotImplementedError:
-                pass  # lazy arg became symbolic after realization, fall through
             except TypeError as exc:
                 raise_observed_exception(
                     type(exc),
                     tx,
                     args=list(exc.args),
                 )
-            else:
-                return variables.UserDefinedClassVariable(
-                    value,
-                    mutation_type=ValueMutationNew(),
-                )
+            return variables.UserDefinedClassVariable(
+                value,
+                mutation_type=ValueMutationNew(),
+            )
         unimplemented(
             gb_type="namedtuple construction",
             context=f"{args=}, {kwargs=}",
@@ -3906,6 +3868,12 @@ class MethodWrapperVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MethodWrapperType
 
+    def get_real_python_backed_value(self) -> types.MethodWrapperType:
+        return self.as_python_constant()
+
+    def is_python_constant(self) -> bool:
+        return self.obj.is_python_constant()
+
     def as_python_constant(self) -> types.MethodWrapperType:
         return self.descriptor.__get__(self.obj.as_python_constant())
 
@@ -3915,11 +3883,46 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        try:
+            method_wrapper = self.as_python_constant()
+        except NotImplementedError:
+            method_wrapper = None
+        if (
+            method_wrapper is not None
+            and is_tensor_base_attr_getter(method_wrapper)
+            and args
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            if not (len(args) == 1 and len(kwargs) == 0):
+                raise_type_error(
+                    tx, "tensor attribute getter takes exactly one argument"
+                )
+            # Avoid the generic descriptor path's implicit owner lookup, which
+            # would read __class__ on tensor subclasses during __torch_function__.
+            descriptor = cast(Any, method_wrapper.__self__)
+            return args[0].var_getattr(tx, descriptor.__name__)
+
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        try:
+            # CPython wrapper_hash:
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
+            return hash(self.as_python_constant()), False
+        except NotImplementedError:
+            return super().hash_impl(tx)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, VariableTracker):
+            return False
+        try:
+            return self.as_python_constant() == other.as_python_constant()
+        except NotImplementedError:
+            return False
 
 
 class MethodDescriptorVariable(VariableTracker):
@@ -4056,7 +4059,12 @@ class BoundBuiltinMethodVariable(VariableTracker):
         return types.BuiltinMethodType
 
     def as_python_constant(self) -> Any:
-        return self.descriptor.__get__(self.obj.as_python_constant())  # type: ignore[union-attr]
+        obj = self.obj.as_python_constant()
+        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
+            return self.descriptor.__get__(None, obj)
+        if hasattr(self.descriptor, "__get__"):
+            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
+        return getattr(obj, self.descriptor.__name__)
 
     def call_function(
         self,
@@ -4384,6 +4392,19 @@ class GetSetDescriptorVariable(VariableTracker):
                 ],
             )
         result_source = obj.source and AttrSource(obj.source, attr_name)
+        if (
+            obj.source
+            and self.descriptor.__objclass__ is type
+            and attr_name in ("__annotations__", "__dict__", "__mro__")
+        ):
+            # Direct descriptor calls still resolve the standard type slot even
+            # when a metaclass shadows the same attribute. Only attach the
+            # normal attribute source when runtime attribute lookup agrees.
+            static_desc = inspect.getattr_static(type(obj_value), attr_name, None)
+            if static_desc is not self.descriptor:
+                result_source = None
+            elif attr_name == "__mro__":
+                result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
 
 
