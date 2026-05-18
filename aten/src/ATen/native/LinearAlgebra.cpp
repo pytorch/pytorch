@@ -106,6 +106,7 @@
 #include <ATen/ops/linalg_slogdet.h>
 #include <ATen/ops/linalg_slogdet_native.h>
 #include <ATen/ops/linalg_solve.h>
+#include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_svdvals.h>
 #include <ATen/ops/linalg_tensorinv.h>
 #include <ATen/ops/linalg_tensorinv_native.h>
