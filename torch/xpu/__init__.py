@@ -1288,6 +1288,40 @@ def memory_usage(device: Device = None) -> float:
     return 1e6 * (read_delta + write_delta) / (bandwidth_end.maxBandwidth * dt) * 100
 
 
+def device_memory_used(device: Device = None) -> int:
+    r"""Return the current GPU used global (device) memory in bytes.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU memory usage information.
+    """
+    memory_handle = _zes_get_memory_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    mem_state = pyzes.zes_mem_state_t()
+    rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU memory usage querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU memory state (rc={rc}).")
+    mem_props = pyzes.zes_mem_properties_t()
+    mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+    _zes_check(
+        pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props)),
+        "Can't get Level Zero Sysman memory properties.",
+    )
+    # TODO: Some drivers report physicalSize as 0 on client GPUs; fall back to
+    # the allocatable size as an approximation in that case.
+    total = mem_props.physicalSize if mem_props.physicalSize != 0 else mem_state.size
+    return total - mem_state.free
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -1337,6 +1371,7 @@ __all__ = [
     "device",
     "device_of",
     "device_count",
+    "device_memory_used",
     "empty_cache",
     "get_arch_list",
     "get_device_capability",
