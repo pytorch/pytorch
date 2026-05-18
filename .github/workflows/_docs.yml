@@ -343,22 +343,31 @@ jobs:
           pip install $(echo dist/*.whl)[opt-einsum]
           ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh
 
+      - name: Configure AWS credentials for doc preview upload
+        id: aws-upload-creds
+        if: ${{ steps.build-docs.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+
       - name: Install AWS CLI
-        if: ${{ steps.aws-creds.outcome == 'success' && steps.build-docs.outcome == 'success' }}
+        if: ${{ steps.aws-upload-creds.outcome == 'success' && steps.build-docs.outcome == 'success' }}
         run: pip install awscli==1.29.40
 
       - name: Upload Python Docs Preview
-        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
+        if: ${{ steps.aws-upload-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
         run: |
           aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --delete --quiet
 
       - name: Upload C++ Docs Preview
-        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        if: ${{ steps.aws-upload-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         run: |
           aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --delete --quiet
 
       - name: Post C++ Docs Coverage Comment
-        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        if: ${{ steps.aws-upload-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -392,11 +401,9 @@ jobs:
           gh pr comment "$PR_NUM" --body "$body"
 
       - name: Upload C++ Docs Preview (nightly dry-run)
-        if: ${{ steps.aws-creds.outcome == 'success' && !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        if: ${{ steps.aws-upload-creds.outcome == 'success' && !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         run: |
-          # Unlike EC2 runners, the OSDC container doesn't have aws CLI pre-installed
-          pip install awscli==1.29.40
-          aws s3 cp cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
+          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
           echo "C++ docs preview available at:"
           echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
