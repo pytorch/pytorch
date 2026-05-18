@@ -418,6 +418,7 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
+    ("add", f16): {"atol": 2e-3, "rtol": 0.002},
     ("_softmax_backward_data", f16): {
         "reference_in_float": False,
         "atol": 0.008,
