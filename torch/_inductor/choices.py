@@ -462,6 +462,11 @@ class InductorChoices:
         if reduction_hint != ReductionHint.INNER:
             return False
 
+        # The heuristic changes reduction ordering. Keep it to forwards to
+        # avoid perturbing gradient reductions in training workloads.
+        if V.graph.is_backward:
+            return False
+
         if not V.graph.sizevars.statically_known_leq(features.reduction_numel, 32768):
             return False
 

@@ -1883,12 +1883,10 @@ class ComboKernelMetadataTests(TestCase):
         self.assertNotIn("'kernel_flop'", code)
 
     @requires_gpu_and_triton
-    def test_combo_rms_norm_forwards_add_persistent_rblock(self):
-        """rms_norm at (2048, 4096) triggers the large-rblock persistent
-        optimization for standalone kernels (set by triton.py:5820). Two
-        parallel rms_norms forming a combo kernel must forward
-        add_persistent_rblock per sub-kernel so _reduction_configs can emit
-        the same specialized large-RBLOCK config."""
+    def test_combo_rms_norm_forwards_persistent_reduction_metadata(self):
+        """rms_norm at (2048, 4096) meets the memory-savings persistent
+        reduction heuristic. Two parallel rms_norms forming a combo kernel must
+        keep the per-sub-kernel persistent heuristic and full-RBLOCK codegen."""
 
         def rms_norm(x, w, eps=1e-6):
             v = x.pow(2).mean(-1, keepdim=True)
@@ -1903,13 +1901,9 @@ class ComboKernelMetadataTests(TestCase):
         wb = torch.rand(4096, device=GPU_TYPE)
         code = self._combo_code(fn, [a, wa, b, wb])
 
-        # add_persistent_rblock must appear inside each sub-kernel's
-        # inductor_meta_{n} sub-dict (single source of truth via
-        # TritonKernel.inductor_meta_per_kernel).
-        fc = FileCheck()
         for num in range(2):
-            fc = fc.check(f"'inductor_meta_{num}'").check("'add_persistent_rblock'")
-        fc.run(code)
+            self.assertIn(f"'heuristic_{num}': 'persistent_reduction'", code)
+            self.assertIn(f"R0_BLOCK_{num}: tl.constexpr = 4096", code)
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch({"benchmark_combo_kernel": True})
