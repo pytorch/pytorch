@@ -1174,9 +1174,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_fwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1202,9 +1200,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_bwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -1388,9 +1384,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_fwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1433,9 +1427,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_bwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
@@ -1829,9 +1821,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_fwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         capability = torch.cuda.get_device_capability()
@@ -1868,9 +1858,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_bwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1981,9 +1969,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_fwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -2012,9 +1998,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(
-                    self.exhaustive_flex_attn_bwd_configs
-                )
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:

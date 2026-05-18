@@ -397,6 +397,11 @@ class MockGraphHandler:
 
 
 def has_cpp_wrapper_for_device(device: str) -> bool:
+    from torch._inductor.codegen.common import (
+        get_wrapper_codegen_for_device,
+        init_backend_registration,
+    )
+
     init_backend_registration()
     return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
 
