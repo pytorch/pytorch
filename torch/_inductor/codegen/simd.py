@@ -1784,7 +1784,9 @@ class SIMDScheduling(BaseScheduling):
         raise NotImplementedError
 
     def _codegen_mix_order_reduction(self, node1, node2):
-        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        numel_rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        assert numel_rnumel is not None
+        numel, rnumel = numel_rnumel
 
         def _pick_split_size():
             # the overridden has highest priority

@@ -218,7 +218,9 @@ class MixOrderReduction:
         )
 
     @classmethod
-    def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
+    def get_numel_rnumel(
+        cls, node: BaseSchedulerNode
+    ) -> tuple[sympy.Expr, sympy.Expr] | None:
         if cls.is_split_reduction(node):
             xnumel = None
             rnumel = None
@@ -243,14 +245,13 @@ class MixOrderReduction:
                     xnumel = curxnumel
                     rnumel = currnumel
                 else:
-                    assert V.graph.sizevars.statically_known_equals(
-                        xnumel, curxnumel
-                    ), f"{xnumel} v.s. {curxnumel}"
-                    assert V.graph.sizevars.statically_known_equals(
-                        rnumel, currnumel
-                    ), f"{rnumel} v.s. {currnumel}"
+                    if not V.graph.sizevars.statically_known_equals(xnumel, curxnumel):
+                        return None
+                    if not V.graph.sizevars.statically_known_equals(rnumel, currnumel):
+                        return None
 
-            assert xnumel is not None
+            if xnumel is None:
+                return None
             return (xnumel, rnumel)
         else:
             return node.group[1]  # type: ignore[return-value]
@@ -262,7 +263,7 @@ class MixOrderReduction:
         g1 = cls.get_numel_rnumel(node1)
         g2 = cls.get_numel_rnumel(node2)
 
-        if len(g1) != 2 or len(g2) != 2 or g1 == g2:
+        if g1 is None or g2 is None or len(g1) != 2 or len(g2) != 2 or g1 == g2:
             return False
 
         return tuple(g1) == tuple(reversed(g2))
@@ -272,33 +273,35 @@ class MixOrderReduction:
         """
         The access to 'buf' is not a broadcast access.
         """
-        found_dep = None
+        deps = []
         for dep in node.read_writes.reads:
             if isinstance(dep, MemoryDep) and dep.name == buf:
-                found_dep = dep
-                break
+                deps.append(dep)
 
-        if not found_dep:
+        if not deps:
             return False
 
-        index = found_dep.index
-        var_ranges = node.read_writes.var_ranges
+        for dep in deps:
+            var_ranges_candidates = []
+            if node.read_writes.var_ranges:
+                var_ranges_candidates.append(node.read_writes.var_ranges)
+            if isinstance(node, FusedSchedulerNode):
+                for snode in node.snodes:
+                    if dep in snode.read_writes.reads and snode.read_writes.var_ranges:
+                        var_ranges_candidates.append(snode.read_writes.var_ranges)
 
-        if not var_ranges:
-            assert isinstance(node, FusedSchedulerNode), f"{type(node)}"
-            var_ranges = node.snodes[0].read_writes.var_ranges
+            index = dep.index
+            for var_ranges in var_ranges_candidates:
+                if not (OrderedSet(var_ranges) - OrderedSet(index.free_symbols)):
+                    return True
 
-        assert var_ranges
-        if not (OrderedSet(var_ranges) - OrderedSet(index.free_symbols)):
-            return True
-
-        # cases that happen after merging loops:
-        #   MemoryDep('arg0_1', c0, {c0: 25165824})])
-        #   var_ranges={d0: 32768, d1: 768}
-        if V.graph.sizevars.statically_known_equals(
-            sympy_product(found_dep.size), sympy_product(var_ranges.values())
-        ):
-            return True
+                # cases that happen after merging loops:
+                #   MemoryDep('arg0_1', c0, {c0: 25165824})])
+                #   var_ranges={d0: 32768, d1: 768}
+                if V.graph.sizevars.statically_known_equals(
+                    sympy_product(dep.size), sympy_product(var_ranges.values())
+                ):
+                    return True
         return False
 
     @classmethod
@@ -322,6 +325,8 @@ class MixOrderReduction:
     @classmethod
     def get_numel(cls, node: BaseSchedulerNode) -> int:
         g1 = cls.get_numel_rnumel(node)
+        if g1 is None:
+            return 0
         return V.graph.sizevars.optimization_hint(g1[0] * g1[1], fallback=0)
 
     @classmethod
@@ -372,6 +377,8 @@ class MixOrderReduction:
             return False
 
         g1 = cls.get_numel_rnumel(contiguous_node)
+        if g1 is None:
+            return False
         nrow, ncol = g1
 
         # in non strict mode, we will skip the non-critical checks
@@ -7922,7 +7929,13 @@ class Scheduler:
         # This is a horizontal/common-read locality heuristic, not a
         # producer-consumer dependency match.
         buffer_overlap_score = 0
-        if score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
+        if score == 0 and self._can_use_buffer_overlap_scoring_for_reductions(
+            node1, node2
+        ):
+            buffer_overlap_score = self._score_fusion_memory_by_reduction_overlap(
+                node1, node2
+            )
+        elif score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
             buffer_overlap_score = self._score_fusion_memory_by_buffer_overlap(
                 node1, node2
             )
@@ -7949,6 +7962,9 @@ class Scheduler:
           "q + 2" and "k - 2" both read from `a` and would get a high overlap
           score, but fusing them horizontally prevents prologue fusion into mm
           (resulting in 2 kernels instead of 1).
+
+        Same-domain reductions with overlapping input buffers are handled by
+        _can_use_buffer_overlap_scoring_for_reductions instead.
 
         We allow buffer overlap scoring when:
         - The node outputs are not actually in the template's allowed_prologue_inps,
@@ -8030,6 +8046,82 @@ class Scheduler:
                         return False
 
         return True
+
+    def _can_use_buffer_overlap_scoring_for_reductions(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        """
+        Allow same-domain sibling reductions to fuse when they read the same
+        buffer through different index expressions.
+
+        Exact MemoryDep matching misses patterns such as block reductions over
+        Mx1 and 1xM tiles: both reductions traverse the same source tensor with
+        the same (numel, rnumel), but one access is contiguous while the other is
+        transposed.  The backend can codegen those reductions together once the
+        scheduler gives the horizontal fusion a non-zero locality score.
+        """
+        if not (
+            node1.is_reduction()
+            and node2.is_reduction()
+            and _is_gpu_triton_backend(node1, node2)
+        ):
+            return False
+
+        if (node1.ancestors & node2.get_operation_names()) or (
+            node2.ancestors & node1.get_operation_names()
+        ):
+            return False
+
+        _, (numel1, rnumel1) = node1.group
+        _, (numel2, rnumel2) = node2.group
+        if not (
+            V.graph.sizevars.statically_known_equals(numel1, numel2)
+            and V.graph.sizevars.statically_known_equals(rnumel1, rnumel2)
+        ):
+            return False
+
+        return bool(self._get_common_full_reduction_read_names(node1, node2))
+
+    def _get_common_full_reduction_read_names(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> OrderedSet[str]:
+        common_read_names = OrderedSet(
+            dep.name for dep in node1.read_writes.reads if isinstance(dep, MemoryDep)
+        ) & OrderedSet(
+            dep.name for dep in node2.read_writes.reads if isinstance(dep, MemoryDep)
+        )
+        return OrderedSet(
+            name
+            for name in common_read_names
+            if MixOrderReduction._is_full_access(name, node1)
+            and MixOrderReduction._is_full_access(name, node2)
+        )
+
+    def _score_fusion_memory_by_reduction_overlap(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        # Match _score_fusion_memory_by_buffer_overlap: symbolic dep sizes can
+        # hint as zero, but a known common full-buffer read should still clear
+        # the horizontal fusion threshold.
+        fallback_dep_size = 10
+
+        common_read_names = self._get_common_full_reduction_read_names(node1, node2)
+        # Count the shared input once.  Both reductions read the same full
+        # buffer, so summing both deps would overstate the locality benefit.
+        return max(
+            (
+                self.dep_size_hint(dep) or fallback_dep_size
+                for dep in itertools.chain(
+                    node1.read_writes.reads, node2.read_writes.reads
+                )
+                if dep.name in common_read_names
+            ),
+            default=0,
+        )
 
     def _score_fusion_memory_by_buffer_overlap(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

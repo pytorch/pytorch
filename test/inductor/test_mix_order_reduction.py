@@ -263,6 +263,23 @@ class MixOrderReductionTest(TestBase):
         check_one_split_size(8)
         check_one_split_size(16)
 
+    def test_block_reduction_transpose_horizontal_fusion(self):
+        def f(x, block_size: int):
+            x0 = x.reshape(-1, block_size)
+            s0 = torch.amax(x0.abs(), dim=1).unsqueeze(1)
+            y0 = (x0 / s0).reshape(x.shape)
+
+            xt = x.t().contiguous()
+            x1 = xt.reshape(-1, block_size)
+            s1 = torch.amax(x1.abs(), dim=1).unsqueeze(1)
+            y1 = (x1 / s1).reshape(xt.shape)
+
+            return y0, y1.t(), s0, s1
+
+        x = torch.randn(256, 256, dtype=torch.bfloat16, device=GPU_TYPE)
+        self.check_numeric(f, (x, 32), tol=1e-2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
         def f(x):
