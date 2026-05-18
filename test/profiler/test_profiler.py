@@ -1260,6 +1260,17 @@ class TestProfiler(TestCase):
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_tensor_dealloc_recorded(self):
+        with profile(activities=[ProfilerActivity.CPU]) as p:
+            with record_function("explicit_tensor_del"):
+                x = torch.empty((3, 4))
+                del x
+            gc.collect()
+
+        names = [e.name for e in p.events()]
+        self.assertIn("Tensor_dealloc", names)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
