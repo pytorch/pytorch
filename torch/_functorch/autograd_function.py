@@ -817,6 +817,7 @@ class AutogradFunctionApply(HigherOrderOperator):
         **fwd_kwargs: Any,
     ) -> Any:
         saved_values: Iterable[Any] | None = None
+        dirty_idx = fwd_kwargs.get("dirty_idx", [])
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
 
@@ -845,6 +846,14 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+                # If users call ctx.mark_dirty() in the original fwd function.
+                if len(dirty_idx) > 0:
+                    dirty_output = []
+                    for i, x in enumerate(output):
+                        if i in dirty_idx:
+                            dirty_output.append(x)
+                    ctx.mark_dirty(*dirty_output)
+
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
                     non_differentiable_output = []
@@ -879,11 +888,17 @@ class DynamoAutogradFunctionTraceHelper:
             with torch.no_grad():
                 outs = orig_fwd(*args, **kwargs)
 
+            ctx = args[0]
+            dirty_tensors = getattr(ctx, "dirty_tensors", ())
+            dirty_tensor_set = {
+                tensor for tensor in dirty_tensors if isinstance(tensor, torch.Tensor)
+            }
+
             # Handle the case where if the input is passed on directly to the output, we call view_as
             # Refer to https://github.com/pytorch/pytorch/blob/main/torch/csrc/autograd/custom_function.cpp#L254
             tensor_args = {arg for arg in args if isinstance(arg, torch.Tensor)}
             if isinstance(outs, torch.Tensor):
-                if outs in tensor_args:
+                if outs in tensor_args and outs not in dirty_tensor_set:
                     return outs.view_as(outs)
                 else:
                     return outs
@@ -891,7 +906,7 @@ class DynamoAutogradFunctionTraceHelper:
             new_outs = []
             for out in outs:
                 if isinstance(out, torch.Tensor):
-                    if out in tensor_args:
+                    if out in tensor_args and out not in dirty_tensor_set:
                         new_outs.append(out.view_as(out))
                     else:
                         new_outs.append(out)
