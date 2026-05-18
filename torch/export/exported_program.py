@@ -920,7 +920,7 @@ def _get_updated_module_call_graph(
         if history := node.meta.get("from_node", []):
             provenance[history[-1].name] = node.name
 
-        # For params and buffers, we might have applied parameterizaiton rule
+        # For params and buffers, we might have applied parameterization rule
         # so that the names might have changed. But for user inputs, we know we
         # must preserve the old name.
         elif node.op == "placeholder":

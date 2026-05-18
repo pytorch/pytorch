@@ -232,7 +232,7 @@ else:
                         "Cannot provide _layout and/or _rank_map if passing explicit mesh"
                     )
                 if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
-                    raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
+                    mesh = mesh.to("cpu")
                 mesh_tensor = (
                     mesh.detach().to(dtype=torch.int).contiguous()
                     if isinstance(mesh, torch.Tensor)

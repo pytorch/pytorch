@@ -1153,7 +1153,7 @@ print("arf")
         fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
-        msg0 = munge_exc(records[0].getMessage())
+        msg0 = munge_exc(records[0].getMessage(), strip_carets=False)
         self.assertExpectedInline(
             msg0,
             """\
@@ -1505,6 +1505,42 @@ TorchDynamo attempted to trace the following frames: [
 ]""",
         )
 
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging(self, records):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("Dynamo tracing is disabled", msg)
+        self.assertIn("fn", msg)
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging_dispatch_mode(self, records):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class SkipMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with SkipMode():
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("non-infra torch dispatch mode present", msg)
+        self.assertIn("fn", msg)
+
 
 # non single record tests
 exclusions = {
@@ -1552,6 +1588,7 @@ exclusions = {
     "loop_tiling",
     "auto_chunker",
     "autotuning",
+    "incremental",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
