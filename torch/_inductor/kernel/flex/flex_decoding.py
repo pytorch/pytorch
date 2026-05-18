@@ -2,6 +2,7 @@
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import sympy
@@ -10,7 +11,7 @@ import torch
 from torch._inductor.virtualized import V
 from torch.utils._sympy.functions import FloorDiv, Mod
 
-from ... import ir
+from ... import config, ir
 from ...ir import FixedLayout, FlexibleLayout
 from ...lowering import empty, empty_strided, lowerings
 from ...runtime.runtime_utils import ceildiv, is_power_of_2, next_power_of_2
@@ -35,6 +36,51 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
+
+_DECODE_TUNING_KEYS = (
+    "BLOCK_M",
+    "BLOCK_N",
+    "SPLIT_KV",
+    "num_warps",
+    "num_stages",
+    "num_consumer_groups",
+    "num_buffers_warp_spec",
+)
+
+
+def _has_user_pinned_decode_tuning(kernel_options: dict[str, Any]) -> bool:
+    return any(
+        name in kernel_options or f"fwd_{name}" in kernel_options
+        for name in _DECODE_TUNING_KEYS
+    )
+
+
+def _with_decode_fallback_configs(configs):
+    if config.max_autotune or not configs:
+        return configs
+
+    default_config = configs[0]
+    fallback_configs = [
+        *configs,
+        replace(
+            default_config,
+            block_n=min(default_config.block_n, 32),
+            num_stages=1,
+            num_warps=2,
+        ),
+        replace(
+            default_config,
+            block_n=min(default_config.block_n, 16),
+            num_stages=1,
+            num_warps=2,
+        ),
+    ]
+
+    unique = []
+    for cfg in fallback_configs:
+        if cfg not in unique:
+            unique.append(cfg)
+    return unique[: config.flex_fallback_max_configs]
 
 
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
@@ -240,6 +286,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     configs = V.choices.get_flex_decode_configs(
         head_dim, dtype, query.get_device().type
     )
+    user_pinned = _has_user_pinned_decode_tuning(kernel_options)
+    if not user_pinned:
+        configs = _with_decode_fallback_configs(configs)
 
     # TODO: fix autotuning.
 
@@ -420,6 +469,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         inputs_for_flex_decoding,
         layout_acc,
         input_gen_fns=input_gen_fns,
+        precompile_only=not config.max_autotune,
     )
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
