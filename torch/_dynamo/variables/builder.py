@@ -354,7 +354,7 @@ def lookup_spec_from_dynamo_source(
 ) -> LeafSpec:
     """Find the user spec entry corresponding to a given dynamo input source.
 
-    Two kinds of input sources are recognized:
+    Three kinds of input sources are recognized:
 
     1. **Named forward arg** — ``LocalSource(local_name=NAME, is_input=True)``
        with ``is_varargs=False`` and ``is_varkw=False`` (a regular named
@@ -366,11 +366,18 @@ def lookup_spec_from_dynamo_source(
        discriminator, set by dynamo from ``co_flags & CO_VARARGS``).
        Looked up in ``ParamsSpec._varargs[N]``.
 
+    3. **Keyed varkw element** — ``DictGetItemSource(base=LocalSource(_, is_input=True, is_varkw=True), index=KEY)``.
+       This represents ``kwargs[KEY]`` for the function's ``**kwargs``
+       parameter (Python name again irrelevant — the ``is_varkw`` flag is
+       the discriminator, set by dynamo from ``co_flags & CO_VARKEYWORDS``).
+       Looked up in ``ParamsSpec._varkw[KEY]``.
+
     Note: indexed access into a *regular list-typed input* (e.g. ``def
     forward(self, lst): return lst[0]``) is structurally identical at the
     dynamo level — same ``GetItemSource`` shape — but its base
     ``LocalSource`` has ``is_varargs=False``. Such accesses are NOT matched
-    here (those inputs stay static under the current spec API).
+    here (those inputs stay static under the current spec API). Same goes
+    for keyed access into a regular dict-typed input vs ``**kwargs``.
 
     Returns the matching ``TensorSpec`` / ``IntVar`` / ``int`` / ``None``
     leaf spec, or ``None`` if the source pattern is not recognized or no
@@ -400,11 +407,26 @@ def lookup_spec_from_dynamo_source(
                 f"{type(source.index).__name__}: {source.index!r} "
                 f"(source={source!r})"
             )
-        if (
-            params._varargs is not None
-            and 0 <= source.index < len(params._varargs)
-        ):
+        if params._varargs is not None and 0 <= source.index < len(params._varargs):
             return params._varargs[source.index]
+    # Case 3: keyed access into **kwargs.
+    if (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, LocalSource)
+        and source.base.is_input
+        and source.base.is_varkw
+    ):
+        # `source.index` is either a literal (string/int) or a
+        # ConstDictKeySource for non-string keys. ``**kwargs`` keys are
+        # always strings, so we only handle the literal-string case here.
+        if not isinstance(source.index, str):
+            raise AssertionError(
+                f"Expected str index for **kwargs DictGetItemSource, got "
+                f"{type(source.index).__name__}: {source.index!r} "
+                f"(source={source!r})"
+            )
+        if params._varkw is not None and source.index in params._varkw:
+            return params._varkw[source.index]
     return None
 
 
