@@ -603,15 +603,12 @@ class TestScatterAddOverrideConds(TestCase):
         cutedsl_impl.register_to_dispatch()
 
     def _conds(self, self_t, idx, src, dim=0):
-        # _is_*_supported operate on already-permuted operands. Mirror
-        # what _make_cond does: permute and feed the views.
-        permuted = self.impl._permute_to_dim0(self_t, dim, idx, src)
-        if permuted is None:
-            return (False, False)
-        self_p, src_p, idx_p = permuted
+        # _is_*_supported take (self, dim, index, src); they build the
+        # analysis iter internally and pattern-match its strides against
+        # the kernel's expected layout.
         return (
-            self.impl._is_tma_supported(self_p, idx_p, src_p),
-            self.impl._is_vec_scatter_supported(self_p, idx_p, src_p),
+            self.impl._is_tma_supported(self_t, dim, idx, src),
+            self.impl._is_vec_scatter_supported(self_t, dim, idx, src),
         )
 
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
