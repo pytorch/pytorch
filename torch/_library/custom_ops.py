@@ -748,13 +748,12 @@ class CustomOpDef:
         if schema._is_view_op():
             return
 
+        # Tensor-list args can hide subclasses that the top-level arg check
+        # in fast_path wouldn't catch.
         has_tensorlist = any(
             utils.is_tensorlist_like_type(a.type)
             for a in (*schema.arguments, *schema.returns)
         )
-
-        # Tensor-list args can hide subclasses that the top-level arg check
-        # in fast_path wouldn't catch.
         if has_tensorlist:
             return
 
