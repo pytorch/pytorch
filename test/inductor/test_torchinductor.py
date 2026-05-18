@@ -14195,17 +14195,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_fixed_layout_tensor_list(self):
-        expected_stride = (1, 2)
-        lowering_stride = (2, 1)
-
         def make_strided(x):
             return torch.empty_strided(
-                (2, 2), expected_stride, dtype=x.dtype, device=x.device
+                (x.shape[0], 2), (1, x.shape[0]), dtype=x.dtype, device=x.device
             )
 
         def make_strided_meta(x):
             return torch.empty_strided(
-                (2, 2), expected_stride, dtype=x.dtype, device=x.device
+                (x.shape[0], 2), (1, x.shape[0]), dtype=x.dtype, device=x.device
             )
 
         define_custom_op_for_test(
@@ -14219,13 +14216,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         def _(x):
             return lowering.empty_strided(
-                (2, 2),
-                lowering_stride,
+                (x.get_size()[0], 2),
+                (2, 1),
                 dtype=x.get_dtype(),
                 device=x.get_device(),
             )
 
         def check_strides(xs):
+            expected_stride = (1, xs[0].shape[0])
             if xs[0].stride() != expected_stride:
                 raise AssertionError(
                     f"Expected stride {expected_stride}, got {xs[0].stride()}"
