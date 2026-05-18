@@ -524,7 +524,15 @@ lib.define(
     "_low_contention_all_gather_v4(Tensor tensor, str group_name) -> Tensor"
 )
 lib.define(
+    "_low_contention_all_gather_v4_out("
+    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
+)
+lib.define(
     "_low_contention_all_gather_v5(Tensor tensor, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_v5_out("
+    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
 )
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
@@ -1912,6 +1920,30 @@ def _require_multicast(device_index: int, op_name: str) -> None:
         raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
 
 
+def _check_lc_ag_out(
+    tensor: torch.Tensor,
+    output: torch.Tensor,
+    world_size: int,
+    op_name: str,
+) -> None:
+    expected_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    if tuple(output.shape) != expected_shape:
+        raise RuntimeError(
+            f"{op_name}: expected out shape {expected_shape}, "
+            f"but got {tuple(output.shape)}."
+        )
+    if output.dtype != tensor.dtype:
+        raise RuntimeError(
+            f"{op_name}: expected out dtype {tensor.dtype}, but got {output.dtype}."
+        )
+    if output.device != tensor.device:
+        raise RuntimeError(
+            f"{op_name}: expected out device {tensor.device}, but got {output.device}."
+        )
+    if not output.is_contiguous():
+        raise RuntimeError(f"{op_name}: out must be contiguous.")
+
+
 def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
     required_bytes = 7 * symm_mem.world_size * 4
     actual_bytes = _SymmetricMemory.signal_pad_size
@@ -2046,9 +2078,45 @@ def _low_contention_all_gather_v4(
     world_size = c10d._get_group_size_by_name(group_name)
     out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
     output = _get_ag_output("v4", group_name, device_index, tensor.dtype, out_shape)
+    return _low_contention_all_gather_v4_impl(tensor, group_name, output)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v4_out", "Meta")
+def _low_contention_all_gather_v4_out_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    return out
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v4_out", "CUDA")
+def _low_contention_all_gather_v4_out(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into caller-provided output."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_v4")
+    return _low_contention_all_gather_v4_impl(tensor, group_name, out)
+
+
+def _low_contention_all_gather_v4_impl(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    output: torch.Tensor,
+) -> torch.Tensor:
+    device_index = (
+        output.device.index
+        if output.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_v4")
     symm_mem = rendezvous(output, group_name)
     if symm_mem is None:
         raise RuntimeError("v4 output must be allocated from symmetric memory")
+    world_size = symm_mem.world_size
     _check_lc_signal_pad_capacity(symm_mem)
 
     rank = symm_mem.rank
@@ -2095,6 +2163,44 @@ def _low_contention_all_gather_v5(
     world_size = c10d._get_group_size_by_name(group_name)
     out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
     output = _get_ag_output("v5", group_name, device_index, tensor.dtype, out_shape)
+    return _low_contention_all_gather_v5_impl(tensor, group_name, output)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v5_out", "Meta")
+def _low_contention_all_gather_v5_out_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    return out
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v5_out", "CUDA")
+def _low_contention_all_gather_v5_out(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    """Direct-input multimem kernel all-gather into caller-provided output."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_v5")
+    return _low_contention_all_gather_v5_impl(tensor, group_name, out)
+
+
+def _low_contention_all_gather_v5_impl(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    output: torch.Tensor,
+) -> torch.Tensor:
+    device_index = (
+        output.device.index
+        if output.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_v5")
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError("v5 output must be allocated from symmetric memory")
 
     backend_stream = _get_backend_stream()
     backend_stream.wait_stream(torch.cuda.current_stream())
