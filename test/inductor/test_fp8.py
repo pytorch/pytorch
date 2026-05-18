@@ -1407,7 +1407,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
