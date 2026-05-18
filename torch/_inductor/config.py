@@ -5,7 +5,6 @@ from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 import torch._inductor.custom_graph_pass
-import torch._inductor_env_vars as inductor_env_vars
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
@@ -2324,6 +2323,38 @@ class aot_inductor_mode:
     compile_standalone: bool = False
 
 
+def _cutlass_dir_env_var() -> str:
+    return "TORCHINDUCTOR_CUTLASS_DIR"
+
+
+def _get_default_cutlass_dir() -> str:
+    def is_cutlass_dir(path: str) -> bool:
+        return os.path.isdir(os.path.join(path, "python"))
+
+    default_cutlass_dir = os.path.join(
+        os.path.dirname(torch.__file__),
+        "../third_party/cutlass/",
+    )
+    if is_cutlass_dir(default_cutlass_dir):
+        return default_cutlass_dir
+
+    # Tests may import an installed torch while running from a source checkout.
+    candidate_roots = [os.path.dirname(os.path.dirname(os.path.dirname(__file__)))]
+    try:
+        candidate_roots.append(os.getcwd())
+    except OSError:
+        pass
+
+    for root in candidate_roots:
+        if not os.path.isfile(os.path.join(root, "torch", "_inductor", "config.py")):
+            continue
+        cutlass_dir = os.path.join(root, "third_party", "cutlass")
+        if is_cutlass_dir(cutlass_dir):
+            return cutlass_dir
+
+    return default_cutlass_dir
+
+
 class cutlass:
     """
     Config specific to cutlass backend.
@@ -2338,14 +2369,10 @@ class cutlass:
     use_fast_math = False
 
     # Path to the CUTLASS repo root directory.
-    # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
-            inductor_env_vars.CUTLASS_DIR_ENV_VAR,
-            os.path.join(
-                os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
-            ),
+            _cutlass_dir_env_var(),
+            _get_default_cutlass_dir(),
         )
     )
 
@@ -2497,9 +2524,7 @@ class xpu(cutlass):
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
 
-    cutlass_dir = os.path.realpath(
-        os.environ.get(inductor_env_vars.CUTLASS_DIR_ENV_VAR, "")
-    )
+    cutlass_dir = os.path.realpath(os.environ.get(_cutlass_dir_env_var(), ""))
 
 
 class rocm:
