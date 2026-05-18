@@ -407,7 +407,7 @@ def conv_layout(
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())
+        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
         x.get_device_or_error(),
@@ -458,6 +458,7 @@ def convolution(
     output_padding: Sequence[int],
     groups: int,
 ):
+    """Lower aten.convolution using Inductor convolution kernels or fallbacks."""
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -552,6 +553,9 @@ def convolution(
     if bias is not None and device_type != "cpu":
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
+        if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
+            # we should not add bias when the output channel is 0
+            return result
         return L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
@@ -592,8 +596,9 @@ def convolution(
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
+        bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
+        assert bias is not None
         args = [x, weight, bias]
-        bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
@@ -616,7 +621,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)

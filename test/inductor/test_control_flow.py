@@ -1158,6 +1158,18 @@ class WhileLoopModels:
             )
             return stacked_c, stacked_x
 
+    class BackwardSumExpandedGrad(torch.nn.Module):
+        def forward(self, x):
+            def cond_fn(i, x):
+                return i < 5
+
+            def body_fn(i, x):
+                return i + 1, x * 0.9 + 0.1
+
+            init = torch.tensor(0, device=x.device)
+            _, result = torch.while_loop(cond_fn, body_fn, (init, x))
+            return result.sum()
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1573,31 +1585,18 @@ class WhileLoopTests(TestCase):
         )
 
     @requires_gpu
-    def test_while_loop_backward_sum_expanded_grad(self):
-        def fn(x):
-            def cond_fn(i, x):
-                return i < 5
-
-            def body_fn(i, x):
-                return i + 1, x * 0.9 + 0.1
-
-            _, result = torch.while_loop(
-                cond_fn, body_fn, (torch.tensor(0, device=x.device), x)
-            )
-            return result.sum()
-
-        torch.manual_seed(42)
-        x = torch.randn(4, 64, device=GPU_TYPE, requires_grad=True)
-        x_ref = x.detach().clone().requires_grad_(True)
-
-        expected = fn(x_ref)
-        expected.backward()
-
-        actual = torch.compile(fn, fullgraph=True)(x)
-        actual.backward()
-
-        self.assertEqual(actual, expected)
-        self.assertEqual(x.grad, x_ref.grad)
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_backward_sum_expanded_grad(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.BackwardSumExpandedGrad(),
+            inputs=(torch.randn(4, 64, device=device),),
+            device=device,
+            dynamic=dynamic,
+            num_counters=0,
+            autograd=True,
+        )
 
 
 class AssociativeScanTests(TestCase):
