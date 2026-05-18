@@ -9919,7 +9919,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(IndexError):
             fn(x)
 
-        with self.assertRaises(RuntimeError):
+        # torch._check_index raises IndexError in eager, but torch.compile
+        # wraps it in a RuntimeError during graph tracing.
+        with self.assertRaisesRegex(RuntimeError, "index .* out of range"):
             torch.compile(fn, fullgraph=True)(x)
 
     @skip_if_gpu_halide  # accuracy issue
