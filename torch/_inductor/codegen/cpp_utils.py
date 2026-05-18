@@ -143,6 +143,8 @@ def promote_args(new_args):
 
 
 class CppCSEVariable(CSEVariable):
+    supports_static_cpp_dtype_assert = True
+
     def __init__(
         self,
         name,

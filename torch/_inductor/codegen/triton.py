@@ -1098,6 +1098,9 @@ def needs_upcast_to_float32(arg: Any) -> bool:
 
 
 class TritonCSEVariable(CSEVariable):
+    supports_runtime_triton_dtype_assert = True
+    supports_runtime_triton_shape_assert = True
+
     def __init__(
         self,
         name: str,
@@ -3647,6 +3650,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
+    def _broadcast_shape_with_masks(
+        self,
+        shape: BlockShapeType,
+        mask_vars: OrderedSet[str | TritonCSEVariable],
+    ) -> BlockShapeType:
+        if shape is None:
+            return None
+
+        result_shape = tuple(shape)
+        for mask in mask_vars:
+            mask_shape = getattr(mask, "shape", None)
+            if mask_shape is None and isinstance(mask, str):
+                for tree in self.active_range_trees():
+                    if mask == f"{tree.prefix}mask":
+                        if tree.tensor_dim is None:
+                            mask_shape = ()
+                        else:
+                            mask_shape_list = [1] * self.triton_tensor_ndim()
+                            mask_shape_list[tree.tensor_dim] = self.dense_size_list()[
+                                tree.tensor_dim
+                            ]
+                            mask_shape = tuple(mask_shape_list)
+                        break
+            if mask_shape is None:
+                return None
+            result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
+
+        return result_shape
+
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
@@ -3915,7 +3947,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 line = f"tl.where({indexing.mask_str}, {result_var}, {other_val})"
                 result_var = self.cse.generate(
-                    load_buffer, line, dtype=dtype, shape=result_var.shape
+                    load_buffer,
+                    line,
+                    dtype=dtype,
+                    shape=self._broadcast_shape_with_masks(
+                        result_var.shape, indexing.mask_vars
+                    ),
                 )
 
         if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):

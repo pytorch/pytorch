@@ -720,10 +720,15 @@ def deduce_output_dtype_by_name(
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
-    backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_dtype_assert
+        and getattr(var, "supports_runtime_triton_dtype_assert", False)
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
-    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
+    elif (
+        config.test_configs.static_cpp_dtype_assert
+        and getattr(var, "supports_static_cpp_dtype_assert", False)
+    ):
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
         assert isinstance(var, CppCSEVariable), type(var)
@@ -745,9 +750,11 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_shape_assert
+        and getattr(var, "supports_runtime_triton_shape_assert", False)
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -1907,6 +1914,10 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
+    supports_runtime_triton_dtype_assert = False
+    supports_runtime_triton_shape_assert = False
+    supports_static_cpp_dtype_assert = False
+
     def __init__(
         self,
         name: str,
@@ -2712,8 +2723,14 @@ class CSEProxy(DefaultHandler):
             csevar.update_on_args(name, args, kwargs)
 
             if (
-                config.test_configs.runtime_triton_dtype_assert
-                or config.test_configs.static_cpp_dtype_assert
+                (
+                    config.test_configs.runtime_triton_dtype_assert
+                    and csevar.supports_runtime_triton_dtype_assert
+                )
+                or (
+                    config.test_configs.static_cpp_dtype_assert
+                    and csevar.supports_static_cpp_dtype_assert
+                )
             ):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
