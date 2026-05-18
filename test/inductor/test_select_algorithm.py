@@ -611,6 +611,109 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestAlgorithmSelectorCleanup(TestCase):
+    class Choice:
+        failed = False
+        name = "choice"
+        description = "choice"
+
+        def __init__(self, key="choice"):
+            self.key = key
+            self.precompile_calls = 0
+            self.released = 0
+
+        def kernel_hash_key(self):
+            return self.key
+
+        def mark_failed(self):
+            self.failed = True
+
+        def precompile(self):
+            self.precompile_calls += 1
+
+        def release_benchmark_artifacts(self):
+            self.released += 1
+
+    class PrecompileFn:
+        def __init__(self):
+            self.released = 0
+
+        def __call__(self):
+            return {}
+
+        def release_benchmark_artifacts(self):
+            self.released += 1
+
+    def test_do_autotuning_releases_benchmark_artifacts(self):
+        choice = self.Choice()
+        precompile_fn = self.PrecompileFn()
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            return {choices[0]: 1.0}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            timings = cache.do_autotuning(
+                "mm", [], None, None, "inputs_key", [choice], precompile_fn
+            )
+
+        self.assertEqual(timings, {choice: 1.0})
+        self.assertEqual(choice.released, 1)
+        self.assertEqual(precompile_fn.released, 1)
+
+    def test_do_autotuning_releases_benchmark_artifacts_on_exception(self):
+        choice = self.Choice()
+        precompile_fn = self.PrecompileFn()
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            raise RuntimeError("lookup failed")
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+            self.assertRaisesRegex(RuntimeError, "lookup failed"),
+        ):
+            cache.do_autotuning(
+                "mm", [], None, None, "inputs_key", [choice], precompile_fn
+            )
+
+        self.assertEqual(choice.released, 1)
+        self.assertEqual(precompile_fn.released, 1)
+
+    def test_precompile_release_evicts_cache(self):
+        class VersionInfo:
+            major = 3
+            minor = 12
+            micro = 0
+
+        choice = self.Choice()
+
+        def lookup(self, choices, name, inputs_key, benchmark=None, hint_override=None):
+            return {}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm, "get_num_workers", lambda: 1),
+            patch.object(select_algorithm.sys, "version_info", VersionInfo),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            precompile_fn = cache.make_precompile_fn([choice], "mm", "inputs_key")
+            precompile_fn()
+            precompile_fn.release_benchmark_artifacts()
+
+            precompile_fn2 = cache.make_precompile_fn([choice], "mm", "inputs_key")
+            precompile_fn2()
+            precompile_fn2.release_benchmark_artifacts()
+
+        self.assertIsNot(precompile_fn, precompile_fn2)
+        self.assertEqual(choice.precompile_calls, 2)
+
+
 class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches

@@ -341,6 +341,26 @@ class TestPyCodeCache(TestCase):
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
 
+    def test_unload_by_key_path(self):
+        key, path = PyCodeCache.write("value = 123", "")
+        mod = PyCodeCache.load_by_key_path(key, path)
+        module_name = f"torch._inductor.runtime.compile_tasks.{key}"
+        PyCodeCache.linemaps[path] = [(1, "node")]
+
+        self.assertIn(mod, PyCodeCache.modules)
+        self.assertIs(PyCodeCache.modules_no_attr[path], mod)
+        self.assertIs(sys.modules[module_name], mod)
+        self.assertIn(path, PyCodeCache.linemaps)
+        self.assertEqual(mod.value, 123)
+
+        PyCodeCache.unload_by_key_path(key, path)
+
+        self.assertNotIn(mod, PyCodeCache.modules)
+        self.assertNotIn(path, PyCodeCache.modules_no_attr)
+        self.assertNotIn(module_name, sys.modules)
+        self.assertNotIn(path, PyCodeCache.linemaps)
+        self.assertFalse(hasattr(mod, "value"))
+
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
         with tempfile.TemporaryDirectory() as tmpdir:

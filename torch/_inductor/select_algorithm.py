@@ -15,13 +15,13 @@ import sys
 import textwrap
 import time
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing_extensions import Protocol, Self
 from unittest.mock import patch
 
 import sympy
@@ -3191,6 +3191,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
         self.n_regs = self.bmreq.n_regs
 
+    def release_benchmark_artifacts(self) -> None:
+        assert self.bmreq is not None
+        self.bmreq.release_benchmark_artifacts()
+
     def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
 
@@ -3583,6 +3587,44 @@ FeedbackFunction = Callable[
 PreprocessingFunction = Callable[[list[ChoiceCaller]], list[ChoiceCaller]]
 
 
+class PrecompileFunction(Protocol):
+    def __call__(self) -> dict[ChoiceCaller, float]: ...
+
+    def release_benchmark_artifacts(self) -> None: ...
+
+
+class _NoOpPrecompileFunction:
+    def __call__(self) -> dict[ChoiceCaller, float]:
+        return {}
+
+    def release_benchmark_artifacts(self) -> None:
+        pass
+
+
+class _PrecompileFunction:
+    def __init__(
+        self,
+        wait_on_futures: Callable[[], dict[ChoiceCaller, float]],
+        release_benchmark_artifacts: Callable[[], None],
+    ) -> None:
+        self._wait_on_futures = wait_on_futures
+        self._release_benchmark_artifacts = release_benchmark_artifacts
+        self._has_result = False
+        self._result: dict[ChoiceCaller, float] = {}
+
+    def __call__(self) -> dict[ChoiceCaller, float]:
+        if not self._has_result:
+            with restore_stdout_stderr():
+                self._result = self._wait_on_futures()
+            self._has_result = True
+        return self._result
+
+    def release_benchmark_artifacts(self) -> None:
+        self._result = {}
+        self._has_result = False
+        self._release_benchmark_artifacts()
+
+
 def filter_choices_by_name_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:
     """Filter choices based on autotune_choice_name_regex config."""
     if config.test_configs.autotune_choice_name_regex is not None:
@@ -3744,7 +3786,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: dict[str, Callable[[], dict[ChoiceCaller, float]]] = {}
+        self.precompile_cache: dict[str, PrecompileFunction] = {}
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
         # list of callbacks that are called after benchmarking
@@ -3767,6 +3809,18 @@ class AlgorithmSelectorCache(PersistentCache):
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
         self.prescreening_cache.clear()
+
+    @staticmethod
+    def release_choice_benchmark_artifacts(choices: Iterable[ChoiceCaller]) -> None:
+        for choice in choices:
+            try:
+                choice.release_benchmark_artifacts()
+            except Exception:
+                log.debug(
+                    "Failed to release benchmark artifacts for choice %s",
+                    choice,
+                    exc_info=True,
+                )
 
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
         assert len(choices) >= 2
@@ -3881,32 +3935,45 @@ class AlgorithmSelectorCache(PersistentCache):
                     assert not hint_override, (
                         "Hint not supported with pipelined autotuning"
                     )
-                    # Await precompilation future, thread pool
-                    precompile_start_ts = time.time()
                     final_choices = choices
-                    if precompile_future:
+                    release_final_choices = False
+                    try:
+                        # Await precompilation future, thread pool
+                        precompile_start_ts = time.time()
+                        if precompile_future:
+                            try:
+                                precompile_future.result()
+                            except NoValidChoicesError:
+                                log.error(
+                                    "Runtime error for autotuning triton choices, defaulting to extern kernels.",
+                                )
+                                final_choices = extern_kernels
+                        precompile_elapse = time.time() - precompile_start_ts
+
+                        # Await autotuning in subproc pool
+                        autotune_start_ts = time.time()
+                        release_final_choices = True
+                        results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                        autotune_wait_ts = time.time() - autotune_start_ts
+                        AlgorithmSelectorCache.log_results(
+                            name,
+                            input_nodes,
+                            results,
+                            precompile_elapse,
+                            autotune_wait_ts,
+                        )
+
+                        return results
+                    finally:
                         try:
-                            precompile_future.result()
-                        except NoValidChoicesError:
-                            log.error(
-                                "Runtime error for autotuning triton choices, defaulting to extern kernels.",
+                            precompile_fn.release_benchmark_artifacts()
+                        except Exception:
+                            log.debug(
+                                "Failed to release precompile benchmark artifacts",
+                                exc_info=True,
                             )
-                            final_choices = extern_kernels
-                    precompile_elapse = time.time() - precompile_start_ts
-
-                    # Await autotuning in subproc pool
-                    autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(final_choices, inputs_key)
-                    autotune_wait_ts = time.time() - autotune_start_ts
-                    AlgorithmSelectorCache.log_results(
-                        name,
-                        input_nodes,
-                        results,
-                        precompile_elapse,
-                        autotune_wait_ts,
-                    )
-
-                    return results
+                        if release_final_choices:
+                            self.release_choice_benchmark_artifacts(final_choices)
             else:
 
                 def get_timings(hint_override: int | None = None):
@@ -4126,7 +4193,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         inputs_key,
         choices,
-        precompile_fn,
+        precompile_fn: PrecompileFunction,
         hint_override: int | None = None,
         best_config_future=None,
         is_collective=False,
@@ -4160,195 +4227,215 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
-            # Log shape information for debugging timeout issues
-            sizevars = V.graph.sizevars
+        choices_to_cleanup = list(choices)
 
-            shapes = [
-                "x".join(
-                    map(
-                        str,
-                        sizevars.optimization_hints_with_override(
-                            node.get_size(),
-                            hint_override=hint_override,
-                        ),
-                    )
+        def release_benchmark_artifacts() -> None:
+            try:
+                precompile_fn.release_benchmark_artifacts()
+            except Exception:
+                log.debug(
+                    "Failed to release precompile benchmark artifacts",
+                    exc_info=True,
                 )
-                for node in input_nodes
-            ]
-            log.debug(
-                "[BENCHMARK DEBUG] Starting autotuning for '%s' with shapes: %s, device: %s",
-                name,
-                shapes,
-                layout.device.type if layout else "unknown",
-            )
+            self.release_choice_benchmark_artifacts(choices_to_cleanup)
 
-        precompile_start_ts = time.time()
+        release_on_exit = True
+        try:
+            if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
+                # Log shape information for debugging timeout issues
+                sizevars = V.graph.sizevars
 
-        if not use_pipelined_autotuning():
-            with dynamo_timed(
-                f"{name}_template_precompiling",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="compile_time_autotune_time_us",
-            ):
+                shapes = [
+                    "x".join(
+                        map(
+                            str,
+                            sizevars.optimization_hints_with_override(
+                                node.get_size(),
+                                hint_override=hint_override,
+                            ),
+                        )
+                    )
+                    for node in input_nodes
+                ]
+                log.debug(
+                    "[BENCHMARK DEBUG] Starting autotuning for '%s' with shapes: %s, device: %s",
+                    name,
+                    shapes,
+                    layout.device.type if layout else "unknown",
+                )
+
+            precompile_start_ts = time.time()
+
+            if not use_pipelined_autotuning():
+                with dynamo_timed(
+                    f"{name}_template_precompiling",
+                    log_pt2_compile_event=True,
+                    dynamo_compile_column_us="compile_time_autotune_time_us",
+                ):
+                    precompile_times = precompile_fn()
+            else:
                 precompile_times = precompile_fn()
-        else:
-            precompile_times = precompile_fn()
 
-        precompile_elapse = time.time() - precompile_start_ts
-        log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
-        # Prune anything that failed to compile
-        choices = [c for c in choices if not c.failed]
-        if len(choices) == 0:
-            raise self.create_no_valid_choices(
-                name, "All choices failed to compile for backend."
+            precompile_elapse = time.time() - precompile_start_ts
+            log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+            # Prune anything that failed to compile
+            choices = [c for c in choices if not c.failed]
+            if len(choices) == 0:
+                raise self.create_no_valid_choices(
+                    name, "All choices failed to compile for backend."
+                )
+
+            candidates = self.prescreen_choices(
+                choices, name, inputs_key, self.prescreening_cache
             )
+            prescreening_elapse: float | None = None
+            if candidates:
+                prescreening_start_ts = time.time()
+                timings = self.lookup(
+                    candidates,
+                    name,
+                    inputs_key,
+                    lambda choices: self.autotune(
+                        name,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        choices,
+                        hint_override=hint_override,
+                    ),
+                    hint_override=hint_override,
+                )
+                choices = self.prune_choices_postscreen(
+                    choices, timings, name, inputs_key, self.prescreening_cache
+                )
+                prescreening_elapse = time.time() - prescreening_start_ts
+                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
-        candidates = self.prescreen_choices(
-            choices, name, inputs_key, self.prescreening_cache
-        )
-        prescreening_elapse: float | None = None
-        if candidates:
-            prescreening_start_ts = time.time()
-            timings = self.lookup(
-                candidates,
-                name,
-                inputs_key,
-                lambda choices: self.autotune(
+            if use_pipelined_autotuning():
+                AsyncAutotuner.start(choices, inputs_key)
+                release_on_exit = False
+                return
+
+            autotune_start_ts = time.time()
+
+            if best_config_future is not None:
+                best_config = await_sync(best_config_future)
+
+                important_keys = [
+                    "ACC_TYPE",
+                    "ALLOW_TF32",
+                    "BLOCK_K",
+                    "BLOCK_M",
+                    "BLOCK_N",
+                    "EVEN_K",
+                    "GROUP_M",
+                    "USE_FAST_ACCUM",
+                    "num_stages",
+                    "num_warps",
+                    "num_consumer_groups",
+                    "num_buffers_warp_spec",
+                ]
+                choices = [
+                    choice
+                    for choice in choices
+                    if all(
+                        f"{k}={best_config[k]}" in choice.description
+                        for k in important_keys
+                    )
+                    for k in important_keys
+                ]
+                log.info("Filtered to %d choices based on best_config", len(choices))
+
+            has_autotuned: bool = False
+
+            def track_has_autotuned(choices):
+                nonlocal has_autotuned
+                has_autotuned = True
+                return self.autotune(
                     name,
                     input_nodes,
                     layout,
                     input_gen_fns,
                     choices,
                     hint_override=hint_override,
-                ),
-                hint_override=hint_override,
-            )
-            choices = self.prune_choices_postscreen(
-                choices, timings, name, inputs_key, self.prescreening_cache
-            )
-            prescreening_elapse = time.time() - prescreening_start_ts
-            log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
-
-        if use_pipelined_autotuning():
-            AsyncAutotuner.start(choices, inputs_key)
-            return
-
-        autotune_start_ts = time.time()
-
-        if best_config_future is not None:
-            best_config = await_sync(best_config_future)
-
-            important_keys = [
-                "ACC_TYPE",
-                "ALLOW_TF32",
-                "BLOCK_K",
-                "BLOCK_M",
-                "BLOCK_N",
-                "EVEN_K",
-                "GROUP_M",
-                "USE_FAST_ACCUM",
-                "num_stages",
-                "num_warps",
-                "num_consumer_groups",
-                "num_buffers_warp_spec",
-            ]
-            choices = [
-                choice
-                for choice in choices
-                if all(
-                    f"{k}={best_config[k]}" in choice.description
-                    for k in important_keys
+                    is_collective=is_collective,
                 )
-                for k in important_keys
-            ]
-            log.info("Filtered to %d choices based on best_config", len(choices))
 
-        has_autotuned: bool = False
-
-        def track_has_autotuned(choices):
-            nonlocal has_autotuned
-            has_autotuned = True
-            return self.autotune(
-                name,
-                input_nodes,
-                layout,
-                input_gen_fns,
+            timings = self.lookup(
                 choices,
-                hint_override=hint_override,
-                is_collective=is_collective,
-            )
-
-        timings = self.lookup(
-            choices,
-            name,
-            inputs_key,
-            track_has_autotuned,
-            hint_override=hint_override,
-        )
-
-        autotune_elapse = time.time() - autotune_start_ts
-        log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
-
-        # For collective: if any choice returned inf (timeout or failure), fallback to default
-        if is_collective and timings:
-            has_inf = any(not math.isfinite(timing) for timing in timings.values())
-            if has_inf:
-                log.warning(
-                    "At least one choice failed or timed out during collective benchmarking. "
-                    "Falling back to default implementation."
-                )
-                return {}
-
-        # For regular: if all choices returned inf, raise error
-        if timings and all(not math.isfinite(timing) for timing in timings.values()):
-            raise NoValidChoicesError
-
-        if (
-            has_autotuned
-            or log.getEffectiveLevel() == logging.DEBUG
-            or config.trace.log_autotuning_results
-        ):
-            self.log_results(
                 name,
-                input_nodes,
-                timings,
-                autotune_elapse,
-                precompile_elapse,
-                prescreening_elapse,
+                inputs_key,
+                track_has_autotuned,
                 hint_override=hint_override,
-                is_collective=is_collective,
             )
 
-        def profiler_bench_function(choices_override=None):
-            # we're not running through the normal caching autotuner method here because we want to avoid returning
-            # the cached value.
-            # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
-            # should use the profiler.
-            # If choices_override is provided, only benchmark those choices instead of all choices.
-            choices_to_benchmark = (
-                choices_override if choices_override is not None else choices
-            )
-            with config.patch(
-                profile_bandwidth_with_do_bench_using_profiling=True,
-                autotune_in_subproc=False,
+            autotune_elapse = time.time() - autotune_start_ts
+            log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
+
+            # For collective: if any choice returned inf (timeout or failure), fallback to default
+            if is_collective and timings:
+                has_inf = any(not math.isfinite(timing) for timing in timings.values())
+                if has_inf:
+                    log.warning(
+                        "At least one choice failed or timed out during collective benchmarking. "
+                        "Falling back to default implementation."
+                    )
+                    return {}
+
+            # For regular: if all choices returned inf, raise error
+            if timings and all(
+                not math.isfinite(timing) for timing in timings.values()
             ):
-                return self.benchmark(
-                    choices_to_benchmark, input_nodes, layout, input_gen_fns
+                raise NoValidChoicesError
+
+            if (
+                has_autotuned
+                or log.getEffectiveLevel() == logging.DEBUG
+                or config.trace.log_autotuning_results
+            ):
+                self.log_results(
+                    name,
+                    input_nodes,
+                    timings,
+                    autotune_elapse,
+                    precompile_elapse,
+                    prescreening_elapse,
+                    hint_override=hint_override,
+                    is_collective=is_collective,
                 )
 
-        for feedback_fn in self.feedback_saver_fns:
-            # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
-            feedback_fn(
-                timings,
-                name,
-                input_nodes,
-                choices,
-                profiler_bench_function,
-                precompile_times,
-            )
+            def profiler_bench_function(choices_override=None):
+                # we're not running through the normal caching autotuner method here because we want to avoid returning
+                # the cached value.
+                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+                # should use the profiler.
+                # If choices_override is provided, only benchmark those choices instead of all choices.
+                choices_to_benchmark = (
+                    choices_override if choices_override is not None else choices
+                )
+                with config.patch(
+                    profile_bandwidth_with_do_bench_using_profiling=True,
+                    autotune_in_subproc=False,
+                ):
+                    return self.benchmark(
+                        choices_to_benchmark, input_nodes, layout, input_gen_fns
+                    )
 
-        return timings
+            for feedback_fn in self.feedback_saver_fns:
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(
+                    timings,
+                    name,
+                    input_nodes,
+                    choices,
+                    profiler_bench_function,
+                    precompile_times,
+                )
+
+            return timings
+        finally:
+            if release_on_exit:
+                release_benchmark_artifacts()
 
     def create_no_valid_choices(self, name: str, reason: str) -> NoValidChoicesError:
         backend_config = (
@@ -4368,14 +4455,12 @@ class AlgorithmSelectorCache(PersistentCache):
         name: str,
         inputs_key: str,
         precompilation_timeout_seconds: int | None = 60 * 60,
-    ) -> Callable[[], dict[ChoiceCaller, float]]:
+    ) -> PrecompileFunction:
         """
         Returns a function that precompiles the given choices.
         """
         log.debug("Starting precompilation")
-
-        def no_op(*args, **kwargs) -> dict[ChoiceCaller, float]:
-            return {}
+        no_op = _NoOpPrecompileFunction()
 
         if (
             precompilation_timeout_seconds is None
@@ -4412,9 +4497,9 @@ class AlgorithmSelectorCache(PersistentCache):
             return no_op
 
         precompile_key = create_precompile_key(name, inputs_key, choices)
-        if precompile_func := self.precompile_cache.get(precompile_key):
+        if cached_precompile_func := self.precompile_cache.get(precompile_key):
             log.debug("Precompile function found in cache, returning it")
-            return precompile_func
+            return cached_precompile_func
 
         log.info(
             "Multithreaded precompilation for %d choices using %d worker threads",
@@ -4448,7 +4533,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        if use_pipelined_autotuning():
+        pipelined_autotuning = use_pipelined_autotuning()
+        if pipelined_autotuning:
             executor = PrecompileThreadPool.get_instance()
         else:
             executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -4457,6 +4543,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
         elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
+        choices_for_cleanup: list[ChoiceCaller] = []
 
         # Some choices only differ in runtime arguments, so we
         # skip a choice if it has the same hash as a previously seen choice
@@ -4486,9 +4573,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 future.add_done_callback(on_complete)
                 futures[future] = c
+                choices_for_cleanup.append(c)
 
-        @functools.cache
-        @restore_stdout_stderr()
+        precompile_func: _PrecompileFunction
+
+        def release_benchmark_artifacts() -> None:
+            if self.precompile_cache.get(precompile_key) is precompile_func:
+                self.precompile_cache.pop(precompile_key, None)
+            if not pipelined_autotuning:
+                # pyrefly: ignore [missing-attribute]
+                executor.shutdown(wait=True)
+            self.release_choice_benchmark_artifacts(choices_for_cleanup)
+            choices_for_cleanup.clear()
+            futures.clear()
+            elapsed_times.clear()
+
         def wait_on_futures() -> dict[ChoiceCaller, float]:
             """Wait for all precompilation futures to complete.
 
@@ -4551,7 +4650,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
-            if not use_pipelined_autotuning():
+            if not pipelined_autotuning:
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
 
@@ -4562,9 +4661,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     precompile_times[choice] = elapsed_times[future]
             return precompile_times
 
-        self.precompile_cache[precompile_key] = wait_on_futures
+        precompile_func = _PrecompileFunction(
+            wait_on_futures, release_benchmark_artifacts
+        )
+        self.precompile_cache[precompile_key] = precompile_func
 
-        return wait_on_futures
+        return precompile_func
 
     @classmethod
     def get_inputs(

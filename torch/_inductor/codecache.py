@@ -10,6 +10,7 @@ import importlib.resources
 import io
 import itertools
 import json
+import linecache
 import logging
 import os
 import pickle
@@ -4229,6 +4230,8 @@ def touch(filename: str) -> None:
 
 @clear_on_fresh_cache
 class PyCodeCache:
+    """Cache for generated Python modules loaded by Inductor."""
+
     # Track the loaded modules so we can remove the on-disk artifacts when
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
@@ -4299,6 +4302,54 @@ class PyCodeCache:
                     pass
         cls.modules.clear()
         cls.modules_no_attr.clear()
+
+    @classmethod
+    def unload_by_key_path(cls, key: str, path: str) -> None:
+        """
+        Drop a single Python code cache module from the in-memory import caches.
+
+        Autotuning loads many benchmark-only modules through PyCodeCache.  Once
+        algorithm selection is complete, those modules are no longer needed and
+        retaining them also retains their compiled Triton launchers.
+        """
+        mod = cls.modules_no_attr.pop(path, None)
+        module_name = f"{_reload_python_module.__module__}.{key}"
+        if mod is None:
+            mod = sys.modules.get(module_name)
+
+        if mod is not None:
+            cls.modules[:] = [m for m in cls.modules if m is not mod]
+        else:
+            cls.modules[:] = [
+                m
+                for m in cls.modules
+                if not (
+                    getattr(m, "__file__", None) == path
+                    and getattr(m, "key", None) == key
+                )
+            ]
+
+        cls.linemaps.pop(path, None)
+        cls.stack_frames_for_code.cache_clear()
+        sys.modules.pop(module_name, None)
+        linecache.cache.pop(path, None)
+        if mod is not None:
+            preserved = OrderedSet(
+                [
+                    "__name__",
+                    "__doc__",
+                    "__package__",
+                    "__loader__",
+                    "__spec__",
+                    "__file__",
+                    "__cached__",
+                    "__builtins__",
+                    "key",
+                ]
+            )
+            for name in list(vars(mod)):
+                if name not in preserved:
+                    vars(mod).pop(name, None)
 
     @classmethod
     @functools.cache
