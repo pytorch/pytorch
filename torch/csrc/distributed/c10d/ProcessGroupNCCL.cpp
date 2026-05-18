@@ -2399,6 +2399,11 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
             work.seq_,
             " PG status: last enqueued work: ",
             pg_->pgStatus_->lastEnqueuedSeq,
+            ", last started work: ",
+            pg_->pgStatus_->lastStartedSeq,
+            " (",
+            pg_->pgStatus_->lastStartedWorkName,
+            ")",
             ", last completed work: ",
             pg_->pgStatus_->lastCompletedSeq);
 
