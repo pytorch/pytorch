@@ -1360,7 +1360,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
             logs,
         )
         self.assertTrue(
-            "Combo standalone autotune seed: selected combo config" in logs
+            "Combo standalone autotune seed: selected stitched combo config" in logs
             or "Combo standalone autotune seed: no combo block field changes" in logs
         )
 

@@ -647,11 +647,10 @@ class TestCachingAutotunerPlugin(TestCase):
             kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32, "waves_per_eu": 2}
         )
 
-    def test_combo_seed_applies_warp_stage_only_seed(self):
+    def test_combo_seed_ignores_warp_stage_only_seed(self):
         from torch.utils._ordered_set import OrderedSet
 
         autotuner = self._make_autotuner([])
-        autotuner.inductor_meta["combo_warp_stage_candidates"] = [(16, 1)]
         current_launcher = self._make_combo_seed_launcher(
             triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
         )
@@ -660,16 +659,10 @@ class TestCachingAutotunerPlugin(TestCase):
         future.result.return_value = seed_config
         autotuner.combo_standalone_autotune_seed_future = [future]
 
-        candidate_launchers = []
-
         with (
             patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ) as mock_precompile,
-            patch.object(autotuner, "bench", side_effect=[3.0, 2.0]),
+            patch.object(autotuner, "_precompile_config") as mock_precompile,
+            patch.object(autotuner, "bench") as mock_bench,
         ):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
@@ -678,12 +671,9 @@ class TestCachingAutotunerPlugin(TestCase):
                 *self._make_kernel_inputs(),
             )
 
-        mock_precompile.assert_called_once()
-        self.assertEqual(
-            [c.args[0].num_warps for c in mock_precompile.call_args_list],
-            [8],
-        )
-        self.assertIs(result, candidate_launchers[0])
+        self.assertIs(result, current_launcher)
+        mock_precompile.assert_not_called()
+        mock_bench.assert_not_called()
 
     def test_combo_seed_run_does_not_stamp_unchanged_launcher(self):
         autotuner = self._make_autotuner([])
@@ -718,6 +708,9 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertFalse(
             getattr(current_launcher.config, "found_by_combo_autotune", False)
         )
+        self.assertTrue(autotuner.combo_standalone_autotune_seed_attempted)
+        self.assertIsNone(autotuner.combo_standalone_autotune_seed_future)
+        self.assertIsNone(autotuner.combo_standalone_autotune_seed_configs)
         autotuner.save_cache_hook.assert_not_called()
 
     def test_combo_seed_applies_block_only_seed(self):
@@ -734,13 +727,13 @@ class TestCachingAutotunerPlugin(TestCase):
 
         candidate_launchers = []
         with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
+            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
             patch.object(
                 autotuner,
                 "_precompile_config",
                 side_effect=self._make_combo_seed_precompile(candidate_launchers),
             ),
-            patch.object(autotuner, "bench", side_effect=[2.0, 1.0]),
+            patch.object(autotuner, "bench") as mock_bench,
         ):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
@@ -751,6 +744,10 @@ class TestCachingAutotunerPlugin(TestCase):
 
         self.assertIs(result, candidate_launchers[0])
         self.assertEqual(result.config.kwargs["XBLOCK_0"], 32)
+        self.assertEqual(result.config.num_warps, 4)
+        self.assertEqual(result.config.num_stages, 1)
+        mock_ensure.assert_called_once()
+        mock_bench.assert_not_called()
 
     def test_combo_seed_returns_input_when_seed_does_not_change_config(self):
         from torch.utils._ordered_set import OrderedSet
@@ -833,13 +830,13 @@ class TestCachingAutotunerPlugin(TestCase):
 
         candidate_launchers = []
         with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
+            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
             patch.object(
                 autotuner,
                 "_precompile_config",
                 side_effect=self._make_combo_seed_precompile(candidate_launchers),
             ),
-            patch.object(autotuner, "bench", side_effect=[2.0, 1.0]),
+            patch.object(autotuner, "bench") as mock_bench,
         ):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
@@ -854,8 +851,10 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertIs(result, candidate_launchers[0])
         self.assertEqual(result.config.kwargs["XBLOCK_0"], 16)
         self.assertEqual(result.config.kwargs["XBLOCK_1"], 32)
+        mock_ensure.assert_called_once()
+        mock_bench.assert_not_called()
 
-    def test_combo_seed_returns_input_when_all_warps_filtered(self):
+    def test_combo_seed_uses_current_combo_warp_stage(self):
         from torch.utils._ordered_set import OrderedSet
 
         autotuner = self._make_autotuner([])
@@ -866,12 +865,16 @@ class TestCachingAutotunerPlugin(TestCase):
         future = MagicMock()
         future.result.return_value = seed_config
         autotuner.combo_standalone_autotune_seed_future = [future]
-        autotuner.coordesc_tuner.get_warpsmax = MagicMock(return_value=4)
 
+        candidate_launchers = []
         with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(autotuner, "_precompile_config") as mock_precompile,
-            patch.object(autotuner, "bench", return_value=1.0) as mock_bench,
+            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
+            patch.object(
+                autotuner,
+                "_precompile_config",
+                side_effect=self._make_combo_seed_precompile(candidate_launchers),
+            ),
+            patch.object(autotuner, "bench") as mock_bench,
         ):
             result = autotuner._apply_combo_standalone_autotune_seed(
                 current_launcher,
@@ -880,9 +883,12 @@ class TestCachingAutotunerPlugin(TestCase):
                 *self._make_kernel_inputs(),
             )
 
-        self.assertIs(result, current_launcher)
+        self.assertIs(result, candidate_launchers[0])
+        self.assertEqual(result.config.kwargs["XBLOCK_0"], 32)
+        self.assertEqual(result.config.num_warps, 8)
+        self.assertEqual(result.config.num_stages, 1)
+        mock_ensure.assert_called_once()
         mock_bench.assert_not_called()
-        mock_precompile.assert_not_called()
 
     def test_hooks_fire_in_registration_order(self):
         sentinel = object()

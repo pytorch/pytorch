@@ -468,9 +468,13 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
         return
     if not combo_kernel.inductor_meta.get("combo_tuning_groups"):
         return
+    if getattr(combo_kernel, "combo_standalone_autotune_seed_attempted", False):
+        return
     if combo_kernel.combo_standalone_autotune_seed_future is not None:
         return
     if _has_combo_standalone_autotune_seed_config(combo_kernel):
+        return
+    if not seed_specs:
         return
 
     from torch._inductor.autotune_process import PrecompileThreadPool
@@ -631,6 +635,7 @@ class CachingAutotuner(KernelInterface):
         self.combo_standalone_autotune_seed_future = None
         self.combo_standalone_autotune_seed_configs = None
         self.combo_standalone_autotune_seed_start_time_ns = None
+        self.combo_standalone_autotune_seed_attempted = False
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -1023,6 +1028,9 @@ class CachingAutotuner(KernelInterface):
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.lock = threading.Lock()
+        self.combo_standalone_autotune_seed_attempted = getattr(
+            self, "combo_standalone_autotune_seed_attempted", False
+        )
         self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
@@ -1672,16 +1680,6 @@ class CachingAutotuner(KernelInterface):
         seeded_kwargs = dict(current_config.kwargs)
         shared_seed_kwargs: dict[str, Any] = {}
         applied_seed = False
-        seed_warp_stage_candidates = OrderedSet(
-            (cfg.num_warps, cfg.num_stages)
-            for cfg in seed_configs
-            if cfg is not None
-        )
-        found_new_warp_stage = any(
-            candidate != (current_config.num_warps, current_config.num_stages)
-            for candidate in seed_warp_stage_candidates
-        )
-
         for idx, cfg in enumerate(seed_configs):
             if cfg is None:
                 continue
@@ -1698,64 +1696,29 @@ class CachingAutotuner(KernelInterface):
             )
             applied_seed = applied_seed or seeded_kwargs != before
 
-        if not applied_seed and not found_new_warp_stage:
+        if not applied_seed:
             log.debug(
                 "Combo standalone autotune seed: no combo block field changes for %s",
                 self.fn.__name__,
             )
             return launcher
 
-        max_num_warps = self.coordesc_tuner.get_warpsmax()
-        warp_stage_candidates = OrderedSet(
-            [
-                (current_config.num_warps, current_config.num_stages),
-                *seed_warp_stage_candidates,
-            ]
+        seed_config = triton.Config(
+            dict(seeded_kwargs),
+            num_warps=current_config.num_warps,
+            num_stages=current_config.num_stages,
         )
+        if seed_config.kwargs == current_config.kwargs:
+            return launcher
 
         self._ensure_kernel_loaded()
-
-        best_launcher = None
-        best_time = float("inf")
+        with self.lock:
+            seeded_launcher = self._precompile_config(seed_config).make_launcher()
         log.debug(
-            "Combo standalone autotune seed: trying %d warp/stage candidates for %s",
-            len(warp_stage_candidates),
-            self.fn.__name__,
+            "Combo standalone autotune seed: selected stitched combo config %s",
+            seeded_launcher.config,
         )
-        for num_warps, num_stages in warp_stage_candidates:
-            if num_warps <= 0 or num_warps > max_num_warps:
-                continue
-            seed_config = triton.Config(
-                dict(seeded_kwargs),
-                num_warps=num_warps,
-                num_stages=num_stages,
-            )
-            if (
-                seed_config.kwargs == current_config.kwargs
-                and seed_config.num_warps == current_config.num_warps
-                and seed_config.num_stages == current_config.num_stages
-            ):
-                candidate_launcher = launcher
-            else:
-                with self.lock:
-                    candidate_launcher = self._precompile_config(
-                        seed_config
-                    ).make_launcher()
-            candidate_time = self.bench(candidate_launcher, *args, **kwargs)
-            counters["inductor"]["combo_autotune_bench"] += 1
-            self.coordesc_tuner.cache_benchmark_result(seed_config, candidate_time)
-            if candidate_time < best_time:
-                best_launcher = candidate_launcher
-                best_time = candidate_time
-
-        if best_launcher is None:
-            return launcher
-        log.debug(
-            "Combo standalone autotune seed: selected combo config %s time=%f",
-            best_launcher.config,
-            best_time,
-        )
-        return best_launcher
+        return seeded_launcher
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
@@ -2146,6 +2109,9 @@ class CachingAutotuner(KernelInterface):
                             time.time_ns() - seed_start_time
                         )
                         self.combo_standalone_autotune_seed_start_time_ns = None
+                        self.combo_standalone_autotune_seed_future = None
+                        self.combo_standalone_autotune_seed_configs = None
+                        self.combo_standalone_autotune_seed_attempted = True
                         if launcher is not original_launcher:
                             launcher.config.found_by_combo_autotune = True
                             if self.save_cache_hook:
