@@ -2818,9 +2818,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

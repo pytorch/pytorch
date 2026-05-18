@@ -35,7 +35,6 @@ ciflow_push_tags:
 - ciflow/periodic-rocm-mi300
 - ciflow/periodic-rocm-mi355
 - ciflow/pull
-- ciflow/quantization-periodic
 - ciflow/riscv64
 - ciflow/rocm-mi200
 - ciflow/rocm-mi300
@@ -45,7 +44,6 @@ ciflow_push_tags:
 - ciflow/s390
 - ciflow/slow
 - ciflow/slow-rocm-mi200
-- ciflow/torchbench
 - ciflow/torchtitan
 - ciflow/tsan
 - ciflow/triton_binaries
@@ -64,4 +62,5 @@ retryable_step_names:
 - Initialize containers
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
+nitpicks_config: nitpicks.yml
 mergebot: true
