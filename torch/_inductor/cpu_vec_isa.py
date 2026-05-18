@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
-import glob
+import json
 import os
 import platform
 import re
@@ -19,66 +19,51 @@ from torch._inductor.utils import python_subprocess_env
 _IS_WINDOWS = sys.platform == "win32"
 
 
-_CUDA_DEPENDENCY_LIBS = [
-    # Keep this order aligned with torch.__init__._preload_cuda_deps.
-    ("cublas", "libcublasLt.so.*[0-9]"),
-    ("cublas", "libcublas.so.*[0-9]"),
-    ("cudnn", "libcudnn.so.*[0-9]"),
-    ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
-    ("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]"),
-    ("cuda_runtime", "libcudart.so.*[0-9]"),
-    ("cuda_cupti", "libcupti.so.*[0-9]"),
-    ("cufft", "libcufft.so.*[0-9]"),
-    ("curand", "libcurand.so.*[0-9]"),
-    ("nvjitlink", "libnvJitLink.so.*[0-9]"),
-    ("cusparse", "libcusparse.so.*[0-9]"),
-    ("cusparselt", "libcusparseLt.so.*[0-9]"),
-    ("cusolver", "libcusolver.so.*[0-9]"),
-    ("nccl", "libnccl.so.*[0-9]"),
-    ("nvshmem", "libnvshmem_host.so.*[0-9]"),
-    ("cufile", "libcufile.so.*[0-9]"),
-    ("nvtx", "libnvToolsExt.so.*[0-9]"),
-]
-
-
 def _prepend_path_to_env(env: dict[str, str], env_var: str, path: str) -> None:
     existing = env.get(env_var)
     paths = existing.split(os.pathsep) if existing else []
     env[env_var] = os.pathsep.join([path, *(p for p in paths if p != path)])
 
 
-def _cuda_dependency_names() -> list[str]:
-    return [lib_name.split(".", 1)[0] for _, lib_name in _CUDA_DEPENDENCY_LIBS]
+def _cuda_dependency_names(cuda_libs: list[tuple[str, str]]) -> list[str]:
+    return [lib_name.split(".", 1)[0] for _, lib_name in cuda_libs]
 
 
-def _get_cuda_dep_paths(
-    path: str, lib_folder: str, lib_name: str, cuda_version: str | None
-) -> list[str]:
-    nvidia_lib_paths = glob.glob(
-        os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
-    )
-    if cuda_version is not None:
-        maj_cuda_version = cuda_version.split(".")[0]
-        nvidia_lib_paths += glob.glob(
-            os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
-        )
-    lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
+def _first_cuda_dependency_path(
+    lib_folder: str,
+    lib_name: str,
+    get_cuda_dep_paths: Callable[[str, str, str], list[str]],
+) -> str | None:
+    for path in sys.path:
+        candidate_lib_paths = get_cuda_dep_paths(path, lib_folder, lib_name)
+        if candidate_lib_paths:
+            return candidate_lib_paths[0]
 
-    return nvidia_lib_paths + lib_paths
+    return None
 
 
 def _isa_dry_run_cuda_dependency_paths() -> tuple[list[str], list[str]]:
     if not sys.platform.startswith("linux") or torch.version.cuda is None:
         return [], []
 
-    cuda_dependency_paths = []
-    for lib_folder, lib_name in _CUDA_DEPENDENCY_LIBS:
-        for path in sys.path:
-            cuda_dependency_paths.extend(
-                _get_cuda_dep_paths(path, lib_folder, lib_name, torch.version.cuda)
-            )
+    from torch import (
+        _CUDA_DEPENDENCY_LIBS as cuda_dependency_libs,
+        _CUDA_OPTIONAL_DEPENDENCY_LIBS as cuda_optional_dependency_libs,
+        _get_cuda_dep_paths as get_cuda_dep_paths,
+    )
 
-    return cuda_dependency_paths, _cuda_dependency_names()
+    cuda_dependency_paths = []
+    for lib_folder, lib_name in [
+        *cuda_dependency_libs,
+        *cuda_optional_dependency_libs,
+    ]:
+        cuda_dependency_path = _first_cuda_dependency_path(
+            lib_folder, lib_name, get_cuda_dep_paths
+        )
+        if cuda_dependency_path is not None:
+            cuda_dependency_paths.append(cuda_dependency_path)
+
+    return cuda_dependency_paths, _cuda_dependency_names(cuda_dependency_libs)
 
 
 def _isa_dry_run_torch_lib_path() -> str:
@@ -173,12 +158,6 @@ cdll.LoadLibrary(__lib_path__)
 
     _avx_linux_py_load = """
 import ctypes
-import os
-
-_torch_lib_path = __torch_lib_path__
-_dll_dir = None
-if hasattr(os, "add_dll_directory"):
-    _dll_dir = os.add_dll_directory(_torch_lib_path)
 
 _cuda_dependency_paths = __cuda_dependency_paths__
 _cuda_dependency_names = __cuda_dependency_names__
@@ -198,22 +177,20 @@ except OSError as _load_error:
 
     @staticmethod
     def _import_torch_dry_run_load_script(output_path: str) -> str:
-        return VecISA._avx_py_load.replace("__lib_path__", repr(output_path))
+        return VecISA._avx_py_load.replace("__lib_path__", json.dumps(output_path))
 
     @staticmethod
     def _linux_dry_run_load_script(
         output_path: str,
-        torch_lib_path: str,
         cuda_dependency_paths: list[str],
         cuda_dependency_names: list[str],
     ) -> str:
         return (
             VecISA._avx_linux_py_load.replace(
-                "__torch_lib_path__", repr(torch_lib_path)
+                "__cuda_dependency_paths__", json.dumps(cuda_dependency_paths)
             )
-            .replace("__cuda_dependency_paths__", repr(cuda_dependency_paths))
-            .replace("__cuda_dependency_names__", repr(cuda_dependency_names))
-            .replace("__lib_path__", repr(output_path))
+            .replace("__cuda_dependency_names__", json.dumps(cuda_dependency_names))
+            .replace("__lib_path__", json.dumps(output_path))
         )
 
     def bit_width(self) -> int:
@@ -258,11 +235,11 @@ except OSError as _load_error:
                 build_option_kwargs.update(
                     aot_mode=True, extra_flags=_isa_dry_run_extra_flags()
                 )
-            buid_options = CppTorchOptions(**build_option_kwargs)
+            build_options = CppTorchOptions(**build_option_kwargs)
             x86_isa_help_builder = CppBuilder(
                 key,
                 [input_path],
-                buid_options,
+                build_options,
                 output_dir,
             )
             try:
@@ -281,7 +258,6 @@ except OSError as _load_error:
                     )
                     load_script = VecISA._linux_dry_run_load_script(
                         output_path,
-                        torch_lib_path,
                         cuda_dependency_paths,
                         cuda_dependency_names,
                     )
