@@ -17,6 +17,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/WaitCounter.h>
@@ -3818,6 +3819,31 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // otherwise, we use separate ncclStream and let it sync on currentStream
   auto ncclStream = asyncOp ? ncclStreams_.at(key)
                             : at::cuda::getCurrentCUDAStream(device.index());
+  {
+    auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
+    auto cachedStream = ncclStreams_.find(key) != ncclStreams_.end()
+        ? ncclStreams_.at(key)
+        : ncclStream;
+    char diag_line[256];
+    int diag_n = std::snprintf(
+        diag_line,
+        sizeof(diag_line),
+        "op=nccl_collective dev=%d asyncOp=%d profilingTitle=%s "
+        "pg_uid=%s ncclStream=%p currentStream=%p cachedStream=%p "
+        "ncclStream_id=%lld currentStream_id=%lld\n",
+        static_cast<int>(device.index()),
+        asyncOp ? 1 : 0,
+        profilingTitle != nullptr ? profilingTitle : "",
+        pg_uid_.c_str(),
+        reinterpret_cast<void*>(ncclStream.stream()),
+        reinterpret_cast<void*>(currentStream.stream()),
+        reinterpret_cast<void*>(cachedStream.stream()),
+        static_cast<long long>(ncclStream.id()),
+        static_cast<long long>(currentStream.id()));
+    if (diag_n > 0) {
+      c10::cuda::stream_pool_diag_writeln(diag_line);
+    }
+  }
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -4022,6 +4048,31 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // otherwise, we use separate ncclStream and let it sync on currentStream
   auto ncclStream = asyncOp ? ncclStreams_.at(key)
                             : at::cuda::getCurrentCUDAStream(device.index());
+  {
+    auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
+    auto cachedStream = ncclStreams_.find(key) != ncclStreams_.end()
+        ? ncclStreams_.at(key)
+        : ncclStream;
+    char diag_line[256];
+    int diag_n = std::snprintf(
+        diag_line,
+        sizeof(diag_line),
+        "op=nccl_collective_coalesced dev=%d asyncOp=%d profilingTitle=%s "
+        "pg_uid=%s ncclStream=%p currentStream=%p cachedStream=%p "
+        "ncclStream_id=%lld currentStream_id=%lld\n",
+        static_cast<int>(device.index()),
+        asyncOp ? 1 : 0,
+        profilingTitle != nullptr ? profilingTitle : "",
+        pg_uid_.c_str(),
+        reinterpret_cast<void*>(ncclStream.stream()),
+        reinterpret_cast<void*>(currentStream.stream()),
+        reinterpret_cast<void*>(cachedStream.stream()),
+        static_cast<long long>(ncclStream.id()),
+        static_cast<long long>(currentStream.id()));
+    if (diag_n > 0) {
+      c10::cuda::stream_pool_diag_writeln(diag_line);
+    }
+  }
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
