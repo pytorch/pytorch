@@ -16,6 +16,7 @@ from torch._inductor.fx_passes import joint_graph
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     fwd_only,
     gen_pattern,
     is_mutation_op,
@@ -2281,6 +2282,123 @@ class TestPatternMatcher(TestCase):
             fn, options={"post_grad_custom_post_pass": custom_pass}
         )
         compiled_fn(x, y)
+
+    def test_register_replacement_uses_eager_input_vals_for_exact_strides(self):
+        class ReproFailed(RuntimeError):
+            pass
+
+        producer_patterns = PatternMatcherPass()
+        replacement_patterns = PatternMatcherPass()
+
+        with torch.library._scoped_library("test_pm_150871", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def force_channels_last_impl(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl(
+                "force_channels_last",
+                force_channels_last_impl,
+                "CompositeExplicitAutograd",
+            )
+
+            lib.define(
+                "add_op(Tensor x, *, Tensor y) -> Tensor",
+                tags=[torch._C.Tag.needs_exact_strides],
+            )
+            lib.define(
+                "add_op_replacement(Tensor x, *, Tensor y) -> Tensor",
+                tags=[torch._C.Tag.needs_exact_strides],
+            )
+
+            def add_impl(x, *, y):
+                return x + y
+
+            def add_replacement_impl(x, *, y):
+                if not x.transpose(2, 3).is_contiguous():
+                    raise ReproFailed(f"wrong x stride: {x.stride()}")
+                if not y.transpose(2, 3).is_contiguous():
+                    raise ReproFailed(f"wrong y stride: {y.stride()}")
+                return x + y
+
+            lib.impl("add_op", add_impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", add_impl, "Meta")
+            lib.impl(
+                "add_op_replacement",
+                add_replacement_impl,
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("add_op_replacement", add_impl, "Meta")
+
+            @register_graph_pattern(
+                CallFunctionVarArgs(torch.ops.aten.permute),
+                pass_dict=producer_patterns,
+            )
+            def replace_permute(match, *args, **kwargs):
+                flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+                def decomp(*flat_args):
+                    args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                    return torch.ops.test_pm_150871.force_channels_last(
+                        torch.ops.aten.permute(*args, **kwargs)
+                    )
+
+                match.replace_by_example(decomp, flat_args)
+
+            def pattern(x, y):
+                return torch.ops.test_pm_150871.add_op.default(x, y=y)
+
+            def replacement(x, y):
+                return torch.ops.test_pm_150871.add_op_replacement.default(x, y=y)
+
+            register_replacement(
+                pattern,
+                replacement,
+                [
+                    torch.randn(4, 4, 2, 2, device=GPU_TYPE),
+                    torch.randn(4, 4, 2, 2, device=GPU_TYPE),
+                ],
+                fwd_only,
+                replacement_patterns,
+            )
+
+            replacement_eager_strides = []
+
+            def custom_pass(graph: torch.fx.Graph):
+                producer_patterns.apply(graph)
+                replacement_patterns.apply(graph)
+                for node in graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target
+                        is torch.ops.test_pm_150871.add_op_replacement.default
+                    ):
+                        eager_args, eager_kwargs = node.meta["eager_input_vals"]
+                        replacement_eager_strides.append(
+                            (eager_args[0].stride(), eager_kwargs["y"].stride())
+                        )
+
+            def fn(x, y):
+                return torch.ops.test_pm_150871.add_op.default(
+                    x.transpose(2, 3), y=y.transpose(2, 3)
+                )
+
+            x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+            y = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+            expected_x_stride = x.transpose(2, 3).stride()
+            expected_y_stride = y.transpose(2, 3).stride()
+
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x, y)
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(
+                replacement_eager_strides, [(expected_x_stride, expected_y_stride)]
+            )
 
     def test_metadata_propagation_graph_pattern_replace_by_example(self):
         """Verify metadata propagation for replace_by_example (single-node match)."""
