@@ -30,8 +30,6 @@ class C10_API SymbolicShapeMeta {
   // no race conditions since its not stored directly on TensorImpl
   mutable SmallVector<int64_t, 5> materialized_sizes_;
   mutable SmallVector<int64_t, 5> materialized_strides_;
-  mutable bool sizes_materialized_ = false;
-  mutable bool strides_materialized_ = false;
 
   SymbolicShapeMeta() = default;
   ~SymbolicShapeMeta() = default;

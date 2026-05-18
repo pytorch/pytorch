@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -247,17 +248,24 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
 
-  // Callback to run a Python decomposition for an op
-  // Returns true if a decomposition was found and executed
+  // callback to run a Python decomposition for an op
+  // returns true if a decomposition was found and executed
   std::function<bool(const void* op, void* stack)> decomp_fn_;
 
-  // Callback to run a Python register_op_impl handler for an op
-  // Returns true if a handler was found and executed
+  // callback to run a Python register_op_impl handler for an op
+  // returns true if a handler was found and executed
   std::function<bool(const void* op, void* stack)> op_impl_fn_;
 
   // we need to guard against re-entries for the same op when its decomp
   //  is also its meta kernel (@register_decomposition).
   const void* decomposing_op_ = nullptr;
+
+  // maps StorageImpl* -> list of weak TensorImpl pointers for all fake tensors
+  // whose constant shares that storage
+  std::unordered_map<
+      c10::StorageImpl*,
+      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
+      constant_storage_mapping_;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
@@ -291,12 +299,8 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
-    if (other.custom_data_ptr_error_msg_) {
-      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    }
-    if (other.custom_storage_error_msg_) {
-      custom_storage_error_msg_ = other.custom_storage_error_msg_;
-    }
+    custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
     constant_ = other.constant_;

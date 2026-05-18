@@ -165,9 +165,16 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 @contextlib.contextmanager
 def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    cpp_fake_was_active = torch._C._dispatch_tls_is_dispatch_key_included(
+        torch._C.DispatchKey.Fake
+    )
+    if cpp_fake_was_active:
+        torch._C._deactivate_cpp_fake_tensor_mode()
     try:
         yield old
     finally:
+        if cpp_fake_was_active:
+            torch._C._activate_cpp_fake_tensor_mode()
         if old is not None:
             torch._C._set_dispatch_mode(old)
 

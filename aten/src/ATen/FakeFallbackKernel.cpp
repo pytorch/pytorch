@@ -235,6 +235,81 @@ static bool may_turn_const(const at::Tensor& t) {
       t.device().type() != c10::DeviceType::Meta;
 }
 
+// Registers a fake tensor's constant in the mode's storage mapping
+static void add_constant_storage_mapping(
+    const at::Tensor& fake_tensor,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (!mode)
+    return;
+  auto constant = fake_tensor.unsafeGetTensorImpl()->constant();
+  if (!constant || !constant->has_storage())
+    return;
+  auto* storage_impl = constant->storage().unsafeGetStorageImpl();
+  // weak reference to not keep the fake tensor alive, math
+  auto weak_impl = c10::weak_intrusive_ptr<c10::TensorImpl>(
+      c10::intrusive_ptr<c10::TensorImpl>::unsafe_reclaim_from_nonowning(
+          fake_tensor.unsafeGetTensorImpl()));
+  mode->constant_storage_mapping_[storage_impl].push_back(std::move(weak_impl));
+}
+
+// Given a real tensor, finds all fake tensors whose constant shares the same
+// underlying storage and clears their constants
+static void invalidate_constant_aliases(
+    const at::Tensor& real_tensor,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (!mode || !real_tensor.has_storage())
+    return;
+  auto* storage_impl = real_tensor.storage().unsafeGetStorageImpl();
+  auto it = mode->constant_storage_mapping_.find(storage_impl);
+  if (it == mode->constant_storage_mapping_.end())
+    return;
+  for (auto& weak_ref : it->second) {
+    // try to promote to strong intrusive_ptr
+    // if faketensor is dead, impl will be nullptr
+    auto impl = weak_ref.lock();
+    if (impl) {
+      impl->set_constant(nullptr); // clear constant
+    }
+  }
+  mode->constant_storage_mapping_.erase(it);
+}
+
+// Before falling through to meta dispatch, checks if any mutable argument
+// carries a constant and invalidates it (and all its storage aliases)
+static void invalidate_written_to_constants(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    size_t arguments_begin,
+    size_t num_arguments,
+    const std::vector<at::Tensor>& flat_arg_fake_tensors,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (!mode)
+    return;
+  const auto& schema = op.schema();
+  bool any_constant = std::any_of(
+      flat_arg_fake_tensors.begin(),
+      flat_arg_fake_tensors.end(),
+      [](const at::Tensor& t) {
+        return t.unsafeGetTensorImpl()->constant() != nullptr;
+      });
+  if (!any_constant || !schema.is_mutable())
+    return;
+  for (size_t idx = 0; idx < num_arguments; ++idx) {
+    const auto& ivalue = (*stack)[arguments_begin + idx];
+    if (!ivalue.isTensor())
+      continue;
+    const auto& t = ivalue.toTensor();
+    if (!is_our_fake(t, mode))
+      continue;
+    auto constant = t.unsafeGetTensorImpl()->constant();
+    if (!constant)
+      continue;
+    if (!schema.is_mutable({c10::SchemaArgType::input, idx}))
+      continue;
+    invalidate_constant_aliases(*constant, mode);
+  }
+}
+
 // creates a zero-filled real tensor on the fake tensor's original device.
 // we need to temporarily exit FakeTensorMode TLS so the created tensor is
 // actually real
@@ -389,6 +464,7 @@ void fakeFallback(
           if (may_turn_const(t)) {
             fake.unsafeGetTensorImpl()->set_constant(
                 std::make_shared<at::Tensor>(t.clone()));
+            add_constant_storage_mapping(fake, mode);
           }
           return fake;
         });
@@ -438,15 +514,20 @@ void fakeFallback(
       // outputs are too large to keep as constants.
       auto orig_arguments = torch::jit::last(*stack, num_arguments).vec();
 
-      // sub fake tensors with their constants on the stack
-      // matches python logic a.constant if self.is_our_fake(a) else a
+      // build memo from constant tensorimpl to original fake tensor
+      // for in-place ops the output real tensor is the same object as the
+      // input constant, so we must return the original fake tensor (with an
+      // updated constant) instead of creating a new one
+      std::unordered_map<c10::TensorImpl*, at::Tensor> tensor_memo;
       for_each_tensor(
           stack, arguments_begin, num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (is_our_fake(t, mode)) {
               auto constant = t.unsafeGetTensorImpl()->constant();
-              if (constant)
+              if (constant) {
+                tensor_memo[constant->unsafeGetTensorImpl()] = t;
                 return *constant;
+              }
             }
             return std::nullopt;
           });
@@ -473,28 +554,40 @@ void fakeFallback(
           });
 
       if (all_outputs_const) {
-        // convert output tensors to fakes with constants attached
         for_each_tensor(
             stack, returns_begin, num_returns,
             [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-              if (may_turn_const(t)) {
-                auto constant = std::make_shared<at::Tensor>(t.clone());
-                auto fake = real_tensor_to_fake(t, mode);
-                fake.unsafeGetTensorImpl()->set_constant(
-                    std::move(constant));
-                return fake;
+              if (!may_turn_const(t))
+                return std::nullopt;
+              auto cloned = std::make_shared<at::Tensor>(t.clone());
+
+              auto memo_it = tensor_memo.find(t.unsafeGetTensorImpl());
+              if (memo_it != tensor_memo.end()) {
+                auto& orig_fake = memo_it->second;
+                orig_fake.unsafeGetTensorImpl()->set_constant(
+                    std::move(cloned));
+                add_constant_storage_mapping(orig_fake, mode);
+                return orig_fake;
               }
-              return std::nullopt;
+              auto fake = real_tensor_to_fake(t, mode);
+              fake.unsafeGetTensorImpl()->set_constant(std::move(cloned));
+              add_constant_storage_mapping(fake, mode);
+              return fake;
             });
-        // non-tensor output are already on
-        // the stack and need no conversion.
         return;
       }
 
-      // outputs too large to keep as constants (determined by may_turn_const)
+      // outputs too large to keep as constants
+      // invalidate all constants that might alias the output tensors
+      for_each_tensor(
+          stack, returns_begin, num_returns,
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (t.defined() && !t.is_fake())
+              invalidate_constant_aliases(t, mode);
+            return std::nullopt;
+          });
 
-      // we need to manually restore the stack now
-      // TODO: invalidate_constant_aliases for output tensors
+      // restore the original arguments to re-run through meta dispatch
       stack->resize(arguments_begin);
       for (auto& arg : orig_arguments) {
         stack->push_back(std::move(arg));
@@ -508,7 +601,8 @@ void fakeFallback(
   // it will route to the proper fake kernel
   // THIS BEHAVIOUR IS DIFFERENT THAN TODAY'S PYTHON IMPL
 
-  // TODO: invalidate_written_to_constants
+  invalidate_written_to_constants(
+      op, stack, arguments_begin, num_arguments, flat_arg_fake_tensors, mode);
 
   // TODO: propagate_real_tensors
   /*if propagate_real_tensors {
