@@ -893,6 +893,42 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
+    def test_torch_function_mode_no_leak_on_graph_break(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/182317
+        # The resume function's except handler referenced a variable from
+        # the first compiled graph's scope, causing a KeyError that masked
+        # the original exception and left the mode on the C-level stack.
+        @torch.compile(backend="eager")
+        def fn():
+            class A(TorchFunctionMode):
+                def __torch_function__(self, *args, **kwargs):
+                    return -1
+
+            with A():
+                x = torch.tensor([1])
+            return x
+
+        fn()
+        self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_torch_function_mode_no_leak_nested_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn():
+            class A(TorchFunctionMode):
+                def __torch_function__(self, *args, **kwargs):
+                    return -1
+
+            with A():
+                _x = torch.tensor([1])
+
+                torch._dynamo.graph_break()
+
+                y = torch.tensor([2])
+            return y
+
+        fn()
+        self.assertEqual(_len_torch_function_stack(), 0)
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
