@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/GroupNorm.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
 #include <metal_simdgroup>
 #include <metal_stdlib>
@@ -45,7 +46,7 @@ kernel void group_norm(
   device T* y = Y + group_offset;
 
   // Divide the elements of the group between each thread in the threadgroup.
-  // First, a thread reads all of the elements assigned to it and computes a
+  // First, each thread reads all of the elements assigned to it and computes a
   // partial sum and sum of squares of those elements.
   float partial_sum = 0;
   float partial_sum_sq = 0;
@@ -62,52 +63,26 @@ kernel void group_norm(
     }
   }
 
-  // Second, the threads in each simdgroup sum their partial sums.
+  // Second, sum all the partial sums of the threads in the threadgroup and
+  // calculate the mean and rstd.
   threadgroup float local_sums[simdgroup_size];
   threadgroup float local_sums_sq[simdgroup_size];
-  threadgroup float tg_mean_val[1];
-  threadgroup float tg_rstd_val[1];
 
-  // Zero-initialize so that unused entries don't contribute garbage to the
-  // simd_sum below when num_simdgroups < simdgroup_size.
-  if (simdgroup_id == 0) {
-    local_sums[simd_lane_id] = 0;
-    local_sums_sq[simd_lane_id] = 0;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  auto reduction_result = threadgroup_sum2(
+      local_sums, local_sums_sq, partial_sum, partial_sum_sq, tid, tptg);
 
-  partial_sum = simd_sum(partial_sum);
-  partial_sum_sq = simd_sum(partial_sum_sq);
-  if (simd_lane_id == 0) {
-    local_sums[simdgroup_id] = partial_sum;
-    local_sums_sq[simdgroup_id] = partial_sum_sq;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float sum_val = reduction_result[0];
+  float sum_sq_val = reduction_result[1];
+  float m = float(params.elements_per_group);
+  float mean_val = sum_val / m;
+  // Variance of an array `a` is `sum((a - mean(a))**2) / m`, which we
+  // factor out into `sum(a**2) / m - 2 * mean(a) * sum(a) / m + mean(a)**2`
+  // so that both the mean and variance can be calculated in one pass.
+  float var_val =
+      (sum_sq_val - 2 * mean_val * sum_val) / m + mean_val * mean_val;
+  float rstd_val = metal::precise::rsqrt(var_val + params.eps);
 
-  // Third, the simdgroups within a threadgroup sum their partial sums to obtain
-  // the total sum and sum of squares of all the elements in the group. From
-  // those sums, one thread in the threadgroup computes the mean and rstd for
-  // the group.
-  if (simdgroup_id == 0) {
-    float sum = simd_sum(local_sums[simd_lane_id]);
-    float sum_sq = simd_sum(local_sums_sq[simd_lane_id]);
-    if (simd_lane_id == 0) {
-      float m = float(params.elements_per_group);
-      float mean = sum / m;
-      // Variance of an array `a` is `sum((a - mean(a))**2) / m`, which we
-      // factor out into `sum(a**2) / m - 2 * mean(a) * sum(a) / m + mean(a)**2`
-      // so that both the mean and variance can be calculated in one pass.
-      float var = (sum_sq - 2 * mean * sum) / m + mean * mean;
-      tg_mean_val[0] = mean;
-      tg_rstd_val[0] = metal::precise::rsqrt(var + params.eps);
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float mean_val = tg_mean_val[0];
-  float rstd_val = tg_rstd_val[0];
-
-  // Fourth, each thread reads its assigned input elements again, applies the
+  // Third, each thread reads its assigned input elements again, applies the
   // normalization and affine transform, and writes the results to the output.
   uint32_t channel_base =
       (tgid % params.num_groups) * params.channels_per_group;
