@@ -14,7 +14,7 @@ from torch._inductor.runtime.triton_heuristics import SplitScanGrid
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
-from ..utils import sympy_product
+from ..utils import sympy_product, upcast_compute_type
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -93,6 +93,7 @@ class TritonSplitScanKernel(TritonKernel):
         (dtype,) = dtypes
         (value,) = values
 
+        dtype = upcast_compute_type(dtype)
         compute_type = triton_compute_type(dtype)
         compute_type_triton = getattr(tl, compute_type[3:])
 
@@ -105,7 +106,6 @@ class TritonSplitScanKernel(TritonKernel):
             scratch_type_triton.primitive_bitwidth // 8
         )
 
-        cse_load = functools.partial(self.cse.generate, self.loads, dtype=dtype)
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         assert len(self.numels) == 2, "Unexpected tiling"

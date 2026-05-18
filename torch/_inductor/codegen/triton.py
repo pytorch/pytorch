@@ -3787,7 +3787,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         if tree.tensor_dim is None:
                             mask_shape = ()
                         else:
-                            mask_shape_list = [1] * self.triton_tensor_ndim()
+                            mask_shape_list: list[int | str] = [
+                                1
+                            ] * self.triton_tensor_ndim()
                             mask_shape_list[tree.tensor_dim] = self.dense_size_list()[
                                 tree.tensor_dim
                             ]
@@ -4609,6 +4611,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
+                result_var.dtype = index_dtype
             elif is_welford_reduction(reduction_type):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
