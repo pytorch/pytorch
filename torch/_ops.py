@@ -41,7 +41,7 @@ _fast_dispatch_tls = threading.local()
 def _enable_fast_dispatch(op: "OpOverload", chain: tuple) -> Iterator[None]:
     """While active, op.redispatch() pops from *chain* instead of C++ dispatch."""
     prev = getattr(_fast_dispatch_tls, "entry", None)
-    _fast_dispatch_tls.entry = (op, chain, 0)
+    _fast_dispatch_tls.entry = [op, chain, 0]
     try:
         yield
     finally:
@@ -894,7 +894,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         if entry is not None:
             target_op, chain, idx = entry
             if target_op is self and idx < len(chain):
-                _fast_dispatch_tls.entry = (target_op, chain, idx + 1)
+                entry[2] = idx + 1
                 return chain[idx](keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
