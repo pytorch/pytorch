@@ -26,7 +26,6 @@ for more information on the design.
 
 import collections
 import contextlib
-import functools
 import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
@@ -129,13 +128,6 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
-
-
-@functools.cache
-def get_prev_stack_var_name() -> str:
-    from ..bytecode_transformation import unique_id
-
-    return unique_id("___prev_torch_function_mode_stack")
 
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
