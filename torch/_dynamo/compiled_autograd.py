@@ -499,6 +499,7 @@ class AutogradCompilerInstance:
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
         bw_prologue_fn = CompiledFunction._bw_prologue_fn
+        bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
         if torch.is_grad_enabled():
@@ -651,33 +652,39 @@ class AutogradCompilerInstance:
 
         outputs = copy_paste_aot_backward_graph()
 
-        def proxy_subclass_constructor(
-            subclass_meta: Any, is_runtime: bool, unwrapped_args: Sequence[Any]
-        ) -> torch.Tensor:
-            @torch._dynamo.allow_in_graph  # type: ignore[misc]
-            def make_subclass(*unwrapped_args: Any) -> Any:
-                return subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+        if maybe_subclass_metadata is not None:
 
-            punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
+            def proxy_subclass_constructor(
+                subclass_meta: Any,
+                is_runtime: bool,
+                unwrapped_args: Sequence[Any],
+            ) -> torch.Tensor:
+                @torch._dynamo.allow_in_graph  # type: ignore[misc]
+                def make_subclass(*unwrapped_args: Any) -> Any:
+                    return subclass_meta.creation_fn(
+                        unwrapped_args, is_runtime=is_runtime
+                    )
 
-            poutput = self.fx_tracer.create_proxy(
-                kind="call_function",
-                # pyrefly: ignore [bad-argument-type]
-                target=make_subclass,
-                args=tuple(punwrapped_args),
-                kwargs={},
+                punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
+
+                poutput = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    # pyrefly: ignore [bad-argument-type]
+                    target=make_subclass,
+                    args=tuple(punwrapped_args),
+                    kwargs={},
+                )
+
+                output = self.allocate_dummy()
+                self.bind_objects_to_proxies([output], [poutput])
+                return output
+
+            results = bw_epilogue_fn(
+                outputs, make_subclass_override=proxy_subclass_constructor
             )
+        else:
+            results = bw_epilogue_fn(outputs)
 
-            output = self.allocate_dummy()
-            self.bind_objects_to_proxies([output], [poutput])
-            return output
-
-        results = torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
-            metadata,
-            maybe_subclass_metadata,
-            outputs,
-            make_subclass_override=proxy_subclass_constructor,
-        )
         presults = pytree.tree_map(self.to_proxy, results)
         return presults
 

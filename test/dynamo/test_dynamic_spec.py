@@ -6,10 +6,8 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
-from torch._dynamo.source import AttrSource, LocalSource, NNModuleSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
-from torch._dynamo.variables.builder import lookup_spec_from_dynamo_source
 from torch.fx.experimental.dynamic_spec import (
     IntVar,
     ObjectSpec,
@@ -522,8 +520,8 @@ class TestObjectSpec(TestCase):
         os = ObjectSpec({"weight": spec, "bias": None})
         self.assertEqual(len(os), 2)
         self.assertIn("weight", os)
-        self.assertIs(os["weight"], spec)
-        self.assertIsNone(os["bias"])
+        self.assertIs(os._fields["weight"], spec)
+        self.assertIsNone(os._fields["bias"])
 
     def test_iter_and_items(self):
         """Iteration walks fields in insertion order; items() yields pairs."""
@@ -540,8 +538,8 @@ class TestObjectSpec(TestCase):
         inner_spec = TensorSpec([ShapeVar("h"), None])
         inner = ObjectSpec({"weight": inner_spec})
         outer = ObjectSpec({"inner": inner})
-        self.assertIs(outer["inner"], inner)
-        self.assertIs(outer["inner"]["weight"], inner_spec)
+        self.assertIs(outer._fields["inner"], inner)
+        self.assertIs(inner._fields["weight"], inner_spec)
 
     def test_repr_with_none_leaf(self):
         """Single-field repr with a ``None`` leaf renders inline."""
@@ -592,101 +590,6 @@ object_spec:
         self.assertIsInstance(out["fields"]["weight"], dict)
         self.assertEqual(out["fields"]["weight"]["type"], "TensorSpec")
         self.assertIsNone(out["fields"]["bias"])
-
-
-class TestObjectSpecLookup(TestCase):
-    """``lookup_spec_from_dynamo_source`` walks an ``AttrSource`` chain
-    against an ``ObjectSpec`` and returns the leaf at that path."""
-
-    def setUp(self):
-        super().setUp()
-        _reset_uid_counter()
-
-    def _local(self, name):
-        return LocalSource(name, is_input=True)
-
-    def _attr(self, base, member):
-        return AttrSource(base, member)
-
-    def test_local_source_root_returns_leaf_spec(self):
-        """Bare ``LocalSource`` resolves to its top-level entry only when
-        that entry is a leaf — a top-level ``ObjectSpec`` is a container,
-        not applicable to a single tensor, so the lookup returns
-        ``None``."""
-        leaf = TensorSpec([ShapeVar("h"), None])
-        # Leaf at the top-level: returned directly.
-        shapes_spec_leaf = ShapesSpec(params=ParamsSpec({"x": leaf}))
-        self.assertIs(
-            lookup_spec_from_dynamo_source(self._local("x"), shapes_spec_leaf),
-            leaf,
-        )
-        # Container at the top-level: bare LocalSource without a path
-        # has no leaf to apply, so returns None.
-        shapes_spec_obj = ShapesSpec(
-            params=ParamsSpec({"model": ObjectSpec({"weight": leaf})})
-        )
-        self.assertIsNone(
-            lookup_spec_from_dynamo_source(self._local("model"), shapes_spec_obj)
-        )
-
-    def test_attr_descends_into_objectspec(self):
-        """``AttrSource(LocalSource("m"), "weight")`` resolves via ``ObjectSpec._fields["weight"]``."""
-        leaf = TensorSpec([ShapeVar("h"), None])
-        shapes_spec = ShapesSpec(
-            params=ParamsSpec({"model": ObjectSpec({"weight": leaf})})
-        )
-        result = lookup_spec_from_dynamo_source(
-            self._attr(self._local("model"), "weight"), shapes_spec
-        )
-        self.assertIs(result, leaf)
-
-    def test_nested_objectspec_walk(self):
-        """Multi-level ``AttrSource`` chains walk nested ``ObjectSpec``s."""
-        leaf = TensorSpec([ShapeVar("h"), None])
-        shapes_spec = ShapesSpec(
-            params=ParamsSpec(
-                {"model": ObjectSpec({"inner": ObjectSpec({"weight": leaf})})}
-            )
-        )
-        # model.inner.weight
-        src = self._attr(self._attr(self._local("model"), "inner"), "weight")
-        self.assertIs(lookup_spec_from_dynamo_source(src, shapes_spec), leaf)
-
-    def test_missing_attr_returns_none(self):
-        """An attr not present in the ``ObjectSpec`` returns ``None``."""
-        shapes_spec = ShapesSpec(
-            params=ParamsSpec(
-                {"model": ObjectSpec({"weight": TensorSpec([None, None])})}
-            )
-        )
-        self.assertIsNone(
-            lookup_spec_from_dynamo_source(
-                self._attr(self._local("model"), "bias"), shapes_spec
-            )
-        )
-
-    def test_attr_against_non_objectspec_returns_none(self):
-        """Asking for an attr off a top-level non-``ObjectSpec`` returns ``None``."""
-        shapes_spec = ShapesSpec(params=ParamsSpec({"x": TensorSpec([None, None])}))
-        self.assertIsNone(
-            lookup_spec_from_dynamo_source(
-                self._attr(self._local("x"), "weight"), shapes_spec
-            )
-        )
-
-    def test_nn_module_source_is_unwrapped(self):
-        """``NNModuleSource`` (and subclasses) are guard-semantics
-        markers, not access steps — the walk transparently skips past
-        them so module-attr access resolves the same as plain-object
-        attribute access."""
-        leaf = TensorSpec([ShapeVar("h"), None])
-        shapes_spec = ShapesSpec(
-            params=ParamsSpec({"model": ObjectSpec({"weight": leaf})})
-        )
-        # AttrSource(NNModuleSource(LocalSource("model")), "weight") —
-        # the source chain dynamo emits for ``model.weight`` access.
-        src = self._attr(NNModuleSource(self._local("model")), "weight")
-        self.assertIs(lookup_spec_from_dynamo_source(src, shapes_spec), leaf)
 
 
 class TestObjectSpecCompile(TestCase):

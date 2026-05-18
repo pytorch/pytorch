@@ -182,9 +182,6 @@ class ObjectSpec:
     def __init__(self, fields: dict[str, IntermediateSpec] | None = None) -> None:
         self._fields: dict[str, IntermediateSpec] = dict(fields) if fields else {}
 
-    def __getitem__(self, name: str) -> IntermediateSpec:
-        return self._fields[name]
-
     def __contains__(self, name: object) -> bool:
         return name in self._fields
 
