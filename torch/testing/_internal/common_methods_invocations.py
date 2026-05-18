@@ -15888,7 +15888,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
     OpInfo(
         "native_group_norm",
-        assert_jit_shape_analysis=True,
         aten_name="native_group_norm",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
@@ -15904,21 +15903,14 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
             # not implemented for integer dtypes
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_match", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
-            # native_group_norm grad doesn't support expanded weights, although the
-            # forward pass does
-            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_mean"),
-            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weight_per_sample_grad_sum"),
-            DecorateInfo(unittest.expectedFailure, "TestExpandedWeightFunctional", "test_expanded_weights_per_sample_grad_input_no_grad"),
             # tensor-likes are not close
             DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
             # fails in TorchScript interpreter with failures associated with batch_norm
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness_with_reusing_ir"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
         ),
-        supports_expanded_weight=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
