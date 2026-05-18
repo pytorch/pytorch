@@ -1446,10 +1446,17 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
+    torch._check(
+        split_size >= 0,
+        lambda: f"split expects split_size be non-negative, but got split_size={split_size}",
+    )
     if dim_size == 0:
         return (self.detach(),)
-    if split_size == 0:
-        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
+    torch._check(
+        split_size > 0,
+        lambda: "split_size can only be 0 if dimension size is 0, "
+        f"but got dimension size of {dim_size}",
+    )
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level

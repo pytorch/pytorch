@@ -4930,6 +4930,72 @@ class CommonTemplate:
         self.assertTrue(r3.size() == (2, 3))
         self.assertTrue(r4.size() == (2, 1))
 
+    def test_unsafe_split_empty_tensor_zero_size(self):
+        def fn(x, split_size, dim):
+            return torch.unsafe_split(x, split_size=split_size, dim=dim)
+
+        x = torch.ones((0,), device=self.device)
+        for split_size in (0, 2):
+            torch._dynamo.reset()
+            actual = torch.compile(fn, fullgraph=True)(x, split_size, -1)
+            self.assertEqual(actual, fn(x, split_size, -1))
+
+    def test_split_empty_dim(self):
+        def fn(x, split_size):
+            return (
+                torch.split(x, split_size, dim=1),
+                torch.unsafe_split(x, split_size=split_size, dim=1),
+                x.new_ones((x.shape[0],)),
+            )
+
+        x = torch.ones((3, 0, 5), device=self.device)
+        self.common(fn, (x, 0))
+        self.common(fn, (x, 2))
+
+    def test_split_zero_size_nonempty_dim_errors(self):
+        def split_fn(x):
+            return torch.split(x, 0, -1)
+
+        def unsafe_split_fn(x):
+            return torch.unsafe_split(x, split_size=0, dim=-1)
+
+        x = torch.ones((2,), device=self.device)
+        msg = "split_size can only be 0 if dimension size is 0"
+        for fn in (split_fn, unsafe_split_fn):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                fn(x)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.compile(fn, fullgraph=True)(x)
+
+    def test_split_negative_size_empty_dim_errors(self):
+        def split_fn(x):
+            return torch.split(x, -1, -1)
+
+        def unsafe_split_fn(x):
+            return torch.unsafe_split(x, split_size=-1, dim=-1)
+
+        x = torch.ones((0,), device=self.device)
+        msg = "split expects split_size be non-negative, but got split_size=-1"
+        for fn in (split_fn, unsafe_split_fn):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                fn(x)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.compile(fn, fullgraph=True)(x)
+
+    def test_split_size_greater_than_dim(self):
+        def fn(x):
+            return (
+                torch.split(x, 5, -1),
+                torch.unsafe_split(x, split_size=5, dim=-1),
+                x + 1,
+            )
+
+        self.common(fn, (torch.randn((2,), device=self.device),))
+
     def test_split_failed(self):
         @torch.compile(backend="inductor")
         def fn(a):
