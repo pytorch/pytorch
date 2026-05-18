@@ -1261,7 +1261,7 @@ def bucketize_scalar(
     ).squeeze(0)
 
 
-@register_decomposition(aten.rrelu_with_noise_functional)
+@decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,
