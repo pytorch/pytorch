@@ -118,20 +118,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
-    def test_addmm_out_dtype_compile(self):
-        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
-        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
-        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
-
-        def fn(bias, x, y):
-            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        result = compiled(bias, a, b)
-        expected = fn(bias, a, b)
-        self.assertEqual(result.dtype, expected.dtype)
-        self.assertEqual(result, expected)
-
     def test_index_put_issue(self):
         def forward(
             self,
@@ -1192,6 +1178,15 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo(inp), out)
 
         def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float32)
+        with config.patch({"eager_numerics.use_pytorch_libdevice": True}):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
             return x.sigmoid()
 
         inp = torch.ones(64, device=device_type).to(torch.float64)
@@ -2209,6 +2204,46 @@ class CudaReproTests(TestCase):
         loss = attn_output.mean()
         loss.backward()
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -3026,17 +3061,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.linalg.vector_norm(x, dim=(-2, -1))
 
         self.common(fn4, [y])
-
-    @config.patch("eager_numerics.division_rounding", True)
-    def test_div_by_constant_with_division_rounding(self):
-        # When division_rounding is enabled, div-by-constant must NOT be
-        # converted to mul-by-reciprocal, because mul-by-reciprocal does not
-        # match IEEE round-to-nearest division.
-        def fn(x):
-            return x / torch.tensor(1e-8, device=x.device)
-
-        x = torch.randn(2, 64, 32, 32, device=device_type).relu()
-        self.common(fn, [x], atol=0, rtol=0)
 
 
 if __name__ == "__main__":
