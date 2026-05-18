@@ -913,7 +913,6 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
 
     # Enumerate all frequency domains under this device handle.
-    # For tiled dGPUs each sub-device's domains are under the root handle.
     freq_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumFrequencyDomains(device_handle, byref(freq_count), None),
