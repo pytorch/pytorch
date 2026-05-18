@@ -2235,6 +2235,16 @@
       ]
     }
   ],
+  "GB7637": [
+    {
+      "Gb_type": "non-string key in object __dict__",
+      "Context": "key={key_value}",
+      "Explanation": "Dynamo expects object __dict__ keys to be strings.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",
@@ -3184,6 +3194,16 @@
       ]
     }
   ],
+  "GB0808": [
+    {
+      "Gb_type": "vectorcall_maybe on C method descriptor",
+      "Context": "name={name}, type={self.python_type_name()}, method={method}",
+      "Explanation": "Cannot trace special method '{name}' implemented in C on user-defined type '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6025": [
     {
       "Gb_type": "Failed to trace list()",
@@ -3648,6 +3668,26 @@
       "Hints": [
         "Remove closure variables that reference non-constant values, e.g. ",
         "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5849": [
+    {
+      "Gb_type": "non-constant key in object __dict__",
+      "Context": "key={key.vt}",
+      "Explanation": "Dynamo expects object __dict__ replacement keys to be constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3241": [
+    {
+      "Gb_type": "C-level descriptor delete on user-defined object",
+      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
+      "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -4395,9 +4435,18 @@
     {
       "Gb_type": "torch.library.wrap_triton call with > 1 args",
       "Context": "args={args}, kwargs={kwargs}",
-      "Explanation": "Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+      "Explanation": "Attempted to call `wrap_triton`/`capture_triton` with > 1 args. Dynamo does not support this.",
       "Hints": [
-        "Remove the torch.library.wrap_triton call or its additional args.",
+        "Remove the wrap_triton/capture_triton call or its additional args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "torch.library.wrap_triton call with > 1 args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Attempted to call `torch.library.wrap_triton` or `torch._library.capture_triton` with > 1 args. Dynamo does not support this.",
+      "Hints": [
+        "Remove the wrap_triton/capture_triton call or its additional args.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -4806,6 +4855,36 @@
       ]
     }
   ],
+  "GB7502": [
+    {
+      "Gb_type": "Unsupported user-defined object construction during side-effect tracking",
+      "Context": "class={user_cls}, base={base_cls}, error={exc}",
+      "Explanation": "Dynamo could not construct an example object for side-effect replay using the class __new__ method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3697": [
+    {
+      "Gb_type": "C-level descriptor setattr on user-defined object",
+      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
+      "Explanation": "Dynamo does not yet model this C-level descriptor setter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2404": [
+    {
+      "Gb_type": "Unsupported object.__new__ user-defined class construction",
+      "Context": "class={self.value}, error={exc}",
+      "Explanation": "Dynamo could not construct an example object for side-effect replay using object.__new__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
@@ -5149,6 +5228,26 @@
       "Gb_type": "record_function escaped from compiled region",
       "Context": "str(self)",
       "Explanation": "Dynamo doesn't support graph break inside record_function region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3934": [
+    {
+      "Gb_type": "missing sq_concat",
+      "Context": "sq_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2544": [
+    {
+      "Gb_type": "missing sq_inplace_concat",
+      "Context": "sq_inplace_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
