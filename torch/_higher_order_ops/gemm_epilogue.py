@@ -422,6 +422,17 @@ def _match_quack_local_m_reduce(
         return None
     if shape[0] != -1 or not isinstance(shape[1], int) or shape[1] <= 0:
         return None
+    mm_val = mm_node.meta.get("val")
+    if mm_val is not None:
+        mm_shape = tuple(mm_val.shape)
+        reduce_val = node.meta.get("val")
+        if len(mm_shape) != 2 or shape[2] != mm_shape[1]:
+            return None
+        if reduce_val is not None and tuple(reduce_val.shape) != (
+            mm_shape[0] // shape[1],
+            mm_shape[1],
+        ):
+            return None
     return QuackLocalReduceInfo(
         view_node=view_node,
         reduce_node=node,
@@ -534,7 +545,8 @@ def _quack_cute_epilogue_code(
             if local_reduce is None or local_reduce.keepdim:
                 raise NotImplementedError(
                     "QUACK tuple epilogue currently supports only "
-                    "(main, acc[.float()].view(M, -1, group).sum(-1))"
+                    "(main, acc[.float()].view(M, -1, group).sum(-1)) or "
+                    "(main, acc[.float()].view(-1, group, N).sum(1))"
                 )
             output_value = output_value[0]
             skip_nodes.update((local_reduce.view_node, local_reduce.reduce_node))
