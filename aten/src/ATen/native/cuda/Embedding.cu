@@ -360,32 +360,36 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkDim("embedding_renorm_", self_arg, 2);
+  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
+
+  auto num_indices = indices.numel();
+  if (num_indices == 0) {
+    return self;
+  }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cuda_", [&] () {
 
-    auto num_indices = indices.numel();
-    auto indices_contig = indices.contiguous();
-    auto num_weights = self.size(0);
-    auto wrapped_indices = at::empty_like(indices_contig, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    if (num_indices > 0) {
-      constexpr int64_t threads = 256;
-      embedding_renorm_wrap_indices_kernel<<<
-          ceil_div(num_indices, threads), threads, 0, stream>>>(
-          indices_contig.const_data_ptr<index_t>(),
-          wrapped_indices.mutable_data_ptr<index_t>(),
-          num_indices,
-          num_weights);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
-    indices_contig = std::get<0>(wrapped_indices.view({num_indices}).sort()).contiguous();
-    auto unique_indices = at::empty(indices.numel(), indices.options());
+    auto indices_contig = indices.expect_contiguous();
+    const auto num_weights = self.size(0);
+    auto wrapped_indices = at::empty({num_indices}, indices.options());
+    constexpr int64_t threads = 256;
+    embedding_renorm_wrap_indices_kernel<<<
+        ceil_div(num_indices, threads), threads, 0, stream>>>(
+        (*indices_contig).const_data_ptr<index_t>(),
+        wrapped_indices.mutable_data_ptr<index_t>(),
+        num_indices,
+        num_weights);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    auto sorted_indices = std::get<0>(wrapped_indices.sort()).contiguous();
+    auto unique_indices = at::empty({num_indices}, indices.options());
     auto num_unique_indices = at::empty({}, indices.options().dtype(kLong));
 
     cuda::cub::unique(
-      indices_contig.const_data_ptr<index_t>(),
+      sorted_indices.const_data_ptr<index_t>(),
       unique_indices.mutable_data_ptr<index_t>(),
       num_unique_indices.mutable_data_ptr<int64_t>(),
       num_indices
