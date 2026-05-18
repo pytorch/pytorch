@@ -1827,6 +1827,35 @@ if HAS_CUDA_AND_TRITON:
                 x_grad, x_grad_clone = compute_grad(grad_output, create_graph=True)
                 self.assertEqual(x_grad, x_grad_clone)
 
+        def test_backward_outputs_do_not_poison_grad_accumulation(self):
+            class MLP(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.lin = nn.Linear(4, 8)
+
+                def forward(self, x):
+                    return self.lin(x)
+
+            torch.manual_seed(0)
+            model = MLP().cuda().train()
+            ref_model = MLP().cuda().train()
+            ref_model.load_state_dict(model.state_dict())
+
+            compiled = torch.compile(
+                model, fullgraph=True, backend="inductor", mode="reduce-overhead"
+            )
+            inputs = [torch.rand((1, 4), device="cuda") for _ in range(2)]
+
+            for x in inputs:
+                compiled(x).sum().backward()
+                ref_model(x).sum().backward()
+
+            self.assertEqual(model.lin.weight.grad, ref_model.lin.weight.grad)
+            self.assertEqual(model.lin.bias.grad, ref_model.lin.bias.grad)
+
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+
         def test_frozen_fn(self):
             @torch.compile()
             def foo(x):

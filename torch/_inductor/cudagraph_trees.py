@@ -603,6 +603,17 @@ def is_live(weak_ref: StorageWeakRefWrapper | None) -> bool:
     return maybe_deref(weak_ref) is not None
 
 
+def clone_outputs_for_autograd_if_needed(
+    outputs: OutputType, mode: CompilationMode | None
+) -> OutputType:
+    if mode != CompilationMode.BACKWARD:
+        return outputs
+
+    # Backward outputs may be stolen by AccumulateGrad and persist as .grad
+    # across iterations, so they cannot keep graph-private output lifetime.
+    return pytree.tree_map_only(torch.Tensor, torch.clone, outputs)
+
+
 def maybe_deref(
     weak_ref: StorageWeakRefWrapper | None,
 ) -> tuple[StorageWeakRefPointer, int] | None:
@@ -702,6 +713,7 @@ class CUDAWarmupNode:
         stream: torch.cuda.Stream,
         already_warm: bool,
         id: GraphID,
+        mode: CompilationMode | None,
     ) -> None:
         self.wrapped_function = wrapped_function
         self.parent: CUDAGraphNode | CUDAWarmupNode | None = parent
@@ -715,6 +727,7 @@ class CUDAWarmupNode:
         self.stream = stream
         self.already_warm = already_warm
         self.id = id
+        self.mode = mode
 
     def run(self, new_inputs: Any) -> OutputType:
         assert not self.has_run, "Wrapped function should never be run twice"
@@ -788,7 +801,7 @@ class CUDAWarmupNode:
             out_refs = list(self.path_live_weakrefs())
             check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
 
-        return out
+        return clone_outputs_for_autograd_if_needed(out, self.mode)
 
     @property
     def _path_from_root(
@@ -901,6 +914,7 @@ class CUDAGraphNode:
         self.device = device_index
         self.stack_traces = stack_traces
         self.stream = stream
+        self.mode = mode
 
         # Enable re-record a cudagraph when static tensor address changed.
         # if not we should error when it changed.
@@ -1193,7 +1207,7 @@ class CUDAGraphNode:
         outputs = self.recording_outputs
         self.recording_outputs = None
         assert outputs is not None
-        return outputs
+        return clone_outputs_for_autograd_if_needed(outputs, self.mode)
 
     def run(self, new_inputs: list[InputType]) -> OutputType:
         self.check_static_inputs_are_stable(new_inputs)
@@ -1214,7 +1228,7 @@ class CUDAGraphNode:
         # Reset this to run the check in the future
         self.static_inputs_stable = False
 
-        return outputs
+        return clone_outputs_for_autograd_if_needed(outputs, self.mode)
 
     def reconstruct_outputs(self) -> OutputType:
         "Reconstruct output tensors according to their saved metadata and alias information"
@@ -2459,6 +2473,7 @@ class CUDAGraphTreeManager:
             self.stream,
             already_warm,
             self.new_warmup_node_id(),
+            self.mode,
         )
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
