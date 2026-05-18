@@ -360,12 +360,14 @@ def list_mode_options(
         # enable max-autotune
         "max-autotune-no-cudagraphs": {
             "max_autotune": True,
+            "combo_kernels": True,
             "coordinate_descent_tuning": True,
         },
         # enable max-autotune
         # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
+            "combo_kernels": True,
             "triton.cudagraphs": True,
             "coordinate_descent_tuning": True,
         },
