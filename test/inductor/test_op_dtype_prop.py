@@ -226,6 +226,16 @@ class TestCase(InductorTestCase):
             compiled = torch.compile(op, backend="inductor")
             code = run_and_get_triton_code(compiled, *inps)
 
+            if op_name == "atan" and GPU_TYPE == "cuda" and not torch.version.hip:
+                self.assertIn("rcp.approx.ftz.f32", code)
+                separate_upcast = (
+                    re.search(r"tmp\d+ = tmp\d+\.to\(tl\.float32\)", code) is not None
+                )
+                self.assertNotEqual(separate_upcast, load_upcast_to_fp32)
+                if convert_output:
+                    self.assertIn(f".to({tl_dtype_str})", code)
+                return
+
             # Search the code with a regex.
             # Example code: libdevice.floor(tmp3.to(tl.float32)).to(tl.float16)
             output_cast = rf"\.to\({tl_dtype_str}\)" if convert_output else ""
