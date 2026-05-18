@@ -1,16 +1,23 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.simd import IterationRangesRoot
-from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+from torch._inductor.codegen.simd_kernel_features import (
+    SIMDKernelFeatures,
+    StatsForDim,
+    StatsForLoop,
+    StatsForReadsOrWrites,
+)
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     TritonKernel,
@@ -19,6 +26,7 @@ from torch._inductor.codegen.triton import (
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
+from torch._inductor.runtime.hints import ReductionHint
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
@@ -49,6 +57,91 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_stats_for_reads_or_writes_add_sums_contiguous_bytes(self):
+        lhs = StatsForReadsOrWrites(
+            [StatsForDim()],
+            [StatsForLoop()],
+            bytes_contiguous_or_broadcast=sympy.Integer(11),
+            bytes_non_contiguous=sympy.Integer(3),
+        )
+        rhs = StatsForReadsOrWrites(
+            [StatsForDim()],
+            [StatsForLoop()],
+            bytes_contiguous_or_broadcast=sympy.Integer(7),
+            bytes_non_contiguous=sympy.Integer(5),
+        )
+
+        total = lhs + rhs
+
+        self.assertEqual(total.bytes_contiguous_or_broadcast, 18)
+        self.assertEqual(total.bytes_non_contiguous, 8)
+        self.assertEqual(total.bytes, 26)
+
+    @inductor_config.patch(
+        {"triton.persistent_reductions": True, "triton.multi_kernel": 0}
+    )
+    def test_persistent_reduction_uses_memory_savings_for_large_inner_reduction(self):
+        def make_features(looped_bytes, persistent_bytes):
+            class Features:
+                numel = sympy.Integer(2048)
+                reduction_numel = sympy.Integer(32768)
+
+                @staticmethod
+                def get_reduction_hint():
+                    return ReductionHint.INNER
+
+                @staticmethod
+                def memory_stats():
+                    return SimpleNamespace(
+                        looped=SimpleNamespace(
+                            memory=SimpleNamespace(
+                                bytes=sympy.Integer(looped_bytes),
+                                count_per_thread=4,
+                            )
+                        ),
+                        persistent=SimpleNamespace(
+                            memory=SimpleNamespace(
+                                bytes=sympy.Integer(persistent_bytes),
+                                count_per_thread=3,
+                            )
+                        ),
+                    )
+
+            return Features()
+
+        self.assertTrue(
+            InductorChoices.should_use_persistent_reduction(
+                make_features(805306368, 536870912),
+                cooperative_reduction=False,
+            )
+        )
+        self.assertFalse(
+            InductorChoices.should_use_persistent_reduction(
+                make_features(630000000, 536870912),
+                cooperative_reduction=False,
+            )
+        )
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(
+        {"triton.persistent_reductions": True, "triton.multi_kernel": 0}
+    )
+    def test_rms_norm_large_inner_reduction_uses_persistent_codegen(self):
+        def rms_norm(x, w, eps=1e-6):
+            v = x.pow(2).mean(-1, keepdim=True)
+            return w * x * torch.rsqrt(v + eps)
+
+        x = torch.rand(512, 32768, device=GPU_TYPE)
+        w = torch.rand(32768, device=GPU_TYPE)
+        _, source_codes = run_and_get_code(
+            torch.compile(rms_norm, fullgraph=True), x, w
+        )
+
+        self.assertEqual(len(source_codes), 1)
+        self.assertIn("@triton_heuristics.persistent_reduction", source_codes[0])
+        self.assertIn("R0_BLOCK: tl.constexpr = 32768", source_codes[0])
+        self.assertNotIn("@triton_heuristics.reduction", source_codes[0])
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):

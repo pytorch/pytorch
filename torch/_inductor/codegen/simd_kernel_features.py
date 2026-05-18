@@ -514,7 +514,7 @@ class StatsForReadsOrWrites:
             dim=[a + b for a, b in zip(self.dim, other.dim)],
             loop=[a + b for a, b in zip(self.loop, other.loop)],
             bytes_contiguous_or_broadcast=self.bytes_contiguous_or_broadcast
-            + self.bytes_contiguous_or_broadcast,
+            + other.bytes_contiguous_or_broadcast,
             bytes_non_contiguous=self.bytes_non_contiguous + other.bytes_non_contiguous,
         )
 

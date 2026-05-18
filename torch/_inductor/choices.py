@@ -394,11 +394,12 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
@@ -443,7 +444,44 @@ class InductorChoices:
 
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
-        )  # type: ignore[arg-types]
+        ) or (
+            not cooperative_reduction
+            and InductorChoices.should_use_persistent_reduction_for_memory_savings(
+                features, reduction_hint
+            )
+        )
+
+    @staticmethod
+    def should_use_persistent_reduction_for_memory_savings(
+        features: SIMDKernelFeatures, reduction_hint: ReductionHint
+    ) -> bool:
+        """
+        Use persistent reductions for large inner reductions when keeping the
+        whole reduction tile live materially reduces global memory traffic.
+        """
+        if reduction_hint != ReductionHint.INNER:
+            return False
+
+        if not V.graph.sizevars.statically_known_leq(features.reduction_numel, 32768):
+            return False
+
+        if not V.graph.sizevars.statically_known_gt(features.reduction_numel, 2048):
+            return False
+
+        memory_stats = features.memory_stats()
+        if memory_stats.persistent.memory.count_per_thread > 10:
+            return False
+
+        looped_bytes = V.graph.sizevars.optimization_hint(
+            memory_stats.looped.memory.bytes
+        )
+        persistent_bytes = V.graph.sizevars.optimization_hint(
+            memory_stats.persistent.memory.bytes
+        )
+        if persistent_bytes <= 0:
+            return False
+
+        return looped_bytes * 10 >= persistent_bytes * 13
 
     @staticmethod
     def reduction_split_factor(
