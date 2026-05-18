@@ -16,6 +16,7 @@
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
@@ -741,4 +742,24 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     reinterpret_cast<torch::Library*>(self)->def(
         torch::schema(schema), tag_vec, torch::_RegisterOrVerify::REGISTER);
   });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->set_python_module(
+        pymodule, context);
+  });
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what() {
+  return torch::csrc::shim::details ::get_torch_exception_what().c_str();
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
+  return torch::csrc::shim::details ::
+      get_torch_exception_what_without_backtrace()
+          .c_str();
 }
