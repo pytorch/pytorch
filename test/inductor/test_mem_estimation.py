@@ -377,9 +377,7 @@ class TestMemoryTracker(InductorTestCase):
             graph.output((fwd_getitem, recomp_getitem))
 
         compute = [
-            n
-            for n in graph.nodes
-            if n.op not in ("placeholder", "get_attr", "output")
+            n for n in graph.nodes if n.op not in ("placeholder", "get_attr", "output")
         ]
         tracker_orig = MemoryTracker(graph, device_filter=device_filter)
         for n in compute:

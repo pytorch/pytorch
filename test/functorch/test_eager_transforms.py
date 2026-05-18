@@ -93,43 +93,6 @@ except ImportError:
         UserWarning,
     )
 
-
-def _assert_functorch_wrapper_repr(test_case, actual, op_list):
-    expected_grad_wrappers = sum(op is grad for op in op_list)
-    expected_batched_wrappers = sum(op is vmap for op in op_list)
-
-    test_case.assertEqual(actual.count("GradTrackingTensor("), expected_grad_wrappers)
-    test_case.assertEqual(actual.count("BatchedTensor("), expected_batched_wrappers)
-    test_case.assertNotIn("FunctionalTensor(", actual)
-    test_case.assertTrue("Tensor(" in actual or "tensor(" in actual, actual)
-
-    wrapper_tokens = []
-    bdim = expected_batched_wrappers
-    for level, op in enumerate(op_list):
-        if op is grad:
-            wrapper_tokens.append(f"GradTrackingTensor(lvl={level + 1}, value=")
-        elif op is vmap:
-            bdim -= 1
-            wrapper_tokens.append(f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value=")
-
-    if not wrapper_tokens:
-        return
-
-    test_case.assertTrue(actual.startswith(wrapper_tokens[-1]), actual)
-    search_from = 0
-    for token in reversed(wrapper_tokens):
-        pos = actual.find(token, search_from)
-        test_case.assertNotEqual(pos, -1, actual)
-        search_from = pos + len(token)
-
-
-def _assert_leaf_tensor_repr(test_case, actual):
-    test_case.assertNotIn("GradTrackingTensor(", actual)
-    test_case.assertNotIn("BatchedTensor(", actual)
-    test_case.assertNotIn("FunctionalTensor(", actual)
-    test_case.assertTrue(actual.startswith(("Tensor(", "tensor(")), actual)
-
-
 # TestCase for _slice_argnums, an important helper function
 
 
@@ -1031,9 +994,20 @@ class TestGradTransform(TestCase):
                     else:
                         fn = op(fn)
 
+                expected = f"{repr(x)}"
+                for level, op in enumerate(op_list):
+                    if op is grad:
+                        expected = (
+                            f"GradTrackingTensor(lvl={level + 1}, value={expected})"
+                        )
+                    elif op is vmap:
+                        bdim -= 1
+                        expected = f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value={expected})"
+
                 fn(x)
-                self.assertIsNotNone(buf)
-                _assert_functorch_wrapper_repr(self, buf, op_list)
+                buf = buf.replace("\n", "").replace("  ", "")
+                expected = expected.replace("\n", "").replace("  ", "")
+                self.assertEqual(expected, buf)
 
     def test_print_captured_tensor_inside_transform(self, device):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
@@ -1045,11 +1019,7 @@ class TestGradTransform(TestCase):
             return y
 
         vjp(f, torch.randn(4, device=device))
-        self.assertIsNotNone(out)
-        if TEST_WITH_TORCHDYNAMO:
-            _assert_leaf_tensor_repr(self, out)
-        else:
-            self.assertEqual(out, repr(x))
+        self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)

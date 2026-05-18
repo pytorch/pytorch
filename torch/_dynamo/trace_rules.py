@@ -65,7 +65,6 @@ from .variables import (
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
     InspectSignatureVariable,
-    IsInstanceBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     LocalGeneratorFunctionVariable,
@@ -402,6 +401,7 @@ manual_torch_name_rule_map: dict[
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
+    "torch._library.capture_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -4041,7 +4041,6 @@ BUILTIN_CALLABLES = {
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
-    isinstance: IsInstanceBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
     setattr: SetAttrBuiltinVariable,

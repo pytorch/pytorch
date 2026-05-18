@@ -118,20 +118,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
-    def test_addmm_out_dtype_compile(self):
-        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
-        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
-        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
-
-        def fn(bias, x, y):
-            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        result = compiled(bias, a, b)
-        expected = fn(bias, a, b)
-        self.assertEqual(result.dtype, expected.dtype)
-        self.assertEqual(result, expected)
-
     def test_index_put_issue(self):
         def forward(
             self,
@@ -2209,6 +2195,46 @@ class CudaReproTests(TestCase):
         loss = attn_output.mean()
         loss.backward()
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -3000,6 +3026,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+    @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
+    def test_atan_special_psi_eager_parity(self):
+        def atan_fn(x):
+            return torch.ops.aten.atan(x)
+
+        def fn(x):
+            out = atan_fn(x)
+            return torch.ops.aten.special_psi(out, out=out)
+
+        atan_x = torch.tensor(
+            [
+                -float("inf"),
+                -10.0,
+                -1.5516796112060547,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                1.5516796112060547,
+                10.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device_type,
+        )
+        actual_atan = torch.compile(atan_fn, backend="inductor", fullgraph=True)(atan_x)
+        expected_atan = atan_fn(atan_x)
+        self.assertEqual(
+            actual_atan.view(torch.uint32),
+            expected_atan.view(torch.uint32),
+        )
+
+        # Selected from the original seed-0 repro where a 1 ULP atan difference
+        # was amplified by special_psi into an assert_close failure.
+        x = torch.tensor([-1.5516796112060547], device=device_type)
+        actual, code = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+        expected = fn(x)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
 
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181

@@ -7021,13 +7021,6 @@ class TestTorch(TestCase):
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
-        if TEST_WITH_TORCHDYNAMO:
-            expected = (
-                "torch.return_types.max(values=Tensor(shape=(5, 10), dtype=torch.int64), "
-                "indices=Tensor(shape=(5, 10), dtype=torch.int64))"
-            )
-            self.assertEqual(repr(a.max(1)), expected)
-            return
         expected = """
         torch.return_types.max(
         values=tensor([[ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49],

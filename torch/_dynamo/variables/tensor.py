@@ -25,7 +25,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -158,27 +158,6 @@ def _is_sym_arith_operand(vt: VariableTracker) -> bool:
     return isinstance(vt, ConstantVariable) and isinstance(vt.value, (float, int, bool))
 
 
-def _tensor_debug_repr(value: torch.Tensor, type_name: str = "Tensor") -> str:
-    if torch._C._functorch.is_batchedtensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        bdim = torch._C._functorch.maybe_get_bdim(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return (
-            "BatchedTensor("
-            f"lvl={level}, bdim={bdim}, value={_tensor_debug_repr(unwrapped)}"
-            ")"
-        )
-    if torch._C._functorch.is_gradtrackingtensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return f"GradTrackingTensor(lvl={level}, value={_tensor_debug_repr(unwrapped)})"
-    if torch._C._functorch.is_functionaltensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return f"FunctionalTensor(lvl={level}, value={_tensor_debug_repr(unwrapped)})"
-    return f"{type_name}(shape={tuple(value.shape)}, dtype={value.dtype})"
-
-
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -300,12 +279,8 @@ class TensorVariable(VariableTracker):
             tx.output.check_input_mutation_on_current_stream(tx)
 
     def debug_repr(self) -> str:
-        return _tensor_debug_repr(
-            self.proxy.node.meta["example_value"], self.python_type_name()
-        )
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        return VariableTracker.build(tx, self.debug_repr())
+        # TODO: strip off fake tensor from repr here
+        return repr(self.proxy.node.meta["example_value"])
 
     def as_proxy(self) -> torch.fx.Proxy:
         return self.proxy
@@ -845,9 +820,6 @@ class TensorVariable(VariableTracker):
                 f"({name}) invocation in strict mode.",
                 hints=[],
             )
-
-        if name == "__repr__" and not args and not kwargs:
-            return self.repr_impl(tx)
 
         if name == "__deepcopy__":
             unimplemented(
@@ -2203,6 +2175,25 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
+        from .builder import wrap_fx_proxy
+
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        proxy = tx.output.create_proxy(
+            "call_function", operator.add, *proxy_args_kwargs(args, {})
+        )
+        # Tensor dominates: any of Tensor+Tensor, Tensor+SymNode, Tensor+scalar
+        # produces a Tensor.
+        return wrap_fx_proxy(tx=tx, proxy=proxy)
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslator",
@@ -2336,7 +2327,7 @@ class SymNodeVariable(VariableTracker):
         return self._tensor_var
 
     def evaluate_expr(
-        self, output_graph: "OutputGraph | None" = None
+        self, output_graph: Optional["OutputGraph"] = None
     ) -> bool | int | float:
         try:
             return guard_scalar(self.sym_num)
@@ -2349,15 +2340,6 @@ class SymNodeVariable(VariableTracker):
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """SymNodeVariable is not a constant - it represents a symbolic value.
-
-        Operations on SymNodeVariable should go through the graph, not be
-        constant-folded. Returning (False, ...) ensures we don't try to
-        constant-fold through symbolic values.
-        """
-        return (False, False, None)
 
     def call_method(
         self,
@@ -2400,6 +2382,24 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
+
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.add, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
 
     def nb_or_impl(
         self,
