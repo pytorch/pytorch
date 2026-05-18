@@ -24,6 +24,7 @@ expensive autotuning operations when the same kernels are compiled multiple time
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import logging
 import os
@@ -694,7 +695,9 @@ def _load_cached_autotuning(
             and cfg.num_stages == best_config.get("num_stages")
         ]
         if len(matching_configs) == 1:
-            matched_config = matching_configs[0]
+            # Copy before mutating: `configs` is a shared heuristic-owned list,
+            # so setattr on the original would leak provenance across compiles.
+            matched_config = copy.copy(matching_configs[0])
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             if found_by_combo_autotune:

@@ -1345,12 +1345,12 @@ class ComboKernelTestsMaxAutotune(TestCase):
         return out_compiled, " ".join(code), "\n".join(cm.output)
 
     def _assert_combo_seed_launch_path(self, code, logs, seed_count):
-        FileCheck().check("start_combo_kernel_standalone_autotune(").check(
-            ".run("
-        ).run(code)
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, seed_count + 1
+        FileCheck().check("start_combo_kernel_standalone_autotune(").check(".run(").run(
+            code
         )
+        # Seed kernels are internal autotune artifacts and must not inflate
+        # generated_kernel_count. Only the combo kernel itself counts.
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         self.assertIn(
             f"Combo standalone autotune seed: submit {seed_count} standalone kernels",
             logs,
