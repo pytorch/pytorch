@@ -14569,18 +14569,44 @@ class TestErrorInputs(TestCase):
             torch.mps.synchronize()
 
     def test_scatter_out_of_bounds(self, device):
-        # Regression for https://github.com/pytorch/pytorch/issues/170507
-        # one_hot is composite (zeros + scatter_); bad indices used to silently
-        # produce zeros instead of raising. MPS scatter now reports async via
-        # the stream error buffer, matching CUDA's deferred-assert behavior.
+        # MPS scatter reports bad indices via the stream's async error buffer,
+        # raised on the next sync as torch.AcceleratorError -- matches CUDA's
+        # deferred-assert behavior.
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(3, 4, device=device).scatter_(1, torch.tensor([[4]], device=device), 1.0)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(3, 4, device=device).scatter_(1, torch.tensor([[-1]], device=device), 1.0)
+            torch.mps.synchronize()
+        # scatter_add and scatter_reduce go through the atomic kernels.
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(3, 4, device=device).scatter_add_(1, torch.tensor([[4]], device=device), torch.ones(1, 1, device=device))
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(3, 4, device=device).scatter_reduce_(
+                1, torch.tensor([[4]], device=device), torch.ones(1, 1, device=device),
+                reduce="amax", include_self=True,
+            )
+            torch.mps.synchronize()
+
+    def test_gather_out_of_bounds(self, device):
+        # MPS gather reports bad indices via the same async error buffer
+        # used by scatter; raised on the next sync as torch.AcceleratorError.
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.gather(torch.zeros(3, 4, device=device), 1, torch.tensor([[4]], device=device))
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.gather(torch.zeros(3, 4, device=device), 1, torch.tensor([[-1]], device=device))
+            torch.mps.synchronize()
+
+    def test_one_hot_out_of_bounds(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/170507 --
+        # F.one_hot used to silently return zeros for out-of-range indices on MPS.
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
             torch.nn.functional.one_hot(torch.tensor([8], device=device), num_classes=8)
             torch.mps.synchronize()
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
             torch.nn.functional.one_hot(torch.tensor([-1], device=device), num_classes=8)
-            torch.mps.synchronize()
-        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
-            torch.zeros(3, 4, device=device).scatter_(1, torch.tensor([[4]], device=device), 1.0)
             torch.mps.synchronize()
 
 

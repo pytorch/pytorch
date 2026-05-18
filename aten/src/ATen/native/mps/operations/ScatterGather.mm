@@ -20,7 +20,7 @@ namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/Scatter_metallib.h>
+#include <ATen/native/mps/ScatterGather_metallib.h>
 #endif
 
 // Fast path applies when output, src, and index are all contiguous, src
@@ -265,139 +265,108 @@ static void scatter_reduce_metal(const Tensor& self,
     }
   });
 }
+
+// Metal gather: output[c] = input[c with c[dim] replaced by index[c]] for
+// every coord c in index's shape. Bounds-check fires the async error path
+// matching the scatter behavior. No atomics needed since each output position
+// is written exactly once.
+static void gather_metal(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& output) {
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "gather: expected index to be Long or Int, got ",
+              index.scalar_type());
+  const auto ndim = static_cast<uint32_t>(index.dim());
+  TORCH_CHECK(
+      ndim <= c10::metal::max_ndim, "gather: tensor rank ", ndim, " exceeds Metal max of ", c10::metal::max_ndim);
+  const int64_t input_dim_size = self.size(dim);
+  const int64_t total = index.numel();
+  // Dense fast path: output/index contiguous, input.size(i) == output.size(i)
+  // for i != dim (no slicing). output.size(d) == index.size(d) for all d (gather contract).
+  bool use_dense = output.is_contiguous() && index.is_contiguous();
+  if (use_dense) {
+    for (const auto i : c10::irange(self.dim())) {
+      if (i != dim && self.size(i) != output.size(i)) {
+        use_dense = false;
+        break;
+      }
+    }
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      if (use_dense) {
+        const int64_t inner_size = dense_inner_size(output, dim);
+        const int64_t output_dim_size = output.size(dim);
+        auto pso = lib.getPipelineStateForFunc(
+            fmt::format("gather_dense_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
+        [encoder setComputePipelineState:pso];
+        dispatch_chunked(encoder, pso, total, [&](int64_t tid_offset) {
+          mtl_setArgs(encoder,
+                      output,
+                      self,
+                      index,
+                      inner_size,
+                      output_dim_size,
+                      input_dim_size,
+                      tid_offset,
+                      stream->getErrorBuffer());
+        });
+      } else {
+        auto sizes = index.sizes();
+        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        auto pso = lib.getPipelineStateForFunc(
+            fmt::format("gather_strided_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
+        [encoder setComputePipelineState:pso];
+        dispatch_chunked(encoder, pso, total, [&](int64_t tid_offset) {
+          mtl_setArgs(encoder,
+                      output,
+                      self,
+                      index,
+                      sizes,
+                      output.strides(),
+                      self.strides(),
+                      index.strides(),
+                      ndim_dim,
+                      input_dim_size,
+                      tid_offset,
+                      stream->getErrorBuffer());
+        });
+      }
+    }
+  });
+}
 } // namespace mps
 
 static Tensor maybe_expand_0_dim(const Tensor& t) {
   return t.dim() == 0 ? t.view({1}) : t;
 }
 
-static Tensor expand_index_as_real(const Tensor& index) {
+// gather_stub: read input at indexed positions per the gather contract. The
+// shared TORCH_IMPL_FUNC(gather_out) handles dim wrap and the empty-numel
+// early return before invoking us. Complex flows through unchanged via
+// float2/half2 templates (no view_as_real shim).
+static void gather_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+  if (self.numel() == 0 || index.numel() == 0) {
+    return;
+  }
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "gather(): self and result must have the same scalar type");
+  auto self_view = self.dim() == 0 ? self.view({1}) : self;
   auto index_view = maybe_expand_0_dim(index);
-  std::vector<int64_t> index_expanded_sizes = index_view.sizes().vec();
-  index_expanded_sizes.push_back(2);
-  auto index_expanded = index_view.unsqueeze(-1).expand(index_expanded_sizes);
-  return index_expanded;
+  auto result_view = maybe_expand_0_dim(result);
+  dim = at::maybe_wrap_dim(dim, self_view.dim());
+  TORCH_CHECK(dim >= 0 && dim < self_view.dim(), "gather(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(index_view.dim() == self_view.dim() && index_view.dim() == result_view.dim(),
+              "Input, index and result must have same rank");
+  for (const auto i : c10::irange(self_view.dim())) {
+    TORCH_CHECK(i == dim || index_view.size(i) <= self_view.size(i),
+                "Index dim must not exceed input dim except at gathering axis");
+    TORCH_CHECK(result_view.size(i) == index_view.size(i), "result and index must have matching sizes");
+  }
+  mps::gather_metal(self_view, dim, index_view, result_view);
 }
 
-TORCH_IMPL_FUNC(gather_out_mps)
-(const Tensor& self_arg, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& output) {
-  using namespace mps;
-
-  if (self_arg.numel() == 0 || index.numel() == 0) {
-    return;
-  }
-  auto self = self_arg.dim() == 0 ? self_arg.view({1}) : self_arg;
-  dim = at::maybe_wrap_dim(dim, self.dim());
-
-  TORCH_CHECK(!sparse_grad, "sparse_grad not supported in MPS yet")
-  TORCH_CHECK(self.scalar_type() == output.scalar_type(), "gather(): self and output must have the same scalar type");
-  TORCH_CHECK(dim >= 0 && dim < self.dim(), "gather(): Indexing dim ", dim, " is out of bounds of tensor");
-
-  if (self.is_complex()) {
-    auto self_real = at::view_as_real(self);
-    auto index_expanded = expand_index_as_real(index);
-    auto output_real = at::view_as_real(maybe_expand_0_dim(output));
-    structured_gather_out_mps::impl(self_real, dim, index_expanded, sparse_grad, output_real);
-    return;
-  }
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* indexTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    MPSShape* input_shape = getMPSShape(self);
-    MPSShape* index_shape = getMPSShape(index);
-    uint32_t num_input_dims = [input_shape count];
-    uint32_t num_index_dims = [index_shape count];
-    TORCH_CHECK(num_input_dims == num_index_dims, "Input and index must have same rank")
-
-    // Determine if we need to slice into the input tensor
-    bool needSlice = false;
-
-    for (const auto i : c10::irange(num_input_dims)) {
-      TORCH_CHECK(i == dim || [index_shape[i] intValue] <= [input_shape[i] intValue],
-                  "Index dim must not exceed input dim except at gathering axis")
-      if (i != dim && [index_shape[i] intValue] < [input_shape[i] intValue])
-        needSlice = true;
-    }
-    auto input_type = getMPSDataType(self);
-    auto output_type = getMPSDataType(output);
-    if (input_type == MPSDataTypeUInt8) {
-      input_type = MPSDataTypeInt8;
-    }
-    if (output_type == MPSDataTypeUInt8) {
-      output_type = MPSDataTypeInt8;
-    }
-    std::string key = "gather_out_mps" + getTensorsStringKey({self, index, output}) + ":" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, getMPSShape(self));
-      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
-
-      MPSGraphTensor* getInput = inputTensor;
-
-      // Slice into the input tensor IF NEEDED
-      if (needSlice) {
-        NSMutableArray<NSNumber*>* starts = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-        NSMutableArray<NSNumber*>* ends = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-        NSMutableArray<NSNumber*>* strides = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-
-        for (const auto i : c10::irange(num_input_dims)) {
-          // All strides are 1
-          strides[i] = @1;
-          // All starts are 0
-          starts[i] = @0;
-          ends[i] = (i != dim) ? index_shape[i] : input_shape[i];
-        }
-
-        getInput = [mpsGraph sliceTensor:inputTensor starts:starts ends:ends strides:strides name:nil];
-      }
-
-      // PyTorch issue #135240: MPS reshape underneath goes haywire in
-      // gatherAlongAxis before MacOS 15.2 if it has multiple dimensions but can
-      // be squeezed into 1D. We need to squeeze out the extra dims pre 15.2
-      bool workaroundSingleDim = (self_arg.squeeze().sizes().size() == 1 && self_arg.sizes().size() > 1);
-      bool isMacos15_2 = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_2_PLUS);
-      if (workaroundSingleDim and !isMacos15_2) {
-        const int64_t dims = self_arg.sizes().size();
-        int64_t size = self_arg.squeeze().sizes()[0];
-        auto shape = [[NSMutableArray alloc] initWithCapacity:dims];
-        for (int i = 0; i < dims; ++i) {
-          [shape addObject:[NSNumber numberWithInt:size]];
-        }
-        getInput = [mpsGraph broadcastTensor:getInput toShape:shape name:nil];
-        indexTensor = [mpsGraph broadcastTensor:indexTensor toShape:shape name:nil];
-      }
-      MPSGraphTensor* castIndexTensor = [mpsGraph castTensor:indexTensor
-                                                      toType:MPSDataTypeInt32
-                                                        name:(NSString* _Nonnull)nil];
-
-      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wobjc-method-access")
-      MPSGraphTensor* outputTensor = [mpsGraph gatherAlongAxis:(NSInteger)dim
-                                             withUpdatesTensor:getInput
-                                                 indicesTensor:castIndexTensor
-                                                          name:nil];
-      C10_DIAGNOSTIC_POP()
-
-      if (workaroundSingleDim) {
-        outputTensor = [mpsGraph sliceTensor:outputTensor dimension:0 start:0 length:output.sizes()[0] name:nil];
-      }
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, input_shape, true, input_type);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, index_shape);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, nullptr, false, output_type);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-}
+REGISTER_DISPATCH(gather_stub, &gather_mps_kernel);
 
 static const char* reduce_op_to_mps_string(const ReductionType& op) {
   switch (op) {

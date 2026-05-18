@@ -9615,8 +9615,7 @@
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: gather_out
-    MPS: gather_out_mps
+    CPU, CUDA, MPS: gather_out
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function

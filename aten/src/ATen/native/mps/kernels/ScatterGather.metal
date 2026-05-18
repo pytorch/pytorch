@@ -293,6 +293,85 @@ kernel void scatter_reduce_strided(
   ScatterAtomicApply<T, Op>::apply(output, out_offs, src[src_offs]);
 }
 
+// gather: for each coord in `index` (= output) shape, read input at
+// (coord with coord[dim] replaced by index[coord]) and write to output[coord].
+// One write per output element -> no atomics needed. Bounds-check fires the
+// async error path on out-of-range indices, matching CUDA's behavior.
+
+// Dense fast path: output and index contiguous, index.shape == output.shape,
+// input.shape == output.shape outside dim (no slicing).
+template <typename T, typename index_t>
+kernel void gather_dense(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant index_t* index [[buffer(2)]],
+    constant long& inner_size [[buffer(3)]],
+    constant long& output_dim_size [[buffer(4)]],
+    constant long& input_dim_size [[buffer(5)]],
+    constant long& tid_offset [[buffer(6)]],
+    device ErrorMessages* error_buf [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long tid = long(thread_index) + tid_offset;
+  long idx = long(index[tid]);
+  if (idx < 0 || idx >= input_dim_size) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "gather: index ",
+        idx,
+        " is out of bounds for dimension with size ",
+        input_dim_size);
+    output[tid] = T(0);
+    return;
+  }
+  const long inner = tid % inner_size;
+  const long outer = tid / (inner_size * output_dim_size);
+  const long input_offset =
+      outer * (inner_size * input_dim_size) + idx * inner_size + inner;
+  output[tid] = input[input_offset];
+}
+
+// Strided generic gather. Iterates over `index` (= output) shape per thread.
+template <typename T, typename index_t>
+kernel void gather_strided(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant index_t* index [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* index_strides [[buffer(6)]],
+    constant uint3& ndim_dim [[buffer(7)]],
+    constant long& input_dim_size [[buffer(8)]],
+    constant long& tid_offset [[buffer(9)]],
+    device ErrorMessages* error_buf [[buffer(10)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const uint ndim = ndim_dim.x;
+  const uint dim = ndim_dim.y;
+  const long tid = long(thread_index) + tid_offset;
+
+  ::metal::array<long, max_ndim> pos;
+  pos_from_thread_index<long>(tid, &pos[0], sizes, ndim);
+
+  const long out_offs = offset_from_coord<long>(&pos[0], output_strides, ndim);
+  const long index_offs = offset_from_coord<long>(&pos[0], index_strides, ndim);
+  long idx = long(index[index_offs]);
+  if (idx < 0 || idx >= input_dim_size) {
+    TORCH_REPORT_ERROR(
+        error_buf,
+        "gather: index ",
+        idx,
+        " is out of bounds for dimension ",
+        long(dim),
+        " with size ",
+        input_dim_size);
+    output[out_offs] = T(0);
+    return;
+  }
+  pos[dim] = idx;
+  const long input_offs = offset_from_coord<long>(&pos[0], input_strides, ndim);
+  output[out_offs] = input[input_offs];
+}
+
 #define REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, IDXTYPE, OP, OP_ENUM)          \
   template                                                                    \
       [[host_name("scatter_" #OP "_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
@@ -365,6 +444,37 @@ kernel void scatter_reduce_strided(
   REGISTER_SCATTER_SET_OP(DTYPE, long);   \
   REGISTER_SCATTER_SET_OP(DTYPE, int)
 
+#define REGISTER_GATHER_OP(DTYPE, IDXTYPE)                                  \
+  template [[host_name("gather_dense_" #DTYPE "_" #IDXTYPE)]] kernel void   \
+  gather_dense<DTYPE, IDXTYPE>(                                             \
+      device DTYPE * output [[buffer(0)]],                                  \
+      constant DTYPE * input [[buffer(1)]],                                 \
+      constant IDXTYPE * index [[buffer(2)]],                               \
+      constant long& inner_size [[buffer(3)]],                              \
+      constant long& output_dim_size [[buffer(4)]],                         \
+      constant long& input_dim_size [[buffer(5)]],                          \
+      constant long& tid_offset [[buffer(6)]],                              \
+      device ErrorMessages* error_buf [[buffer(7)]],                        \
+      uint thread_index [[thread_position_in_grid]]);                       \
+  template [[host_name("gather_strided_" #DTYPE "_" #IDXTYPE)]] kernel void \
+  gather_strided<DTYPE, IDXTYPE>(                                           \
+      device DTYPE * output [[buffer(0)]],                                  \
+      constant DTYPE * input [[buffer(1)]],                                 \
+      constant IDXTYPE * index [[buffer(2)]],                               \
+      constant long* sizes [[buffer(3)]],                                   \
+      constant long* output_strides [[buffer(4)]],                          \
+      constant long* input_strides [[buffer(5)]],                           \
+      constant long* index_strides [[buffer(6)]],                           \
+      constant uint3& ndim_dim [[buffer(7)]],                               \
+      constant long& input_dim_size [[buffer(8)]],                          \
+      constant long& tid_offset [[buffer(9)]],                              \
+      device ErrorMessages* error_buf [[buffer(10)]],                       \
+      uint thread_index [[thread_position_in_grid]])
+
+#define REGISTER_GATHER_DTYPE(DTYPE) \
+  REGISTER_GATHER_OP(DTYPE, long);   \
+  REGISTER_GATHER_OP(DTYPE, int)
+
 #define REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, OP, OP_ENUM)   \
   REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, long, OP, OP_ENUM); \
   REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, int, OP, OP_ENUM)
@@ -390,18 +500,20 @@ kernel void scatter_reduce_strided(
   REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amin, Amin); \
   REGISTER_SCATTER_REDUCE_FOR_OP(DTYPE, amax, Amax)
 
-// Dtypes that support all of {set, add, prod, amin, amax}: float, int, half,
-// bfloat, short, char, uchar, bool -- AtomicType provides both atomic_add and
-// atomic_binary_op for these.
+// Dtypes that support all of {gather, set, add, prod, amin, amax}: float, int,
+// half, bfloat, short, char, uchar, bool -- AtomicType provides both atomic_add
+// and atomic_binary_op for these.
 #define REGISTER_SCATTER_OPS_FULL(DTYPE) \
+  REGISTER_GATHER_DTYPE(DTYPE);          \
   REGISTER_SCATTER_SET_DTYPE(DTYPE);     \
   REGISTER_SCATTER_ADD_DTYPE(DTYPE);     \
   REGISTER_SCATTER_PROD_MIN_MAX_DTYPE(DTYPE)
 
-// Dtypes that support {set, add} only: long (atomic_add is eventually
+// Dtypes that support {gather, set, add} only: long (atomic_add is eventually
 // consistent, no true 64-bit CAS for atomic_binary_op), float2/half2
 // (complex; amin/amax undefined).
 #define REGISTER_SCATTER_OPS_SET_ADD(DTYPE) \
+  REGISTER_GATHER_DTYPE(DTYPE);             \
   REGISTER_SCATTER_SET_DTYPE(DTYPE);        \
   REGISTER_SCATTER_ADD_DTYPE(DTYPE)
 
