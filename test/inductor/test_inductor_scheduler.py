@@ -13,7 +13,7 @@ import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     NestedReduction,
@@ -99,15 +99,16 @@ class TestScheduler(TestCase):
         snode.node = node
         return snode
 
-    def test_get_mm_like_fn_uses_op_overload(self):
+    def test_get_benchmarkable_extern_fn_uses_op_overload(self):
+        self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
         self.assertIs(
-            _get_mm_like_fn(
+            _get_benchmarkable_extern_fn(
                 self._extern_snode_for_op(torch.ops.aten.mm.out, "renamed_mm")
             ),
             torch.ops.aten.mm,
         )
         self.assertIs(
-            _get_mm_like_fn(
+            _get_benchmarkable_extern_fn(
                 self._extern_snode_for_op(
                     torch.ops.aten._scaled_mm.out, "extern_kernels.mm"
                 )
@@ -115,10 +116,12 @@ class TestScheduler(TestCase):
             torch.ops.aten._scaled_mm,
         )
         self.assertIsNone(
-            _get_mm_like_fn(self._extern_snode_for_op(None, "extern_kernels.mm"))
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(None, "extern_kernels.mm")
+            )
         )
         self.assertIsNone(
-            _get_mm_like_fn(
+            _get_benchmarkable_extern_fn(
                 self._extern_snode_for_op(
                     torch.ops.aten.relu.out, "extern_kernels.relu"
                 )
