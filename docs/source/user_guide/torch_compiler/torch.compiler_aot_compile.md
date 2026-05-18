@@ -368,11 +368,6 @@ if __name__ == "__main__":
     main()
 ```
 
-Because `compile_on_one_rank` makes the compiled graphs identical across ranks,
-the Inductor cache (`FxGraphCache`) can share compiled artifacts. On the first
-run, every rank compiles independently but produces the same cache entry. On
-subsequent runs, all ranks hit the warm cache and skip compilation entirely.
-
 :::{note}
 Save/load of distributed artifacts via `save_compiled_function` /
 `load_compiled_function` is not yet supported when the compiled graph
