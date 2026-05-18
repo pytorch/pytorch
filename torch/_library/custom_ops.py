@@ -105,6 +105,9 @@ def custom_op(
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
+        tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
+            operator. Use ``torch.Tag.inplace`` for operators that mutate their
+            first Tensor argument and return it.
 
     The following types are supported for the wrapped function's input parameters:
 
@@ -168,6 +171,24 @@ def custom_op(
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
         >>>
+        >>> # Example of a custom op with inplace semantics
+        >>> @custom_op(
+        >>>     "mylib::numpy_sin_",
+        >>>     mutates_args={"x"},
+        >>>     device_types="cpu",
+        >>>     tags=torch.Tag.inplace,
+        >>> )
+        >>> def numpy_sin_(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     np.sin(x_np, out=x_np)
+        >>>     return x
+        >>>
+        >>> x = torch.randn(3)
+        >>> expected = x.sin()
+        >>> result = numpy_sin_(x)
+        >>> assert result is x
+        >>> assert torch.allclose(x, expected)
+        >>>
         >>> # Example of a factory function
         >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
         >>> def bar(device: torch.device) -> Tensor:
@@ -192,13 +213,18 @@ def custom_op(
     def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
+        normalized_tags = _normalize_tags(tags)
         if schema is None:
-            schema_str = torch.library.infer_schema(fn, mutates_args=mutates_args)
+            schema_str = torch.library.infer_schema(
+                fn,
+                mutates_args=mutates_args,
+                _tags=normalized_tags,
+            )
         else:
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, tags)
+        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -253,6 +279,7 @@ class CustomOpDef:
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Callable | None = None
         self._autocast_dtype: dict[str, _dtype | None] = {}
+        self._is_inplace = False
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
@@ -394,7 +421,14 @@ class CustomOpDef:
                             return inspect.getmodule(fn)
 
                         schema = self._opoverload._schema
-                        if not schema._is_view_op():
+                        if self._is_inplace:
+                            if result is not args[0]:
+                                raise RuntimeError(
+                                    f"{self._name} (with implementation in {get_module()}): "
+                                    "An operator tagged with torch.Tag.inplace must "
+                                    "return its first argument."
+                                )
+                        elif not schema._is_view_op():
                             utils._c_check_aliasing_constraint(
                                 self._name,
                                 args,
@@ -652,6 +686,7 @@ class CustomOpDef:
         cpp_schema = _C.parse_schema(schema_str)
         self._validate_schema(cpp_schema, schema_str)
         self._define_dispatcher_op(schema_str, tags)
+        self._is_inplace = utils.is_inplace(self._opoverload)
         self._register_fake_dispatcher_impl()
         self._register_autograd_dispatcher_impl()
         self._register_adinplaceorview_dispatcher_impl()

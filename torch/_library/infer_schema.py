@@ -27,6 +27,7 @@ def infer_schema(
     *,
     mutates_args,
     op_name: str | None = None,
+    _tags: typing.Sequence[torch.Tag] = (),
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -69,6 +70,9 @@ def infer_schema(
     # inspect.signature() and we no longer need to deal with stringified
     # annotations below.
     sig = inspect.signature(prototype_function)
+    is_inplace = torch.Tag.inplace in _tags
+    if type(mutates_args) is not str:
+        mutates_args = tuple(mutates_args)
 
     def error_fn(what):
         raise ValueError(f"infer_schema(func): {what} Got func with signature {sig})")
@@ -111,6 +115,9 @@ def infer_schema(
     params = []
     seen_args = set()
     saw_kwarg_only_arg = False
+    first_positional_arg_name = None
+    first_positional_arg_schema_type = None
+    first_positional_arg_alias = None
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
@@ -164,6 +171,14 @@ def infer_schema(
         if schema_type is None:
             raise AssertionError(f"schema_type is None for param {name}")
 
+        if (
+            param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and first_positional_arg_name is None
+        ):
+            first_positional_arg_name = name
+            first_positional_arg_schema_type = schema_type
+            first_positional_arg_alias = f"a{idx}"
+
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
@@ -212,8 +227,28 @@ def infer_schema(
                 f"mutates_args should contain the names of all args that the "
                 f"custom op mutates, or just the string 'unknown' if you don't know."
             )
+    if is_inplace:
+        if first_positional_arg_name is None:
+            error_fn("torch.Tag.inplace requires a positional Tensor argument.")
+        if first_positional_arg_schema_type != "Tensor":
+            error_fn(
+                "torch.Tag.inplace requires the first positional argument to be a Tensor."
+            )
+        if type(mutates_args) is str or set(mutates_args) != {
+            first_positional_arg_name
+        }:
+            error_fn(
+                "torch.Tag.inplace requires mutates_args to contain exactly "
+                f"the first positional argument, got {mutates_args}."
+            )
     return_annotation, _ = unstringify_type(sig.return_annotation)
     ret = parse_return(return_annotation, error_fn)
+    if is_inplace:
+        if ret != "Tensor":
+            error_fn(
+                "torch.Tag.inplace requires the return annotation to be torch.Tensor."
+            )
+        ret = f"Tensor({first_positional_arg_alias}!)"
     if op_name is not None:
         return f"{op_name}({', '.join(params)}) -> {ret}"
     return f"({', '.join(params)}) -> {ret}"
