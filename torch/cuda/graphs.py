@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import gc
-import textwrap
-import traceback
 import typing
-import weakref
 from collections.abc import Callable
-from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
+from typing import overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -28,48 +25,9 @@ except ImportError:
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE
-    from torch.utils._cuda_debug import _TensorTrackingMode
+    from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
 from .._utils import _dummy_type
-
-
-class _TrackedTensorInfo:
-    __slots__ = (
-        "weakref",
-        "creation_traceback_py",
-        "creation_traceback_cpp",
-        "deletion_traceback_py",
-        "data_ptr",
-        "device_index",
-        "_storage_data_ptr",
-    )
-
-    def __init__(self, tensor: Tensor) -> None:
-        from torch.utils import get_cpp_backtrace
-
-        self.creation_traceback_py = "".join(traceback.format_stack()[:-3])
-        self.creation_traceback_cpp = get_cpp_backtrace()
-        self.deletion_traceback_py: str | None = None
-        self.data_ptr = tensor.data_ptr()
-        self.device_index = tensor.device.index
-
-        def on_release(_: weakref.ref[torch.UntypedStorage]) -> None:
-            try:
-                self.deletion_traceback_py = "".join(traceback.format_stack()[:-1])
-            except Exception:
-                pass  # don't raise under GC
-
-        storage = tensor.untyped_storage()
-        self._storage_data_ptr = storage.data_ptr()
-        self.weakref: weakref.ref[torch.UntypedStorage] = weakref.ref(
-            storage, on_release
-        )
-
-    def is_alive(self) -> bool:
-        storage = self.weakref()
-        if storage is None:
-            return False
-        return storage.data_ptr() == self._storage_data_ptr
 
 
 __all__ = [
@@ -144,107 +102,20 @@ class CUDAGraph(_CUDAGraph):
 
     """
 
-    _external_inputs: dict[int, _TrackedTensorInfo]
-    _internal_outputs: set[int]
-    _memory_snapshot: Any = None
-    _tracking_mode: _TensorTrackingMode | None
+    _tracker: _CUDAGraphInputLivenessTracker | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
-        instance._external_inputs = {}
-        instance._internal_outputs = set()
-        instance._memory_snapshot = None
-        instance._tracking_mode = None
+        instance._tracker = None
         return instance
-
-    def _track_external_input(self, tensor: Tensor) -> None:
-        data_ptr = tensor.data_ptr()
-        if (
-            data_ptr not in self._internal_outputs
-            and data_ptr not in self._external_inputs
-        ):
-            self._external_inputs[data_ptr] = _TrackedTensorInfo(tensor)
-
-    def _mark_internal_output(self, tensor: Tensor) -> None:
-        data_ptr = tensor.data_ptr()
-        if data_ptr not in self._external_inputs:
-            self._internal_outputs.add(data_ptr)
-
-    def _stop_input_tracking(self) -> None:
-        if self._tracking_mode is not None:
-            self._tracking_mode.__exit__(None, None, None)
-            self._tracking_mode = None
-
-    def _reset_tracking_state(self) -> None:
-        self._stop_input_tracking()
-        self._external_inputs.clear()
-        self._internal_outputs.clear()
-        self._memory_snapshot = None
-
-    def _start_input_tracking(self) -> None:
-        from torch.utils._cuda_debug import _TensorTrackingMode
-
-        self._tracking_mode = _TensorTrackingMode(self)
-        self._tracking_mode.__enter__()
-
-    def _get_memory_snapshot(self, capture_pool: _POOL_HANDLE) -> list[dict[str, Any]]:
-        if self._memory_snapshot is None:
-            self._memory_snapshot = torch.cuda.memory.memory_snapshot(
-                capture_pool, include_traces=False
-            )
-        return self._memory_snapshot
 
     def __del__(self) -> None:
         try:
-            self._reset_tracking_state()
+            tracker, self._tracker = self._tracker, None
+            if tracker is not None:
+                tracker.stop()
         except Exception:
             pass  # don't raise under GC
-
-    def _is_tensor_from_capture_pool(self, tensor: _TrackedTensorInfo) -> bool:
-        capture_pool = self.pool()
-        if capture_pool == (0, 0):
-            return False
-        device = tensor.device_index
-        if device is None:
-            return False
-        snapshot = self._get_memory_snapshot(capture_pool)
-        tensor_ptr = tensor.data_ptr
-        for meminfo in snapshot:
-            if meminfo["device"] != device:
-                continue
-            for block in meminfo["blocks"]:
-                addr = block["address"]
-                if (
-                    addr <= tensor_ptr < addr + block["size"]
-                    and "active" in block["state"]
-                ):
-                    return True
-        return False
-
-    def _check_external_inputs_alive(self) -> None:
-        dead = [
-            i
-            for i in self._external_inputs.values()
-            if not i.is_alive() and not self._is_tensor_from_capture_pool(i)
-        ]
-        if not dead:
-            return
-
-        def fmt(label: str, tb: str | None) -> str:
-            return f"  {label}:\n{textwrap.indent(tb.strip(), '    ')}\n" if tb else ""
-
-        parts = [f"CUDA graph replay detected {len(dead)} dead tensor(s).\n"]
-        for i, info in enumerate(dead[:5], 1):
-            parts.append(f"Dead tensor #{i} (data_ptr={info.data_ptr:#x}):\n")
-            parts.append(fmt("Creation Traceback (Python)", info.creation_traceback_py))
-            parts.append(fmt("Creation Traceback (C++)", info.creation_traceback_cpp))
-            parts.append(fmt("Deletion Traceback (Python)", info.deletion_traceback_py))
-        if len(dead) > 5:
-            parts.append(f"  ... and {len(dead) - 5} more\n")
-        parts.append(
-            fmt("Replay Traceback (Python)", "".join(traceback.format_stack()[:-2]))
-        )
-        raise RuntimeError("".join(parts))
 
     def capture_begin(
         self,
@@ -275,11 +146,16 @@ class CUDAGraph(_CUDAGraph):
                 .. note::
                     Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
                     tracked by this mechanism.
-        """  # noqa: B950
-        self._reset_tracking_state()
+        """
+        if self._tracker is not None:
+            self._tracker.stop()
+            self._tracker = None
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
         if check_input_liveness:
-            self._start_input_tracking()
+            from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
+
+            self._tracker = _CUDAGraphInputLivenessTracker()
+            self._tracker.start()
 
     def capture_end(self) -> None:
         r"""End CUDA graph capture on the current stream.
@@ -291,7 +167,8 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         super().capture_end()
-        self._stop_input_tracking()
+        if self._tracker is not None:
+            self._tracker.stop()
 
     def instantiate(self) -> None:
         r"""Instantiate the CUDA graph. Will be called by
@@ -304,14 +181,15 @@ class CUDAGraph(_CUDAGraph):
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
-        # The call below would be a no-op if input liveness check was not turned on
-        # during the capture.
-        self._check_external_inputs_alive()
+        if self._tracker is not None:
+            self._tracker.check_alive(self.pool())
         super().replay()
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
-        self._reset_tracking_state()
+        if self._tracker is not None:
+            self._tracker.stop()
+            self._tracker = None
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:

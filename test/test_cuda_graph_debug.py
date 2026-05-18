@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, T
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 def _warmup_op(op, n=3):
@@ -128,7 +128,7 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = x * 2
             z = empty.view(0)
         self.assertEqual(empty.data_ptr(), 0)
-        self.assertNotIn(empty.data_ptr(), g._external_inputs)
+        self.assertNotIn(empty.data_ptr(), g._tracker._external_inputs)
         del empty
         g.replay()
 
@@ -145,8 +145,8 @@ class TestCUDAGraphDebugInputs(TestCase):
                 result = x * 2
                 with torch.cuda.stream(other_stream):
                     other_result = y * 3
-        self.assertIn(x.data_ptr(), g._external_inputs)
-        self.assertNotIn(y.data_ptr(), g._external_inputs)
+        self.assertIn(x.data_ptr(), g._tracker._external_inputs)
+        self.assertNotIn(y.data_ptr(), g._tracker._external_inputs)
         del y
         g.replay()
         self.assertEqual(result, x * 2)
@@ -209,8 +209,8 @@ class TestCUDAGraphDebugInputs(TestCase):
         with torch.cuda.graph(g, check_input_liveness=True):
             cuda_dest.copy_(pinned, non_blocking=True)
             y = cuda_dest * 2
-        self.assertIn(pinned.data_ptr(), g._external_inputs)
-        self.assertIn(cuda_dest.data_ptr(), g._external_inputs)
+        self.assertIn(pinned.data_ptr(), g._tracker._external_inputs)
+        self.assertIn(cuda_dest.data_ptr(), g._tracker._external_inputs)
         # This should be OK
         g.replay()
         del pinned
