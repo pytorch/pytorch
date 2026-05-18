@@ -43,7 +43,6 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
-IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
@@ -68,7 +67,7 @@ def CDNA3OrLater():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:

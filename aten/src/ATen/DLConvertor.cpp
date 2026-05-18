@@ -109,8 +109,7 @@ DLDataType getDLDataType(const Tensor& t) {
 DLDevice torchDeviceToDLDevice(at::Device device) {
   DLDevice ctx;
 
-  ctx.device_id =
-      (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
+  ctx.device_id = (device.is_cuda() || device.is_privateuseone())
       ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
       : 0;
 
@@ -141,9 +140,6 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       ctx.device_type = DLDeviceType::kDLMAIA;
       break;
     case DeviceType::PrivateUse1:
-      ctx.device_type = DLDeviceType::kDLExtDev;
-      break;
-    case DeviceType::MTIA:
       ctx.device_type = DLDeviceType::kDLExtDev;
       break;
     case DeviceType::MPS:

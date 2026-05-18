@@ -520,22 +520,22 @@ class _NestedReductionBase:
 
     @inductor_config.patch(emulate_precision_casts=True)
     def test_fullres_epilogue_with_multiple_outputs(self):
-        """Full-res epilogue producing both FP8 output and a second derived output."""
+        """Full-res epilogue producing both converted output and scale."""
         import torch.nn.functional as F
 
         B, D, G = 64, 4096, 128
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+        qmax = 448.0
 
         def f(x, weight):
             x = F.rms_norm(x, (D,), weight)
             x_groups = x.view(B, D // G, G)
             amax = x_groups.abs().amax(dim=-1)
-            scale = (amax / fp8_max).clamp(min=1e-12)
-            x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
-            return x_fp8.view(B, D).float(), scale
+            scale = (amax / qmax).clamp(min=1e-12)
+            x_quant = (x_groups / scale.unsqueeze(-1)).to(torch.float16)
+            return x_quant.view(B, D).float(), scale
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(B, D, device=GPU_TYPE)
+        w = torch.randn(D, device=GPU_TYPE)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
@@ -561,7 +561,7 @@ class _NestedReductionBase:
 
     @inductor_config.patch(emulate_precision_casts=True)
     def test_producer_consumer_rmsnorm_scale(self):
-        """RMS norm + amax + scale epilogue (clamp + to_fp8)."""
+        """RMS norm + amax + converted scale epilogue."""
         import torch.nn.functional as F
 
         B, D, G = 128, 4096, 16
@@ -570,41 +570,41 @@ class _NestedReductionBase:
             x = F.rms_norm(x, (D,), weight)
             x = x.view(B, D // G, G)
             amax = x.abs().amax(dim=-1)
-            scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
+            scale = (amax / 448.0).clamp(min=1e-12).to(torch.float16)
             return scale.float()
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(B, D, device=GPU_TYPE)
+        w = torch.randn(D, device=GPU_TYPE)
         self.check_numeric(f, (x, w), tol=0.01)
         self.check_fusion()
 
     @inductor_config.patch(emulate_precision_casts=True)
     @parametrize("B", [128, 1])
-    def test_producer_consumer_rmsnorm_fp8_quant(self, B):
-        """RMS norm + amax + scale + full-res quantize epilogue."""
+    def test_producer_consumer_rmsnorm_quant(self, B):
+        """RMS norm + amax + scale + full-res convert epilogue."""
         import torch.nn.functional as F
 
         D, G = 4096, 128
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+        qmax = 448.0
 
         def f(x, weight):
             x = F.rms_norm(x, (D,), weight)
             x_groups = x.view(B, D // G, G)
             amax = x_groups.abs().amax(dim=-1)
-            scale = (amax / fp8_max).clamp(min=1e-12)
-            x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
-            return x_fp8.view(B, D).float(), scale
+            scale = (amax / qmax).clamp(min=1e-12)
+            x_quant = (x_groups / scale.unsqueeze(-1)).to(torch.float16)
+            return x_quant.view(B, D).float(), scale
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(B, D, device=GPU_TYPE)
+        w = torch.randn(D, device=GPU_TYPE)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
     @inductor_config.patch(emulate_precision_casts=True)
-    def test_producer_consumer_residual_rmsnorm_fp8_quant(self):
+    def test_producer_consumer_residual_rmsnorm_quant(self):
         B, D, G = 128, 2048, 128
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
-        fp8_min_scale = 1.0 / (fp8_max * 512.0)
+        qmax = 448.0
+        min_scale = 1.0 / (qmax * 512.0)
 
         def f(x, residual, weight):
             h = x.float() + residual.float()
@@ -613,14 +613,14 @@ class _NestedReductionBase:
             normed_fp16 = normed.to(torch.float16) * weight
             grouped = normed_fp16.view(B, D // G, G)
             absmax = grouped.abs().amax(dim=-1, keepdim=True).float()
-            scales = (absmax / fp8_max).clamp(min=fp8_min_scale)
-            x_scaled = (grouped / scales).clamp(-fp8_max, fp8_max)
-            x_fp8 = x_scaled.to(torch.float8_e4m3fn).view(B, D)
-            return x_fp8.float(), scales.squeeze(-1)
+            scales = (absmax / qmax).clamp(min=min_scale)
+            x_scaled = (grouped / scales).clamp(-qmax, qmax)
+            x_quant = x_scaled.to(torch.float16).view(B, D)
+            return x_quant.float(), scales.squeeze(-1)
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(f, (x, residual, w))
         self.check_fusion()
 
@@ -1081,11 +1081,11 @@ def _capture_producer_scale_kernel_sources(
         x = F.rms_norm(x, (D,), weight)
         x = x.view(B, D // G, G)
         amax = x.abs().amax(dim=-1)
-        scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
+        scale = (amax / 448.0).clamp(min=1e-12).to(torch.float16)
         return scale.float()
 
-    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+    x = torch.randn(B, D, device=GPU_TYPE)
+    w = torch.randn(D, device=GPU_TYPE)
     return _run_and_capture_sources(
         f,
         (x, w),
@@ -1098,19 +1098,19 @@ def _capture_fullres_kernel_sources(
     batch_size: int, *, force_persistent_outer_reduction: bool | None = None
 ) -> tuple[str, str]:
     B, D, G = batch_size, 4096, 128
-    fp8_max = torch.finfo(torch.float8_e4m3fn).max
+    qmax = 448.0
     import torch.nn.functional as F
 
     def f(x, weight):
         x = F.rms_norm(x, (D,), weight)
         x_groups = x.view(B, D // G, G)
         amax = x_groups.abs().amax(dim=-1)
-        scale = (amax / fp8_max).clamp(min=1e-12)
-        x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
-        return x_fp8.view(B, D).float(), scale
+        scale = (amax / qmax).clamp(min=1e-12)
+        x_quant = (x_groups / scale.unsqueeze(-1)).to(torch.float16)
+        return x_quant.view(B, D).float(), scale
 
-    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
-    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
+    x = torch.randn(B, D, device=GPU_TYPE)
+    w = torch.randn(D, device=GPU_TYPE)
     return _run_and_capture_sources(
         f,
         (x, w),

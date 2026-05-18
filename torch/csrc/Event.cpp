@@ -75,17 +75,13 @@ PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
   return self.release();
 }
 
-void THPEvent_dealloc_common(THPEvent* self) {
-  PyObject_ClearWeakRefs((PyObject*)self);
-  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
-}
-
 static void THPEvent_dealloc(THPEvent* self) {
   {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
-  THPEvent_dealloc_common(self);
+  PyObject_ClearWeakRefs((PyObject*)self);
+  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
@@ -335,7 +331,12 @@ PyTypeObject THPEventType = {
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
-  if (PyModule_AddType(module, &THPEventType) < 0) {
+  if (PyType_Ready(&THPEventType) < 0) {
+    throw python_error();
+  }
+  Py_INCREF(&THPEventType);
+  if (PyModule_AddObject(
+          module, "Event", reinterpret_cast<PyObject*>(&THPEventType)) < 0) {
     throw python_error();
   }
 }

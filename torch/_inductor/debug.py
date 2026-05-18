@@ -412,13 +412,9 @@ class DebugContext:
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
-            try:
-                os.makedirs(dirname, exist_ok=False)
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
                 return dirname
-            except FileExistsError:
-                # Another process (e.g. a peer rank with the same debug_dir)
-                # created this counter slot first; advance to the next n.
-                continue
         return None
 
     def __init__(self) -> None:

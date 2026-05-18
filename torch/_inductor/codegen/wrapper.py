@@ -3187,14 +3187,12 @@ class PythonWrapperCodegen(CodeGen):
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     kernel.cuda_kernel_saved = False
-                    kernel.cpu_kernel_saved = False
             """
         )
 
     def generate_save_uncompiled_kernels(self):
         """
-        Precompile and save the per-config kernel artifacts (CUBINs on GPU,
-        ``.so`` + launcher ``.so`` on CPU) for Triton kernels that haven't
+        Precompile and save the CUBINs of the Triton kernels that haven't
         been precompiled and saved as a side effect of running the generated
         JIT model (Python wrapper). This can happen when the model contains
         control flow: only one pass through the control flow operators covers
@@ -3207,19 +3205,13 @@ class PythonWrapperCodegen(CodeGen):
             f"""
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
-                    if kernel.device_props.type == "cpu":
-                        if not kernel.cpu_kernel_saved:
-                            if len(kernel.launchers) == 0:
-                                kernel.precompile()
-                            kernel.save_cpu_kernel(launcher=kernel.launchers[0])
-                    else:
-                        if not kernel.cuda_kernel_saved:
-                            if len(kernel.launchers) == 0:
-                                kernel.precompile()
-                            kernel.save_gpu_kernel(
-                                stream="stream",  # use dummy stream
-                                launcher=kernel.launchers[0],
-                            )
+                    if not kernel.cuda_kernel_saved:
+                        if len(kernel.launchers) == 0:
+                            kernel.precompile()
+                        kernel.save_gpu_kernel(
+                            stream="stream",  # use dummy stream
+                            launcher=kernel.launchers[0],
+                        )
             """
         )
 

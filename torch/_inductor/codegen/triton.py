@@ -3446,7 +3446,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
                 )
-                if issubclass(options_class, TensorDescriptorOptions):
+                if options_class == TensorDescriptorOptions:
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -3707,26 +3707,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
-        # If the strides have a non-trivial sort, then the broadcasting dims
-        # need to be reverted for the store
-        # Also see indexing.codegen_broadcast_and_reshape
-        broadcast_shape = indexing.broadcast_shape
-        broadcasting_dims = indexing.broadcasting_dims
-        if not indexing.stride_sorter.is_identity:
-            broadcast_shape = indexing.stride_sorter.revert(broadcast_shape)
-            broadcasting_dims = indexing.stride_sorter.revert(broadcasting_dims)
-
         # These dims no longer need broadcasting.
         for idx, (dim, broadcast_dim) in enumerate(
-            zip(indexing.final_shape, broadcast_shape)
+            zip(indexing.final_shape, indexing.broadcast_shape)
         ):
             if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                broadcasting_dims[idx] = False
-
-        if not indexing.stride_sorter.is_identity:
-            indexing.broadcasting_dims = indexing.stride_sorter.sort(broadcasting_dims)
-        else:
-            indexing.broadcasting_dims = broadcasting_dims
+                indexing.broadcasting_dims[idx] = False
 
         value = indexing.codegen_broadcast_and_reshape(
             value,

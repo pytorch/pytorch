@@ -14,7 +14,6 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
-    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 
@@ -823,10 +822,6 @@ class PurePythonOrderedDictTests(OrderedDictTests, __TestCase):
     module = py_coll
     OrderedDict = py_coll.OrderedDict
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_attribute_error(self):
         class Key(_TriggerSideEffectOnEqual):
             def side_effect(self):
@@ -869,10 +864,6 @@ class CPythonOrderedDictSideEffects:
         msg = re.escape("OrderedDict mutated during iteration")
         self.assertRaisesRegex(RuntimeError, msg, operator.eq, dict1, dict2)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_change_size_by_clear(self):
         class Key(_TriggerSideEffectOnEqual):
             def side_effect(self):
@@ -885,10 +876,6 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict1, {})
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_change_size_by_delete_key(self):
         class Key(_TriggerSideEffectOnEqual):
             def side_effect(self):
@@ -902,10 +889,6 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict1, dict.fromkeys((0, 4.2)))
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_change_linked_list_by_clear(self):
         class Key(_TriggerSideEffectOnEqual):
             def side_effect(self):
@@ -919,10 +902,6 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict1, dict.fromkeys(('a', 'b'), 'c'))
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_change_linked_list_by_delete_key(self):
         class Key(_TriggerSideEffectOnEqual):
             def side_effect(self):
@@ -937,10 +916,6 @@ class CPythonOrderedDictSideEffects:
         self.assertDictEqual(dict1, {0: None, 'a': 'c', 4.2: None})
         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_issue119004_change_size_by_delete_key_in_dict_eq(self):
         class Key(_TriggerSideEffectOnEqual):
             trigger = 0

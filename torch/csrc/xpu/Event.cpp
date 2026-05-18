@@ -49,7 +49,7 @@ static void THXPEvent_dealloc(THXPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->xpu_event.~XPUEvent();
   }
-  THPEvent_dealloc_common(reinterpret_cast<THPEvent*>(self));
+  Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static PyObject* THXPEvent_get_sycl_event(THXPEvent* self, void* unused) {
@@ -168,7 +168,7 @@ static PyTypeObject THXPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset (inherited from THPEventType via tp_base) */
+    0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPEvent_methods, /* tp_methods */
