@@ -5170,7 +5170,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"
     )
-    @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize(
         "test_case",
         [
