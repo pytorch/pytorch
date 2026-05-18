@@ -1257,6 +1257,7 @@ static PyObject* custom_op_fast_path_check(
   c10::DeviceType first_device = c10::DeviceType::CPU;
   bool seen_tensor = false;
   bool any_requires_grad = false;
+  bool mixed_device = false;
 
   for (Py_ssize_t i = 0; i < n; i++) {
     PyObject* obj = PyTuple_GET_ITEM(py_args, i);
@@ -1273,13 +1274,15 @@ static PyObject* custom_op_fast_path_check(
     if (!seen_tensor) {
       first_device = dev;
       seen_tensor = true;
+    } else if (dev != first_device) {
+      mixed_device = true;
     }
     if (t.requires_grad()) {
       any_requires_grad = true;
     }
   }
 
-  if (!seen_tensor) {
+  if (!seen_tensor || mixed_device) {
     Py_RETURN_NONE;
   }
 
@@ -1287,6 +1290,12 @@ static PyObject* custom_op_fast_path_check(
   // then check that nothing unexpected remains.
   uint64_t active = (ks.raw_repr() & ~tls.excluded_.raw_repr());
   if ((active & ~fast_path_allowed_ks.raw_repr()) != 0) {
+    Py_RETURN_NONE;
+  }
+
+  // inference_mode excludes autograd keys; the fast path currently always
+  // calls autograd_impl so bail when no autograd key is active.
+  if ((active & c10::autograd_dispatch_keyset.raw_repr()) == 0) {
     Py_RETURN_NONE;
   }
 
