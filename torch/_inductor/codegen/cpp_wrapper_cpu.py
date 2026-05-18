@@ -2050,6 +2050,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
 
+    def generate_debug_sync(self, buffer):
+        pass
+
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
             'RAIIAtenRecordFunctionHandle record_inductor_wrapper_call_("inductor_wrapper_call", nullptr);'

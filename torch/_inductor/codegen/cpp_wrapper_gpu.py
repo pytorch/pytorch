@@ -844,6 +844,19 @@ class CppWrapperGpu(CppWrapperCpu):
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
 
+    def generate_debug_sync(self, buffer):
+        if self.device == "cuda":
+            buffer.writeline(
+                maybe_hipify_code_wrapper(
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                )
+            )
+            return
+
+        raise NotImplementedError(
+            f"triton debug sync is not supported with {self.device} cpp_wrapper"
+        )
+
     @staticmethod
     def create(
         is_subgraph: bool,

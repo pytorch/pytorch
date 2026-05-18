@@ -1664,7 +1664,7 @@ class PythonWrapperCodegen(CodeGen):
 
         with self.prefix.indent(prefix_indent):
             if config.triton.debug_sync_graph:
-                self.prefix.writeline(V.graph.device_ops.synchronize())
+                self.generate_debug_sync(self.prefix)
             phase = V.graph.get_training_phase()
             if config.annotate_training:
                 self.prefix.writeline(
@@ -2120,7 +2120,7 @@ class PythonWrapperCodegen(CodeGen):
             output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
+                self.generate_debug_sync(self.wrapper_call)
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
@@ -3163,6 +3163,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
+
+    def generate_debug_sync(self, buffer):
+        buffer.writeline(V.graph.device_ops.synchronize())
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
