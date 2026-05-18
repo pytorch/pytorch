@@ -4721,6 +4721,18 @@ def _grid_sampler_2d(
             f"grid last dimension must be 2 (for x,y coords), got {two}"
         )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    int32_max = torch.iinfo(torch.int32).max
+    # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
+    # the historical int64 path, and dynamic shapes fall back if we cannot guard.
+    use_32bit_indices = (
+        a.device.type in ("cuda", "xpu")
+        and guard_or_false(iH <= int32_max)
+        and guard_or_false(iW <= int32_max)
+    )
+    index_dtype = torch.int32 if use_32bit_indices else torch.int64
+
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
         # This allows to generate a single triton cuda kernel instead of two kernels.
@@ -4746,7 +4758,7 @@ def _grid_sampler_2d(
         c = C if _expand_grid else 1
         return tuple(
             torch.where(cond, t, 0).view(N, c, oH, oW)
-            for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
+            for t in (xs.to(dtype=index_dtype), ys.to(dtype=index_dtype), ws)
         )
 
     def get_summand(ix: Tensor, iy: Tensor, w) -> Tensor:
