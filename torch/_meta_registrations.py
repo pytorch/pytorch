@@ -2248,9 +2248,9 @@ def _pad2d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1,
+        sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h} W: {input_w}) is too small. "
+            f"input (H: {input_h}, W: {input_w}) is too small. "
             f"Calculated output H: {output_h} W: {output_w}"
         ),
     )
@@ -2383,12 +2383,10 @@ def _pad3d_common(input, padding, *, is_reflection):
             ),
         )
 
-    from torch.fx.experimental.symbolic_shapes import sym_or
-
     torch._check(
-        sym_or(output_w >= 1, output_h >= 1, output_d >= 1),
+        sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
+            f"input (D: {input_d}, H: {input_h}, W: {input_w}) is too small. "
             f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
         ),
     )
