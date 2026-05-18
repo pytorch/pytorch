@@ -912,18 +912,9 @@ coverage_ignore_functions = [
     "storage_to_tensor_type",
     "validate_cuda_device",
     "validate_hpu_device",
-    # torch.signal.windows.windows
-    "bartlett",
-    "blackman",
-    "cosine",
-    "exponential",
-    "gaussian",
-    "general_cosine",
-    "general_hamming",
-    "hamming",
-    "hann",
-    "kaiser",
-    "nuttall",
+    # torch.utils.backend_registration
+    "generate_methods_for_privateuse1_backend",
+    "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
