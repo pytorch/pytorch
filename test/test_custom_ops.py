@@ -4679,7 +4679,11 @@ class TestCustomOpFastPath(TestCase):
         y = torch.randn(3)
         with self._assert_fast_path_taken(fp_add):
             self.assertEqual(fp_add(x, y), x + y)
+            # OpOverload path (torch.ops.ns.name.default)
             self.assertEqual(torch.ops._torch_testing.fp_add.default(x, y), x + y)
+            # OpOverloadPacket path (torch.ops.ns.name) - resolves to the
+            # default overload whose _op carries the fast path.
+            self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
 
     def test_fast_path_mutable(self):
         @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
