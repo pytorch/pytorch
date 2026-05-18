@@ -65,6 +65,7 @@ from .ir import (
     ExpandView,
     IndexingConstant,
     IRNode,
+    is_cpu,
     is_triton,
     MutableBox,
     OnlineSoftmaxReduction,
@@ -72,6 +73,7 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
+    ReinterpretView,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -6795,6 +6797,16 @@ def make_reduction(
             and is_triton(x)
         ):
             x = to_dtype(x, torch.int32)
+
+        # For argmax/argmin on CPU, make non-contiguous tensors contiguous.
+        # The C++ backend iterates in memory order not logical order.
+        if (
+            reduction_type in ("argmax", "argmin")
+            and is_cpu(x)
+            and isinstance(x.data, (PermuteView, ReinterpretView))
+        ):
+            x = ir.ExternKernel.require_contiguous(clone(x))
+
         kwargs = _make_reduction_inner(
             x,
             axis=axis,

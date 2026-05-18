@@ -6684,6 +6684,18 @@ class CPUReproTests(TestCase):
                 # Compiled output should match eager mode (whether Eager produces
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
+    def test_reduction_transpose(self):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            x.sin_()
+            y = x.t()
+            return y.argmin()
+
+        torch.manual_seed(21)
+
+        x = torch.randn(5, 7, device="cpu")
+        expected = f(x.clone())
+        actual = torch.compile(f, backend="inductor")(x.clone())
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
