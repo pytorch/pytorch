@@ -1041,9 +1041,51 @@ class GemmEpilogueFusionTests(TestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_tuple_epilogue_row_group2_fuses(self):
+    def test_cuda_inductor_quack_backend_tuple_epilogue_row_groups_fuse(self):
         M = 128
         N = 64
+        K = 64
+
+        for dtype in (torch.float16, torch.bfloat16):
+            for group in (2, 4, 8, 16):
+                with self.subTest(dtype=dtype, group=group):
+
+                    def fn(a, b):
+                        return gemm_epilogue_fusion(
+                            torch.ops.aten.mm.default,
+                            (a, b),
+                            lambda acc: (
+                                acc.relu(),
+                                acc.float().view(-1, group, N).sum(1),
+                            ),
+                            kernel_options={"backend": "QUACK"},
+                        )
+
+                    a = torch.rand(M, K, device="cuda", dtype=dtype)
+                    b = torch.rand(K, N, device="cuda", dtype=dtype)
+
+                    actual, (code,) = run_and_get_code(
+                        torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                    )
+                    expected = fn(a, b)
+
+                    torch.testing.assert_close(
+                        actual[0], expected[0], atol=1e-2, rtol=1e-2
+                    )
+                    torch.testing.assert_close(
+                        actual[1], expected[1], atol=5e-1, rtol=1e-2
+                    )
+                    FileCheck().check(f"local_reduce_group={group}").check(
+                        "local_reduce_dim=0"
+                    ).check("local_reduce_out=").check_not("extern_kernels.mm").run(
+                        code
+                    )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_row_reshape_fuses(self):
+        M = 256
+        N = 128
+        group = 4
 
         def fn(a, b):
             return gemm_epilogue_fusion(
@@ -1051,7 +1093,7 @@ class GemmEpilogueFusionTests(TestCase):
                 (a, b),
                 lambda acc: (
                     acc.relu(),
-                    acc.float().view(-1, 2, N).sum(1),
+                    acc.float().reshape(-1, group, N).sum(1),
                 ),
                 kernel_options={"backend": "QUACK"},
             )
@@ -1065,10 +1107,10 @@ class GemmEpilogueFusionTests(TestCase):
         expected = fn(a, b)
 
         torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
-        torch.testing.assert_close(actual[1], expected[1], atol=2e-2, rtol=1e-2)
-        FileCheck().check("local_reduce_group=2").check("local_reduce_dim=0").check(
-            "local_reduce_out="
-        ).check_not("extern_kernels.mm").run(code)
+        torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
+        FileCheck().check(f"local_reduce_group={group}").check(
+            "local_reduce_dim=0"
+        ).check("local_reduce_out=").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_mis_shaped_row_reduce(self):

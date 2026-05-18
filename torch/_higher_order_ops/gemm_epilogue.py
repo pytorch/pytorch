@@ -401,6 +401,9 @@ def _match_quack_local_m_reduce(
     ):
         base = view_node.args[0]
         shape = view_node.args[1]
+    elif view_node.op == "call_method" and view_node.target in ("view", "reshape"):
+        base = view_node.args[0]
+        shape = view_node.args[1:]
     else:
         return None
     source_node = base
