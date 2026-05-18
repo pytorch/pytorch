@@ -342,7 +342,7 @@ class SummaryWriter:
             w_hp.file_writer.add_summary(ssi, global_step)
             w_hp.file_writer.add_summary(sei, global_step)
             for k, v in metric_dict.items():
-                w_hp.add_scalar(k, v, global_step)
+                w_hp.add_scalar(k, v, global_step, new_style=True)
 
     def add_scalar(
         self,

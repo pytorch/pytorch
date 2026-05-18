@@ -14,6 +14,7 @@ import numpy as np
 
 TEST_TENSORBOARD = True
 try:
+    from tensorboard.backend.event_processing import event_file_loader
     import tensorboard.summary.writer.event_file_writer  # noqa: F401
     from tensorboard.compat.proto.summary_pb2 import Summary
 except ImportError:
@@ -283,6 +284,27 @@ recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
 class TestTensorBoardWriter(BaseTestCase):
+    def test_add_hparams_metric_uses_scalars_plugin(self):
+        with self.createSummaryWriter() as writer:
+            writer.add_hparams(
+                {"lr": 0.1, "epochs": 3},
+                {"sss": 2},
+                run_name="run0",
+                global_step=5,
+            )
+
+        metric_values = []
+        run_dir = Path(writer.get_logdir()) / "run0"
+        for event_file in run_dir.glob("events.out.tfevents.*"):
+            for event in event_file_loader.EventFileLoader(str(event_file)).Load():
+                for value in event.summary.value:
+                    if value.tag == "sss":
+                        metric_values.append(value)
+
+        self.assertEqual(1, len(metric_values))
+        self.assertEqual("scalars", metric_values[0].metadata.plugin_data.plugin_name)
+        self.assertEqual(2, metric_values[0].tensor.float_val[0])
+
     def test_writer(self):
         with self.createSummaryWriter() as writer:
             sample_rate = 44100
