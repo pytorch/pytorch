@@ -2868,11 +2868,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         fixed_config: FixedTritonConfig | None = None,
         hint_override: int | None = None,
         is_combo_kernel: bool = False,
+        per_subkernel_blocks: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -6252,7 +6254,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
         # Combo kernels use flattened dispatch where y_pid_offset is computed
         # from the flattened pid, so YZ overflow is not needed
-        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
+        if self.is_combo_kernel and self.per_subkernel_blocks:
             return False
         return (
             entry.grid_dim == 1
@@ -6704,9 +6706,9 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment += "\n" + origins + "\n" + detailed_origins
         wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
 
-    def define_kernel(self, src_code, node_schedule, kernel):
+    def define_kernel(self, src_code, node_schedule, kernel, *, dedupe: bool = True):
         wrapper = V.graph.wrapper_code
-        if src_code in wrapper.src_to_kernel:
+        if dedupe and src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
@@ -6725,8 +6727,9 @@ class TritonScheduling(SIMDScheduling):
                 # distinguish kernel related symbols.
                 kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
 
-            # use the original src_code as the key
-            wrapper.src_to_kernel[src_code] = kernel_name
+            if dedupe:
+                # use the original src_code as the key
+                wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
@@ -6987,16 +6990,18 @@ class TritonScheduling(SIMDScheduling):
         V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
         enable_autotune = config.combo_kernels_autotune > 0
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
+        per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes=node_list,
             custom_part_algorithm=True,
             enable_autotune=enable_autotune,
             mixed_sizes=mixed_sizes,
             only_gen_src_code=True,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, kernel, node_group in kernel_code_list:
+        for src_code, kernel, node_group, _node_info_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 

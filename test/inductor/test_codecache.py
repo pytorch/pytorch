@@ -4540,6 +4540,41 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertEqual(saved_data["extra_options"], {"custom_key": "custom_value"})
 
     @requires_triton()
+    def test_autotune_cache_save_includes_combo_autotune_marker(self):
+        """
+        Test that AutotuneCache.save() persists combo seed tuning state.
+        """
+        from unittest.mock import MagicMock
+
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        tuned_config = Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+
+        cache = AutotuneCache.__new__(AutotuneCache)
+        cache.configs_hash = "test_hash"
+
+        mock_local_backend = MagicMock()
+        cache.local_cache = (mock_local_backend, "test_key")
+        cache.remote_cache = None
+
+        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
+            cache.save(
+                tuned_config,
+                time_taken_ns=1000000,
+                found_by_combo_autotune=True,
+            )
+
+        mock_local_backend.put.assert_called_once()
+        saved_data = mock_local_backend.put.call_args[0][1]
+        self.assertTrue(saved_data["found_by_combo_autotune"])
+
+    @requires_triton()
     def test_autotune_cache_save_omits_extra_options_when_none(self):
         """
         Test that AutotuneCache.save() does not include extra_options when it's None.

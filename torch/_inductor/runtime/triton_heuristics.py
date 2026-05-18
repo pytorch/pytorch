@@ -18,7 +18,7 @@ import re
 import sys
 import threading
 import time
-from collections import namedtuple
+from collections import Counter, namedtuple
 from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
@@ -405,6 +405,97 @@ def get_caching_autotuner_plugins(
     return plugins
 
 
+def _run_combo_kernel_standalone_autotune_seed_one(seed_kernel, seed_args):
+    from torch._dynamo.device_interface import DeviceGuard
+
+    device_interface = seed_kernel.get_device_interface()
+    device_idx = seed_kernel.device_props.index
+    with DeviceGuard(device_interface, device_idx):
+        stream = device_interface.get_raw_stream(device_idx)
+        seed_kernel.autotune_to_one_config_no_launch(*seed_args, stream=stream)
+    assert seed_kernel.launchers
+    log.debug(
+        "Combo standalone autotune seed: selected standalone config %s",
+        seed_kernel.launchers[0].config,
+    )
+    return seed_kernel.launchers[0].config
+
+
+def _run_combo_kernel_standalone_autotune_seed(seed_specs):
+    log.debug(
+        "Combo standalone autotune seed: tuning %d standalone kernels",
+        len(seed_specs),
+    )
+    return [
+        _run_combo_kernel_standalone_autotune_seed_one(seed_kernel, seed_args)
+        for seed_kernel, seed_args in seed_specs
+    ]
+
+
+def _has_combo_standalone_autotune_seed_config(combo_kernel) -> bool:
+    configs = getattr(combo_kernel, "configs", None)
+    if (
+        configs is not None
+        and len(configs) == 1
+        and getattr(configs[0], "found_by_combo_autotune", False)
+    ):
+        return True
+
+    launchers = getattr(combo_kernel, "launchers", ())
+    if (
+        len(launchers) == 1
+        and getattr(launchers[0].config, "found_by_combo_autotune", False)
+    ):
+        return True
+
+    compile_results = getattr(combo_kernel, "compile_results", ())
+    if (
+        len(compile_results) == 1
+        and getattr(compile_results[0].config, "found_by_combo_autotune", False)
+    ):
+        return True
+    return False
+
+
+_combo_standalone_autotune_seed_apply_lock = threading.Lock()
+_combo_standalone_autotune_seed_benchmark_lock = threading.Lock()
+_MISSING_COMBO_CONFIG_KWARG = object()
+_MIXED_COMBO_CONFIG_KWARG = object()
+
+
+def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
+    if not isinstance(combo_kernel, CachingAutotuner):
+        return
+    if not combo_kernel.inductor_meta.get("combo_tuning_groups"):
+        return
+    if getattr(combo_kernel, "combo_standalone_autotune_seed_attempted", False):
+        return
+    if combo_kernel.combo_standalone_autotune_seed_future is not None:
+        return
+    if _has_combo_standalone_autotune_seed_config(combo_kernel):
+        return
+    if not seed_specs:
+        return
+
+    from torch._inductor.autotune_process import PrecompileThreadPool
+
+    log.debug(
+        "Combo standalone autotune seed: submit %d standalone kernels for %s",
+        len(seed_specs),
+        combo_kernel.fn.__name__,
+    )
+    pool = PrecompileThreadPool.get_instance()
+    combo_kernel.combo_standalone_autotune_seed_start_time_ns = time.time_ns()
+    combo_kernel.combo_standalone_autotune_seed_future = [
+        pool.submit(
+            _run_combo_kernel_standalone_autotune_seed_one,
+            seed_kernel,
+            seed_args,
+        )
+        for seed_kernel, seed_args in seed_specs
+    ]
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -541,6 +632,10 @@ class CachingAutotuner(KernelInterface):
         # Compile-time info included in runtime logginging
         self.compile_id: CompileId | None = None
         self.is_backward = False
+        self.combo_standalone_autotune_seed_future = None
+        self.combo_standalone_autotune_seed_configs = None
+        self.combo_standalone_autotune_seed_start_time_ns = None
+        self.combo_standalone_autotune_seed_attempted = False
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -575,12 +670,18 @@ class CachingAutotuner(KernelInterface):
         if len(cached_configs) == 1:
             best_config = cached_configs[0]
             found_by_coordesc = getattr(best_config, "found_by_coordesc", False)
+            found_by_combo_autotune = getattr(
+                best_config, "found_by_combo_autotune", False
+            )
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
 
             for compile_result in self.compile_results:
                 if triton_config_to_hashable(compile_result.config) == best_config_hash:
                     compile_result.config.found_by_coordesc = found_by_coordesc
+                    compile_result.config.found_by_combo_autotune = (
+                        found_by_combo_autotune
+                    )
                     self.compile_results = [compile_result]
                     return
 
@@ -914,15 +1015,22 @@ class CachingAutotuner(KernelInterface):
         assert not self.launchers, (
             "pickle should not be called with after make_launchers()"
         )
+        self._cancel_combo_standalone_autotune_seed()
         return {
             **self.__dict__,
             "lock": None,
             "_plugins": [],
+            "combo_standalone_autotune_seed_future": None,
+            "combo_standalone_autotune_seed_configs": None,
+            "combo_standalone_autotune_seed_start_time_ns": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.lock = threading.Lock()
+        self.combo_standalone_autotune_seed_attempted = getattr(
+            self, "combo_standalone_autotune_seed_attempted", False
+        )
         self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
@@ -1483,7 +1591,11 @@ class CachingAutotuner(KernelInterface):
 
         TritonBundler.put_winner(launcher.cache_hash)
 
-        if self.save_cache_hook:
+        skip_combo_seed_baseline_cache = (
+            self.inductor_meta.get("combo_tuning_groups")
+            and self.combo_standalone_autotune_seed_future is not None
+        )
+        if self.save_cache_hook and not skip_combo_seed_baseline_cache:
             self.save_cache_hook(
                 launcher.config,
                 self.autotune_time_taken_ns,
@@ -1493,154 +1605,120 @@ class CachingAutotuner(KernelInterface):
                 triton_cache_hash=launcher.cache_hash,
             )
 
-    def _combo_sequential_autotune(self, launcher, *args, **kwargs):
-        """
-        Chain block-size decisions for combo kernels: tune one group at a time,
-        each step building on the previous winner.
+    def autotune_to_one_config_no_launch(self, *args, stream, **kwargs):
+        # `stream` is required by callers that establish the correct device/stream
+        # context before seed benchmarking. This helper intentionally returns a
+        # selected config, so it does not run pre_dispatch/pre_autotune plugins
+        # whose non-DEFER contract is to own the full dispatch result.
+        if len(self.launchers) == 0:
+            start_time = time.time_ns()
+            self.precompile()
+            self.precompile_time_taken_ns = time.time_ns() - start_time
+        with self.lock:
+            if len(self.launchers) > 1:
+                with _combo_standalone_autotune_seed_benchmark_lock:
+                    self.autotune_to_one_config(*args, **kwargs)
 
-        Phase 1: Tune block sizes with warps/stages fixed from the base config.
-        Phase 2: Re-tune warps/stages with finalized block sizes.
-        """
-        combo_tuning_groups = self.inductor_meta.get("combo_tuning_groups")
-        if not combo_tuning_groups:
+            assert len(self.launchers) == 1
+            return self.launchers[0].config
+
+    def _consume_combo_standalone_autotune_seed_configs(self):
+        futures = self.combo_standalone_autotune_seed_future
+        assert futures is not None
+        if self.combo_standalone_autotune_seed_configs is None:
+            if isinstance(futures, list):
+                seed_configs = []
+                for future in futures:
+                    try:
+                        seed_configs.append(future.result())
+                    except Exception:
+                        log.warning(
+                            "Combo standalone autotune seed failed; ignoring seed",
+                            exc_info=True,
+                        )
+                        seed_configs.append(None)
+                self.combo_standalone_autotune_seed_configs = seed_configs
+            else:
+                self.combo_standalone_autotune_seed_configs = futures.result()
+        return self.combo_standalone_autotune_seed_configs
+
+    def _cancel_combo_standalone_autotune_seed(self) -> None:
+        futures = self.combo_standalone_autotune_seed_future
+        if futures is None:
+            return
+        if not isinstance(futures, list):
+            futures = [futures]
+        for future in futures:
+            future.cancel()
+        self.combo_standalone_autotune_seed_future = None
+        self.combo_standalone_autotune_seed_start_time_ns = None
+
+    def _apply_combo_standalone_autotune_seed(
+        self,
+        launcher,
+        signature_keys: OrderedSet[str],
+        combo_tuning_groups: list[dict[str, Any]],
+        *args,
+        **kwargs,
+    ):
+        seed_configs = self._consume_combo_standalone_autotune_seed_configs()
+        seed_count = sum(cfg is not None for cfg in seed_configs)
+        log.debug(
+            "Combo standalone autotune seed: applying %d standalone configs to %s",
+            seed_count,
+            self.fn.__name__,
+        )
+        if seed_count == 0:
+            return launcher
+
+        skip_rblock_by_idx = {}
+        for group in combo_tuning_groups:
+            for idx in group["member_indices"]:
+                skip_rblock_by_idx[idx] = group["skip_rblock"]
+
+        current_config = launcher.config
+        seeded_kwargs = dict(current_config.kwargs)
+        shared_seed_kwargs: dict[str, Any] = {}
+        applied_seed = False
+        for idx, cfg in enumerate(seed_configs):
+            if cfg is None:
+                continue
+            before = dict(seeded_kwargs)
+            # Standalone block sizes are stitched directly into per-subkernel
+            # combo constexprs. The combo-level choice left here is warp/stage.
+            _update_combo_kernel_kwargs(
+                seeded_kwargs,
+                cfg.kwargs,
+                idx,
+                skip_rblock_by_idx.get(idx, False),
+                signature_keys,
+                shared_seed_kwargs,
+            )
+            applied_seed = applied_seed or seeded_kwargs != before
+
+        if not applied_seed:
+            log.debug(
+                "Combo standalone autotune seed: no combo block field changes for %s",
+                self.fn.__name__,
+            )
+            return launcher
+
+        seed_config = triton.Config(
+            dict(seeded_kwargs),
+            num_warps=current_config.num_warps,
+            num_stages=current_config.num_stages,
+        )
+        if seed_config.kwargs == current_config.kwargs:
             return launcher
 
         self._ensure_kernel_loaded()
-
-        signature_keys = OrderedSet(self.triton_meta["signature"])
-        best_config = launcher.config
-        current_kwargs = dict(best_config.kwargs)
-        base_num_warps = best_config.num_warps
-        base_num_stages = best_config.num_stages
-
-        start_time = time.time_ns()
-        best_time = self.bench(launcher, *args, **kwargs)
-        counters["inductor"]["combo_autotune_bench"] += 1
-        self.coordesc_tuner.cache_benchmark_result(launcher.config, best_time)
+        with self.lock:
+            seeded_launcher = self._precompile_config(seed_config).make_launcher()
         log.debug(
-            "  Phase 1 baseline: %s warps=%d time=%f",
-            dict(current_kwargs),
-            base_num_warps,
-            best_time,
+            "Combo standalone autotune seed: selected stitched combo config %s",
+            seeded_launcher.config,
         )
-
-        # Phase 1: Tune block sizes per sub-kernel (largest first).
-        # warps/stages stay fixed at base config values.
-        for gi, group in enumerate(combo_tuning_groups):
-            member_indices = group["member_indices"]
-            cfgs = group["configs"]
-            skip_rblock = group["skip_rblock"]
-
-            if len(cfgs) <= 1:
-                log.debug("  Phase 1 group %d SK%s: 1 config, skip", gi, member_indices)
-                continue
-
-            log.debug(
-                "  Phase 1 group %d SK%s: trying %d configs, current_kwargs=%s",
-                gi,
-                member_indices,
-                len(cfgs),
-                dict(current_kwargs),
-            )
-            for ci, cfg in enumerate(cfgs):
-                trial_kwargs = dict(current_kwargs)
-                for idx in member_indices:
-                    _update_combo_kernel_kwargs(
-                        trial_kwargs, cfg.kwargs, idx, skip_rblock, signature_keys
-                    )
-
-                if trial_kwargs == current_kwargs:
-                    log.debug("    cfg[%d] skip (same as current)", ci)
-                    continue
-
-                trial_config = triton.Config(
-                    trial_kwargs,
-                    num_warps=base_num_warps,
-                    num_stages=base_num_stages,
-                )
-
-                with self.lock:
-                    trial_launcher = self._precompile_config(
-                        trial_config
-                    ).make_launcher()
-                trial_time = self.bench(trial_launcher, *args, **kwargs)
-                counters["inductor"]["combo_autotune_bench"] += 1
-                self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
-
-                improved = trial_time < best_time
-                log.debug(
-                    "    cfg[%d] trial=%s time=%f%s",
-                    ci,
-                    dict(trial_kwargs),
-                    trial_time,
-                    " (BETTER)" if improved else "",
-                )
-                if improved:
-                    best_time = trial_time
-                    launcher = trial_launcher
-                    current_kwargs = trial_kwargs
-
-            log.debug(
-                "  Phase 1 group %d winner: current_kwargs=%s",
-                gi,
-                dict(current_kwargs),
-            )
-
-        # Phase 2: Re-tune num_warps/num_stages with finalized block sizes.
-        # Block sizes are now optimal — find the best warp/stage pair for them.
-        warp_stage_candidates = self.inductor_meta.get("combo_warp_stage_candidates")
-        log.debug(
-            "  Phase 2: blocks=%s, trying %d warp/stage pairs",
-            dict(current_kwargs),
-            len(warp_stage_candidates),
-        )
-        best_warps = launcher.config.num_warps
-        best_stages = launcher.config.num_stages
-        for num_warps, num_stages in warp_stage_candidates:
-            if num_warps == best_warps and num_stages == best_stages:
-                log.debug(
-                    "    warps=%d stages=%d skip (same as current)",
-                    num_warps,
-                    num_stages,
-                )
-                continue
-
-            trial_config = triton.Config(
-                dict(current_kwargs),
-                num_warps=num_warps,
-                num_stages=num_stages,
-            )
-            with self.lock:
-                trial_launcher = self._precompile_config(trial_config).make_launcher()
-            trial_time = self.bench(trial_launcher, *args, **kwargs)
-            counters["inductor"]["combo_autotune_bench"] += 1
-            self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
-
-            improved = trial_time < best_time
-            log.debug(
-                "    warps=%d stages=%d time=%f%s",
-                num_warps,
-                num_stages,
-                trial_time,
-                " (BETTER)" if improved else "",
-            )
-            if improved:
-                best_time = trial_time
-                launcher = trial_launcher
-                best_warps = num_warps
-                best_stages = num_stages
-
-        log.debug(
-            "Combo sequential autotune for %s: best config %s, time %f",
-            self.fn.__name__,
-            launcher.config,
-            best_time,
-        )
-        launcher.config.found_by_combo_autotune = True
-        self.autotune_time_taken_ns += time.time_ns() - start_time
-        if self.save_cache_hook:
-            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
-        return launcher
+        return seeded_launcher
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
@@ -1825,12 +1903,18 @@ class CachingAutotuner(KernelInterface):
         )
         coordesc_time_taken_ns = time.time_ns() - start_time
         best_config.found_by_coordesc = True
+        found_by_combo_autotune = getattr(
+            launcher.config, "found_by_combo_autotune", False
+        )
+        if found_by_combo_autotune:
+            best_config.found_by_combo_autotune = True
 
         if self.save_cache_hook:
             self.save_cache_hook(
                 best_config,
                 self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
+                found_by_combo_autotune=found_by_combo_autotune,
             )
 
         if best_config not in config2launcher:
@@ -1986,22 +2070,62 @@ class CachingAutotuner(KernelInterface):
                 if len(self.launchers) > 1:
                     self.autotune_to_one_config(*args, **kwargs)
 
-        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
+        combo_tuning_groups = self.inductor_meta.get("combo_tuning_groups")
+        if combo_tuning_groups and getattr(
             self.launchers[0].config, "found_by_combo_autotune", False
         ):
-            with dynamo_timed(
-                "CachingAutotuner.combo_sequential_autotune",
-                log_pt2_compile_event=False,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ):
-                self.launchers = [
-                    self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
-                ]
+            self._cancel_combo_standalone_autotune_seed()
+        elif combo_tuning_groups:
+            with _combo_standalone_autotune_seed_apply_lock:
+                if self.combo_standalone_autotune_seed_future is not None:
+                    with dynamo_timed(
+                        "CachingAutotuner.combo_standalone_autotune_seed",
+                        log_pt2_compile_event=False,
+                        metadata={
+                            "kernel_name": self.inductor_meta.get("kernel_name")
+                        },
+                        dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                        compile_id=self.compile_id,
+                        is_backward=self.is_backward,
+                        log_waitcounter=True,
+                        waitcounter_name_override="triton_autotuner",
+                    ):
+                        start_time = time.time_ns()
+                        signature_keys = OrderedSet(self.triton_meta["signature"])
+                        original_launcher = self.launchers[0]
+                        launcher = self._apply_combo_standalone_autotune_seed(
+                            original_launcher,
+                            signature_keys,
+                            combo_tuning_groups,
+                            *args,
+                            **kwargs,
+                        )
+                        self.launchers = [launcher]
+                        seed_start_time = (
+                            self.combo_standalone_autotune_seed_start_time_ns
+                            or start_time
+                        )
+                        self.autotune_time_taken_ns += (
+                            time.time_ns() - seed_start_time
+                        )
+                        self.combo_standalone_autotune_seed_start_time_ns = None
+                        self.combo_standalone_autotune_seed_future = None
+                        self.combo_standalone_autotune_seed_configs = None
+                        self.combo_standalone_autotune_seed_attempted = True
+                        if launcher is not original_launcher:
+                            launcher.config.found_by_combo_autotune = True
+                            if self.save_cache_hook:
+                                self.save_cache_hook(
+                                    launcher.config,
+                                    self.autotune_time_taken_ns,
+                                    found_by_combo_autotune=True,
+                                    triton_cache_hash=launcher.cache_hash,
+                                )
+                else:
+                    log.debug(
+                        "Combo standalone autotune seed: missing seed future for %s",
+                        self.fn.__name__,
+                    )
 
         if not getattr(
             self.launchers[0].config, "found_by_coordesc", False
@@ -3360,16 +3484,28 @@ def _update_combo_kernel_kwargs(
     subkernel_idx: int,
     skip_rblock: bool,
     signature_keys: OrderedSet[str],
+    shared_kwargs: dict[str, Any] | None = None,
 ) -> None:
     for key, value in cfg_kwargs.items():
         if skip_rblock and key.startswith("R") and "BLOCK" in key:
             continue
         suffixed_key = f"{key}_{subkernel_idx}"
-        # Only suffix keys that actually exist in the combo kernel signature.
-        # Signature keys are real per-subkernel constexpr args such as XBLOCK_0.
-        # Everything else must stay unsuffixed so HIP-specific compile options like
-        # waves_per_eu continue to flow through the backend-options path above.
-        kwargs[suffixed_key if suffixed_key in signature_keys else key] = value
+        if suffixed_key in signature_keys:
+            kwargs[suffixed_key] = value
+        elif key in signature_keys:
+            kwargs[key] = value
+        elif shared_kwargs is not None:
+            current = shared_kwargs.get(key, _MISSING_COMBO_CONFIG_KWARG)
+            if current is _MISSING_COMBO_CONFIG_KWARG:
+                shared_kwargs[key] = value
+                kwargs[key] = value
+            elif current is _MIXED_COMBO_CONFIG_KWARG:
+                kwargs.pop(key, None)
+            elif current == value:
+                kwargs[key] = value
+            else:
+                shared_kwargs[key] = _MIXED_COMBO_CONFIG_KWARG
+                kwargs.pop(key, None)
 
 
 def _handle_combo_kernel_per_subkernel_blocks(
@@ -3387,10 +3523,9 @@ def _handle_combo_kernel_per_subkernel_blocks(
     Each sub-kernel gets its own block sizes (XBLOCK_0, XBLOCK_1, etc.) generated
     using the same heuristics as standalone Triton kernels.
 
-    Returns base configs that vary (num_warps, num_stages) with all blocks at
-    heuristic defaults. Stores per-subkernel candidate configs in
-    inductor_meta["combo_tuning_groups"] for sequential chained autotuning
-    in CachingAutotuner._combo_sequential_autotune().
+    Returns one base config using each sub-kernel's heuristic defaults. Stores
+    per-subkernel metadata in inductor_meta["combo_tuning_groups"] so standalone
+    seed winners can be stitched into combo constexpr names.
 
     Returns:
         List of configs if combo kernel with combo_grid_meta and per-subkernel
@@ -3406,14 +3541,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
     }
 
     combined_kwargs: dict[str, int] = {}
-    all_num_warps: list[int] = []
-    all_num_stages: list[int] = []
+    default_warp_stage_pairs: list[tuple[int, int]] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
+    combo_coordesc_field_minimums: dict[str, int] = {}
     signature_keys = OrderedSet(triton_meta.get("signature", ()))
 
-    # Group sub-kernels with identical config kwargs to skip redundant tuning.
+    # Group sub-kernels with identical config kwargs for shared seed metadata.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
+    shared_config_kwargs: dict[str, Any] = {}
 
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
@@ -3466,7 +3602,12 @@ def _handle_combo_kernel_per_subkernel_blocks(
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         _update_combo_kernel_kwargs(
-            combined_kwargs, cfg.kwargs, i, skip_rblock, signature_keys
+            combined_kwargs,
+            cfg.kwargs,
+            i,
+            skip_rblock,
+            signature_keys,
+            shared_config_kwargs,
         )
         for key in cfg.kwargs:
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
@@ -3481,9 +3622,16 @@ def _handle_combo_kernel_per_subkernel_blocks(
                     TRITON_MAX_BLOCK[prefix.upper()],
                     size_hints_i[prefix],
                 )
+            if key == "XBLOCK" and inductor_meta_i.get("min_xblock") is not None:
+                combo_coordesc_field_minimums[combined_key] = inductor_meta_i[
+                    "min_xblock"
+                ]
+            elif key.startswith("R") and "BLOCK" in key:
+                min_rblock = inductor_meta_i.get("min_rblock")
+                if min_rblock is not None:
+                    combo_coordesc_field_minimums[combined_key] = min_rblock
 
-        all_num_warps.append(cfg.num_warps)
-        all_num_stages.append(cfg.num_stages)
+        default_warp_stage_pairs.append((cfg.num_warps, cfg.num_stages))
         for c in cfgs:
             unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
@@ -3497,32 +3645,37 @@ def _handle_combo_kernel_per_subkernel_blocks(
         else:
             group_map[group_key] = {
                 "member_indices": [i],
-                "configs": cfgs,
                 "skip_rblock": skip_rblock,
                 "size_hints": size_hints_i,
                 "coordesc_fields": list(group_coordesc_fields),
             }
 
-    unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
+    base_num_warps, base_num_stages = Counter(default_warp_stage_pairs).most_common(
+        1
+    )[0][0]
+    unique_warp_stage_pairs.add((base_num_warps, base_num_stages))
 
     combo_tuning_groups = list(group_map.values())
     # Largest sub-kernels tuned first — they dominate runtime and get most freedom
     combo_tuning_groups.sort(
         key=lambda g: -functools.reduce(operator.mul, g["size_hints"].values())
     )
+    log.debug(
+        "Combo standalone autotune seed: formed %d tuning groups %s",
+        len(combo_tuning_groups),
+        [group["member_indices"] for group in combo_tuning_groups],
+    )
     inductor_meta["combo_tuning_groups"] = combo_tuning_groups
     inductor_meta["combo_coordesc_field_order"] = [
         field for group in combo_tuning_groups for field in group["coordesc_fields"]
     ]
     inductor_meta["combo_coordesc_field_limits"] = combo_coordesc_field_limits
-    # Candidates for num_warps/num_stages re-tuning after block sizes are finalized
+    inductor_meta["combo_coordesc_field_minimums"] = combo_coordesc_field_minimums
+    # Candidate warp/stage pairs from standalone sub-kernel heuristics.
     inductor_meta["combo_warp_stage_candidates"] = list(unique_warp_stage_pairs)
 
-    # Single base config: max warps/stages, all blocks at heuristic defaults.
-    # Block sizes are tuned in _combo_sequential_autotune, then num_warps/num_stages
-    # are re-tuned at the end with finalized block sizes.
-    base_num_warps = max(all_num_warps)
-    base_num_stages = max(all_num_stages)
+    # Single base config: most common default warp/stage pair with all blocks at
+    # heuristic defaults. Seed apply can still retune to seed-winning pairs.
     return [
         triton.Config(
             combined_kwargs,
