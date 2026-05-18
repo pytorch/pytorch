@@ -1008,8 +1008,8 @@ class DynamoOutput:
 
     def graph_capture_output(
         self,
-        argdefs: tuple[Any, ...] | None = None,
-        kwdefaults: dict[str, Any] | None = None,
+        argdefs: tuple[object, ...] | None = None,
+        kwdefaults: dict[str, object] | None = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1058,10 +1058,10 @@ class GraphRuntimeEnv:
     bytecode: types.CodeType
     pycode: list[list[str] | None]
     import_sources: dict[str, str]
-    used_globals: dict[str, Any]
-    closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None = None
+    used_globals: dict[str, object]
+    closure: tuple[CellType, ...] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -1069,7 +1069,7 @@ class GraphRuntimeEnv:
         backend_id: str,
         compiled_fn: Callable[..., Any],
         *,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         import_sources = {
@@ -1122,20 +1122,22 @@ class GraphRuntimeEnv:
         return "\n".join(func_lines)
 
     def _build_python_wrapper(
-        self, f_globals: dict[str, Any], backend_id: str
+        self, f_globals: dict[str, object], backend_id: str
     ) -> types.CodeType:
         """Build a Python code object from the generated pycode strings."""
         func_source = self._build_python_wrapper_source()
         # Execute to get the function, then extract its code
-        namespace: dict[str, Any] = f_globals.copy()
+        namespace: dict[str, object] = f_globals.copy()
         # exec() should be fine because we only define a function in the scope
         # without actually running the code inside the function, so in theory
         # it should be safe.
         exec(func_source, namespace)
         func = namespace["__dynamo_generated_func__"]
+        if not isinstance(func, FunctionType):
+            raise AssertionError("generated wrapper must be a function")
         return func.__code__
 
-    def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
+    def _check_external_refs(self, f_globals: dict[str, object]) -> None:
         # pyrefly: ignore [implicit-any]
         missing_refs = []
         for ref in self.external_refs:
@@ -1149,7 +1151,7 @@ class GraphRuntimeEnv:
             )
 
 
-def _safe_builtins_dict(builtins_dict: dict[str, Any]) -> dict[str, Any]:
+def _safe_builtins_dict(builtins_dict: dict[str, object]) -> dict[str, object]:
     """Filter a builtins dict to only picklable entries for serialization."""
     import pickle
 
@@ -1174,10 +1176,10 @@ class GraphCaptureOutput:
     traced_code: list[CodeType]
     bytecode: CodeType
     pycode: list[list[str] | None]
-    closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
-    f_globals: dict[str, Any]
+    closure: tuple[CellType, ...] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
+    f_globals: dict[str, object]
 
     def build_guards(
         self,
@@ -1219,8 +1221,9 @@ class GraphCaptureOutput:
 
         for ref in external_refs:
             if ref not in used_globals:
-                if ref.startswith("__builtins_dict__") and ref in self.f_globals:
-                    used_globals[ref] = _safe_builtins_dict(self.f_globals[ref])
+                value = self.f_globals.get(ref)
+                if ref.startswith("__builtins_dict__") and isinstance(value, dict):
+                    used_globals[ref] = _safe_builtins_dict(value)
                 elif hasattr(_builtins, ref):
                     used_globals[ref] = getattr(_builtins, ref)
 
@@ -1275,7 +1278,7 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Callable[..., Any] | None = None,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
@@ -1433,8 +1436,8 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
 
 
 def _fullgraph_capture_frame(
