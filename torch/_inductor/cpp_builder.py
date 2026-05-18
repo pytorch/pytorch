@@ -31,6 +31,7 @@ from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 
 if config.is_fbcode():
@@ -519,6 +520,30 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 
 @functools.cache
+def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
+    if not _is_gcc(cpp_compiler):
+        return False
+
+    try:
+        output_msg = (
+            subprocess.check_output(
+                [cpp_compiler, "-dumpfullversion", "-dumpversion"],
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+    version_search = re.search(r"\d+(?:\.\d+)*", output_msg)
+    if version_search is None:
+        return False
+
+    return TorchVersion(version_search.group(0)) < TorchVersion(str(major))
+
+
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
@@ -930,6 +955,40 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     return cflags, ldflags
 
 
+@functools.cache
+def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
+    flags: OrderedSet[str] = OrderedSet()
+
+    if platform.machine() not in ("aarch64", "arm64"):
+        return flags
+
+    if not sys.platform.startswith("linux"):
+        return flags
+
+    capabilities = torch.cpu.get_capabilities()
+    flags.update(
+        capability
+        for capability in ("bf16", "sve", "sve2")
+        if capabilities.get(capability, False)
+    )
+
+    return flags
+
+
+@functools.cache
+def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
+    flags = _get_linux_aarch64_cpu_flags()
+
+    if _is_gcc(cpp_compiler) and _is_gcc_version_less_than(cpp_compiler, 13):
+        if OrderedSet(["bf16", "sve", "sve2"]).issubset(flags):
+            return "march=armv8.6-a+sve+sve2+bf16"
+
+        if OrderedSet(["bf16", "sve"]).issubset(flags):
+            return "march=armv8.6-a+sve+bf16"
+
+    return "march=native"
+
+
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
 ) -> tuple[list[str], list[str]]:
@@ -989,6 +1048,8 @@ def _get_optimization_cflags(
                     cflags.append("march=rv64gc")
                 elif platform.machine() == "riscv32":
                     cflags.append("march=rv32gc")
+                elif platform.machine() in ("aarch64", "arm64"):
+                    cflags.append(_get_linux_aarch64_arch_flag(cpp_compiler))
                 else:
                     cflags.append("march=native")
 
