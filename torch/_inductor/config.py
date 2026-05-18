@@ -1189,6 +1189,42 @@ class _collective:
 class aten_distributed_optimizations:
     """Configuration for distributed optimization passes on ATen FX graphs."""
 
+    # Enable simple, defensive communication/compute overlap pass.
+    #
+    # Moves collective starts earlier and wait_tensor nodes later in the
+    # FX graph so that NCCL collectives execute concurrently with compute.
+    # Only collective-start and wait_tensor nodes are relocated; all other
+    # nodes keep their original positions.
+    #
+    # Guarantees:
+    #
+    #   Hang-safe:  Collectives on the same process group are never
+    #       reordered relative to each other -- neither starts nor waits.
+    #       This preserves NCCL stream ordering and prevents deadlocks.
+    #
+    #   Memory-safe:  After all moves, the pass simulates peak memory
+    #       over the new schedule.  If peak memory would increase, every
+    #       wait move is reverted (collective moves are always safe
+    #       because they only shift allocation earlier within the same
+    #       lifetime).  The result is at most the original peak memory.
+    #
+    #   Compile-time bounded:  The expensive alias analysis
+    #       (GraphAliasTracker) is built once.  Memory verification is a
+    #       single O(N) simulation -- not repeated per collective.
+    #       Total cost is O(N) + O(W*N) index-map rebuilds for W waits,
+    #       dominated by the one-time alias analysis in practice.
+    #
+    #   Predictable:  No runtime estimation, no priority heuristics, no
+    #       bucketing.  A collective moves to the earliest position its
+    #       data dependencies and PG ordering allow; a wait moves to just
+    #       before its first consumer.  The result is easy to inspect in
+    #       a trace and reason about.
+    #
+    # Intended to be safe as a default for any FSDP workload.
+    # Mutually exclusive with enable_overlap_scheduling (which applies a
+    # more aggressive, estimation-driven reordering strategy).
+    enable_simple_overlap: bool = False
+
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
 
