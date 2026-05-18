@@ -1146,16 +1146,38 @@ def unfold_backward(
     dim = utils.canonicalize_dim(len(input_size), dimension)
     grad_input = grad.new_zeros(input_size)
 
-    if step >= size:
+    def _vectorized_index_put() -> Tensor:
         idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
         idx = idx.unfold(0, size, step).flatten()
-        grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+        source = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
         index = (None,) * dim + (idx,)
         return aten._unsafe_index_put(
-            grad_input, index, grad, accumulate=True
+            grad_input, index, source, accumulate=True
         ).contiguous()
 
+    if step >= size:
+        return _vectorized_index_put()
+
     from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def _is_canonical_grad_shape() -> bool:
+        if grad.dim() != len(input_size) + 1:
+            return False
+        if not statically_known_true(grad.size(-1) == size):
+            return False
+
+        n_folds = (input_size[dim] - size) // step + 1
+        if not statically_known_true(grad.size(dim) == n_folds):
+            return False
+
+        return all(
+            source_dim == dim
+            or statically_known_true(grad.size(source_dim) == dim_size)
+            for source_dim, dim_size in enumerate(input_size)
+        )
+
+    if _is_canonical_grad_shape():
+        return _vectorized_index_put()
 
     def _sym_min_if_needed(a, b):
         if statically_known_true(a <= b):
