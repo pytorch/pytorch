@@ -4832,7 +4832,6 @@ class CommonTemplate:
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
 
-    @xfail_if_mps_unimplemented  # Sparse not supported
     def test_gather3(self):
         def fn(a, b):
             return torch.gather(a, 1, b, sparse_grad=True)
