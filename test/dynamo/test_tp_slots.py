@@ -19,7 +19,7 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 
 
 class TestTypeSlots(TestCase):

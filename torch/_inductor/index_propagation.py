@@ -367,9 +367,9 @@ class IndexPropagation(DefaultHandler):
                 else:
                     return Where(expr < 0, expr + size, expr)
 
-            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
-            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
-                -size <= expr
+            # -size <= expr only proves the lower bound after negative wrapping.
+            can_prove_lower = self.statically_true(0 <= expr) or (
+                wrap_neg and self.statically_true(-size <= expr)
             )
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:

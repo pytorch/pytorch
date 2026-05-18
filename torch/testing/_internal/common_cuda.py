@@ -43,6 +43,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
@@ -67,7 +68,7 @@ def CDNA3OrLater():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
+    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
@@ -473,9 +474,17 @@ def xfailIfSM89PreCUDA13(func):
     return func
 
 def xfailIfSM100OrLater(func):
+    # SMxxx LazyVals are derived from torch.cuda.get_device_capability(), which
+    # on ROCm reports the gfx-arch major version (e.g. (11, 0) for gfx1100). That
+    # makes SM100OrLater spuriously true on AMD gfx10/11/12, so guard with
+    # TEST_WITH_ROCM to keep the xfail NVIDIA-only.
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM120OrLater(func):
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM12X(func):

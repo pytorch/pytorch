@@ -82,7 +82,7 @@ std::vector<int64_t> GetPromotedShape(
     c10::ArrayRef<int64_t> shape1_dims,
     c10::ArrayRef<int64_t> shape2_dims) {
   std::vector<int64_t> dimensions;
-  // If the rank of a shape is bigger than then other, fill up the first
+  // If the rank of a shape is bigger than the other, fill up the first
   // dimensions with the ones of the bigger.
   // Example:
   //   shape1 = [9, 7, 6, 5, 2]

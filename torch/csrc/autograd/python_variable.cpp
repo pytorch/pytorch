@@ -3010,8 +3010,7 @@ static PyObject* THPVariable_get_backwards_hooks(
     return handle_torch_function_getter(self, "_backward_hooks");
   }
   if (self->backward_hooks) {
-    Py_INCREF(self->backward_hooks);
-    return self->backward_hooks;
+    return Py_NewRef(self->backward_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3050,8 +3049,7 @@ static PyObject* THPVariable_get_post_accumulate_grad_hooks(
     return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
   }
   if (self->post_accumulate_grad_hooks) {
-    Py_INCREF(self->post_accumulate_grad_hooks);
-    return self->post_accumulate_grad_hooks;
+    return Py_NewRef(self->post_accumulate_grad_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3836,13 +3834,10 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj (stored in "pyobj_")
-          Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they also have an "obj" field
-          if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-            Py_VISIT(py_node_fn->obj);
-          }
+        // Check that this python object is the sole owner of the grad_fn.
+        // The grad_fn's PyObject holds the other reference.
+        if (grad_fn && grad_fn.use_count() == 2) {
+          Py_VISIT(grad_fn->pyobj_slot()->load_pyobj());
         }
       }
     }
@@ -3938,21 +3933,21 @@ static void initTensorImplConversion(PyObject* module) {
 
 bool THPVariable_initModule(PyObject* module) {
   THPVariableMetaType.tp_base = &PyType_Type;
-  if (PyType_Ready(&THPVariableMetaType) < 0)
+  if (PyModule_AddType(module, &THPVariableMetaType) < 0)
     return false;
-  Py_INCREF(&THPVariableMetaType);
-  PyModule_AddObject(module, "_TensorMeta", (PyObject*)&THPVariableMetaType);
 
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
   THPUtils_addPyMethodDefs(methods, extra_methods);
   THPVariableType.tp_methods = methods.data();
-  if (PyType_Ready(&THPVariableType) < 0)
+  if (PyModule_AddType(module, &THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
-  Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
+  if (PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType) <
+      0) {
+    Py_DECREF(&THPVariableType);
+    return false;
+  }
 #ifdef USE_DISTRIBUTED
   PyModule_AddObject(
       module,

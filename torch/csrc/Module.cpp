@@ -488,8 +488,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
         Py_TYPE(obj)->tp_name);
   }
 
-  Py_INCREF(obj);
-  return obj;
+  return Py_NewRef(obj);
 }
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
@@ -1686,7 +1685,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   torch::autograd::Node* node = nullptr;
   c10::intrusive_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata;
     node = node_sp.get();
   } else {
     node =
@@ -2242,6 +2241,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_disabled_torch_dispatch_impl",
      THPModule_disable_torch_dispatch,
      METH_VARARGS,
+     nullptr},
+    {"_skip_one_hop_torch_function",
+     THPModule_skip_one_hop_torch_function,
+     METH_VARARGS,
+     nullptr},
+    {"_peek_should_skip_torch_function",
+     THPModule_peek_should_skip_torch_function,
+     METH_NOARGS,
+     nullptr},
+    {"_set_skip_next_torch_function",
+     THPModule_set_skip_next_torch_function,
+     METH_O,
      nullptr},
     {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
     {"_has_torch_function_unary",

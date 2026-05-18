@@ -2356,10 +2356,32 @@ def _to_copy(
         x_tensor = torch.scalar_tensor(x)
 
     if device is not None and device != x_tensor.device:
-        # avoid conversions on cpu
-        if dtype is not None and device.type == "cpu":
-            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
-            dtype_converted = True
+        # When both dtype and device change, decide where to do the dtype
+        # conversion.  The general heuristic is to convert on the faster
+        # device (i.e. avoid conversions on cpu when the source is a gpu).
+        # However, we must convert on the *source* device when the target
+        # device does not support the source dtype – e.g. copying a float64
+        # tensor to an XPU device that lacks fp64 hardware would otherwise
+        # create an unsupported intermediate buffer on the target device.
+        if dtype is not None:
+            convert_before_transfer = False
+            if device.type == "cpu":
+                # Source is accelerator, target is CPU – convert on the
+                # (faster) source device before the transfer.
+                convert_before_transfer = True
+            elif x_tensor.dtype == torch.float64:
+                # The target device may not support float64 (e.g. Intel Arc
+                # consumer GPUs).  Convert to the requested dtype on the
+                # source device to avoid creating an unsupported fp64
+                # intermediate buffer on the target device.
+                from torch._inductor.utils import device_supports_fp64
+
+                if not device_supports_fp64(device):
+                    convert_before_transfer = True
+
+            if convert_before_transfer:
+                x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+                dtype_converted = True
         x_tensor = torch._prims.device_put(x_tensor, device, non_blocking)
 
     if dtype is not None and not dtype_converted:
@@ -3089,6 +3111,14 @@ def _index_add(
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_add(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
+    torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
@@ -3170,6 +3200,14 @@ def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
+    torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_copy(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
@@ -4850,7 +4888,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(t1.numel() == 0):
+    if guard_or_false(sym_numel(t1) == 0):
         return True
 
     t1_shape = t1.shape
@@ -5174,8 +5212,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
@@ -5725,6 +5775,9 @@ def max_pool2d_with_indices_backward(
     """
     # Use native kernel in deterministic mode
     if torch.are_deterministic_algorithms_enabled():
+        return NotImplemented
+
+    if grad_output.is_xpu:
         return NotImplemented
 
     # MPS: Use native kernel. scatter_add has correctness issues on macOS 14

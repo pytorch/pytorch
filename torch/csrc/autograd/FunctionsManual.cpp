@@ -1060,7 +1060,7 @@ Tensor unbind_backward_nested(
     } else {
       const auto component_size = nt_sizes[i].contiguous();
       const c10::IntArrayRef grad_size(
-          component_size.data_ptr<int64_t>(), component_size.size(0));
+          component_size.const_data_ptr<int64_t>(), component_size.size(0));
       grads_tensors.push_back(at::zeros(grad_size, options));
     }
   }

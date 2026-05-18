@@ -541,7 +541,7 @@ Module _load_jit_module_from_bytes(
 
 // Replace object with a newly created but equivalent object.
 // The goal is to replace object's methods. However, since object's
-// methods are attached to type; we need to replace it's type.
+// methods are attached to type; we need to replace its type.
 // Non-objects are unchanged; however, nested structures such as list, dict
 // are also reconstructed because they might contain an object.
 static IValue recreateObject(IValue ivalue, const TypeResolver& resolver) {
