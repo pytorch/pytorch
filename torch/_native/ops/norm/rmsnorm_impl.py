@@ -142,9 +142,9 @@ def _fused_rms_norm_backward_impl(
 
 
 def register_rmsnorm_overrides() -> None:
-    if not torch.cuda.is_available():
-        return
-
+    # Don't gate on torch.cuda.is_available() here: it calls cuInit and
+    # poisons fork (vLLM EngineCore relies on fork). cu.register_op_override
+    # already short-circuits on _cuda.is_built() via _check_runtime_available.
     cu.register_op_override(
         "aten",
         "_fused_rms_norm",
