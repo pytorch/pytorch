@@ -488,7 +488,8 @@ class DeferredTritonCallWrapper:
             f" kernel_args_, stream_"
         )
 
-        prefix.writeline_jit(f"void* kernel_args_[] = {{{call_args_str}}};")
+        # kernel_args_ is consumed by both JIT and AOT launchKernel calls.
+        prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
@@ -863,8 +864,9 @@ class CppWrapperGpu(CppWrapperCpu):
         super().write_header()
         kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         if V.graph.is_const_graph and V.graph.is_dual_wrapper_mode:
-            # const_graph's AOTI variant merges into main (which has its own
-            # kernel_driver) — JIT-only emission avoids the duplicate.
+            # For a dual-wrapper-mode const graph, only the standalone JIT
+            # output needs this header content. The AOTI const body is spliced
+            # into the main AOTI source, which has its own kernel driver.
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -874,7 +876,19 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
+        # Pure AOTI receives the stream as a function parameter. JIT and
+        # dual-wrapper-mode code use an explicit stream variable so the shared kernel
+        # call arguments are valid for the JIT entry point.
+        if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
+            return "stream"
+
         name = f"stream{device_idx}"
+        # In dual-wrapper mode, the JIT stream is declared at the entry function
+        # prologue (see _codegen_entry_impl_prologue) so it stays in scope
+        # across all kernel call sites.
+        if V.graph.is_dual_wrapper_mode:
+            return name
+
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
@@ -951,11 +965,29 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
-        self.prefix.writeline(
+        # ensure_triton_kernel_compiles_started() is JIT-only; AOTI has no
+        # Python-dependent lazy compile flow.
+        self.prefix.writeline_jit(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
             )
         )
+        # In dual-wrapper mode, hoist the JIT-side stream declaration to the entry
+        # function prologue. Kernel calls run inside KernelContextGuard
+        # scopes, so a per-call declaration would be scoped to the guard
+        # and unavailable to other kernel calls in the same function.
+        if V.graph.is_dual_wrapper_mode:
+            stream_type = maybe_hipify_code_wrapper(
+                self.device_codegen.cpp_stream_type()
+            )
+            get_stream = self.device_codegen.aoti_get_stream()
+            for device_idx in sorted(V.graph.device_idxs):
+                name = f"stream{device_idx}"
+                self.prefix.writeline_jit(f"{stream_type} {name};")
+                self.prefix.writeline_jit(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"{get_stream}({device_idx}, (void**)&{name}));"
+                )
 
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
@@ -1264,11 +1296,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        stream = (
-            "stream"
-            if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, graph_name)
-        )
+        stream = self.write_get_raw_stream(device.index, graph_name)
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -1313,18 +1341,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
-            call_args.append(device_idx)
-            call_args.append(stream)
-            if V.graph.aot_mode:
-                call_args.append("kernels")
-                call_args.append("this->cubin_dir_")
+            # AOTI side uses this->device_idx_ so the model honors runtime device
+            # assignment; JIT side has no this->device_idx_ in scope, so use the
+            # concrete graph device index. Similarly, AOTI side always uses the
+            # `stream` function parameter of run_impl, while JIT side uses the
+            # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
+            aoti_device_idx = (
+                "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            )
+            jit_device_idx = str(device.index)
+            jit_call_args = [*call_args, jit_device_idx, stream]
+            aot_call_args = [*call_args, aoti_device_idx, "stream"]
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
-                call_args[: len(arg_types)], kernel_name, arg_types, None
+                jit_call_args[: len(arg_types)], kernel_name, arg_types, None
             )
-            with debug_printer_manager:
-                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
+            # DebugPrinterManager is AOTI-only: route its writes through
+            # writeline_aot so they're dropped on the JIT side (no-op for the
+            # pure-JIT IndentedBuffer; AOT-only for DualIndentedBuffer). Without
+            # this, the JIT buffer would receive before/after-launch prints
+            # after the JIT launch, reporting post-launch state as pre-launch.
+            with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline_aot):
+                with debug_printer_manager:
+                    self.wrapper_call.writeline_jit(
+                        f"{wrapper_name}({', '.join(jit_call_args)});"
+                    )
+                    self.wrapper_call.writeline_aot(
+                        f"{wrapper_name}({', '.join(aot_call_args)}, "
+                        f"kernels, this->cubin_dir_);"
+                    )
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]

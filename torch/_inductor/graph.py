@@ -1001,15 +1001,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     @property
     def is_dual_wrapper_mode(self) -> bool:
-        """True when generating dual-wrapper-mode C++ for both JIT and AOTI.
-
-        Dual-wrapper mode emits a JIT pass that drives Triton autotune/compile
-        alongside the AOTI output, so it is needed iff at least one device in
-        the graph uses the Triton backend.
-        """
-        if not self.aot_mode or config.triton.autotune_at_compile_time:
-            return False
-        return any(ir.is_triton(d) for d in self.device_types)
+        """True when generating dual-wrapper-mode C++ for both JIT and AOTI."""
+        # TODO: dual-wrapper-mode is not activated yet. The buffer factory
+        # (make_codegen_buffer) and codegen_with_cpp_wrapper still treat
+        # AOTI+autotune_at_compile_time=False as the legacy two-pass flow.
+        # Flip this back on once those wire-ups land later in the stack.
+        return False
 
     def try_get_buffer(
         self, buffer_name: str
