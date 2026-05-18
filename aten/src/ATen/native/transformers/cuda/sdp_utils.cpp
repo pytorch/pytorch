@@ -172,7 +172,7 @@ inline int aotriton_max_hdim() {
 // function for fundamental limitations by the GPU kernel
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 //
-// FIXME: revert this re-use when removing AOTriton <= 0.11 support
+// FIXME: revert this reuse when removing AOTriton <= 0.11 support
 //
 // AOTriton 0.12 supports hdim_qk != hdim_vo, but we cannot enable this in
 // check_head_dim_size_flash because it changes the backend selection logic for
