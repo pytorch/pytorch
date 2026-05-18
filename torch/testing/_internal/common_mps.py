@@ -901,7 +901,6 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device

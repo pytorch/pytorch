@@ -53,6 +53,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
@@ -2044,6 +2045,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
+        if config.eager_numerics.use_pytorch_libdevice:
+            # Strict numerics should use the backend math library entry point.
+            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+            return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
     @staticmethod
@@ -3429,7 +3434,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
                 )
-                if options_class == TensorDescriptorOptions:
+                if issubclass(options_class, TensorDescriptorOptions):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -3690,12 +3695,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
+        # If the strides have a non-trivial sort, then the broadcasting dims
+        # need to be reverted for the store
+        # Also see indexing.codegen_broadcast_and_reshape
+        broadcast_shape = indexing.broadcast_shape
+        broadcasting_dims = indexing.broadcasting_dims
+        if not indexing.stride_sorter.is_identity:
+            broadcast_shape = indexing.stride_sorter.revert(broadcast_shape)
+            broadcasting_dims = indexing.stride_sorter.revert(broadcasting_dims)
+
         # These dims no longer need broadcasting.
         for idx, (dim, broadcast_dim) in enumerate(
-            zip(indexing.final_shape, indexing.broadcast_shape)
+            zip(indexing.final_shape, broadcast_shape)
         ):
             if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                indexing.broadcasting_dims[idx] = False
+                broadcasting_dims[idx] = False
+
+        if not indexing.stride_sorter.is_identity:
+            indexing.broadcasting_dims = indexing.stride_sorter.sort(broadcasting_dims)
+        else:
+            indexing.broadcasting_dims = broadcasting_dims
 
         value = indexing.codegen_broadcast_and_reshape(
             value,
@@ -3717,6 +3736,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value = f"{value}.to({triton_store_type(store_dtype)})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
+        return self.codegen_descriptor_store_line(block_ptr, indexing, value)
+
+    def codegen_descriptor_load_line(self, block_descriptor, indexing):
+        """Generate the descriptor load line. Override for backend customization."""
+        return f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+
+    def codegen_descriptor_store_line(self, block_ptr, indexing, value):
+        """Generate the descriptor store line. Override for backend customization."""
         return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
 
     def check_bounds(
@@ -3962,7 +3989,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
-                    line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+                    line = self.codegen_descriptor_load_line(block_descriptor, indexing)
                 line = indexing.codegen_broadcast_and_reshape(
                     line,
                     indexing.block_shape,
@@ -5733,8 +5760,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
+        if self.min_xblock is not None:
+            out["min_xblock"] = self.min_xblock
+        if self.min_rblock is not None:
+            out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
+        if (rblock := self._get_native_matmul_persistent_rblock()) is not None:
+            out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
         if (
@@ -6059,6 +6092,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return val
 
+    def _get_native_matmul_persistent_rblock(self) -> int | None:
+        if (
+            not self.is_native_matmul
+            or not self.persistent_reduction
+            or self.cooperative_reduction
+        ):
+            return None
+
+        rblocks = [
+            native_matmul_persistent_rblock(self._get_persistent_RBLOCK(tree.numel))
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+        return math.prod(rblocks) if rblocks else None
+
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
         try:
@@ -6263,6 +6311,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
+        if not tree.supports_constant_mask():
+            return False
+
         if self.is_native_matmul:
             # tl.dot requires the shape to be >= 16,
             # so when matmul shape is smaller than 16, we always keep the mask.
@@ -6402,8 +6453,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
     def iteration_ranges_codegen_header(
-        self, entry: IterationRangesRoot, code: IndentedBuffer
+        self,
+        entry: IterationRangesRoot,
+        code: IndentedBuffer,
     ) -> None:
+        if entry.has_custom_codegen_header():
+            assert not (
+                self.cooperative_reduction
+                and self.persistent_reduction
+                and entry.is_reduction
+            ), "derived reduction roots do not support cooperative reductions"
+            for sym, expr, constexpr in entry.named_constants():
+                annotation = ": tl.constexpr" if constexpr else ""
+                code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")
+            code.writeline(
+                f"{entry.name} = {self.index_to_str(entry.block_offset())} + "
+                f"{self.iteration_ranges_ranges_code(entry)}"
+            )
+            code.writeline(
+                f"{entry.mask_name()} = {entry.name} < {self.index_to_str(entry.numel)}"
+            )
+            return
+
         x = entry.prefix
         if entry.is_loop:
             code.writeline(f"{entry.name} = {x}offset + {x}base")
