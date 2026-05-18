@@ -217,6 +217,171 @@ with open("fn_with_model.pt", "rb") as f:
     )
 ```
 
+## Training
+
+`aot_compile()` supports training out of the box. When any input or parameter
+requires gradients, the compilation automatically traces the joint
+forward+backward graph, partitions it, and compiles both halves. The resulting
+function is autograd-aware -- calling `.backward()` on its output works as
+expected.
+
+```python
+import torch
+import torch.nn as nn
+
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(4, 4)
+
+    def forward(self, x):
+        return self.linear(x)
+
+model = MyModel()
+
+# AOT compile -- backward is captured automatically when inputs require grad.
+compiled_fn = torch.compile(
+    model, fullgraph=True
+).forward.aot_compile(((torch.randn(3, 4, requires_grad=True),), {}))
+
+# Training loop using the AOT-compiled function.
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+for _ in range(3):
+    optimizer.zero_grad()
+    inputs = torch.randn(3, 4, requires_grad=True)
+    output = compiled_fn(model, inputs)
+    loss = output.sum()
+    loss.backward()
+    optimizer.step()
+```
+
+Save and load preserve the autograd support -- backward works after loading
+from disk:
+
+```python
+compiled_fn.save_compiled_function("train_model.pt")
+
+with open("train_model.pt", "rb") as f:
+    loaded_fn = torch.compiler.load_compiled_function(f)
+
+inputs = torch.randn(3, 4, requires_grad=True)
+output = loaded_fn(model, inputs)
+output.sum().backward()  # gradients flow correctly
+```
+
+(distributed-training-with-dtensor)=
+
+### Distributed training with DTensor
+
+When training with tensor-parallelized models using
+{class}`~torch.distributed.tensor.DTensor`, `aot_compile()` can be combined
+with `compile_on_one_rank` to produce rank-independent compiled graphs. Without
+this flag, rank-specific values (mesh coordinates, shard offsets) get baked into
+the compiled graph as constants, producing a different graph per rank. With the
+flag enabled, these values become symbolic and are computed at runtime.
+
+Set the flag via `torch.distributed.config.patch`:
+
+```python
+import torch.distributed.config as dist_config
+
+with dist_config.patch(compile_on_one_rank=True):
+    compiled_fn = torch.compile(
+        model, fullgraph=True
+    ).forward.aot_compile(((example_input,), {}))
+```
+
+Or via the environment variable `TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK=1`.
+
+Here is a complete example of a tensor-parallel model compiled and trained
+across multiple GPUs via `torchrun`:
+
+```python
+# train_tp.py -- run with: torchrun --nproc_per_node=8 train_tp.py
+import torch
+import torch.distributed as dist
+import torch.distributed.config as dist_config
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import DTensor, Replicate
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    RowwiseParallel,
+    parallelize_module,
+)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim):
+        super().__init__()
+        self.linear1 = nn.Linear(dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, dim)
+
+    def forward(self, x):
+        return self.linear2(F.relu(self.linear1(x)))
+
+
+def main():
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+    torch.cuda.set_device(rank)
+    mesh = init_device_mesh("cuda", (dist.get_world_size(),))
+
+    model = FeedForward(64, 128).cuda()
+    parallelize_module(model, mesh, {
+        "linear1": ColwiseParallel(),
+        "linear2": RowwiseParallel(),
+    })
+
+    x = DTensor.from_local(
+        torch.randn(4, 64, device=f"cuda:{rank}"),
+        mesh, [Replicate()], run_check=False,
+    )
+
+    # Compile with compile_on_one_rank -- all ranks produce the same graph.
+    with dist_config.patch(compile_on_one_rank=True):
+        compiled_fn = torch.compile(
+            model, fullgraph=True,
+        ).forward.aot_compile(((x,), {}))
+
+    # Training loop.
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    for step in range(5):
+        optimizer.zero_grad()
+        x = DTensor.from_local(
+            torch.randn(4, 64, device=f"cuda:{rank}"),
+            mesh, [Replicate()], run_check=False,
+        )
+        out = compiled_fn(model, x)
+        local_out = out.to_local() if isinstance(out, DTensor) else out
+        loss = local_out.sum()
+        loss.backward()
+        optimizer.step()
+        if rank == 0:
+            print(f"step {step}: loss = {loss.item():.4f}")
+
+    dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Because `compile_on_one_rank` makes the compiled graphs identical across ranks,
+the Inductor cache (`FxGraphCache`) can share compiled artifacts. On the first
+run, every rank compiles independently but produces the same cache entry. On
+subsequent runs, all ranks hit the warm cache and skip compilation entirely.
+
+:::{note}
+Save/load of distributed artifacts via `save_compiled_function` /
+`load_compiled_function` is not yet supported when the compiled graph
+references `DeviceMesh` objects, because `DeviceMesh` contains
+`ProcessGroup` objects that cannot be serialized. Use `aot_compile()` within
+the same `torchrun` job rather than precompiling to a file for later
+deployment.
+:::
+
 ## Limitations
 
 - **`fullgraph=True` is required.** If `torch.compile` encounters a graph
@@ -227,3 +392,8 @@ with open("fn_with_model.pt", "rb") as f:
   explicitly disabled.
 - **Not all backends are supported.** Custom backends must implement the
   `SerializableCallable` interface to be compatible with save/load.
+- **Save/load with distributed DTensor is not yet supported.** Compiled
+  artifacts that reference `DeviceMesh` objects cannot be serialized to disk
+  because `ProcessGroup` objects are not picklable. See the
+  {ref}`distributed training <distributed-training-with-dtensor>` section for
+  the recommended workflow.
