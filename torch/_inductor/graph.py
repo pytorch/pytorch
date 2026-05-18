@@ -1025,6 +1025,8 @@ class GraphLowering(torch.fx.Interpreter):
                 layout=ir.FixedLayout(
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
+                is_conj=data.is_conj(),
+                is_neg=data.is_neg(),
             )
 
         return None
@@ -1190,6 +1192,8 @@ class GraphLowering(torch.fx.Interpreter):
                 layout=FixedLayout(
                     data.device, data.dtype, *self.static_sizes_strides(data)
                 ),
+                is_conj=data.is_conj(),
+                is_neg=data.is_neg(),
             )
         )
 
@@ -1309,6 +1313,8 @@ class GraphLowering(torch.fx.Interpreter):
                 DonatedBuffer(
                     name=target,
                     layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    is_conj=example.is_conj(),
+                    is_neg=example.is_neg(),
                 )
             )
         else:
@@ -1317,6 +1323,8 @@ class GraphLowering(torch.fx.Interpreter):
                 InputBuffer(
                     name=target,
                     layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    is_conj=example.is_conj(),
+                    is_neg=example.is_neg(),
                 )
             )
 

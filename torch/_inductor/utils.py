@@ -3877,6 +3877,8 @@ def is_same_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
         and data.stride() == value.stride()
         and data.dtype == value.dtype
         and data.device == value.device
+        and data.is_conj() == value.is_conj()
+        and data.is_neg() == value.is_neg()
         and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
         and data.storage_offset() == value.storage_offset()
     )

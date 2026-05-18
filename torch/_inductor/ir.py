@@ -4525,6 +4525,8 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
+    """Layout marker for a realized copy that writes back into an existing buffer."""
+
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -4548,18 +4550,26 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
-            if isinstance(target, MutationLayoutSHOULDREMOVE):
-                return unwrap_views(target.target)
-            if isinstance(target, BaseView):
-                return unwrap_views(target.unwrap_view())
-            if isinstance(target, MutableBox):
-                return unwrap_views(target.data)
-            return target
-
-        result = unwrap_views(self.target)
+        result = self._unwrap_views(self.target)
         assert isinstance(result, Buffer), type(result)
         return result
+
+    @staticmethod
+    def _unwrap_views(target: Any) -> Any:
+        if isinstance(target, MutationLayoutSHOULDREMOVE):
+            return MutationLayoutSHOULDREMOVE._unwrap_views(target.target)
+        if isinstance(target, BaseView):
+            return MutationLayoutSHOULDREMOVE._unwrap_views(target.unwrap_view())
+        if isinstance(target, MutableBox):
+            return MutationLayoutSHOULDREMOVE._unwrap_views(target.data)
+        return target
+
+    @staticmethod
+    def _get_input_buffer(target: Any) -> InputBuffer | None:
+        result = MutationLayoutSHOULDREMOVE._unwrap_views(target)
+        if isinstance(result, InputBuffer):
+            return result
+        return None
 
     def real_layout(self) -> Layout:
         layout = self.get_buffer().layout
@@ -4586,12 +4596,30 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+        dst_input_buffer = cls._get_input_buffer(dst)
+        dst_has_lazy_view_bits = dst_input_buffer is not None and (
+            dst_input_buffer.is_conj or dst_input_buffer.is_neg
+        )
+        if dst_has_lazy_view_bits:
+            # Mutating a lazy input view writes to the caller-visible physical
+            # storage, so the logical value must be inverted before store.
+            unsafe_alias = False
 
         if not unsafe_alias:
+            src_loader = src.make_loader()
+            inner_fn = src_loader
+            if dst_has_lazy_view_bits:
+
+                def inner_fn(index: Sequence[Expr]) -> OpsValue:
+                    assert dst_input_buffer is not None
+                    return dst_input_buffer._apply_mutation_store_view_bits(
+                        src_loader(index)
+                    )
+
             node = Pointwise.create(
                 device=src.get_device(),
                 dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
+                inner_fn=inner_fn,
                 ranges=[
                     V.graph.sizevars.check_equals_and_simplify(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
@@ -4768,8 +4796,52 @@ class OperationBuffer(Buffer, Operation):
 
 
 class InputBuffer(Buffer):
+    def __init__(
+        self,
+        *,
+        name: str | None,
+        layout: OutputSpec,
+        is_conj: bool = False,
+        is_neg: bool = False,
+    ) -> None:
+        super().__init__(name=name, layout=layout)
+        self.is_conj = is_conj
+        self.is_neg = is_neg
+
     def num_reads(self) -> int:
         return 1
+
+    def _apply_input_view_bits(self, value: OpsValue) -> OpsValue:
+        # Conjugate is only valid for complex tensors. Built-in ops with
+        # complex tensor inputs are routed through fallback before generated
+        # loaders run, so the generated-load case only needs to resolve the
+        # lazy negative bit from real views like conj().imag.
+        if self.is_conj:
+            raise NotImplementedError(
+                "Generated input loads do not support lazy conjugate tensors"
+            )
+        if self.is_neg:
+            value = ops.neg(value)
+        return value
+
+    def _apply_mutation_store_view_bits(self, value: OpsValue) -> OpsValue:
+        if self.is_conj:
+            raise NotImplementedError(
+                "Generated input mutations do not support lazy conjugate tensors"
+            )
+        if self.is_neg:
+            value = ops.neg(value)
+        return value
+
+    def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
+        loader = super().make_loader()
+        if not self.is_conj and not self.is_neg:
+            return loader
+
+        def inner(index: Sequence[Expr]) -> OpsValue:
+            return self._apply_input_view_bits(loader(index))
+
+        return inner
 
 
 class DonatedBuffer(InputBuffer):
@@ -4788,16 +4860,27 @@ class ConstantBuffer(InputBuffer):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.get_layout().make_indexer()
-            return ops.load(
-                V.graph.constant_name(self.get_name(), self.override_device),
-                indexer(index),
-            )
+            name = V.graph.constant_name(self.get_name(), self.override_device)
+            data = V.graph.constants[name]
+            value = ops.load(name, indexer(index))
+            if data.is_conj():
+                raise NotImplementedError(
+                    "Generated constant loads do not support lazy conjugate tensors"
+                )
+            if data.is_neg():
+                value = ops.neg(value)
+            return value
 
         return loader
 
     def constant_to_device(self, device: torch.device) -> IRNode:
+        name = V.graph.constant_name(self.get_name(), device)
+        data = V.graph.constants[name]
         return ConstantBuffer(
-            name=V.graph.constant_name(self.get_name(), device), layout=self.layout
+            name=name,
+            layout=self.layout,
+            is_conj=data.is_conj(),
+            is_neg=data.is_neg(),
         )
 
 

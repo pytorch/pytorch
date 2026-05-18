@@ -57,6 +57,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    is_same_tensor,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -6844,6 +6845,165 @@ class CommonTemplate:
         x = torch.randn(4, dtype=torch.complex64)
 
         self.common(fn, (x,))
+
+    @xfail_if_mps
+    def test_lazy_negative_input(self):
+        def clone_fn(x):
+            return torch.ops.aten.clone.default(x)
+
+        def add_fn(x):
+            return x + 0
+
+        inputs = [torch.randn(4, device=self.device)._neg_view()]
+        if self.is_dtype_supported(torch.complex64):
+            inputs.append(
+                torch.randn(4, dtype=torch.complex64, device=self.device).conj().imag
+            )
+
+        for x in inputs:
+            self.assertTrue(x.is_neg())
+            for fn in (clone_fn, add_fn):
+                expected = fn(x)
+                actual = torch.compile(fn, fullgraph=True)(x)
+                self.assertEqual(actual, expected)
+                self.assertFalse(actual.is_neg())
+
+        class CapturedNegBuffer(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("buf", torch.randn(4, device=device)._neg_view())
+
+            def forward(self, x):
+                return x + self.buf
+
+        mod = CapturedNegBuffer(self.device)
+        self.assertTrue(mod.buf.is_neg())
+        x = torch.randn(4, device=self.device)
+        self.assertEqual(torch.compile(mod, fullgraph=True)(x), mod(x))
+
+        def mutation_fn(x):
+            x.add_(1)
+            return x.clone()
+
+        base_eager = torch.tensor([1.0, -2.0], device=self.device)
+        x_eager = base_eager._neg_view()
+        out_eager = mutation_fn(x_eager)
+        base_compiled = torch.tensor([1.0, -2.0], device=self.device)
+        x_compiled = base_compiled._neg_view()
+        out_compiled = torch.compile(mutation_fn, fullgraph=True)(x_compiled)
+        self.assertEqual(out_compiled, out_eager)
+        self.assertEqual(x_compiled, x_eager)
+        self.assertEqual(base_compiled, base_eager)
+
+    @xfail_if_mps
+    def test_lazy_negative_constant_buffer(self):
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.ops_handler import MockHandler
+
+        base = torch.tensor([1.0, -2.0], device=self.device)
+        neg = base._neg_view()
+        self.assertFalse(is_same_tensor(base, neg))
+
+        class Graph:
+            constants = {"neg": neg}
+
+            def constant_name(self, name, device_override):
+                if device_override is not None:
+                    copy_name = f"{name}_copy"
+                    self.constants[copy_name] = self.constants[name].to(
+                        device_override, copy=True
+                    )
+                    return copy_name
+                return name
+
+        with V.set_graph_handler(Graph()), V.set_ops_handler(MockHandler()):
+            buf = ir.ConstantBuffer(
+                name="neg",
+                layout=ir.FixedLayout(
+                    neg.device, neg.dtype, list(neg.size()), list(neg.stride())
+                ),
+                is_neg=neg.is_neg(),
+            )
+            self.assertEqual(
+                str(buf.make_loader()([sympy.Symbol("i")])), "-ops.load(neg, i)"
+            )
+            buf.override_device = torch.device(self.device)
+            self.assertEqual(
+                str(buf.make_loader()([sympy.Symbol("i")])), "ops.load(neg_copy, i)"
+            )
+            buf.override_device = None
+            copied = buf.constant_to_device(torch.device(self.device))
+            self.assertIsInstance(copied, ir.ConstantBuffer)
+            self.assertFalse(copied.is_neg)
+            self.assertEqual(
+                str(copied.make_loader()([sympy.Symbol("i")])), "ops.load(neg_copy, i)"
+            )
+
+    @xfail_if_mps
+    def test_lazy_negative_mutation_disables_unsafe_alias(self):
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.ops_handler import MockHandler
+
+        class SizeVars:
+            def check_equals_and_simplify(self, a, b):
+                return a
+
+            def statically_known_true(self, expr):
+                return bool(expr == sympy.true)
+
+        class Graph:
+            graph_inputs = {"src": None, "dst": None}
+            sizevars = SizeVars()
+
+            def __init__(self):
+                self.mutated_buffers = []
+
+            def mark_buffer_mutated(self, name):
+                self.mutated_buffers.append(name)
+
+            def register_buffer(self, data):
+                return "copyback"
+
+            def register_operation(self, data):
+                self.operation = data
+
+        layout = ir.FixedLayout(torch.device(self.device), torch.float32, [2], [1])
+        src = ir.StorageBox(ir.InputBuffer(name="src", layout=layout))
+        dst = ir.StorageBox(ir.InputBuffer(name="dst", layout=layout, is_neg=True))
+        graph = Graph()
+
+        with V.set_graph_handler(graph):
+            copyback = ir.MutationLayoutSHOULDREMOVE.realize_into(
+                src, dst, unsafe_alias=True
+            )
+
+        self.assertIsInstance(copyback, ir.ComputedBuffer)
+        self.assertIsInstance(copyback.data, ir.Pointwise)
+        self.assertIsInstance(copyback.layout, ir.MutationLayoutSHOULDREMOVE)
+        self.assertIn("dst", graph.mutated_buffers)
+        with V.set_ops_handler(MockHandler()):
+            self.assertEqual(
+                str(copyback.data.inner_fn([sympy.Symbol("i")])), "-ops.load(src, i)"
+            )
+
+    @xfail_if_mps
+    def test_lazy_conjugate_input_clone(self):
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest(f"{self.device} does not support complex64")
+
+        x = torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64, device=self.device)
+        x = x.conj()
+        self.assertTrue(x.is_conj())
+        self.assertTrue(lowering.unsupported_input_tensor(x))
+
+        expected = torch.ops.aten.clone.default(x)
+        actual = torch.compile(torch.ops.aten.clone.default, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertFalse(actual.is_conj())
 
     def test_complex_conv2d_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
