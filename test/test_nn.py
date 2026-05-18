@@ -9632,10 +9632,11 @@ class TestNNDeviceType(NNTestCase):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
         # Negative padding that reduces only one spatial dim to <= 0 must still
-        # be rejected with a clear error. Prior to the fix the meta check used
-        # OR across dims so a single positive dim let the bad input through and
-        # a negative output dim reached the allocator with a cryptic message
-        # (see follow-up to GH #143487).
+        # be rejected with a clear error. Previously the meta check joined the
+        # per-axis "output >= 1" conditions with OR, so a single positive dim
+        # let the bad input through and a negative output dim reached the
+        # allocator with a cryptic "Trying to create tensor with negative
+        # dimension" message.
         with self.assertRaisesRegex(RuntimeError, 'is too small'):
             torch._C._nn.replication_pad2d(
                 torch.zeros(1, 1, 4, 1, device=device, dtype=dtype),
