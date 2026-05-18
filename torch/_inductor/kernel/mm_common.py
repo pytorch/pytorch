@@ -103,30 +103,47 @@ def addmm_epilogue(dtype, alpha, beta):
     return epilogue
 
 
-def scale_mm_epilogue():
+def scale_mm_epilogue(
+    *,
+    has_bias: bool = False,
+    has_scale_result: bool = False,
+    apply_scale_result: bool = False,
+):
     """
     Create an epilogue function that applies scaling to matrix multiplication result
     using the given scale factors.
 
     Args:
-        dtype: The data type of the output
-        scale_a: Scale factor for matrix A
-        scale_b: Scale factor for matrix B
+        has_bias: Whether the epilogue receives and applies a bias argument.
+        has_scale_result: Whether the epilogue receives a scale_result argument.
+        apply_scale_result: Whether the epilogue divides by scale_result.
 
     Returns:
         Epilogue function that takes the accumulator and applies scaling
     """
 
-    def epilogue(acc, inv_a_scale, inv_b_scale, bias=None):
+    def epilogue(acc, inv_a_scale, inv_b_scale, *optional_args):
+        arg_idx = 0
+        bias = None
+        if has_bias:
+            bias = optional_args[arg_idx]
+            arg_idx += 1
+
+        scale_result = None
+        if has_scale_result:
+            scale_result = optional_args[arg_idx]
+
         # The epilogue function receives the accumulator (result of mat1 @ mat2)
         # and applies the scaling factors
         # In the original scaled_mm, we use inverse scales, so we multiply by them
         mul_scales = V.ops.mul(inv_a_scale, inv_b_scale)
         mul_acc = V.ops.mul(acc, mul_scales)
         if bias is not None:
-            return V.ops.add(mul_acc, bias)
-        else:
-            return mul_acc
+            mul_acc = V.ops.add(mul_acc, bias)
+        if apply_scale_result:
+            assert scale_result is not None
+            mul_acc = V.ops.truediv(mul_acc, scale_result)
+        return mul_acc
 
     return epilogue
 

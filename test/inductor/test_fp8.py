@@ -439,6 +439,212 @@ class TestFP8Types(TestCase):
 
 
 class TestFP8Lowering(TestCase):
+    def test_scaled_mm_epilogue_scale_result_after_bias(self):
+        from torch._inductor.kernel.mm_common import scale_mm_epilogue
+        from torch._inductor.ops_handler import DefaultHandler
+        from torch._inductor.virtualized import V
+
+        class StringOps(DefaultHandler):
+            def _default(self, name, args, kwargs):
+                if name == "mul":
+                    return f"({args[0]} * {args[1]})"
+                if name == "add":
+                    return f"({args[0]} + {args[1]})"
+                if name == "truediv":
+                    return f"({args[0]} / {args[1]})"
+                raise AssertionError(f"unexpected op {name}")
+
+        epilogue = scale_mm_epilogue(
+            has_bias=True,
+            has_scale_result=True,
+            apply_scale_result=True,
+        )
+        with V.set_ops_handler(StringOps()):
+            result = epilogue("acc", "scale_a", "scale_b", "bias", "scale_result")
+
+        self.assertEqual(
+            result, "(((acc * (scale_a * scale_b)) + bias) / scale_result)"
+        )
+
+    def test_scaled_mm_epilogue_omitted_scale_result_is_identity(self):
+        from torch._inductor.kernel.mm_common import scale_mm_epilogue
+        from torch._inductor.ops_handler import DefaultHandler
+        from torch._inductor.virtualized import V
+
+        class StringOps(DefaultHandler):
+            def _default(self, name, args, kwargs):
+                if name == "mul":
+                    return f"({args[0]} * {args[1]})"
+                if name == "truediv":
+                    raise AssertionError("scale_result should not be applied")
+                raise AssertionError(f"unexpected op {name}")
+
+        epilogue = scale_mm_epilogue(apply_scale_result=False)
+        with V.set_ops_handler(StringOps()):
+            result = epilogue("acc", "scale_a", "scale_b")
+
+        self.assertEqual(result, "(acc * (scale_a * scale_b))")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cpu"])
+    def test_scaled_mm_omitted_scale_result_fp8_output(self, device):
+        torch.manual_seed(0)
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 16, 32, 16
+        a = (torch.randn(M, K, device=device) * 0.25).to(dtype_float8).contiguous()
+        b = (torch.randn(N, K, device=device) * 0.25).to(dtype_float8).contiguous().t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+
+        def fn(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                out_dtype=dtype_float8,
+            )
+
+        expected = fn(a, b, scale_a, scale_b)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale_a,
+            scale_b,
+        )
+
+        self.assertEqual(expected.float(), actual.float(), atol=0, rtol=0)
+        self.assertIn(
+            "extern_kernels._scaled_mm(arg0_1, arg1_1, arg2_1, arg3_1, out_dtype",
+            code,
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cpu"])
+    @parametrize("has_bias", (False, True))
+    def test_scaled_mm_scale_result(self, device, has_bias):
+        torch.manual_seed(0)
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 16, 32, 16
+        a = (torch.randn(M, K, device=device) * 0.25).to(dtype_float8).contiguous()
+        b = (torch.randn(N, K, device=device) * 0.25).to(dtype_float8).contiguous().t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        scale_result = torch.tensor(2.0, device=device)
+        bias = torch.randn(N, device=device) * 0.25 if has_bias else None
+
+        def fn(a, b, scale_a, scale_b, bias, scale_result):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                bias=bias,
+                scale_result=scale_result,
+                out_dtype=dtype_float8,
+            )
+
+        expected = fn(a, b, scale_a, scale_b, bias, scale_result)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale_a,
+            scale_b,
+            bias,
+            scale_result,
+        )
+
+        self.assertEqual(expected.float(), actual.float(), atol=0, rtol=0)
+        if has_bias:
+            self.assertIn(
+                "extern_kernels._scaled_mm(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1",
+                code,
+            )
+        else:
+            self.assertIn(
+                "extern_kernels._scaled_mm(arg0_1, arg1_1, arg2_1, arg3_1, None, arg4_1",
+                code,
+            )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cpu"])
+    def test_scaled_mm_scale_result_rejects_vector(self, device):
+        torch.manual_seed(0)
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 16, 32, 16
+        a = (torch.randn(M, K, device=device) * 0.25).to(dtype_float8).contiguous()
+        b = (torch.randn(N, K, device=device) * 0.25).to(dtype_float8).contiguous().t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        scale_result = torch.ones(2, device=device)
+
+        def fn(a, b, scale_a, scale_b, scale_result):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                scale_result=scale_result,
+                out_dtype=dtype_float8,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "scale_result must be a float scalar"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                scale_result,
+            )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    def test_scaled_mm_scale_result_triton_template(self, device):
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 16, 32, 16
+        a = torch.ones(M, K, device=device, dtype=torch.bfloat16).to(dtype_float8)
+        b = torch.ones(N, K, device=device, dtype=torch.bfloat16).to(dtype_float8).t()
+        scale_a = torch.tensor(0.25, device=device)
+        scale_b = torch.tensor(0.25, device=device)
+        bias = torch.full((N,), 14.0, device=device, dtype=torch.bfloat16)
+        scale_result = torch.tensor(2.0, device=device)
+
+        def fn(a, b, scale_a, scale_b, bias, scale_result):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                bias=bias,
+                scale_result=scale_result,
+                out_dtype=dtype_float8,
+            )
+
+        with config.patch(
+            {
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", mode="max-autotune"),
+                a,
+                b,
+                scale_a,
+                scale_b,
+                bias,
+                scale_result,
+            )
+
+        self.assertEqual(actual.float(), torch.full_like(actual.float(), 8.0))
+        self.assertIn("triton_", code)
+        self.assertNotIn("extern_kernels._scaled_mm", code)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
     @onlyCUDA
