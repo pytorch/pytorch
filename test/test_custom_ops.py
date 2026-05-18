@@ -4641,9 +4641,7 @@ class TestCustomOpFastPath(TestCase):
             # falls back to the C++ dispatcher — skip the poison.
             yield
             return
-        packet = opdef._opoverload._overloadpacket
         overload = opdef._opoverload
-        saved_packet_orig = packet._orig_op
         saved_overload_orig = overload._orig_op
         saved_overload = opdef._opoverload
 
@@ -4652,17 +4650,14 @@ class TestCustomOpFastPath(TestCase):
                 "slow path was called; fast path should have handled this"
             )
 
-        # Poison all three fallback paths:
-        # - packet._orig_op: read by fast_op for torch.ops.ns.name(x)
+        # Poison the fallback paths:
         # - overload._orig_op: read by fast_op for torch.ops.ns.name.default(x)
         # - opdef._opoverload: used by CustomOpDef.__call__ for direct my_op(x)
-        packet._orig_op = poison
         overload._orig_op = poison
         opdef._opoverload = poison
         try:
             yield
         finally:
-            packet._orig_op = saved_packet_orig
             overload._orig_op = saved_overload_orig
             opdef._opoverload = saved_overload
 
@@ -4675,7 +4670,6 @@ class TestCustomOpFastPath(TestCase):
         y = torch.randn(3)
         with self._assert_fast_path_taken(fp_add):
             self.assertEqual(fp_add(x, y), x + y)
-            self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
             self.assertEqual(torch.ops._torch_testing.fp_add.default(x, y), x + y)
 
     def test_fast_path_mutable(self):
@@ -4738,15 +4732,15 @@ class TestCustomOpFastPath(TestCase):
                 result = fp_nograd_check(x)
         self.assertEqual(result, x**2)
 
-    def test_fast_path_inference_mode(self):
+    def test_fast_path_falls_back_for_inference_mode(self):
         @torch.library.custom_op("_torch_testing::fp_im", mutates_args=())
         def fp_im(x: Tensor) -> Tensor:
             return x.clone()
 
+        # inference_mode excludes autograd keys; fast path bails to C++ dispatcher
         with torch.inference_mode():
             x = torch.randn(3)
-            with self._assert_fast_path_taken(fp_im):
-                result = fp_im(x)
+            result = fp_im(x)
         self.assertEqual(result, x)
 
     def test_fast_path_falls_back_for_autocast(self):
@@ -4834,6 +4828,7 @@ class TestCustomOpFastPath(TestCase):
         x = torch.randn(3)
         expected = x + 1
         v_before = x._version
+        # inference_mode bails from fast path; slow path still bumps version
         with torch.inference_mode():
             fp_im_bump(x)
         self.assertEqual(x, expected)
@@ -4844,6 +4839,7 @@ class TestCustomOpFastPath(TestCase):
         def fp_im_mut(x: Tensor) -> None:
             x.data.add_(1)
 
+        # inference_mode tensors go through slow path
         with torch.inference_mode():
             x = torch.randn(3)
             expected = x + 1
@@ -4877,7 +4873,7 @@ class TestCustomOpFastPath(TestCase):
             torch.ops._torch_testing.fp_tl2(x, [tt])
             self.assertTrue(called)
 
-    def test_fast_path_no_wrapper_chain_on_multi_device_register(self):
+    def test_fast_path_no_wrapper_nest_on_multi_device_register(self):
         @torch.library.custom_op(
             "_torch_testing::fp_chain", mutates_args=(), device_types="cpu"
         )
@@ -4888,8 +4884,12 @@ class TestCustomOpFastPath(TestCase):
         def _(x):
             return torch.empty_like(x)
 
-        packet = torch.ops._torch_testing.fp_chain.default._overloadpacket
-        orig = packet._orig_op
+        overload = torch.ops._torch_testing.fp_chain.default
+        packet = overload._overloadpacket
+        orig = overload._orig_op
+
+        # Packet should not be wrapped (OpOverload-only install)
+        self.assertFalse(hasattr(packet, "_orig_op"))
 
         @fp_chain.register_kernel("cuda")
         def _(x: Tensor) -> Tensor:
@@ -4897,10 +4897,9 @@ class TestCustomOpFastPath(TestCase):
 
         # After a second register_kernel, the fallback should still be the
         # original C++ entry point, not a nested fast_op wrapper.
-        self.assertIs(packet._orig_op, orig)
+        self.assertIs(overload._orig_op, orig)
 
         # Exercise the fallback path (meta tensor forces fast_call to bail)
-        # to verify it reaches the real C++ dispatcher, not a stale wrapper.
         x_meta = torch.randn(3, device="meta")
         result = torch.ops._torch_testing.fp_chain(x_meta)
         self.assertEqual(result.shape, x_meta.shape)
@@ -4976,6 +4975,10 @@ class TestCustomOpFastPath(TestCase):
         self.assertEqual(result[1], True)
 
         with torch.autocast("cpu"):
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+        with torch.inference_mode():
             result = torch._C._custom_op_fast_path_check(args)
             self.assertIsNone(result)
 
@@ -5093,18 +5096,16 @@ class TestCustomOpFastPath(TestCase):
             for f in concurrent.futures.as_completed(futures):
                 self.assertTrue(f.result())
 
-    def test_fast_path_mixed_device_uses_first_tensor(self):
+    def test_fast_path_rejects_mixed_device(self):
         @torch.library.custom_op("_torch_testing::fp_mixed", mutates_args=())
         def fp_mixed(x: Tensor, y: Tensor) -> Tensor:
             return x.clone()
 
-        # C++ checker uses the first tensor's device; mixed-device handling
-        # is left to the kernel / fast_call meta fallback.
+        # C++ checker rejects mixed-device inputs
         result = torch._C._custom_op_fast_path_check(
             (torch.randn(3, device="cpu"), torch.randn(3, device="meta"))
         )
-        self.assertIsNotNone(result)
-        self.assertEqual(result[0], "cpu")
+        self.assertIsNone(result)
 
 
 class TestLibrarySourceLocation(TestCase):

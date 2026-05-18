@@ -746,9 +746,6 @@ class CustomOpDef:
         Uses a chain-based dispatch: fast_call → autograd_impl → [adinplaceorview_impl →]
         backend_dispatch, connected via op.redispatch popping from a thread-local chain."""
         schema = self._opoverload._schema
-
-        # View ops have special ADInplaceOrView handling that the fast path
-        # can't replicate.
         if schema._is_view_op():
             return
 
