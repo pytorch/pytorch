@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import pickle
 from types import SimpleNamespace
 
 import torch
 import torch.fx
+from torch._dynamo.graph_region_tracker import get_global_state_key
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
@@ -260,6 +262,14 @@ class GraphRegionTrackerTests(TestCase):
 [['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
             )
 
+    def test_global_state_key_uses_fp32_precision_api(self):
+        old_value = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            self.assertEqual(get_global_state_key()[7], "tf32")
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = old_value
+
     def test_mutation_tracking_simple(self):
         def fn(x, y, z):
             x0 = torch.sin(x)
@@ -375,19 +385,31 @@ z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
             def __reduce_ex__(self, protocol):
                 raise NotImplementedError("no pickle")
 
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        x.meta["example_value"] = Unpickleable()
-        y = graph.call_function(torch.neg, (x,))
+        class PickleErrorValue:
+            def __reduce_ex__(self, protocol):
+                raise pickle.PickleError("no pickle")
 
-        tx = SimpleNamespace(
-            f_code=SimpleNamespace(co_filename="test.py"),
-            lineno=1,
-            instruction_pointer=0,
-        )
-        tracker = GraphRegionTracker()
-        tracker.track_node(tx, y)
-        self.assertEqual(tracker.node_to_duplicates, {})
+        unpickleable_values = [
+            Unpickleable(),
+            PickleErrorValue(),
+            {},
+        ]
+        unpickleable_values[-1]["cycle"] = unpickleable_values[-1]
+
+        for value in unpickleable_values:
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["example_value"] = value
+            y = graph.call_function(torch.neg, (x,))
+
+            tx = SimpleNamespace(
+                f_code=SimpleNamespace(co_filename="test.py"),
+                lineno=1,
+                instruction_pointer=0,
+            )
+            tracker = GraphRegionTracker()
+            tracker.track_node(tx, y)
+            self.assertEqual(tracker.node_to_duplicates, {})
 
 
 if __name__ == "__main__":

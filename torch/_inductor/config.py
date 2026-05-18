@@ -581,9 +581,11 @@ graph_partition: bool = (
 # it. cpp_wrapper does not support invoke_subgraph codegen yet, and the runtime
 # overhead is not always worthwhile for inference. The torch.compile Inductor
 # wrapper ignores this option when grad mode is disabled, cpp_wrapper is active,
-# dynamic=True is set, fallback_by_default is active, invoke_subgraph regional
-# compile is active, autograd ops are traced into the graph, or compiled
-# autograd is compiling the backward graph.
+# dynamic=True is set, fallback_by_default is active, cudagraphs are active,
+# invoke_subgraph regional compile is active, autograd ops are traced into the
+# graph, or compiled autograd is compiling the backward graph. It is also
+# disabled for the Inductor subprocess compile mode because nested GraphModule
+# subgraphs are not yet supported across that compile-worker boundary.
 graph_deduplication: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_DEDUPLICATION", "1") == "1"
 )

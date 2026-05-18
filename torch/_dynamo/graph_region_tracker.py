@@ -54,7 +54,7 @@ GlobalStateKey = tuple[
     tuple[bool, bool],
     torch.dtype,
     bool,
-    bool,
+    str,
     bool,
     bool,
 ]
@@ -111,7 +111,13 @@ class InputPickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError, NotImplementedError) as e:
+        except (
+            TypeError,
+            AttributeError,
+            NotImplementedError,
+            pickle.PickleError,
+            ValueError,
+        ) as e:
             raise NodeHashException from e
         finally:
             self._stream.seek(0)
@@ -159,7 +165,7 @@ def get_global_state_key() -> GlobalStateKey:
         torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
         torch.get_default_dtype(),
         torch.are_deterministic_algorithms_enabled(),
-        torch._C._get_cublas_allow_tf32(),
+        torch.backends.cuda.matmul.fp32_precision,
         torch.is_deterministic_algorithms_warn_only_enabled(),
         torch._C._autograd._saved_tensors_hooks_is_enabled(),  # type: ignore[attr-defined]
     )

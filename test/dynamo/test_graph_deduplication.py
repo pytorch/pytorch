@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+from unittest import mock
 
 import torch
 import torch.fx
@@ -1288,16 +1289,20 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
         cpp_wrapper=False,
         fallback_by_default=False,
         dynamic=None,
+        triton_cudagraphs=None,
     ):
         class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
             def __init__(self):
+                options = {
+                    "cpp_wrapper": cpp_wrapper,
+                    "fallback_by_default": fallback_by_default,
+                    "graph_deduplication": graph_deduplication,
+                }
+                if triton_cudagraphs is not None:
+                    options["triton.cudagraphs"] = triton_cudagraphs
                 super().__init__(
                     mode=None,
-                    options={
-                        "cpp_wrapper": cpp_wrapper,
-                        "fallback_by_default": fallback_by_default,
-                        "graph_deduplication": graph_deduplication,
-                    },
+                    options=options,
                     dynamic=dynamic,
                 )
                 self.graphs = []
@@ -1334,11 +1339,70 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
             for node in backend.graphs[0].graph.nodes
         )
 
+    def _compile_string_inductor_and_count_invoke_subgraphs(self, *, dynamic=None):
+        import torch._inductor.compile_fx as compile_fx
+
+        graphs = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            graphs.append(gm)
+            return gm.forward
+
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return x + self.linear(x).relu()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Block() for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        with mock.patch.object(compile_fx, "compile_fx", side_effect=fake_compile_fx):
+            opt_model = torch._dynamo.optimize("inductor", dynamic=dynamic)(Model())
+            opt_model(torch.randn(2, 4))
+
+        self.assertEqual(len(graphs), 1)
+        return sum(
+            node.op == "call_function"
+            and node.target is torch.ops.higher_order.invoke_subgraph
+            for node in graphs[0].graph.nodes
+        )
+
     def test_inductor_wrapper_enables_graph_deduplication(self):
         self.assertGreater(
             self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
             0,
         )
+
+    def test_optimize_string_inductor_enables_graph_deduplication(self):
+        self.assertGreater(
+            self._compile_string_inductor_and_count_invoke_subgraphs(),
+            0,
+        )
+
+    def test_optimize_string_inductor_disables_graph_deduplication_for_dynamic_shapes(
+        self,
+    ):
+        self.assertEqual(
+            self._compile_string_inductor_and_count_invoke_subgraphs(dynamic=True),
+            0,
+        )
+
+    def test_optimize_string_inductor_disables_graph_deduplication_for_cudagraphs(self):
+        with torch._inductor.config.patch("triton.cudagraphs", True):
+            self.assertEqual(
+                self._compile_string_inductor_and_count_invoke_subgraphs(),
+                0,
+            )
 
     def test_inductor_wrapper_can_disable_graph_deduplication(self):
         self.assertEqual(
@@ -1377,6 +1441,14 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
             0,
         )
 
+    def test_inductor_wrapper_disables_graph_deduplication_for_cudagraphs(self):
+        self.assertEqual(
+            self._compile_and_count_invoke_subgraphs(
+                graph_deduplication=True, triton_cudagraphs=True
+            ),
+            0,
+        )
+
     def test_inductor_wrapper_disables_graph_deduplication_for_regional_compile(self):
         with torch._dynamo.config.patch(enable_invoke_subgraph_regional_compile=True):
             self.assertEqual(
@@ -1409,6 +1481,53 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
                 self.assertFalse(torch._dynamo.config.use_graph_deduplication)
         finally:
             compiled_autograd.in_compiled_autograd_region = prior
+
+    def test_inductor_wrapper_disables_graph_deduplication_for_compile_subprocess(self):
+        import torch._inductor.compile_fx as compile_fx
+
+        with mock.patch.object(
+            compile_fx, "fx_compile_mode", compile_fx.FxCompileMode.SUBPROCESS
+        ):
+            self.assertEqual(
+                self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
+                0,
+            )
+
+    def test_inductor_wrapper_skips_mutating_external_inputs(self):
+        class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
+            def __init__(self):
+                super().__init__(
+                    mode=None,
+                    options={"graph_deduplication": True},
+                    dynamic=None,
+                )
+                self.graphs = []
+
+            def __call__(self, gm, example_inputs, *, config_patches=None):
+                self.graphs.append(gm)
+                return gm.forward
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn1 = torch.nn.BatchNorm2d(3)
+                self.bn2 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                return self.bn2(self.bn1(x))
+
+        backend = RecordingInductorWrapper()
+        opt_model = torch._dynamo.optimize(backend, nopython=True)(Model().train())
+        opt_model(torch.randn(2, 3, 4, 4))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(
+            sum(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.invoke_subgraph
+                for node in backend.graphs[0].graph.nodes
+            ),
+            0,
+        )
 
     def test_inductor_wrapper_handles_existing_invoke_subgraph(self):
         from torch._higher_order_ops.invoke_subgraph import mark_compile_region

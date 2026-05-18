@@ -77,6 +77,12 @@ when they are created in output_graph.
     sub_gms: dict[str, torch.fx.GraphModule] = {}
 
     for region_group in duplicated_region_groups:
+        if any(
+            _has_mutated_external_input(region, node_to_mutated_arg_positions)
+            for region in region_group
+        ):
+            continue
+
         inds_with_external_users = _get_all_output_indices(region_group)
         region = region_group[0]
         (
@@ -250,6 +256,52 @@ def _get_sub_args(
             sub_args.append(flattened_args_kwargs[usage_ind])
 
     return sub_args, flattened_getitem_nodes
+
+
+def _has_mutated_external_input(
+    region: Region,
+    node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
+) -> bool:
+    region_unique = set(region)
+
+    for node in region:
+        if node in node_to_mutated_arg_positions:
+            flattened_args_kwargs = _get_flat_args(node, {})
+            for arg_index in node_to_mutated_arg_positions[node]:
+                if arg_index >= len(flattened_args_kwargs):
+                    continue
+                arg = flattened_args_kwargs[arg_index]
+                if isinstance(arg, Node) and arg not in region_unique:
+                    return True
+
+        if not (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+        ):
+            continue
+
+        schema_args = node.target._schema.arguments
+        for arg, arg_schema in zip(node.args, schema_args):
+            if arg_schema.is_write and _contains_external_node(arg, region_unique):
+                return True
+
+        for arg_schema in schema_args[len(node.args) :]:
+            if (
+                arg_schema.is_write
+                and arg_schema.name in node.kwargs
+                and _contains_external_node(node.kwargs[arg_schema.name], region_unique)
+            ):
+                return True
+
+    return False
+
+
+def _contains_external_node(arg: object, region_unique: set[Node]) -> bool:
+    flattened_args, _ = torch.utils._pytree.tree_flatten(arg)
+    return any(
+        isinstance(flat_arg, Node) and flat_arg not in region_unique
+        for flat_arg in flattened_args
+    )
 
 
 def _are_valid_invoke_subgraph_operands(nodes: list[Node]) -> bool:
