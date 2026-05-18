@@ -1257,7 +1257,14 @@ def get_reduction_combine_fn(
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
-            delta = b_mean - a_mean
+            # Guard against inf - inf = NaN when both means are infinite and
+            # equal. This occurs during FP16/BF16 LayerNorm when inputs
+            # overflow to inf.
+            delta = ops.where(
+                ops.logical_and(ops.isinf(a_mean), ops.eq(a_mean, b_mean)),
+                ops.constant(0.0, torch.float32),
+                b_mean - a_mean,
+            )
             new_weight = a_weight + b_weight
             w2_over_w = b_weight / new_weight
             return (
@@ -1354,6 +1361,9 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: IRNode | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
+        """
+        Choose the reduction hint and split count from shape and input stride information.
+        """
         # Use optimization_hint when all unbacked symbols have explicit hints,
         # otherwise fall back conservatively.
         exprs = [reduction_numel, sympy_product(ranges)]
@@ -1477,22 +1487,42 @@ class Reduction(Loops):
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
             assert read_writes.range_vars is not None
             range_vars = [
-                r
-                for r in read_writes.range_vars
-                if isinstance(r, Expr) and not isinstance(r, sympy.Number)
+                var
+                for var in read_writes.range_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
+            ]
+            (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+                r.get_size(), r.get_reduction_size()
+            )
+            reduction_vars = [
+                var
+                for var in reduction_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
             indices = []
+            broadcasted_reduction_indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all(r in md.index.free_symbols for r in range_vars):
+                free_symbols = md.index.free_symbols
+                is_full_size_read = all(var in free_symbols for var in range_vars)
+                # Prefer full-size reads, but fall back to reads that still
+                # vary across the reduction.  Missing reduction vars are
+                # zero-stride broadcasts, not proof of an inner reduction.
+                is_broadcasted_reduction_read = not is_full_size_read and any(
+                    var in free_symbols for var in reduction_vars
+                )
+                if is_full_size_read:
                     indices.append(md.index)
+                elif is_broadcasted_reduction_read:
+                    broadcasted_reduction_indices.append(md.index)
+                if is_full_size_read or is_broadcasted_reduction_read:
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
                         original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
                         if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
-            return indices, changed
+            return indices or broadcasted_reduction_indices, changed
 
         indices, changed = get_read_indices(r)
         if changed:

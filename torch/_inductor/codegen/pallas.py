@@ -4850,16 +4850,28 @@ from torch._inductor.runtime.runtime_utils import (
                 )
                 for idx in ctx.copy_output_indices:
                     out_name = ctx.output_params[idx]
+                    copy_target = f"{out_name}_copy_target"
+                    code.writeline(f"{copy_target} = {out_name}")
+                    code.writeline(f"if {copy_target}.is_neg():")
+                    with code.indent():
+                        code.writeline(f"{copy_target} = {copy_target}._neg_view()")
                     code.writeline(
-                        f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                        f"{copy_target}.copy_(torch.from_dlpack(result_values[{idx}]))"
                     )
 
     @staticmethod
     def _emit_torch_to_jax(
         code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
     ) -> None:
-        suffix = ".detach().contiguous()" if contiguous else ".detach()"
-        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
+        # Preserve physical storage for lazy negative views; generated loads
+        # resolve the logical value explicitly after reading from the input.
+        code.writeline(f"{var_name}_torch = {var_name}.detach()")
+        code.writeline(f"if {var_name}_torch.is_neg():")
+        with code.indent():
+            code.writeline(f"{var_name}_torch = {var_name}_torch._neg_view()")
+        if contiguous:
+            code.writeline(f"{var_name}_torch = {var_name}_torch.contiguous()")
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}_torch)")
 
     def call_kernel(self, name: str, node: IRNode | None = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
