@@ -68,6 +68,7 @@ class TestCompileWorkerStartup(TestCase):
             task_path = f"/proc/{proc.pid}/task"
             deadline = time.monotonic() + 10
             state = None
+            idle_polls = 0
             threads = os.listdir(task_path)
             while time.monotonic() < deadline:
                 self.assertIsNone(proc.poll())
@@ -75,10 +76,15 @@ class TestCompileWorkerStartup(TestCase):
                     state = f.read().split()[2]
                 threads = os.listdir(task_path)
                 if state in ("S", "I"):
-                    break
+                    idle_polls += 1
+                    if idle_polls >= 2:
+                        break
+                else:
+                    idle_polls = 0
                 time.sleep(0.05)
 
             self.assertIn(state, ("S", "I"))
+            self.assertGreaterEqual(idle_polls, 2)
             self.assertEqual(len(threads), 1)
         finally:
             os.close(write_fd)

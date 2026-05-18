@@ -5,6 +5,9 @@ This module is imported by compile_worker.__main__ before it creates the inner
 ProcessPoolExecutor, so top-level imports here must not import torch.
 """
 
+import atexit
+import concurrent
+import dataclasses
 import functools
 import logging
 import multiprocessing
@@ -19,11 +22,17 @@ import typing
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass
 from enum import Enum, IntEnum
+from multiprocessing.context import BaseContext
+from time import time
 from typing import Any, IO
 
 
 log = logging.getLogger(__name__)
+_queue_stats_log = logging.getLogger(
+    "torch._inductor.compile_worker.tracked_process_pool"
+)
 
 
 class MsgHeader(IntEnum):
@@ -108,6 +117,93 @@ class SubprocKind(Enum):
     SPAWN = "spawn"
 
 
+@dataclass
+class _QueueStats:
+    # Mapping from id(future) -> start time
+    pending: dict[int, float] = dataclasses.field(default_factory=dict)
+    timing: list[float] = dataclasses.field(default_factory=list)
+    enqueue_count: int = 0
+    dequeue_count: int = 0
+    max_queue_depth: int = 0
+    pool_count: int = 0
+
+
+_queue_stats = _QueueStats()
+_queue_stats_lock = threading.Lock()
+
+
+class TrackedProcessPoolExecutor(ProcessPoolExecutor):
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        mp_context: BaseContext | None = None,
+        initializer: Callable[[], object] | None = None,
+    ) -> None:
+        with _queue_stats_lock:
+            _queue_stats.pool_count += 1
+        super().__init__(max_workers, mp_context, initializer)
+
+    def _record_dequeue(self, f: Future[Any]) -> None:
+        now = time()
+        with _queue_stats_lock:
+            stats = _queue_stats
+            if (start_time := stats.pending.pop(id(f), None)) is None:
+                return
+            stats.dequeue_count += 1
+            duration = now - start_time
+            stats.timing.append(duration)
+
+    def _record_enqueue(self, f: Future[Any]) -> None:
+        # Monkeypatch set_running_or_notify_cancel so we can track when the
+        # Future moves out of PENDING.
+        saved_running_or_notify_cancel = f.set_running_or_notify_cancel
+
+        def set_running_or_notify_cancel() -> Any:
+            self._record_dequeue(f)
+            return saved_running_or_notify_cancel()
+
+        now = time()
+        with _queue_stats_lock:
+            stats = _queue_stats
+            stats.pending[id(f)] = now
+            stats.enqueue_count += 1
+            stats.max_queue_depth = max(stats.max_queue_depth, len(stats.pending))
+            f.set_running_or_notify_cancel = set_running_or_notify_cancel  # type: ignore[method-assign]
+
+        if f._state != concurrent.futures._base.PENDING:
+            self._record_dequeue(f)
+
+    def submit(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future[Any]:
+        f = super().submit(fn, *args, **kwargs)
+        self._record_enqueue(f)
+        return f
+
+
+@atexit.register
+def _queue_stats_report() -> None:
+    stats = _queue_stats
+    if stats.pool_count == 0:
+        return
+
+    timing = stats.timing
+    timing.sort()
+
+    _queue_stats_log.info("AsyncCompile Metrics:")
+    _queue_stats_log.info("  Pools %s", stats.pool_count)
+    _queue_stats_log.info(
+        "  Items %d enqueued / %d dequeued", stats.enqueue_count, stats.dequeue_count
+    )
+    _queue_stats_log.info("  Max Queue Depth: %d", stats.max_queue_depth)
+    n = len(timing)
+    if n > 0:
+        _queue_stats_log.info("  Longest queue time: %0.2fs", timing[-1])
+        _queue_stats_log.info("  P50: %0.2fs", timing[n // 2])
+        if n >= 20:
+            _queue_stats_log.info("  P95: %0.2fs", timing[n * 95 // 100])
+
+
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
@@ -127,7 +223,7 @@ class SubprocMain:
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
         self.torch_key_data = torch_key_data
-        self.pool: ProcessPoolExecutor | None = None
+        self.pool: TrackedProcessPoolExecutor | None = None
         self.running = True
 
     def main(self) -> None:
@@ -144,7 +240,10 @@ class SubprocMain:
 
     def _quiesce(self) -> None:
         if self.pool is not None:
-            self.pool.shutdown(wait=False)
+            # A later wakeup may create a new fork-based pool. Wait for the old
+            # executor manager thread to exit first so the sidecar is single-threaded
+            # before it forks again.
+            self.pool.shutdown(wait=True)
             self.pool = None
 
     def _shutdown(self) -> None:
@@ -197,7 +296,10 @@ class SubprocMain:
         if self.pool is not None:
             return
 
-        self.pool = ProcessPoolExecutor(
+        # Do not import tracked_process_pool here: it imports torch._thread_safe_fork
+        # for parents that have already imported torch. The sidecar deliberately
+        # has not, so that import would recreate the fork-after-thread-start issue.
+        self.pool = TrackedProcessPoolExecutor(
             self.nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(
@@ -222,6 +324,8 @@ class SubprocMain:
 
 
 def _worker_initializer(orig_ppid: int, torch_key_data: bytes) -> None:
+    # Import torch-dependent setup only inside the already-created compile
+    # worker. The sidecar process stays torch-free before the worker fork.
     from torch._inductor.async_compile import pre_fork_setup
     from torch._inductor.codecache import torch_key
     from torch._inductor.compile_worker.utils import _async_compile_initializer
