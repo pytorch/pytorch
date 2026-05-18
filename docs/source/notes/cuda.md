@@ -1,11 +1,13 @@
-.. meta::
-   :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
-   :keywords: memory management, PYTORCH_ALLOC_CONF, optimize PyTorch, CUDA
+---
+myst:
+  html_meta:
+    description: A guide to torch.cuda, a PyTorch module to run CUDA operations
+    keywords: memory management, PYTORCH_ALLOC_CONF, optimize PyTorch, CUDA
+---
 
-.. _cuda-semantics:
+(cuda-semantics)=
 
-CUDA semantics
-==============
+# CUDA semantics
 
 
 :mod:`torch.cuda` is used to set up and run CUDA operations. It keeps track of
@@ -23,8 +25,9 @@ such as :meth:`~torch.Tensor.to` and :meth:`~torch.Tensor.cuda`.
 Unless you enable peer-to-peer memory access, any attempts to launch ops on
 tensors spread across different devices will raise an error.
 
-Below you can find a small example showcasing this::
+Below you can find a small example showcasing this:
 
+```python
     cuda = torch.device('cuda')     # Default CUDA device
     cuda0 = torch.device('cuda:0')
     cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
@@ -58,23 +61,23 @@ Below you can find a small example showcasing this::
         e = torch.randn(2).to(cuda2)
         f = torch.randn(2).cuda(cuda2)
         # d.device, e.device, and f.device are all device(type='cuda', index=2)
+```
 
-.. _tf32_on_ampere:
+(tf32_on_ampere)=
 
-TensorFloat-32 (TF32) on Ampere (and later) devices
----------------------------------------------------
+## TensorFloat-32 (TF32) on Ampere (and later) devices
 
 After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
 suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
-.. code:: python
-
+```python
   torch.backends.fp32_precision = "ieee"
   torch.backends.cuda.matmul.fp32_precision = "ieee"
   torch.backends.cudnn.fp32_precision = "ieee"
   torch.backends.cudnn.conv.fp32_precision = "tf32"
   torch.backends.cudnn.rnn.fp32_precision = "tf32"
+```
 
 The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
 `ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
@@ -82,30 +85,31 @@ The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 
-.. code:: python
-
+```python
   torch.backends.cudnn.fp32_precision = "tf32"
   torch.backends.cudnn.conv.fp32_precision = "ieee"
   torch.backends.cudnn.rnn.fp32_precision = "ieee"
+```
 
 We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
 
-.. code:: python
-
+```python
   torch.backends.fp32_precision = "tf32"
   torch.backends.cudnn.fp32_precision = "ieee"
   torch.backends.cudnn.conv.fp32_precision = "ieee"
   torch.backends.cudnn.rnn.fp32_precision = "ieee"
+```
 
 For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
 is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
 
-.. warning::
+```{warning}
 
   Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
   better control. And we do not support to use mix of old and new settings.
+```
 
 Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
 defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
@@ -119,14 +123,14 @@ results with FP32 precision, maintaining FP32 dynamic range.
 
 matmuls and convolutions are controlled separately, and their corresponding flags can be accessed at:
 
-.. code:: python
-
+```python
   # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
   # in PyTorch 1.12 and later.
   torch.backends.cuda.matmul.allow_tf32 = True
 
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
   torch.backends.cudnn.allow_tf32 = True
+```
 
 The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float32_matmul_precision`.
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
@@ -135,8 +139,7 @@ affine grid and grid sample, adaptive log softmax, GRU and LSTM.
 
 To get an idea of the precision and speed, see the example code and benchmark data (on A100) below:
 
-.. code:: python
-
+```python
   a_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
   b_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
   ab_full = a_full @ b_full
@@ -156,6 +159,7 @@ To get an idea of the precision and speed, see the example code and benchmark da
   ab_fp32 = a @ b  # takes 0.11s on GA100
   error = (ab_fp32 - ab_full).abs().max()  # 0.0031
   relative_error = error / mean  # 0.000039
+```
 
 From the above example, we can see that with TF32 enabled, the speed is ~7x faster on A100, and that
 relative error compared to double precision is approximately 2 orders of magnitude larger. Note that
@@ -164,32 +168,28 @@ such as the ratio of memory bandwidth to compute as well as the ratio of TF32 to
 may vary from generation to generation or model to model.
 If full FP32 precision is needed, users can disable TF32 by:
 
-.. code:: python
-
+```python
   torch.backends.cuda.matmul.allow_tf32 = False
   torch.backends.cudnn.allow_tf32 = False
+```
 
 To toggle the TF32 flags off in C++, you can do
 
-.. code:: C++
-
+```cpp
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
+```
 
 For more information about TF32, see:
 
-- `TensorFloat-32`_
-- `CUDA 11`_
-- `Ampere architecture`_
+- [TensorFloat-32](https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/)
+- [CUDA 11](https://devblogs.nvidia.com/cuda-11-features-revealed/)
+- [Ampere architecture](https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/)
 
-.. _TensorFloat-32: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/
-.. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
-.. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
 
-.. _fp16reducedprecision:
+(fp16reducedprecision)=
 
-Reduced Precision Reduction in FP16 GEMMs
------------------------------------------
+## Reduced Precision Reduction in FP16 GEMMs
 
 (Distinct from full FP16 accumulation that is intended for hardware that has higher throughput
 with FP16 accumulation than FP32 accumulation, see :ref:`Full FP16 accumulation<fp16accumulation>`)
@@ -198,8 +198,7 @@ fp16 GEMMs are potentially done with some intermediate reduced precision reducti
 
 Some example benchmark data on V100:
 
-.. code::
-
+```
   [--------------------------- bench_gemm_transformer --------------------------]
         [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
   1 threads: --------------------------------------------------------------------
@@ -217,23 +216,23 @@ Some example benchmark data on V100:
         [4096, 9728, 4096]    |           3875.1        |           5779.8
         [4096, 16384, 4096]   |           6182.9        |           9656.5
   (times in microseconds).
+```
 
 If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
 
-.. code:: python
-
+```python
   torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+```
 
 To toggle the reduced precision reduction flags in C++, one can do
 
-.. code:: C++
-
+```cpp
   at::globalContext().setAllowFP16ReductionCuBLAS(false);
+```
 
-.. _bf16reducedprecision:
+(bf16reducedprecision)=
 
-Reduced Precision Reduction in BF16 GEMMs
------------------------------------------
+## Reduced Precision Reduction in BF16 GEMMs
 
 A similar flag (as above) exists for BFloat16 GEMMs.
 Note that this switch is set to `True` by default for BF16, if you observe
@@ -242,20 +241,19 @@ numerical instability in your workload, you may wish to set it to `False`.
 If reduced precision reductions are not desired, users can disable reduced
 precision reductions in bf16 GEMMs with:
 
-.. code:: python
-
+```python
   torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+```
 
 To toggle the reduced precision reduction flags in C++, one can do
 
-.. code:: C++
-
+```cpp
   at::globalContext().setAllowBF16ReductionCuBLAS(true);
+```
 
-.. _fp16accumulation:
+(fp16accumulation)=
 
-Full FP16 Accumulation in FP16 GEMMs
--------------------------------------
+## Full FP16 Accumulation in FP16 GEMMs
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
 in FP16, at the cost of numerical precision and greater likelihood of overflow.
@@ -264,18 +262,17 @@ or newer.
 
 This behavior can be enabled via:
 
-.. code:: python
-
+```python
   torch.backends.cuda.matmul.allow_fp16_accumulation = True
+```
 
 To toggle the reduced precision reduction flags in C++, one can do
 
-.. code:: C++
-
+```cpp
   at::globalContext().setAllowFP16AccumulationCuBLAS(true);
+```
 
-Asynchronous execution
-----------------------
+## Asynchronous execution
 
 By default, GPU operations are asynchronous.  When you call a function that
 uses the GPU, the operations are *enqueued* to the particular device, but not
@@ -297,8 +294,9 @@ requested.)
 A consequence of the asynchronous computation is that time measurements without
 synchronizations are not accurate. To get precise measurements, one should either
 call :func:`torch.cuda.synchronize()` before measuring, or use :class:`torch.cuda.Event`
-to record times as following::
+to record times as following:
 
+```python
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     start_event.record()
@@ -308,16 +306,16 @@ to record times as following::
     end_event.record()
     torch.cuda.synchronize()  # Wait for the events to be recorded!
     elapsed_time_ms = start_event.elapsed_time(end_event)
+```
 
 As an exception, several functions such as :meth:`~torch.Tensor.to` and
 :meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
 
-CUDA streams
-^^^^^^^^^^^^
+### CUDA streams
 
-A `CUDA stream`_ is a linear sequence of execution that belongs to a specific
+A [CUDA stream](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams) is a linear sequence of execution that belongs to a specific
 device.  You normally do not need to create one explicitly: by default, each
 device uses its own "default" stream.
 
@@ -325,20 +323,23 @@ Operations inside each stream are serialized in the order they are created,
 but operations from different streams can execute concurrently in any
 relative order, unless explicit synchronization functions (such as
 :meth:`~torch.cuda.synchronize` or :meth:`~torch.cuda.Stream.wait_stream`) are
-used.  For example, the following code is incorrect::
+used.  For example, the following code is incorrect:
 
+```python
     cuda = torch.device('cuda')
     s = torch.cuda.Stream()  # Create a new stream.
     A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
     with torch.cuda.stream(s):
         # sum() may start execution before normal_() finishes!
         B = torch.sum(A)
+```
 
 When the "current stream" is the default stream, PyTorch automatically performs
 necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
-ensure proper synchronization.  The fixed version of this example is::
+ensure proper synchronization.  The fixed version of this example is:
 
+```python
     cuda = torch.device('cuda')
     s = torch.cuda.Stream()  # Create a new stream.
     A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
@@ -346,6 +347,7 @@ ensure proper synchronization.  The fixed version of this example is::
     with torch.cuda.stream(s):
         B = torch.sum(A)
     A.record_stream(s)  # NEW!
+```
 
 There are two new additions.  The :meth:`torch.cuda.Stream.wait_stream` call
 ensures that the ``normal_()`` execution has finished before we start running
@@ -359,8 +361,9 @@ documentation for :meth:`torch.Tensor.record_stream` on more details on when
 to use one or another.
 
 Note that this synchronization is necessary even when there is no
-read dependency, e.g., as seen in this example::
+read dependency, e.g., as seen in this example:
 
+```python
     cuda = torch.device('cuda')
     s = torch.cuda.Stream()  # Create a new stream.
     A = torch.empty((100, 100), device=cuda)
@@ -368,16 +371,16 @@ read dependency, e.g., as seen in this example::
     with torch.cuda.stream(s):
         A.normal_(0.0, 1.0)
         A.record_stream(s)
+```
 
 Despite the computation on ``s`` not reading the contents of ``A`` and no
 other uses of ``A``, it is still necessary to synchronize, because ``A``
 may correspond to memory reallocated by the CUDA caching allocator, with
 pending operations from the old (deallocated) memory.
 
-.. _bwd-cuda-stream-semantics:
+(bwd-cuda-stream-semantics)=
 
-Stream semantics of backward passes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Stream semantics of backward passes
 
 Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
 If your forward pass runs independent ops in parallel on different streams,
@@ -400,8 +403,9 @@ the acts of
 2. invoking the backward pass, and
 3. using the gradients
 
-have the same stream-semantics relationship as any group of ops::
+have the same stream-semantics relationship as any group of ops:
 
+```python
     s = torch.cuda.Stream()
 
     # Safe, grads are used in the same stream context as backward()
@@ -436,34 +440,36 @@ have the same stream-semantics relationship as any group of ops::
     with torch.cuda.stream(s):
         initial_grad.record_stream(s)
         loss.backward(gradient=initial_grad)
+```
 
-BC note: Using grads on the default stream
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#### BC note: Using grads on the default stream
 
 In prior versions of PyTorch (1.9 and earlier), the autograd engine always synced
-the default stream with all backward ops, so the following pattern::
+the default stream with all backward ops, so the following pattern:
 
+```python
     with torch.cuda.stream(s):
         loss.backward()
     use grads
+```
 
 was safe as long as ``use grads`` happened on the default stream.
 In present PyTorch, that pattern is no longer safe. If ``backward()``
-and ``use grads`` are in different stream contexts, you must sync the streams::
+and ``use grads`` are in different stream contexts, you must sync the streams:
 
+```python
     with torch.cuda.stream(s):
         loss.backward()
     torch.cuda.current_stream().wait_stream(s)
     use grads
+```
 
 even if ``use grads`` is on the default stream.
 
-.. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
-.. _cuda-memory-management:
+(cuda-memory-management)=
 
-Memory management
------------------
+## Memory management
 
 PyTorch uses a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
@@ -486,10 +492,9 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
-.. _cuda-memory-envvars:
+(cuda-memory-envvars)=
 
-Optimizing memory usage  with ``PYTORCH_ALLOC_CONF``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Optimizing memory usage  with ``PYTORCH_ALLOC_CONF``
 
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
@@ -504,7 +509,7 @@ Available options:
 * ``backend`` allows selecting the underlying allocator implementation.
   Currently, valid options are ``native``, which uses PyTorch's native
   implementation, and ``cudaMallocAsync``, which uses
-  `CUDA's built-in asynchronous allocator`_.
+  [CUDA's built-in asynchronous allocator](https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/).
   ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
   ``backend`` applies to all devices used by the process, and can't be
   specified on a per-device basis.
@@ -651,36 +656,33 @@ Available options:
 
   Example configuration:
 
-  .. code-block:: bash
-
+```bash
       PYTORCH_CUDA_ALLOC_CONF=per_process_memory_fraction:0.95,throw_on_cudamalloc_oom:True
 
   This is particularly useful for inference serving, where a fatal GPU OOM would crash the
   server process. With this option, the serving framework can catch the ``OutOfMemoryError``
   and reject the individual request while continuing to serve subsequent requests.
+```
 
-.. note::
+```{note}
 
     Some stats reported by the
     :ref:`CUDA memory management API<cuda-memory-management-api>`
     are specific to ``backend:native``, and are not meaningful with
     ``backend:cudaMallocAsync``.
     See each function's docstring for details.
+```
 
-.. _CUDA's built-in asynchronous allocator:
-    https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
 
-.. _cuda-memory-custom-allocator:
+(cuda-memory-custom-allocator)=
 
-Using custom memory allocators for CUDA
----------------------------------------
+## Using custom memory allocators for CUDA
 
 It is possible to define allocators as simple functions in C/C++ and compile
 them as a shared library, the code below shows a basic allocator that just
 traces all the memory operations.
 
-.. code:: C++
-
+```cpp
    #include <sys/types.h>
    #include <cuda_runtime_api.h>
    #include <iostream>
@@ -698,14 +700,14 @@ traces all the memory operations.
       cudaFree(ptr);
    }
    }
+```
 
 
 This can be used in python through the :class:`torch.cuda.memory.CUDAPluggableAllocator`.
 The user is responsible for supplying the path to the `.so` file and the name
 of the alloc/free functions that match the signatures specified above.
 
-.. code:: python
-
+```python
    import torch
 
    # Load the allocator
@@ -715,10 +717,10 @@ of the alloc/free functions that match the signatures specified above.
    torch.cuda.memory.change_current_allocator(new_alloc)
    # This will allocate memory in the device using the new allocator
    b = torch.zeros(10, device='cuda')
+```
 
 
-.. code:: python
-
+```python
    import torch
 
    # Do an initial memory allocator
@@ -728,11 +730,11 @@ of the alloc/free functions that match the signatures specified above.
        'alloc.so', 'my_malloc', 'my_free')
    # This will error since the current allocator was already instantiated
    torch.cuda.memory.change_current_allocator(new_alloc)
+```
 
-.. cublas-workspaces:
+<!-- cublas-workspaces -->
 
-Mixing different CUDA system allocators in the same program
------------------------------------------------------------
+## Mixing different CUDA system allocators in the same program
 Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
 ``PYTORCH_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
@@ -756,17 +758,17 @@ such as:
   performance sensitive and doesn't fit in the GPU, then you could just allocate that module with
   ``cudaMallocManaged`` with preferred CPU location and get your model working first.
 
-.. note::
+```{note}
 
     While ``cudaMallocManaged`` offers convenient automatic memory management using CUDA Unified Virtual Memory (UVM),
     it is not recommended for DL workloads. For DL workloads that fit in GPU memory, explicit placement consistently
     outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
     saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
+```
 
 The code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
 
-.. code:: python
-
+```python
    import os
 
    import torch
@@ -825,20 +827,20 @@ The code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUD
    # Note: for convenience, ProcessGroupNCCL backend provides
    # the ncclMemAlloc allocator as backend.mem_allocator
    allocator = backend.mem_allocator
+```
 
 
 You can now define a new memory pool by passing this allocator to :class:`torch.cuda.MemPool`:
 
-.. code:: python
-
+```python
    pool = torch.cuda.MemPool(allocator)
+```
 
 
 The pool can then be used with the :class:`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
-.. code:: python
-
+```python
    with torch.cuda.use_mem_pool(pool):
        # tensor gets allocated with ncclMemAlloc passed in the pool
        tensor = torch.arange(1024 * 1024 * 2, device=device)
@@ -851,6 +853,7 @@ allocate tensors into that pool:
    dist.all_reduce(tensor[0:4])
    torch.cuda.synchronize()
    print(tensor[0:4])
+```
 
 
 Note the usage of ``register_mem_pool`` in the above example. This is an extra step for
@@ -861,17 +864,16 @@ To reclaim memory, users will first need to ensure nothing is using the pool. Wh
 of the tensors are holding a reference to the pool, :meth:`~torch.cuda.empty_cache` will
 be called internally on deletion of the pool, hence returning all the memory to the system.
 
-.. code:: python
-
+```python
    del tensor, del pool
+```
 
 
 Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
 creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
 a last resort instead of OOMing.
 
-.. code:: python
-
+```python
     pool = torch.cuda.MemPool(allocator, use_on_oom=True)
     with torch.cuda.use_mem_pool(pool):
         a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
@@ -879,13 +881,13 @@ a last resort instead of OOMing.
 
     # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
     b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+```
 
 
 The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
 APIs can be used for debugging purposes:
 
-.. code:: python
-
+```python
    pool = torch.cuda.MemPool(allocator)
 
    # pool's use count should be 1 at this point as MemPool object
@@ -921,9 +923,10 @@ APIs can be used for debugging purposes:
        # pool now should have 2 segments since the CUDACachingAllocator had
        # to make a new 2 MB buffer to accommodate out_2
        assert len(pool.snapshot()) == 2
+```
 
 
-.. note::
+```{note}
 
    * :class:`torch.cuda.MemPool` holds a reference to the pool. When you use the
      :class:`torch.cuda.use_mem_pool` context manager, it will also acquire another reference
@@ -935,20 +938,17 @@ APIs can be used for debugging purposes:
      ``del``.
    * :class:`torch.cuda.MemPool` doesn't currently support ``expandable_segments`` mode of
      CUDACachingAllocator.
-   * `NCCL has specific requirements`_ for a buffer to be compatible with NVLS reductions.
+   * [NCCL has specific requirements](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator) for a buffer to be compatible with NVLS reductions.
      These requirements can be broken in a dynamic workload, for instance, the buffer being
      sent to NCCL by the CUDACachingAllocator might be split and hence, not correctly aligned.
      In those cases, NCCL can use a fallback algorithm instead of NVLS.
    * Allocators like ``ncclMemAlloc`` can use more memory than requested, due to alignment
      requirements (``CU_MULTICAST_GRANULARITY_RECOMMENDED``, ``CU_MULTICAST_GRANULARITY_MINIMUM``),
      and can cause your workload to run out of memory.
-
-.. _NCCL has specific requirements:
-    https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+```
 
 
-Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
-------------------------------------------------------------------------
+## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
 In rare cases, performance of NVLink on H100/H200 GPUs can be influenced by the physical memory
 layout of data, creating an opportunity for developers to tune their applications for optimal
 throughput.
@@ -959,13 +959,13 @@ that each warp accesses memory addresses with a consistent strided pattern in ea
 We can have a more balanced load by tuning the stride size in the workload or we can implement
 a custom CUDA allocator.
 
-.. code::
-
+```
   _______________________________  _______________________________      _______________________________
   | Warp 0 Reading | No-reading |  | Warp 1 Reading | No-reading |  ...  Warp N Reading | No-reading |
   _______________________________  _______________________________      _______________________________
   <----------------------------->
           Stride size
+```
 
 Such an allocator can maintain contiguous virtual memory addresses for the kernel while strategically
 arranging the mapping to physical memory addresses (e.g., through shuffling). This technique allows
@@ -974,8 +974,7 @@ higher performance without modifying the kernel's logic. A practical implementat
 can be achieved using PyTorch’s custom allocator support as mentioned before, where the malloc and free
 functions are:
 
-.. code:: C++
-
+```cpp
   // assuming a system with 8 GPUs
   struct CustomAllocInfo {
     void** devPtr;  // This will be the usable virtual memory address
@@ -1069,10 +1068,10 @@ functions are:
       // CHECK_CUDA(cuMemAddressFree((CUdeviceptr)*info->devPtr, info->padded_size));
       CHECK_CUDA(cuMemAddressFree(info->dptr, info->padded_size));
   }
+```
 
 
-cuBLAS workspaces
------------------
+## cuBLAS workspaces
 
 For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
 if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
@@ -1083,10 +1082,9 @@ As an example, the default workspace size per allocation is ``CUBLAS_WORKSPACE_C
 which specifies a total size of ``2 * 4096 + 8 * 16 KiB``. To force cuBLAS to avoid using workspaces,
 set ``CUBLAS_WORKSPACE_CONFIG=:0:0``.
 
-.. _cufft-plan-cache:
+(cufft-plan-cache)=
 
-cuFFT plan cache
-----------------
+## cuFFT plan cache
 
 For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
 running FFT methods (e.g., :func:`torch.fft.fft`) on CUDA tensors of same geometry
@@ -1111,10 +1109,9 @@ object or a device index, and access one of the above attributes. E.g., to set
 the capacity of the cache for device ``1``, one can write
 ``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
 
-.. _cuda-just-in-time-compilation:
+(cuda-just-in-time-compilation)=
 
-Just-in-Time Compilation
-------------------------
+## Just-in-Time Compilation
 
 PyTorch just-in-time compiles some operations, like torch.special.zeta, when
 performed on CUDA tensors. This compilation can be time consuming
@@ -1130,11 +1127,9 @@ controlled with two environment variables. If USE_PYTORCH_KERNEL_CACHE is set to
 cache will be used, and if PYTORCH_KERNEL_CACHE_PATH is set then that path will be used
 as a kernel cache instead of the default location.
 
-Best practices
---------------
+## Best practices
 
-Device-agnostic code
-^^^^^^^^^^^^^^^^^^^^
+### Device-agnostic code
 
 Due to the structure of PyTorch, you may need to explicitly write
 device-agnostic (CPU or GPU) code; an example may be creating a new tensor as
@@ -1146,8 +1141,8 @@ have a flag that can be used to disable CUDA, in combination with
 :meth:`~torch.cuda.is_available`. In the following, ``args.device`` results in a
 :class:`torch.device` object that can be used to move tensors to CPU or CUDA.
 
-::
 
+```python
     import argparse
     import torch
 
@@ -1160,17 +1155,18 @@ have a flag that can be used to disable CUDA, in combination with
         args.device = torch.device('cuda')
     else:
         args.device = torch.device('cpu')
+```
 
-.. note::
+```{note}
 
     When assessing the availability of CUDA in a given environment (:meth:`~torch.cuda.is_available`), PyTorch's default
-    behavior is to call the CUDA Runtime API method `cudaGetDeviceCount`_. Because this call in turn initializes the
-    CUDA Driver API (via `cuInit`_) if it is not already initialized, subsequent forks of a process that has run
+    behavior is to call the CUDA Runtime API method [cudaGetDeviceCount](https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g18808e54893cfcaafefeab31a73cc55f). Because this call in turn initializes the
+    CUDA Driver API (via [cuInit](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3)) if it is not already initialized, subsequent forks of a process that has run
     :meth:`~torch.cuda.is_available` will fail with a CUDA initialization error.
 
     One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
     :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
-    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment (`nvmlDeviceGetCount_v2`_). If the
+    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment ([nvmlDeviceGetCount_v2](https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d)). If the
     NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
     :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
 
@@ -1180,35 +1176,39 @@ have a flag that can be used to disable CUDA, in combination with
     Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
     Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
     may succeed while later CUDA initialization fails.
+```
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
 desired device.
 
-::
 
+```python
     x = torch.empty((8, 42), device=args.device)
     net = Network().to(device=args.device)
+```
 
 This can be used in a number of cases to produce device agnostic code. Below
 is an example when using a dataloader:
 
-::
 
+```python
     cuda0 = torch.device('cuda:0')  # CUDA GPU 0
     for i, x in enumerate(train_loader):
         x = x.to(cuda0)
+```
 
 When working with multiple GPUs on a system, you can use the
 ``CUDA_VISIBLE_DEVICES`` environment flag to manage which GPUs are available to
 PyTorch. As mentioned above, to manually control which GPU a tensor is created
 on, the best practice is to use a :any:`torch.cuda.device` context manager.
 
-::
 
+```python
     print("Outside device is 0")  # On device 0 (default in most scenarios)
     with torch.cuda.device(1):
         print("Inside device is 1")  # On device 1
     print("Outside device is still 0")  # On device 0
+```
 
 If you have a tensor and would like to create a new tensor of the same type on
 the same device, then you can use a ``torch.Tensor.new_*`` method
@@ -1221,8 +1221,8 @@ the device and other attributes of the tensor.
 This is the recommended practice when creating modules in which new
 tensors need to be created internally during the forward pass.
 
-::
 
+```python
     cuda = torch.device('cuda')
     x_cpu = torch.empty(2)
     x_gpu = torch.empty(2, device=cuda)
@@ -1246,6 +1246,7 @@ tensors need to be created internally during the forward pass.
     print(y_cpu_long)
 
         tensor([[ 1,  2,  3]])
+```
 
 
 If you want to create a tensor of the same type and size of another tensor, and
@@ -1253,25 +1254,26 @@ fill it with either ones or zeros, :meth:`~torch.ones_like` or
 :meth:`~torch.zeros_like` are provided as convenient helper functions (which
 also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
 
-::
 
+```python
     x_cpu = torch.empty(2, 3)
     x_gpu = torch.empty(2, 3)
 
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
+```
 
 
-.. _cuda-memory-pinning:
+(cuda-memory-pinning)=
 
-Use pinned memory buffers
-^^^^^^^^^^^^^^^^^^^^^^^^^
+### Use pinned memory buffers
 
-.. warning::
+```{warning}
 
     This is an advanced tip. If you overuse pinned memory, it can cause serious
     problems when running low on RAM, and you should be aware that pinning is
     often an expensive operation.
+```
 
 Host to GPU copies are much faster when they originate from pinned (page-locked)
 memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`
@@ -1285,10 +1287,9 @@ to overlap data transfers with computation.
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.
 
-.. _cuda-nn-ddp-instead:
+(cuda-nn-ddp-instead)=
 
-Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
 
 Most use cases involving batched inputs and multiple GPUs should default to
 using :class:`~torch.nn.parallel.DistributedDataParallel` to utilize more
@@ -1313,27 +1314,18 @@ by GIL of Python interpreter.
 If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
 
-.. _cudaGetDeviceCount:
-    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g18808e54893cfcaafefeab31a73cc55f
 
-.. _cuInit:
-    https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3
+(cuda-graph-semantics)=
 
-.. _nvmlDeviceGetCount_v2:
-    https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d
-
-.. _cuda-graph-semantics:
-
-CUDA Graphs
------------
+## CUDA Graphs
 
 A CUDA graph is a record of the work (mostly kernels and their arguments) that a
 CUDA stream and its dependent streams perform.
 For general principles and details on the underlying CUDA API, see
-`Getting Started with CUDA Graphs`_ and the
-`Graphs section`_ of the CUDA C Programming Guide.
+[Getting Started with CUDA Graphs](https://developer.nvidia.com/blog/cuda-graphs/) and the
+[Graphs section](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs) of the CUDA C Programming Guide.
 
-PyTorch supports the construction of CUDA graphs using `stream capture`_, which puts a
+PyTorch supports the construction of CUDA graphs using [stream capture](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture), which puts a
 CUDA stream in *capture mode*. CUDA work issued to a capturing stream doesn't actually
 run on the GPU. Instead, the work is recorded in a graph.
 
@@ -1343,36 +1335,26 @@ means the same memory addresses are used.
 By filling input memory with new data (e.g., from a new batch) before each replay,
 you can rerun the same work on new data.
 
-Why CUDA Graphs?
-^^^^^^^^^^^^^^^^
+### Why CUDA Graphs?
 
 Replaying a graph sacrifices the dynamic flexibility of typical eager execution in exchange for
 **greatly reduced CPU overhead**. A graph's arguments and kernels are fixed, so a graph replay
 skips all layers of argument setup and kernel dispatch, including Python, C++, and CUDA driver
 overheads. Under the hood, a replay submits the entire graph's work to the GPU with
-a single call to `cudaGraphLaunch`_.  Kernels in a replay also execute slightly faster
+a single call to [cudaGraphLaunch](https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597).  Kernels in a replay also execute slightly faster
 on the GPU, but eliding CPU overhead is the main benefit.
 
 You should try CUDA graphs if all or part of your network is graph-safe (usually this means
 static shapes and static control flow, but see the other :ref:`constraints<capture-constraints>`)
 and you suspect its runtime is at least somewhat CPU-limited.
 
-.. _Getting Started with CUDA Graphs:
-    https://developer.nvidia.com/blog/cuda-graphs/
-.. _Graphs section:
-    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs
-.. _stream capture:
-    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
-.. _cudaGraphLaunch:
-    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
-.. _conditional nodes:
-    https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/
 
-PyTorch API
-^^^^^^^^^^^
+### PyTorch API
 
-.. warning::
+```{warning}
+
     This API is in beta and may change in future releases.
+```
 
 PyTorch exposes graphs via a raw :class:`torch.cuda.CUDAGraph` class
 and two convenience wrappers,
@@ -1388,8 +1370,9 @@ replay, you must maintain long-lived references to tensors that hold
 input and output data during capture.
 To run the graph on new input data, copy new data to the capture's input tensor(s),
 replay the graph, then read the new output from the capture's output tensor(s).
-Example::
+Example:
 
+```python
     g = torch.cuda.CUDAGraph()
 
     # Placeholder input used for capture
@@ -1418,6 +1401,7 @@ Example::
     static_input.copy_(torch.full((5,), 4, device="cuda"))
     g.replay()
     print(static_output)  # full of 4 * 2 = 8
+```
 
 See
 :ref:`Whole-network capture<whole-network-capture>`,
@@ -1431,10 +1415,9 @@ for realistic and advanced patterns.
 it creates separate graphs of the forward-pass and backward-pass work. See
 :ref:`Partial-network capture<partial-network-capture>`.
 
-.. _capture-constraints:
+(capture-constraints)=
 
-Constraints
-~~~~~~~~~~~
+#### Constraints
 
 A set of ops is *capturable* if it doesn't violate any of the following constraints.
 
@@ -1459,7 +1442,6 @@ Violating any of these will likely cause a runtime error:
   torch.cond(). See :ref:`Data Dependent Control Flow<graph-data-dependent-control-flow>`.
 
 
-
 Violating any of these will likely cause silent numerical errors or undefined behavior:
 
 * Within a process, only one capture may be underway at a time.
@@ -1470,18 +1452,17 @@ Violating any of these will likely cause silent numerical errors or undefined be
   has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
 
-Non-constraints
-~~~~~~~~~~~~~~~
+#### Non-constraints
 
 * Once captured, the graph may be replayed on any stream.
 
-.. _whole-network-capture:
+(whole-network-capture)=
 
-Whole-network capture
-^^^^^^^^^^^^^^^^^^^^^^
+### Whole-network capture
 
-If your entire network is capturable, you can capture and replay an entire iteration::
+If your entire network is capturable, you can capture and replay an entire iteration:
 
+```python
     N, D_in, H, D_out = 640, 4096, 2048, 1024
     model = torch.nn.Sequential(torch.nn.Linear(D_in, H),
                                 torch.nn.Dropout(p=0.2),
@@ -1533,11 +1514,11 @@ If your entire network is capturable, you can capture and replay an entire itera
         g.replay()
         # Params have been updated. static_y_pred, static_loss, and .grad
         # attributes hold values from computing on this iteration's data.
+```
 
-.. _partial-network-capture:
+(partial-network-capture)=
 
-Partial-network capture
-^^^^^^^^^^^^^^^^^^^^^^^^^
+### Partial-network capture
 
 If some of your network is unsafe to capture (e.g., due to dynamic control flow,
 dynamic shapes, CPU syncs, or essential CPU-side logic), you can run the unsafe
@@ -1556,8 +1537,9 @@ static inputs and outputs as needed.  Therefore (unlike with
 In the following example, data-dependent dynamic control flow means the
 network isn't capturable end-to-end, but
 :func:`~torch.cuda.make_graphed_callables`
-lets us capture and run graph-safe sections as graphs regardless::
+lets us capture and run graph-safe sections as graphs regardless:
 
+```python
     N, D_in, H, D_out = 640, 4096, 2048, 1024
 
     module1 = torch.nn.Linear(D_in, H).cuda()
@@ -1598,18 +1580,19 @@ lets us capture and run graph-safe sections as graphs regardless::
         # as well as module1's backward ops, run as graphs
         loss.backward()
         optimizer.step()
+```
 
-.. _graphs-with-amp:
+(graphs-with-amp)=
 
-Usage with torch.cuda.amp
-^^^^^^^^^^^^^^^^^^^^^^^^^
+### Usage with torch.cuda.amp
 
 For typical optimizers, :meth:`GradScaler.step<torch.cuda.amp.GradScaler.step>` syncs
 the CPU with the GPU, which is prohibited during capture. To avoid errors, either use
 :ref:`partial-network capture<partial-network-capture>`, or (if forward, loss,
 and backward are capture-safe) capture forward, loss, and backward but not the
-optimizer step::
+optimizer step:
 
+```python
     # warmup
     # In a real setting, use a few batches of real data.
     s = torch.cuda.Stream()
@@ -1645,18 +1628,19 @@ optimizer step::
         # Runs scaler.step and scaler.update eagerly
         scaler.step(optimizer)
         scaler.update()
+```
 
-.. _multistream-capture:
+(multistream-capture)=
 
-Usage with multiple streams
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Usage with multiple streams
 
 Capture mode automatically propagates to any streams that sync with a capturing stream.
 Within capture, you may expose parallelism by issuing calls to different streams,
 but the overall stream dependency DAG must branch out from the
 initial capturing stream after capture begins and rejoin the initial stream
-before capture ends::
+before capture ends:
 
+```python
     with torch.cuda.graph(g):
         # at context manager entrance, torch.cuda.current_stream()
         # is the initial capturing stream
@@ -1672,20 +1656,20 @@ before capture ends::
             cuda_work()
         # rejoins initial stream before capture ends
         torch.cuda.current_stream().wait_stream(s)
+```
 
-.. note::
+```{note}
 
     To avoid confusion for power users looking at replays in nsight systems or nvprof:
     Unlike eager execution, the graph interprets a nontrivial stream DAG in capture
     as a hint, not a command. During replay, the graph may reorganize independent ops
     onto different streams or enqueue them in a different order (while respecting your
     original DAG's overall dependencies).
+```
 
-Usage with DistributedDataParallel
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Usage with DistributedDataParallel
 
-NCCL < 2.9.6
-~~~~~~~~~~~~
+#### NCCL < 2.9.6
 
 NCCL versions earlier than 2.9.6 don't allow collectives to be captured.
 You must use :ref:`partial-network capture<partial-network-capture>`,
@@ -1694,29 +1678,31 @@ which defers allreduces to happen outside graphed sections of backward.
 Call :func:`~torch.cuda.make_graphed_callables` on graphable network sections
 *before* wrapping the network with DDP.
 
-NCCL >= 2.9.6
-~~~~~~~~~~~~~
+#### NCCL >= 2.9.6
 
 NCCL versions 2.9.6 or later allow collectives in the graph.
 Approaches that capture an :ref:`entire backward pass<whole-network-capture>`
 are a viable option, but need three setup steps.
 
-1. Disable DDP's internal async error handling::
+1. Disable DDP's internal async error handling:
 
+```python
     os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
     torch.distributed.init_process_group(...)
+```
 
-2. Before full-backward capture, DDP must be constructed in a side-stream context::
+2. Before full-backward capture, DDP must be constructed in a side-stream context:
 
+```python
     with torch.cuda.stream(s):
         model = DistributedDataParallel(model)
+```
 
 3. Your warmup must run at least 11 DDP-enabled eager iterations before capture.
 
-.. _graph-memory-management:
+(graph-memory-management)=
 
-Graph memory management
-^^^^^^^^^^^^^^^^^^^^^^^
+### Graph memory management
 
 A captured graph acts on the same virtual addresses every time it replays.
 If PyTorch frees the memory, a later replay can hit an illegal memory access.
@@ -1733,8 +1719,7 @@ separate private pool for each capture. If you capture multiple graphs,
 this conservative approach ensures graph replays never corrupt each other's values,
 but sometimes needlessly wastes memory.
 
-Sharing memory across captures
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#### Sharing memory across captures
 
 To economize the memory stashed in private pools, :class:`torch.cuda.graph`
 and :func:`torch.cuda.make_graphed_callables` optionally allow different
@@ -1744,8 +1729,9 @@ be replayed in the same order they were captured,
 and never be replayed concurrently.
 
 :class:`torch.cuda.graph`'s ``pool`` argument is a hint to use a particular private pool,
-and can be used to share memory across graphs as shown::
+and can be used to share memory across graphs as shown:
 
+```python
     g1 = torch.cuda.CUDAGraph()
     g2 = torch.cuda.CUDAGraph()
 
@@ -1763,6 +1749,7 @@ and can be used to share memory across graphs as shown::
     static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
+```
 
 It's also safe to share a memory pool across separate graphs that do not depend
 on each other's outputs, provided they never run concurrently.
@@ -1771,8 +1758,8 @@ they share a pool, unless :meth:`~torch.Tensor.clone` is called on the outputs
 beforehand.
 This pattern is frequently used in inference servers that accept variable batch
 sizes at runtime.
-vLLM is a notable example; see `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/platforms/interface.py#L508-L515>`__
-and `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/compilation/cuda_graph.py#L86-L89>`__.
+vLLM is a notable example; see [here](https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/platforms/interface.py#L508-L515)
+and [here](https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/compilation/cuda_graph.py#L86-L89).
 
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)
@@ -1785,15 +1772,14 @@ or if they'll run concurrently, passing them as a tuple to a single invocation o
 :func:`~torch.cuda.make_graphed_callables` is not allowed. Instead, you must call
 :func:`~torch.cuda.make_graphed_callables` separately for each one.
 
-.. _graph-data-dependent-control-flow:
+(graph-data-dependent-control-flow)=
 
-Data Dependent Control Flow
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Data Dependent Control Flow
 
 Data-dependent control flow can with cuda graphs if the control flow
 is implemented using torch.cond(). If your function uses this
 function, compiling it with the "cudagraphs" backend will enable
-control flow in the resulting cuda graph via `conditional nodes`_.
+control flow in the resulting cuda graph via [conditional nodes](https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/).
 
 Doing cuda graph capture of eager mode code using torch.cond() will
 also work.
@@ -1802,8 +1788,9 @@ Support for inductor backend to torch.compile is not available yet,
 but there is no fundamental blocker.
 
 An example of using the cudagraphs backend to torch.compile on code
-using torch.cond is demonstrated below::
+using torch.cond is demonstrated below:
 
+```python
     import torch
 
     def true_fn(x):
@@ -1827,3 +1814,4 @@ using torch.cond is demonstrated below::
 
     # will output x.sin()
     y = compiled_foo(~pred, x)
+```
