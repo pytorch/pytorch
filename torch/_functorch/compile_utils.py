@@ -14,7 +14,7 @@ from torch.utils._pytree import tree_flatten
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Hashable
 
     from torch._ops import OpOverloadPacket
     from torch.utils._pytree import TreeSpec
@@ -50,16 +50,18 @@ rand_ops = [
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
 def fx_graph_cse(
     fx_g: torch.fx.graph.Graph,
-    extra_node_key: Callable[[fx.Node], Any] | None = None,
+    extra_node_key: Callable[[fx.Node], Hashable] | None = None,
 ) -> fx.Graph:
     new_graph = fx.Graph()
     env: dict[
         fx.Node, fx.Node
     ] = {}  # map from node in the old graph to node in the new graph
     hash_env: dict[
-        tuple[Any, Any, int], fx.Node
+        tuple[Any, Hashable | None, int], fx.Node
     ] = {}  # map from hash to a node in the new graph
-    token_map: dict[tuple[Any, Any, int], dict[str, Any]] = {}  # map from hash to token
+    token_map: dict[
+        tuple[Any, Hashable | None, int], dict[str, Any]
+    ] = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,

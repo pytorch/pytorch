@@ -394,7 +394,7 @@ class FusionTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """120""")
 
     @requires_gpu_and_triton
-    @config.patch(force_disable_caches=True)
+    @config.patch({"force_disable_caches": True, "triton.multi_kernel": 0})
     def test_aot_autograd_cse_preserves_reduction_fusion(self):
         def fn(x):
             return x.abs().max(), x.abs().mean(), x.square().mean()
@@ -411,8 +411,7 @@ class FusionTests(TestCase):
         inference_kernel_count = count_kernels(requires_grad=False)
         autograd_kernel_count = count_kernels(requires_grad=True)
 
-        if not config.triton.multi_kernel:
-            self.assertEqual(autograd_kernel_count, inference_kernel_count)
+        self.assertEqual(autograd_kernel_count, inference_kernel_count)
 
     def test_horizontal_reduction_pointwise2(self):
         def f(a, b):
