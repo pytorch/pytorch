@@ -2043,6 +2043,16 @@ Dynamic shape operator
                 lib.define("foo12(int64_t a) -> Tensor")
             with self.assertRaisesRegex(RuntimeError, "Use `float`"):
                 lib.define("foo12(double a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(PyObject a) -> Tensor")
+            type_name = "torch.testing.OpaqueObjectForCustomOpsTest"
+            if torch._C._is_opaque_type_registered(type_name):
+                torch._C._unregister_opaque_type(type_name)
+            torch._C._register_opaque_type(type_name)
+            try:
+                lib.define(f"foo12({type_name} a) -> Tensor")
+            finally:
+                torch._C._unregister_opaque_type(type_name)
 
     def test_is_tensorlist_like_type(self):
         tensorlists = [
