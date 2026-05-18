@@ -290,6 +290,18 @@ class TestPySymInt(TestCase):
         c = create_symbool(shape_env, True)
         self.assertIs(sympy.sympify(c), c.node.expr)
 
+    def test_raw_expr(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 2)
+        raw_expr = a.node.raw_expr()
+
+        self.assertIs(raw_expr, a.node.expr)
+
+        shape_env._set_replacement(raw_expr, sympy.Integer(7), "test_raw_expr")
+
+        self.assertIs(a.node.raw_expr(), raw_expr)
+        self.assertEqual(a.node.expr, 7)
+
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
