@@ -446,7 +446,7 @@ struct CodeImpl {
     // check if the node should be emitted as instruction or operator
     const Operator& op = node->getOperator();
     std::string unique_op_name = c10::toString(op.schema().operator_name());
-    if (unique_op_name.starts_with("aten::__getitem__.Dict")) {
+    if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
       // __get_item__ overloaded operator for Dict
       // needs to be emitted an instruction
       emitOperatorOrInstruction(node, DICT_INDEX);

@@ -2,7 +2,10 @@
     There are known non-determinism issues for RNN functions on some versions of cuDNN and CUDA.
     You can enforce deterministic behavior by setting the following environment variables:
 
-    Set environment variable
+    On CUDA 10.1, set environment variable ``CUDA_LAUNCH_BLOCKING=1``.
+    This may affect performance.
+
+    On CUDA 10.2 or later, set environment variable
     (note the leading colon symbol)
     ``CUBLAS_WORKSPACE_CONFIG=:16:8``
     or
