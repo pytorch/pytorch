@@ -14,7 +14,7 @@ import os
 import threading
 import traceback
 import warnings
-from ctypes import byref, c_uint32, c_void_p, cast, pointer
+from ctypes import byref, c_double, c_uint32, c_void_p, cast, pointer
 from functools import lru_cache
 from typing import Any, NewType, TYPE_CHECKING
 
@@ -56,6 +56,7 @@ class _ZesDeviceInfo:
     device_handle: c_void_p
     subdevice_id: int | None = None
     is_integrated: bool = False
+    temperature_handle: c_void_p | None = None
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
@@ -81,13 +82,18 @@ else:
         raise NotImplementedError("PyTorch was compiled without XPU support")
 
 
-def _parse_visible_devices() -> list[int]:
+def _parse_visible_devices(strict=False) -> list[int]:
     r"""Parse ``ZE_AFFINITY_MASK`` and return visible device ordinals.
 
     Returns a list of non-negative device ordinals specified by the mask.
     When the mask is unset, returns ``[0, 1, ..., 127]`` (the maximum range
     for ``int8_t`` device indices).  Returns an empty list for unsupported
     COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
+
+    Args:
+        strict (bool): If ``True``, raises ``ValueError`` on unsupported mask
+            formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
+            (default), returns an empty list instead.
     """
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
@@ -103,6 +109,10 @@ def _parse_visible_devices() -> list[int]:
             # A non-integer token (e.g. "0.0" in COMPOSITE-mode format)
             # means the mask is unsupported here; signal that by returning
             # an empty list.
+            if strict:
+                raise ValueError(
+                    f"Unsupported ZE_AFFINITY_MASK format: '{var}'. Expected a comma-separated list of integers, e.g. '0,1,2'."
+                ) from None
             return []
         if x >= 0 and x not in visible_devices:
             visible_devices.append(x)
@@ -749,6 +759,126 @@ def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     return default_generator.get_offset()
 
 
+def _zes_check(rc: int, msg: str) -> None:
+    """Raise RuntimeError if the Level Zero Sysman call failed (rc != ZE_RESULT_SUCCESS)."""
+    import pyzes  # type: ignore[import]
+
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"{msg} (rc={rc})")
+
+
+def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU temperature sensor handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.temperature_handle`` so that
+    repeated calls skip sensor enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    global _cached_zes_device_infos
+    if not _cached_zes_device_infos:
+        if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
+            raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
+
+    total_devices = len(_cached_zes_device_infos)
+    if device >= total_devices:
+        raise RuntimeError(
+            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
+        )
+
+    info = _cached_zes_device_infos[device]
+    if info.temperature_handle is not None:
+        return info.temperature_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # Enumerate all temperature sensors under this device handle.
+    # For tiled dGPUs each sub-device's sensors are under the root handle.
+    temp_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumTemperatureSensors(device_handle, byref(temp_count), None),
+        "Can't get Level Zero Sysman temperature sensor count.",
+    )
+    if temp_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman temperature sensors found.")
+    temp_handles = (pyzes.zes_temp_handle_t * temp_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumTemperatureSensors(
+            device_handle, byref(temp_count), temp_handles
+        ),
+        "Can't get Level Zero Sysman temperature sensor handles.",
+    )
+
+    # Select the GPU temperature sensor matching this device:
+    #   - Tiled dGPU (subdevice_id set): use the per-tile GPU sensor
+    #     whose subdeviceId matches.
+    #   - Non-tiled: use the root-level (non-subdevice) GPU sensor.
+    # Raises RuntimeError if no matching sensor is found.
+    temperature_handle = None
+    for temp_handle in temp_handles:
+        temp_props = pyzes.zes_temp_properties_t()
+        temp_props.stype = pyzes.ZES_STRUCTURE_TYPE_TEMP_PROPERTIES
+        _zes_check(
+            pyzes.zesTemperatureGetProperties(temp_handle, byref(temp_props)),
+            "Can't get Level Zero Sysman temperature properties.",
+        )
+        if temp_props.type != pyzes.ZES_TEMP_SENSORS_GPU:
+            continue
+        if subdevice_id is not None:
+            # Tiled dGPU: match the per-tile sensor for this sub-device.
+            if temp_props.onSubdevice and temp_props.subdeviceId == subdevice_id:
+                temperature_handle = temp_handle
+                break
+        else:
+            # Non-tiled or root device: pick the root-level GPU sensor.
+            if not temp_props.onSubdevice:
+                temperature_handle = temp_handle
+                break
+
+    if temperature_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU temperature handle found.")
+    info.temperature_handle = temperature_handle
+    return temperature_handle
+
+
+def temperature(device: Device = None) -> float:
+    r"""Return the GPU temperature in degrees Celsius.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU temperature information.
+    """
+    temperature_handle = _get_zes_temperature_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    temp = c_double(0.0)
+    rc = pyzes.zesTemperatureGetState(temperature_handle, byref(temp))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU temperature querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU temperature (rc={rc}).")
+    return temp.value
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -841,4 +971,5 @@ __all__ = [
     "stream",
     "streams",
     "synchronize",
+    "temperature",
 ]

@@ -1,10 +1,15 @@
 name: linux-binary-build
 
-# Reusable build workflow for linux binary (manywheel/libtorch). Uses GHA's
-# `container:` directive to launch the build container — checkout, env-setup,
-# and the .ci/* build scripts all run directly inside it. The .ci/* scripts
-# read the same env vars (PYTORCH_ROOT, PYTORCH_FINAL_PACKAGE_DIR,
-# BINARY_ENV_FILE, ...) as before.
+# Reusable build workflow for linux binary (manywheel/libtorch).
+#
+# Two execution modes selected by `use_container_directive`:
+# - true (default): launch the build container via GHA's native `container:`
+#   directive — checkout, env-setup, and the .ci/* build scripts all run
+#   directly inside it. Used by x86 / aarch64 / cuda runners.
+# - false: run on the bare runner and spawn the build container with
+#   `docker run` from a step. Used by s390x self-hosted runners, which
+#   register only with the bare `linux.s390x` label and lack a host-level
+#   docker CLI compatible with GHA's container directive.
 
 on:
   workflow_call:
@@ -27,6 +32,15 @@ on:
         required: false
         default: 240
         type: number
+      use_container_directive:
+        required: false
+        default: true
+        type: boolean
+        description: |
+          When true, use GHA's native `container:` directive. When false,
+          run on the bare runner and spawn the build container via
+          `docker run`. Set to false on runners that lack a docker CLI
+          compatible with the container directive (e.g. s390x).
       ALPINE_IMAGE:
         required: false
         type: string
@@ -71,13 +85,14 @@ jobs:
     runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
-      image: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+      image: ${{ inputs.use_container_directive && format('pytorch/{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) || '' }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
@@ -111,7 +126,7 @@ jobs:
             echo "DESIRED_CUDA=${DESIRED_CUDA}"
             echo "GPU_ARCH_VERSION=${GPU_ARCH_VERSION}"
             echo "GPU_ARCH_TYPE=${GPU_ARCH_TYPE}"
-            echo "DOCKER_IMAGE=pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}"
+            echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
             echo "SKIP_ALL_TESTS=${SKIP_ALL_TESTS}"
             echo "DESIRED_PYTHON=${DESIRED_PYTHON}"
             echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}"
@@ -126,18 +141,59 @@ jobs:
           } >> "${GITHUB_ENV}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
+      # Container-directive path: build runs directly inside the container.
       - name: Populate binary env
+        if: inputs.use_container_directive
         shell: bash
         run: bash .ci/pytorch/binary_populate_env.sh
 
       - name: Build PyTorch binary
+        if: inputs.use_container_directive
         shell: bash
         run: |
           source "${BINARY_ENV_FILE}"
           bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
+
+      # Bare-runner path: spawn the build container manually.
+      - name: Build PyTorch binary (docker run)
+        if: ${{ !inputs.use_container_directive }}
+        shell: bash
+        run: |
+          set -x
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILD_ENVIRONMENT \
+            -e DESIRED_CUDA \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
+            -v "${PYTORCH_FINAL_PACKAGE_DIR}:${PYTORCH_FINAL_PACKAGE_DIR}" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: ${{ inputs.build_name }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
+
+      - name: Cleanup docker
+        if: ${{ always() && !inputs.use_container_directive }}
+        shell: bash
+        run: |
+          # On bare-runner mode the container is left running by docker run --detach;
+          # stop it for clean worker shutdown.
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
