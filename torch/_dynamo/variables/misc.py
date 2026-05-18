@@ -1238,6 +1238,14 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         elif name == "mark_dirty":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            if getattr(self, "proxy", None) is None:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function context `mark_dirty`",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo only supports tracing ctx.mark_dirty "
+                    "inside autograd.Function.apply.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             self.dirty_tensors = args
             return variables.ConstantVariable.create(None)
 
