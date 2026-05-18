@@ -421,7 +421,7 @@ def rmsnorm_fwd(
     eps: float = 1e-6,
     store_rstd: bool = False,
 ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
-    # Need to wrap to handle the case where residual_out is a alias of x, which makes torch.library
+    # Need to wrap to handle the case where residual_out is an alias of x, which makes torch.library
     # and torch.compile unhappy. Also allocate memory for out and residual_out if they are None
     # so that _layer_norm_fwd_impl doesn't have to return them.
     out_dtype = x.dtype if out_dtype is None else out_dtype
