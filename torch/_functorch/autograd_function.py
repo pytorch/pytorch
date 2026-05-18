@@ -847,21 +847,21 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+                def selected_outputs(idx: Iterable[int]) -> list[Any]:
+                    idx_set = set(idx)
+                    if isinstance(output, (tuple, list)):
+                        return [x for i, x in enumerate(output) if i in idx_set]
+                    return [output] if 0 in idx_set else []
+
                 # If users call ctx.mark_dirty() in the original fwd function.
                 if len(dirty_idx) > 0:
-                    dirty_output = []
-                    for i, x in enumerate(output):
-                        if i in dirty_idx_set:
-                            dirty_output.append(x)
-                    ctx.mark_dirty(*dirty_output)
+                    ctx.mark_dirty(*selected_outputs(dirty_idx_set))
 
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
-                    non_differentiable_output = []
-                    for i, x in enumerate(output):
-                        if i in non_differentiable_idx:
-                            non_differentiable_output.append(x)
-                    ctx.mark_non_differentiable(*non_differentiable_output)
+                    ctx.mark_non_differentiable(
+                        *selected_outputs(non_differentiable_idx)
+                    )
 
             @staticmethod
             def backward(ctx: Any, *grad: Any) -> Any:
@@ -891,19 +891,25 @@ class DynamoAutogradFunctionTraceHelper:
 
             ctx = args[0]
             dirty_tensors = getattr(ctx, "dirty_tensors", None)
-            dirty_tensor_ids = set()
-            if dirty_tensors is not None:
-                dirty_tensor_ids = {
-                    id(tensor)
-                    for tensor in dirty_tensors
-                    if isinstance(tensor, torch.Tensor)
-                }
+
+            def is_dirty_tensor(tensor: torch.Tensor) -> bool:
+                if dirty_tensors is None:
+                    return False
+                return any(
+                    tensor is dirty_tensor
+                    for dirty_tensor in dirty_tensors
+                    if isinstance(dirty_tensor, torch.Tensor)
+                )
+
+            def is_tensor_arg(tensor: torch.Tensor) -> bool:
+                return any(
+                    arg is tensor for arg in args if isinstance(arg, torch.Tensor)
+                )
 
             # Handle the case where if the input is passed on directly to the output, we call view_as
             # Refer to https://github.com/pytorch/pytorch/blob/main/torch/csrc/autograd/custom_function.cpp#L254
-            tensor_arg_ids = {id(arg) for arg in args if isinstance(arg, torch.Tensor)}
             if isinstance(outs, torch.Tensor):
-                if id(outs) in tensor_arg_ids and id(outs) not in dirty_tensor_ids:
+                if is_tensor_arg(outs) and not is_dirty_tensor(outs):
                     return outs.view_as(outs)
                 else:
                     return outs
@@ -911,7 +917,7 @@ class DynamoAutogradFunctionTraceHelper:
             new_outs = []
             for out in outs:
                 if isinstance(out, torch.Tensor):
-                    if id(out) in tensor_arg_ids and id(out) not in dirty_tensor_ids:
+                    if is_tensor_arg(out) and not is_dirty_tensor(out):
                         new_outs.append(out.view_as(out))
                     else:
                         new_outs.append(out)

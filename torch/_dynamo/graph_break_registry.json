@@ -149,6 +149,16 @@
       ]
     }
   ],
+  "GB2019": [
+    {
+      "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
+      "Context": "call_method {self} {name}",
+      "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0012": [
     {
       "Gb_type": "Attempted to read undefined local variable (implicit)",
