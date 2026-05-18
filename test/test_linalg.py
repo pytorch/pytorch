@@ -8997,7 +8997,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
-class TestLinalgCUDA(TestCase):
+class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
     def setUp(self):
@@ -10536,6 +10536,7 @@ class TestLinalgCUDA(TestCase):
 
 
 instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
