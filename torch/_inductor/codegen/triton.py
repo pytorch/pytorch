@@ -281,7 +281,7 @@ class TritonSymbols:
         for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
-                var_shape = cse_var.shape
+                var_shape = tuple(cse_var.shape)
             elif symbol_is_type(
                 var,
                 (
@@ -1241,6 +1241,11 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        fp8_dtypes = (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        )
+
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -1251,10 +1256,6 @@ class TritonOverrides(OpOverrides):
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
-            fp8_dtypes = (
-                torch.float8_e4m3fn,
-                torch.float8_e5m2,
-            )
             # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
             assert not (
                 src_dtype in fp8_dtypes
@@ -1292,6 +1293,13 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            src_dtype is not None
+            and dtype in fp8_dtypes
+            and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
+        ):
+            return f"{x}.to(tl.float32).to({out_dtype})"
 
         return f"{x}.to({out_dtype})"
 
@@ -1812,104 +1820,10 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
-    def _f32_const_from_bits(bits: int) -> str:
-        return f"tl.full([], 0x{bits:08X}, tl.uint32).to(tl.float32, bitcast=True)"
-
-    @staticmethod
-    def _inline_asm_f32(asm: str, args: Sequence[Any], shape: BlockShapeType) -> Any:
-        constraints = ", ".join(["=f"] + ["f"] * len(args))
-        args_str = ", ".join(map(str, args))
-        return V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
-            f"[{args_str}], dtype=tl.float32, is_pure=True, pack=1)",
-            dtype=torch.float32,
-            shape=shape,
-        )
-
-    @staticmethod
-    def _cuda_atanf(x: CSEVariable) -> CSEVariable:
-        # Match CUDA's device atanf implementation.  This sequence mirrors
-        # nvcc-generated PTX for `atan(float)`: abs/reciprocal range reduction,
-        # a Horner polynomial in exact f32 hex constants using fma.rn, pi/2
-        # reconstruction for |x| > 1, sign-bit restoration, and NaN handling.
-        # Triton's bundled libdevice uses a different approximation, and a
-        # 1 ULP atan difference can be amplified by steep consumers such as
-        # digamma near zero.
-        shape = x.shape
-
-        def gen(expr: str, dtype: torch.dtype = torch.float32) -> TritonCSEVariable:
-            return V.kernel.cse.generate(
-                V.kernel.compute, expr, dtype=dtype, shape=shape
-            )
-
-        def fma(a: Any, b: Any, c: Any) -> Any:
-            return TritonOverrides._inline_asm_f32(
-                "fma.rn.f32 $0, $1, $2, $3;", [a, b, c], shape
-            )
-
-        c = TritonOverrides._f32_const_from_bits
-        one = c(0x3F800000)
-        inf = c(0x7F800000)
-
-        abs_x = gen(f"tl_math.abs({x})")
-        large = gen(f"{abs_x} > {one}", torch.bool)
-        rcp = TritonOverrides._inline_asm_f32(
-            "rcp.approx.ftz.f32 $0, $1;", [abs_x], shape
-        )
-        z = gen(f"tl.where({large}, {rcp}, {abs_x})")
-        z2 = gen(f"{z} * {z}")
-
-        poly = fma(c(0x3B2090AA), z2, c(0xBC6BE14F))
-        poly = fma(poly, z2, c(0x3D23397E))
-        poly = fma(poly, z2, c(0xBD948A7A))
-        poly = fma(poly, z2, c(0x3DD76B21))
-        poly = fma(poly, z2, c(0xBE111E88))
-        poly = fma(poly, z2, c(0x3E4CAF60))
-        poly = fma(poly, z2, c(0xBEAAAA27))
-
-        correction = gen(f"{z2} * {poly}")
-        result = fma(correction, z, z)
-        neg_result = gen(f"-{result}")
-        pi_over_two_minus_result = fma(c(0x3F6EE581), c(0x3FD774EB), neg_result)
-        result = gen(f"tl.where({large}, {pi_over_two_minus_result}, {result})")
-
-        sign_mask = "tl.full([], 0x80000000, tl.uint32)"
-        sign = gen(f"{x}.to(tl.uint32, bitcast=True) & {sign_mask}", torch.uint32)
-        result_bits = gen(f"{result}.to(tl.uint32, bitcast=True)", torch.uint32)
-        signed_bits = gen(f"{sign} | {result_bits}", torch.uint32)
-        signed_result = gen(f"{signed_bits}.to(tl.float32, bitcast=True)")
-        not_nan = gen(f"{abs_x} <= {inf}", torch.bool)
-        return gen(f"tl.where({not_nan}, {signed_result}, {result})")
-
-    @staticmethod
+    @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def atan(x):
-        dtype = triton_arg_dtype(x)
-        result_dtype = None
-        if needs_upcast_to_float32(x):
-            result_dtype = dtype
-            x = V.kernel.cse.generate(
-                V.kernel.compute,
-                f"{x}.to(tl.float32)",
-                dtype=torch.float32,
-                shape=x.shape,
-            )
-            dtype = torch.float32
-
-        if (
-            not torch.version.hip
-            and V.graph.get_current_device_or_throw().type == "cuda"
-            and dtype == torch.float32
-            and isinstance(x, CSEVariable)
-        ):
-            result = TritonOverrides._cuda_atanf(x)
-        else:
-            result = f"libdevice.atan({x})"
-
-        if result_dtype is not None and result_dtype != torch.float32:
-            return f"{result}.to({triton_type(result_dtype)})"
-        return result
+        return f"libdevice.atan({x})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2139,6 +2053,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
+        if config.eager_numerics.use_pytorch_libdevice:
+            # Strict numerics should use the backend math library entry point.
+            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+            return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
     @staticmethod
@@ -2224,7 +2142,6 @@ class TritonOverrides(OpOverrides):
 
 # Register the custom pow override after class creation so type checkers see
 # a plain callable instead of the class-body staticmethod descriptor.
-OpDtypeSupport.register_upcast(TritonOverrides.atan, True)
 OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
