@@ -24,7 +24,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, extern_kernel_input, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     lowerings,
@@ -160,6 +160,14 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+_SCALED_MM_SCALE_RESULT_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
 )
 
 
@@ -932,18 +940,40 @@ def tuned_scaled_mm(
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+    bias_real = realize_inputs(bias) if bias is not None else None
+    scale_result_real = (
+        realize_inputs(scale_result) if scale_result is not None else None
+    )
+    if scale_result_real is not None:
+        torch._check(
+            scale_result_real.get_dtype() == torch.float32
+            and scale_result_real.get_numel() == 1,
+            lambda: "scale_result must be a float scalar",
+        )
 
-    input_nodes: list[Any]
+    input_nodes: list[Any] = [mat_a, mat_b, scale_a_real, scale_b_real]
+    if bias_real is not None:
+        input_nodes.append(bias_real)
+    if scale_result_real is not None:
+        input_nodes.append(scale_result_real)
 
-    if not bias:
-        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
-    else:
-        bias_real = realize_inputs(bias)
-        input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
+    # FP8 Triton templates must divide by scale_result in their epilogue.
+    # Other dtypes pass scale_result through to the extern ATen kernel.
+    apply_scale_result = (
+        scale_result_real is not None and layout.dtype in _SCALED_MM_SCALE_RESULT_DTYPES
+    )
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
     kernel_inputs = MMKernelInputs(
-        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+        input_nodes,
+        scalars={
+            "has_bias": int(bias_real is not None),
+            "has_scale_result": int(scale_result_real is not None),
+            "apply_scale_result": int(apply_scale_result),
+        },
+        mat1_idx=0,
+        mat2_idx=1,
+        out_dtype=out_dtype,
     )
 
     choices: list[ChoiceCaller] = []
@@ -953,9 +983,21 @@ def tuned_scaled_mm(
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
+        call_args = None
+        if scale_result_real is not None and bias_real is None:
+            call_args = (
+                *(extern_kernel_input(i) for i in range(4)),
+                None,
+                extern_kernel_input(4),
+            )
+        choices.append(
+            aten__fp8_mm.bind(
+                kernel_inputs.nodes(),
+                kernel_inputs.output_layout(),
+                call_args=call_args,
+                out_dtype=out_dtype,
+                use_fast_accum=use_fast_accum,
+            )
         )
 
     _, is_nonzero = _is_static_problem(layout)
@@ -978,7 +1020,8 @@ def tuned_scaled_mm(
         # Don't run tma template currently if bias exist
         if (
             use_triton_tma_template(mat_a, mat_b, output_layout=layout, add_guards=True)
-            and not bias
+            and bias_real is None
+            and scale_result_real is None
         ):
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
@@ -1010,7 +1053,7 @@ def tuned_scaled_mm(
             use_triton_blackwell_tma_template(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
-            and not bias
+            and bias_real is None
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
@@ -1034,7 +1077,11 @@ def tuned_scaled_mm(
     )
 
     # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
-    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+    if (
+        scale_result_real is None
+        and is_nonzero
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
+    ):
         from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
 
         add_nv_universal_scaled_gemm_choices(
@@ -1050,7 +1097,8 @@ def tuned_scaled_mm(
         return node
 
     if (
-        is_nonzero
+        scale_result_real is None
+        and is_nonzero
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
     ):
@@ -1061,7 +1109,11 @@ def tuned_scaled_mm(
             use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
         )
 
-    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+    if (
+        scale_result_real is None
+        and is_nonzero
+        and use_ck_gemm_template(layout, m, n, k)
+    ):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

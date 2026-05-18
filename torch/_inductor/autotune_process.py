@@ -758,23 +758,31 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
         extra_args: Iterable[Any],
         callable_path: str,  # Module path to the callable (e.g., "extern_kernels.mm")
         kwargs: dict[str, Any] | None = None,
+        call_args: Sequence[Any] | None = None,
         has_out_variant: bool = True,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.callable_path = callable_path
         self.kwargs = kwargs or {}
+        self.call_args = call_args
         self.has_out_variant = has_out_variant
+
+    def resolve_call_args(
+        self, input_tensors: Sequence[torch.Tensor]
+    ) -> tuple[Any, ...]:
+        return ir.resolve_extern_kernel_call_args(input_tensors, self.call_args)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
         fn = self.to_callable()
+        call_args = self.resolve_call_args(input_tensors)
         if self.has_out_variant:
             # For out=variant, pass output as keyword arg
-            return functools.partial(fn, *input_tensors, out=out)
+            return functools.partial(fn, *call_args, out=out)
         else:
             # For non-out variant, just call with inputs
-            return functools.partial(fn, *input_tensors)
+            return functools.partial(fn, *call_args)
 
     def benchmark(self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None):
         if out is not None and out.numel() == 0:
@@ -784,7 +792,8 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
             return super().benchmark(*input_tensors, out=out)
         else:
             algo = self.to_callable()
-            out_new = algo(*input_tensors)
+            call_args = self.resolve_call_args(input_tensors)
+            out_new = algo(*call_args)
             if out is not None:
                 torch._C._dynamo.guards.assert_size_stride(
                     out_new, tuple(out.size()), tuple(out.stride())
@@ -792,11 +801,11 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                 out.copy_(out_new)  # for correctness checking
             if self.benchmark_with_cudagraphs:
                 return benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: algo(*input_tensors)
+                    lambda: algo(*call_args)
                 )
             if config.profile_bandwidth_with_do_bench_using_profiling:
-                return do_bench_using_profiling(lambda: algo(*input_tensors))
-            return benchmarker.benchmark(algo, input_tensors, {})
+                return do_bench_using_profiling(lambda: algo(*call_args))
+            return benchmarker.benchmark(algo, call_args, {})
 
     def precompile(self) -> None:
         # Extern kernels don't need precompilation - they're already compiled

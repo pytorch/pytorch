@@ -1133,7 +1133,9 @@ class FxConverter:
         # Get FX nodes corresponding to the call args.
         assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
-        if hasattr(kernel, "unflatten_args"):
+        if kernel.call_args is not None:
+            args = ir.resolve_extern_kernel_call_args(tensor_nodes, kernel.call_args)
+        elif hasattr(kernel, "unflatten_args"):
             args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
         else:
             args = tensor_nodes + tuple(kernel.constant_args)
