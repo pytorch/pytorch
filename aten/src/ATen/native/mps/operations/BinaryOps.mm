@@ -12,15 +12,9 @@
 #else
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/div_native.h>
-#include <ATen/ops/eq_native.h>
-#include <ATen/ops/ge_native.h>
-#include <ATen/ops/gt_native.h>
-#include <ATen/ops/le_native.h>
 #include <ATen/ops/logical_and_native.h>
 #include <ATen/ops/logical_or_native.h>
 #include <ATen/ops/logical_xor_native.h>
-#include <ATen/ops/lt_native.h>
-#include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
 #include <ATen/ops/result_type.h>
@@ -212,32 +206,6 @@ static void add_sub_lerp_template(const Tensor& self,
                                                    name:nil];                                               \
         });                                                                                                 \
   }
-
-// output of Boolean Ops will be cast to "MPSDataTypeBool" at the end of binaryOpTensor()
-#define CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                              \
-  TORCH_IMPL_FUNC(func_out)(const Tensor& self, const other_type& other, const Tensor& output) {            \
-    mps::binaryOp##other_type(                                                                              \
-        self, other, output, #func_stub, ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) { \
-          MPSGraph* mpsGraph = cachedGraph->graph();                                                        \
-          return [mpsGraph func_stub##WithPrimaryTensor:primaryCastTensor                                   \
-                                        secondaryTensor:secondaryCastTensor                                 \
-                                                   name:nil];                                               \
-        });                                                                                                 \
-  }
-
-// Boolean Binary Ops
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(eq_scalar_out_mps, equal, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(eq_tensor_out_mps, equal, Tensor);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ne_scalar_out_mps, notEqual, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ne_tensor_out_mps, notEqual, Tensor);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(le_scalar_out_mps, lessThanOrEqualTo, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(le_tensor_out_mps, lessThanOrEqualTo, Tensor);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(lt_scalar_out_mps, lessThan, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(lt_tensor_out_mps, lessThan, Tensor);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ge_scalar_out_mps, greaterThanOrEqualTo, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ge_tensor_out_mps, greaterThanOrEqualTo, Tensor);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
-CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 
 // Arithmetic Binary Ops
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);

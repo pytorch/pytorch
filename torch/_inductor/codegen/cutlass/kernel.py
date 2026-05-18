@@ -78,7 +78,7 @@ class CUTLASSKernel(Kernel):
     Baseclass for Cutlass based Kernels
     """
 
-    overrides = OpOverrides  # type: ignore[assignment]
+    overrides = OpOverrides
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -219,7 +219,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
-        device_type: str = "cuda",  # type: ignore[assignment]
+        device_type: str = "cuda",
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
@@ -279,7 +279,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 if self.find_layout_arg(node, attr, dim) is not None:
                     continue
                 for symbol in expr.free_symbols:
-                    free_symbols.add(symbol)  # type: ignore[arg-type]
+                    free_symbols.add(symbol)
         return free_symbols
 
     def def_kernel(
@@ -355,7 +355,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     def call_kernel(
         self,
         name: str,
-        node: "CUTLASSTemplateBuffer",  # type: ignore[name-defined]
+        node: "CUTLASSTemplateBuffer",
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -383,7 +383,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         dynamic_shape_args = self.get_dynamic_shape_args()
         offset_args = self.get_offset_args()
         call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
-        call_args.extend(offset_args)  # type: ignore[arg-type]
+        call_args.extend(offset_args)
         for arg in self.runtime_arg_values:
             call_args.append(str(arg))
         arg_types.extend("const int" for _ in dynamic_shape_args)
@@ -613,8 +613,8 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         ],
         bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
-        template: "CUTLASSTemplate",  # type: ignore[name-defined]
-        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
+        template: "CUTLASSTemplate",
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)

@@ -742,3 +742,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
         torch::schema(schema), tag_vec, torch::_RegisterOrVerify::REGISTER);
   });
 }
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->set_python_module(
+        pymodule, context);
+  });
+}

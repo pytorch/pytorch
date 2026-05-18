@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
@@ -120,9 +120,6 @@ jobs:
           3.13)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
             ;;
-          3.13t)
-            PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
-            ;;
           3.14)
             PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
             ;;
@@ -186,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:

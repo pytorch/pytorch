@@ -141,6 +141,26 @@ inline bfloat max(bfloat a, bfloat b) {
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
 
+// Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
+// which gave wrong results at large threadgroup sizes on M2.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  if (a != a)
+    return false;
+  if (b != b)
+    return true;
+  return a < b;
+}
+
+template <typename T>
+inline ::metal::enable_if_t<!::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  return a < b;
+}
+
 template <typename T>
 using vec2type_t = typename detail::vectypes<T>::type2;
 

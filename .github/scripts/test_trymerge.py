@@ -22,6 +22,7 @@ from urllib.error import HTTPError
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
+    _find_non_matching_files,
     _revlist_to_prs,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
@@ -289,6 +290,31 @@ class TestTryMerge(TestCase):
         repo = DummyGitRepo()
         merge_rules = read_merge_rules(repo, "pytorch", "pytorch")
         self.assertGreater(len(merge_rules), 1)
+
+    def test_negative_pattern_excludes_subpath(self, *args: Any) -> None:
+        "Patterns prefixed with '-' exclude matching files from a rule."
+        patterns = [".ci/**", "-.ci/docker/**", ".github/**"]
+        files = [
+            ".ci/test.sh",
+            ".ci/docker/Dockerfile",
+            ".ci/docker/common/install_onnx.sh",
+            ".github/workflows/lint.yml",
+            "torch/foo.py",
+        ]
+        non_matching = _find_non_matching_files(patterns, files)
+        self.assertEqual(
+            sorted(non_matching),
+            [
+                ".ci/docker/Dockerfile",
+                ".ci/docker/common/install_onnx.sh",
+                "torch/foo.py",
+            ],
+        )
+
+    def test_negative_pattern_no_negatives(self, *args: Any) -> None:
+        "Without negative patterns, behavior matches the positive-only case."
+        files = [".ci/test.sh", "torch/foo.py"]
+        self.assertEqual(_find_non_matching_files([".ci/**"], files), ["torch/foo.py"])
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:

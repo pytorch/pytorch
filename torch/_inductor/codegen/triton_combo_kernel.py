@@ -20,6 +20,7 @@ from ..runtime.triton_heuristics import (
     SequentialFlattenComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
+from ..stream_utils import get_raw_stream_name
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
@@ -94,7 +95,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         long_reduction = [
             n
             for n in reduction
-            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -110,7 +111,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             and V.graph.sizevars.optimization_hint(
                 node_info_map[n].tiling["x"], fallback=1
             )
-            > LARGE_NUMELS  # type: ignore[arg-type]
+            > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -734,7 +735,7 @@ class ComboKernel(Kernel):
         }
 
         for arg_num in equal_1_arg_indices(signature):
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+            triton_meta["constants"][signature[arg_num].name] = 1
 
         triton_meta["configs"] = [config_of(signature)]
 
@@ -1035,7 +1036,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(const_tensor.size())
                     stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)
@@ -1071,7 +1072,7 @@ class ComboKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -1164,7 +1165,7 @@ class ComboKernel(Kernel):
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         """
-        Build metadata used by combo-kernel grid/disaptch/autotune helpers.
+        Build metadata used by combo-kernel grid/dispatch/autotune helpers.
         """
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
