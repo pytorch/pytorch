@@ -1346,6 +1346,15 @@ print(t.is_pinned())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
+    def test_stream_invalid_device_index(self):
+        # Regression test for #184034: constructing a CUDAStream with an
+        # out-of-range device_index must not OOB-index the static stream pool.
+        num_devices = torch.cuda.device_count()
+        for di in (-2, -8, num_devices, num_devices + 16, 128):
+            s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
+            with self.assertRaisesRegex(RuntimeError, "Device index value"):
+                _ = s.cuda_stream
+
     def test_stream_event_repr(self):
         s = torch.cuda.current_stream()
         self.assertTrue("torch.cuda.Stream" in s.__repr__())
