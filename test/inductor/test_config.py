@@ -7,6 +7,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -178,21 +179,70 @@ class TestInductorConfig(TestCase):
 
         max_autotune_opts = torch._inductor.list_mode_options("max-autotune")
         self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["combo_kernels"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
 
         max_autotune_opts = torch._inductor.list_mode_options(
             "max-autotune", dynamic=True
         )
         self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["combo_kernels"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
 
         max_autotune_no_cudagraphs_opts = torch._inductor.list_mode_options(
             "max-autotune-no-cudagraphs"
         )
         self.assertEqual(max_autotune_no_cudagraphs_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_no_cudagraphs_opts["combo_kernels"], True)
         self.assertEqual(
             max_autotune_no_cudagraphs_opts.get("triton.cudagraphs", False), False
         )
+
+    @requires_gpu
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_max_autotune_mode_combines_mixed_head_rope(self):
+        def rotate_half(x):
+            return torch.cat(
+                (-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]),
+                dim=-1,
+            )
+
+        def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
+            cos = cos[position_ids].unsqueeze(1)
+            sin = sin[position_ids].unsqueeze(1)
+            return (q * cos) + (rotate_half(q) * sin), (k * cos) + (
+                rotate_half(k) * sin
+            )
+
+        q = torch.randn(1, 4, 16, 8, device=GPU_TYPE)
+        k = torch.randn(1, 2, 16, 8, device=GPU_TYPE)
+        cos = torch.randn(16, 8, device=GPU_TYPE)
+        sin = torch.randn(16, 8, device=GPU_TYPE)
+        position_ids = torch.arange(16, device=GPU_TYPE).unsqueeze(0)
+
+        out_eager = apply_rotary_pos_emb(q, k, cos, sin, position_ids)
+
+        for mode in ("max-autotune-no-cudagraphs", "max-autotune"):
+            with self.subTest(mode=mode):
+                torch._dynamo.reset()
+                torch._inductor.metrics.reset()
+                with torch._inductor.config.patch({"autotune_local_cache": False}):
+                    out_compiled, (code,) = run_and_get_code(
+                        torch.compile(
+                            apply_rotary_pos_emb,
+                            mode=mode,
+                            fullgraph=True,
+                        ),
+                        q,
+                        k,
+                        cos,
+                        sin,
+                        position_ids,
+                    )
+
+                self.assertEqual(out_eager, out_compiled)
+                self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+                self.assertIn("combo_grid_meta", code)
 
     def test_invalid_backend(self):
         self.assertRaises(
