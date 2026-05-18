@@ -63,6 +63,10 @@ EPILOGUES = {
         acc.relu(),
         acc.float().view(acc.shape[0], -1, 16).sum(-1),
     ),
+    "relu-local-sum-n2": lambda acc: (
+        acc.relu(),
+        acc.float().view(acc.shape[0], -1, 2).sum(-1),
+    ),
 }
 AUX_EPILOGUES = {
     # QUACK currently supports one captured aux tensor for plain mm.
