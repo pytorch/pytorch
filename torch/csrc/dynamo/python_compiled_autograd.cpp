@@ -203,21 +203,17 @@ static variable_list call_function(
     const ivalue_list& packed_args,
     const c10::IValue& output_metadata) {
   // convert ivalue_list -> PyObject*
-  PyObject* py_packed_args =
-      PyTuple_New(static_cast<Py_ssize_t>(packed_args.size()));
+  py::object py_packed_args = py::reinterpret_steal<py::object>(
+      PyTuple_New(static_cast<Py_ssize_t>(packed_args.size())));
   for (const auto i : c10::irange(packed_args.size())) {
     py::object obj = jit::toPyObject(packed_args[i]);
-    Py_INCREF(obj.ptr());
-    PyTuple_SET_ITEM(py_packed_args, i, obj.ptr());
+    PyTuple_SET_ITEM(py_packed_args.ptr(), i, obj.release().ptr());
   }
 
   // call the corresponding method on the py_compiler
   py::handle handle(py_compiler);
   py::object stuff = handle.attr(method_name)(
-      fn_name,
-      inputs,
-      py::handle(py_packed_args),
-      jit::toPyObject(output_metadata));
+      fn_name, inputs, py_packed_args, jit::toPyObject(output_metadata));
 
   // Convert the output from PyObject* to vector<Tensor>
   auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
@@ -374,8 +370,11 @@ struct PythonLogger {
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    PyObject* result =
-        PyObject_CallFunction(pyfunc.get(), "s", std::string(msg).c_str());
+    THPObjectPtr result(PyObject_CallFunction(
+        pyfunc.get(),
+        "s#",
+        msg.data(),
+        static_cast<Py_ssize_t>(msg.size())));
     if (result == nullptr) {
       throw_python_error();
     }
