@@ -15,6 +15,30 @@ from pathlib import Path
 
 import torch
 
+_CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
+
+
+def _maybe_set_cutlass_dir_env_from_checkout() -> None:
+    # Set this before importing torch._inductor.config below. This matters when
+    # running source-checkout tests against an installed torch package.
+    if _CUTLASS_DIR_ENV_VAR in os.environ:
+        return
+
+    default_cutlass_dir = (
+        Path(torch.__file__).resolve().parent.parent / "third_party" / "cutlass"
+    )
+    if (default_cutlass_dir / "python").is_dir():
+        return
+
+    checkout_cutlass_dir = (
+        Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
+    )
+    if (checkout_cutlass_dir / "python").is_dir():
+        os.environ[_CUTLASS_DIR_ENV_VAR] = str(checkout_cutlass_dir)
+
+
+_maybe_set_cutlass_dir_env_from_checkout()
+
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
     get_cutlass_operation_serializer,
@@ -312,7 +336,7 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(
             try_import_cutlass(),
             "CUTLASS backend is required by this test but could not be imported. "
-            f"Set {config._cutlass_dir_env_var()} to a valid CUTLASS checkout; "
+            f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
             f"current cutlass_dir={cutlass_dir!r}.",
         )
 
