@@ -687,7 +687,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
-
         def create_cmp_op_handlers(
             op: Callable[..., Any],
         ) -> list[tuple[tuple[_TrackersType, _TrackersType], _HandlerCallback]]:

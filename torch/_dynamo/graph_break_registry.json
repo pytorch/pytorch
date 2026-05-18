@@ -42,16 +42,6 @@
       ]
     }
   ],
-  "GB9292": [
-    {
-      "Gb_type": "vectorcall_maybe on C method descriptor",
-      "Context": "name={name}, type={self.python_type_name()}, method={method}",
-      "Explanation": "Cannot trace special method '{name}' implemented in C on user-defined type '{self.python_type_name()}'.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0004": [
     {
       "Gb_type": "Attempted super().__delattr__() on an object without mutation tracking",
