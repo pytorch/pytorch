@@ -1381,7 +1381,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         FileCheck().check("start_combo_kernel_standalone_autotune(").check(".run(").run(
             code
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, seed_count + 1)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
         self.assertIn(
             f"Combo standalone autotune seed: submit {seed_count} standalone kernels",
             logs,

@@ -1419,6 +1419,18 @@ class PrecompileThreadPool:
                     cls._instance._shutdown(wait=False)
                     cls._instance = None
 
+    @classmethod
+    def _after_fork_in_child(cls) -> None:
+        # ThreadPoolExecutor workers don't survive fork(); the inherited
+        # _executor / _lock state is dead. Reset the singleton so the next
+        # submit() in the child constructs a fresh pool. Locks are reset
+        # because the parent could have been mid-acquire at fork time.
+        cls._instance = None
+        cls._lock = threading.RLock()
+
+
+os.register_at_fork(after_in_child=PrecompileThreadPool._after_fork_in_child)
+
 
 class AsyncAutotuner:
     """

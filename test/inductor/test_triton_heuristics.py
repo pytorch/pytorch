@@ -52,6 +52,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
+    NoTritonConfigsError,
     template,
     triton_config,
 )
@@ -458,9 +459,7 @@ class TestCachingAutotunerPlugin(TestCase):
         launcher.config = triton_config({"x": 16}, 64)
         autotuner.launchers = [launcher]
 
-        with patch.object(
-            autotuner, "coordinate_descent_tuning"
-        ) as mock_coordesc:
+        with patch.object(autotuner, "coordinate_descent_tuning") as mock_coordesc:
             result = autotuner.autotune_to_one_config_no_launch(
                 *self._make_kernel_inputs(), stream=self._get_stream()
             )
@@ -543,7 +542,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner = self._make_autotuner([])
         future = MagicMock()
         future.cancel.return_value = False
-        future.result.side_effect = RuntimeError("seed failed")
+        future.result.side_effect = NoTritonConfigsError("seed failed")
         autotuner.combo_standalone_autotune_seed_future = [future]
 
         autotuner._cancel_combo_standalone_autotune_seed()
@@ -570,9 +569,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner.coordesc_tuner.autotune = MagicMock(return_value=launcher.config)
 
         with patch.object(autotuner, "_ensure_kernel_loaded"):
-            autotuner._coordinate_descent_tuning(
-                launcher, *self._make_kernel_inputs()
-            )
+            autotuner._coordinate_descent_tuning(launcher, *self._make_kernel_inputs())
 
         self.assertTrue(launcher.config.found_by_coordesc)
         self.assertTrue(launcher.config.found_by_combo_autotune)
@@ -643,9 +640,7 @@ class TestCachingAutotunerPlugin(TestCase):
             shared_kwargs,
         )
 
-        self.assertEqual(
-            kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32, "waves_per_eu": 2}
-        )
+        self.assertEqual(kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32, "waves_per_eu": 2})
 
     def test_combo_seed_ignores_warp_stage_only_seed(self):
         from torch.utils._ordered_set import OrderedSet
@@ -786,7 +781,7 @@ class TestCachingAutotunerPlugin(TestCase):
             triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
         )
         future = MagicMock()
-        future.result.side_effect = RuntimeError("seed failed")
+        future.result.side_effect = NoTritonConfigsError("seed failed")
         autotuner.combo_standalone_autotune_seed_future = [future]
 
         with (
@@ -818,7 +813,7 @@ class TestCachingAutotunerPlugin(TestCase):
             )
         )
         failed_future = MagicMock()
-        failed_future.result.side_effect = RuntimeError("seed failed")
+        failed_future.result.side_effect = NoTritonConfigsError("seed failed")
         seed_future = MagicMock()
         seed_future.result.return_value = triton.Config(
             {"XBLOCK": 32}, num_warps=4, num_stages=1
@@ -1321,9 +1316,7 @@ class TestRecheckAutotuneCache(TestCase):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 
         self.assertEqual(len(autotuner.compile_results), 1)
-        self.assertTrue(
-            autotuner.compile_results[0].config.found_by_combo_autotune
-        )
+        self.assertTrue(autotuner.compile_results[0].config.found_by_combo_autotune)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_no_cache_hit_leaves_results_unchanged(self):
@@ -1612,7 +1605,13 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         )
 
         self.assertIsNotNone(result)
-        self.assertIs(result, cfg_b)
+        # Loader copies the matched config before any setattr, so the result is
+        # a fresh Config equivalent to cfg_b (not the same object).
+        self.assertIsNot(result, cfg_b)
+        self.assertEqual(result.kwargs, cfg_b.kwargs)
+        self.assertEqual(result.num_warps, cfg_b.num_warps)
+        self.assertEqual(result.num_stages, cfg_b.num_stages)
+        self.assertFalse(hasattr(cfg_b, "found_by_combo_autotune"))
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_restores_combo_autotune_marker(self):
@@ -1641,8 +1640,14 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
             {"combo_tuning_groups": [{"member_indices": [0], "skip_rblock": False}]},
         )
 
-        self.assertIs(result, cfg)
+        # Loader copies the matched config; provenance lives on the copy, not
+        # on the shared heuristic-owned list entry.
+        self.assertIsNot(result, cfg)
+        self.assertEqual(result.kwargs, cfg.kwargs)
+        self.assertEqual(result.num_warps, cfg.num_warps)
+        self.assertEqual(result.num_stages, cfg.num_stages)
         self.assertTrue(result.found_by_combo_autotune)
+        self.assertFalse(hasattr(cfg, "found_by_combo_autotune"))
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
