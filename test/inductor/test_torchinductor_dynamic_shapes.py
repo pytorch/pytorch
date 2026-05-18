@@ -70,22 +70,13 @@ test_failures = {
         ("cpu", "cuda", "xpu", "mps")
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
-    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
-    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_std_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
