@@ -1685,9 +1685,9 @@ class cpp:
     vec_isa_ok: bool | None = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Literal[
-        "torch", "original_aten", "inductor_node"
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1940,9 +1940,9 @@ class triton:
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Literal[
-        "torch", "original_aten", "inductor_node"
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
@@ -2645,12 +2645,12 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda: Literal[
-        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
-    ] = "Anderson2021"
-    scheduler_cpu: Literal[
-        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
-    ] = "Adams2019"
+    scheduler_cuda: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
+        "Anderson2021"
+    )
+    scheduler_cpu: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
+        "Adams2019"
+    )
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False

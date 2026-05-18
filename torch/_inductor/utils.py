@@ -488,9 +488,9 @@ def ceildiv(number: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Ex
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(number, int) and isinstance(
-        denom, int
-    ), f"{number}: {type(number)}, {denom}: {type(denom)}"
+    assert isinstance(number, int) and isinstance(denom, int), (
+        f"{number}: {type(number)}, {denom}: {type(denom)}"
+    )
     return runtime_ceildiv(number, denom)
 
 
@@ -729,11 +729,9 @@ FN_TYPE = Callable[Concatenate[Any, P], RV]
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(cache: Any) -> None:
-        ...
+    def clear_cache(cache: Any) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -2595,9 +2593,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.cache
-def try_import_ck_lib() -> (
-    tuple[str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
-):
+def try_import_ck_lib() -> tuple[
+    str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
+]:
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -2896,9 +2894,9 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
     # pyrefly: ignore [bad-argument-type]
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -2908,9 +2906,9 @@ def run_and_get_triton_code(
     # pyrefly: ignore [bad-argument-type]
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -3036,9 +3034,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(
-        val, sympy.Expr
-    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    assert isinstance(val, sympy.Expr), (
+        "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    )
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -3724,9 +3722,9 @@ def copy_misaligned_inputs(
     ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
-        assert isinstance(
-            _inp, torch.Tensor
-        ), f"Expected tensors only, but got: {type(_inp)}"
+        assert isinstance(_inp, torch.Tensor), (
+            f"Expected tensors only, but got: {type(_inp)}"
+        )
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 

@@ -297,9 +297,9 @@ def _hierarchical_indexer_cute(
 
     def indexer(indices: Sequence[Expr]) -> Expr:
         assert offset == Integer(0), "Offset not supported for hierarchical indexing"
-        assert len(indices) == len(
-            size
-        ), f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+        assert len(indices) == len(size), (
+            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+        )
         if not indices:
             return Integer(0)
         if len(indices) == 1:
