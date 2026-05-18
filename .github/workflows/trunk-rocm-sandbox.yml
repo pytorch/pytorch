@@ -1,10 +1,6 @@
 name: trunk-rocm-sandbox
 
 on:
-  # temporary for testing
-  push:
-    tags:
-      - ciflow/trunk/*
   #push:
   #  branches:
   #    - main
