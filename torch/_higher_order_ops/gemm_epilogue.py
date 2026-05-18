@@ -134,6 +134,7 @@ class QuackLocalReduceInfo:
     source_node: torch.fx.Node
     keepdim: bool
     group_size: int
+    dim: int
     feeds_main: bool = False
 
 
@@ -373,6 +374,61 @@ def _match_quack_local_n_reduce(
         source_node=source_node,
         keepdim=bool(keepdim),
         group_size=group_size,
+        dim=1,
+    )
+
+
+def _match_quack_local_m_reduce(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if not (node.op == "call_function" and node.target == torch.ops.aten.sum.dim_IntList):
+        return None
+    view_node = node.args[0]
+    dims = _normalize_reduce_dims(
+        node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+    )
+    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
+    if dims != (1,) or dtype is not None:
+        return None
+    if not isinstance(view_node, torch.fx.Node):
+        return None
+    if view_node.op == "call_function" and view_node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        base = view_node.args[0]
+        shape = view_node.args[1]
+    else:
+        return None
+    source_node = base
+    if base is not mm_node:
+        if not (
+            isinstance(base, torch.fx.Node)
+            and base.op == "call_function"
+            and base.target
+            in (
+                torch.ops.aten._to_copy.default,
+                torch.ops.prims.convert_element_type.default,
+            )
+            and base.args[0] is mm_node
+        ):
+            return None
+    if isinstance(shape, torch.Size):
+        shape = tuple(shape)
+    if not isinstance(shape, (list, tuple)) or len(shape) != 3:
+        return None
+    if shape[0] != -1 or not isinstance(shape[1], int) or shape[1] <= 0:
+        return None
+    return QuackLocalReduceInfo(
+        view_node=view_node,
+        reduce_node=node,
+        source_node=source_node,
+        keepdim=bool(keepdim),
+        group_size=shape[1],
+        dim=0,
     )
 
 
@@ -472,7 +528,9 @@ def _quack_cute_epilogue_code(
         if len(output_value) == 1:
             output_value = output_value[0]
         elif len(output_value) == 2:
-            local_reduce = _match_quack_local_n_reduce(output_value[1], mm_node)
+            local_reduce = _match_quack_local_n_reduce(
+                output_value[1], mm_node
+            ) or _match_quack_local_m_reduce(output_value[1], mm_node)
             if local_reduce is None or local_reduce.keepdim:
                 raise NotImplementedError(
                     "QUACK tuple epilogue currently supports only "

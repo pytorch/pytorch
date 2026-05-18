@@ -1041,6 +1041,58 @@ class GemmEpilogueFusionTests(TestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_row_group2_fuses(self):
+        M = 128
+        N = 64
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (
+                    acc.relu(),
+                    acc.float().view(-1, 2, N).sum(1),
+                ),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual[1], expected[1], atol=2e-2, rtol=1e-2)
+        FileCheck().check("local_reduce_group=2").check("local_reduce_dim=0").check(
+            "local_reduce_out="
+        ).check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_row_group2_tail_m(self):
+        M = 64
+        N = 64
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (
+                    acc.relu(),
+                    acc.float().view(-1, 2, N).sum(1),
+                ),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "multiple of tile_m=128"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_small_group_fuses(self):
         M = 32
 
