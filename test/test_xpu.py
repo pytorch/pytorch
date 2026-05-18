@@ -288,6 +288,8 @@ if __name__ == "__main__":
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.temperature()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.clock_rate()
 
     def test_temperature_returns_float(self):
         try:
@@ -306,6 +308,24 @@ if __name__ == "__main__":
         # Sanity check: GPU temperature should be in a plausible range (0–150 °C)
         self.assertGreaterEqual(temp, 0.0)
         self.assertLess(temp, 150.0)
+
+    def test_clock_rate_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            rate = torch.xpu.clock_rate()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU clock rate requires elevated privileges")
+            raise
+
+        self.assertIsInstance(rate, float)
+        # Sanity check: GPU clock rate should be in a plausible range (0–5000 MHz)
+        self.assertGreaterEqual(rate, 0.0)
+        self.assertLess(rate, 5000.0)
 
     def test_device_count_respects_affinity_mask(self):
         try:
