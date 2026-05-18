@@ -118,8 +118,7 @@ static PyObject* unpack_saved_variables(
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
-      Py_INCREF(Py_None);
-      value = Py_None;
+      value = Py_NewRef(Py_None);
     } else {
       value = unpack_fn(unpacked_var);
     }
@@ -707,8 +706,7 @@ static void _wrap_outputs(
         }
         variable_idx++;
       } else {
-        Py_INCREF(Py_None);
-        input = Py_None;
+        input = Py_NewRef(Py_None);
       }
       PyTuple_SET_ITEM(pyInputs.get(), i, input);
     }
@@ -965,8 +963,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
             "expected a Tensor argument, but got ", THPUtils_typename(arg));
         throw python_error();
       }
-      Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -1361,8 +1358,7 @@ static PyObject* resolve_kwargs_to_positional(
     PyObject* args,
     PyObject* kwargs) {
   if (!kwargs || PyDict_Size(kwargs) == 0) {
-    Py_INCREF(args);
-    return args;
+    return Py_NewRef(args);
   }
 
   THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
