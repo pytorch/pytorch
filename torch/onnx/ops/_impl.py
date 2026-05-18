@@ -63,7 +63,9 @@ def _rotary_embedding_23_fake_impl(
     if x.dim() == 4:
         # The real impl permutes (0,2,1,3), computes, then permutes back,
         # producing strides equivalent to empty_permuted with (0,2,1,3).
-        return torch.empty_permuted(x.shape, (0, 2, 1, 3), dtype=x.dtype, device=x.device)
+        return torch.empty_permuted(
+            x.shape, (0, 2, 1, 3), dtype=x.dtype, device=x.device
+        )
     return torch.empty_like(x)
 
 
