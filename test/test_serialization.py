@@ -39,7 +39,11 @@ from torch.serialization import (
     skip_data,
     SourceChangeWarning,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCUDA,
+)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_utils import (
     AlwaysWarnTypedStorageRemoval,
@@ -629,15 +633,6 @@ class SerializationMixin:
         def map_location(storage, loc):
             return storage
 
-        def generate_map_locations(device_type):
-            return [
-                {'cuda:0': device_type + ':0'},
-                device_type,
-                device_type + ':0',
-                torch.device(device_type),
-                torch.device(device_type, 0)
-            ]
-
         def load_bytes():
             with open(test_file_path, 'rb') as f:
                 return io.BytesIO(f.read())
@@ -648,18 +643,6 @@ class SerializationMixin:
             {'cuda:0': 'cpu'},
             'cpu',
             torch.device('cpu'),
-        ]
-        gpu_0_map_locations = generate_map_locations('cuda')
-        gpu_last_map_locations = [
-            f'cuda:{torch.cuda.device_count() - 1}',
-        ]
-        xpu_0_map_locations = generate_map_locations('xpu')
-        xpu_last_map_locations = [
-            f'xpu:{torch.xpu.device_count() - 1}',
-        ]
-        mtia_0_map_locations = generate_map_locations('mtia')
-        mtia_last_map_locations = [
-            f'mtia:{torch.mtia.device_count() - 1}',
         ]
 
         def check_map_locations(map_locations, dtype, intended_device):
@@ -672,27 +655,6 @@ class SerializationMixin:
                     self.assertEqual(tensor, torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtype, device=intended_device))
 
         check_map_locations(cpu_map_locations, torch.float, torch.device('cpu'))
-        if torch.cuda.is_available():
-            check_map_locations(gpu_0_map_locations, torch.float, torch.device('cuda', 0))
-            check_map_locations(
-                gpu_last_map_locations,
-                torch.float,
-                torch.device('cuda', torch.cuda.device_count() - 1)
-            )
-        if torch.xpu.is_available():
-            check_map_locations(xpu_0_map_locations, torch.float, torch.device('xpu', 0))
-            check_map_locations(
-                xpu_last_map_locations,
-                torch.float,
-                torch.device('xpu', torch.xpu.device_count() - 1)
-            )
-        if torch.mtia.is_available():
-            check_map_locations(mtia_0_map_locations, torch.float, torch.device('mtia', 0))
-            check_map_locations(
-                mtia_last_map_locations,
-                torch.float,
-                torch.device('mtia', torch.mtia.device_count() - 1)
-            )
 
     def test_map_location_meta_skips_storage_read(self):
         """Verify that map_location='meta' doesn't read storage data from disk."""
@@ -890,10 +852,6 @@ class SerializationMixin:
             torch.load(resource, weights_only=False)
 
     def test_save_different_dtype_unallocated(self):
-        devices = ['cpu']
-        if torch.cuda.is_available():
-            devices.append('cuda')
-
         def save_load_check(a, b):
             with io.BytesIO() as f:
                 torch.save([a, b], f)
@@ -902,9 +860,9 @@ class SerializationMixin:
             self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
-        for device, dtype in product(devices, all_types_and_complex_and(torch.half,
-                                                                        torch.bfloat16, torch.bool)):
-            a = torch.tensor([], dtype=dtype, device=device)
+        for dtype in all_types_and_complex_and(torch.half,
+                                               torch.bfloat16, torch.bool):
+            a = torch.tensor([], dtype=dtype)
 
             for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
                 s = torch.TypedStorage(
@@ -912,42 +870,37 @@ class SerializationMixin:
                     dtype=other_dtype)
                 save_load_check(a, s)
                 save_load_check(a.storage(), s)
-                b = torch.tensor([], dtype=other_dtype, device=device)
+                b = torch.tensor([], dtype=other_dtype)
                 save_load_check(a, b)
 
     def test_save_different_dtype_error(self):
         error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
 
-        devices = ['cpu']
-        if torch.cuda.is_available():
-            devices.append('cuda')
+        a = torch.randn(10, dtype=torch.complex128)
+        f = io.BytesIO()
 
-        for device in devices:
-            a = torch.randn(10, dtype=torch.complex128, device=device)
-            f = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, a.imag], f)
 
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a, a.imag], f)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), a.imag], f)
 
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a.storage(), a.imag], f)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, a.imag.storage()], f)
 
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a, a.imag.storage()], f)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), a.imag.storage()], f)
 
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a.storage(), a.imag.storage()], f)
+        a = torch.randn(10)
+        s_bytes = torch.TypedStorage(
+            wrap_storage=a.storage().untyped(),
+            dtype=torch.uint8)
 
-            a = torch.randn(10, device=device)
-            s_bytes = torch.TypedStorage(
-                wrap_storage=a.storage().untyped(),
-                dtype=torch.uint8)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, s_bytes], f)
 
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a, s_bytes], f)
-
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.save([a.storage(), s_bytes], f)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), s_bytes], f)
 
     def test_safe_load_basic_types(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -961,35 +914,6 @@ class SerializationMixin:
     def test_debug_set_in_ci(self):
         # This test is to make sure that the serialization debug flag is set in CI
         self.assertTrue(os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1")
-
-    def test_skip_data_load(self):
-        t_device = "cuda" if torch.cuda.is_available() else "cpu"
-        t_v2 = torch.randn(2, 3, device=t_device)
-        tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
-
-        sd = {'t_v2': t_v2, 'tt': tt}
-        sd_zeroed = {
-            't_v2': torch.zeros(2, 3, device=t_device),
-            'tt': TwoTensor(torch.zeros(2, device=t_device), torch.zeros(2, device=t_device)),
-        }
-
-        with BytesIOContext() as f:
-            torch.save(sd, f)
-            f.seek(0)
-            with safe_globals([TwoTensor]), skip_data():
-                sd_loaded = torch.load(f)
-            self.assertNotEqual(sd_loaded, sd)
-            self.assertEqual(
-                sd_loaded['t_v2'].untyped_storage().nbytes(),
-                sd['t_v2'].untyped_storage().nbytes()
-            )
-            self.assertEqual(
-                sd_loaded['tt'].a.untyped_storage().nbytes(),
-                sd['tt'].a.untyped_storage().nbytes()
-            )
-            for k in sd_loaded:
-                sd_loaded[k] = sd_loaded[k].zero_()
-            self.assertEqual(sd_loaded, sd_zeroed)
 
 
 class serialization_method:
@@ -4366,31 +4290,6 @@ class TestSerialization(TestCase, SerializationMixin):
         input = torch.randn(4, 3)
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
-    @unittest.skipIf(not torch.cuda.is_available(),
-                     "CUDA is unavailable")
-    def test_serialization_mmap_loading_with_map_location(self):
-        class DummyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = torch.nn.Linear(3, 1024)
-                self.fc2 = torch.nn.Linear(1024, 5)
-
-            def forward(self, input):
-                return self.fc2(self.fc1(input))
-
-        # make sure mmap where tensors' location tags are not CPU does not crash
-        # zipfile will first be mmap-ed on CPU and storages are extracted using
-        # overall_storage[start_offset:end_offset] before running
-        # _{device}_deserialize, which moves the storage to device
-        with TemporaryFileName() as f:
-            with torch.device('cuda'):
-                m = DummyModel()
-            state_dict = m.state_dict()
-            torch.save(state_dict, f)
-            result = torch.load(f, mmap=True)
-            for v in result.values():
-                self.assertTrue(v.is_cuda)
-
     def test_serialization_mmap_loading(self):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
@@ -4511,57 +4410,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 os.unlink(f.name)
                 g.close()
                 os.unlink(g.name)
-
-    @parametrize("materialize_fake", (True, False))
-    def test_skip_data_serialization(self, materialize_fake):
-        # Create one tensor that uses each of the paths in __reduce_ex__ that should work
-        t_device = "cuda" if torch.cuda.is_available() else "cpu"
-        t_v2 = torch.randn(2, 3, device=t_device)
-        t_v3 = torch.randn(2, 3, dtype=torch.complex32, device=t_device)
-        i = torch.tensor([[0, 1, 1],
-                          [2, 0, 2]])
-        v = torch.tensor([3, 4, 5], dtype=torch.float32)
-        if not materialize_fake:
-            # FakeTensorConverter messes up sizes of i and v for the sparse tensor
-            st = torch.sparse_coo_tensor(i, v, (2, 4))
-        tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
-
-        mode, converter = FakeTensorMode(), FakeTensorConverter()
-
-        def fn(t):
-            return converter.from_real_tensor(mode, t) if materialize_fake else t
-
-        sd = {'t_v2': fn(t_v2), 't_v3': fn(t_v3), 'tt': fn(tt)}
-        sd_expected = {
-            't_v2': torch.zeros(2, 3, device=t_device),
-            't_v3': torch.zeros(2, 3, dtype=torch.complex32, device=t_device),
-            'tt': TwoTensor(torch.zeros(2, device=t_device), torch.zeros(2, device=t_device)),
-        }
-
-        if not materialize_fake:
-            sd['st'] = st
-            sd_expected['st'] = torch.sparse_coo_tensor(torch.zeros(2, 3), torch.zeros(3), (2, 4))
-
-        with BytesIOContext() as f:
-            with skip_data(materialize_fake_tensors=materialize_fake):
-                torch.save(sd, f)
-            f.seek(0)
-            with safe_globals([TwoTensor]):
-                sd_loaded = torch.load(f, weights_only=True)
-            self.assertEqual(sd_loaded, sd_expected, exact_device=True)
-            self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
-            self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
-
-        # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
-        if not materialize_fake:
-            ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
-            exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
-            with self.assertRaisesRegex(
-                exc,
-                r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
-            ):
-                with skip_data(), BytesIOContext() as f:
-                    torch.save(ft, f)
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization_preserves_views(self, materialize_fake):
@@ -4729,45 +4577,6 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
-
-    @unittest.skipIf(not torch.accelerator.is_available() or torch.accelerator.current_accelerator().type == 'mps',
-                     "accelerator not available, on mps pin memory allocator is not registered")
-    def test_use_pinned_memory_for_d2h(self):
-        device = torch.accelerator.current_accelerator().type
-
-        def patched_write_record(self, filename, data, nbytes):
-            if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
-                if not data.is_pinned(device=device):
-                    raise RuntimeError("Expected storage to be in pinned memory")
-                return None
-
-        sd = torch.nn.Linear(3, 5, device=device).state_dict()
-
-        # Test that CUDA actually get moved to pinned memory on CPU
-        with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
-            with tempfile.NamedTemporaryFile() as f:
-                with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
-                    torch.save(sd, f)
-
-            with tempfile.NamedTemporaryFile() as f:
-                pinned_before = serialization_config.save.use_pinned_memory_for_d2h
-                try:
-                    serialization_config.save.use_pinned_memory_for_d2h = True
-                    torch.save(sd, f)
-                finally:
-                    serialization_config.save.use_pinned_memory_for_d2h = pinned_before
-
-        # Test correctness
-        with tempfile.NamedTemporaryFile() as f:
-            pinned_before = serialization_config.save.use_pinned_memory_for_d2h
-            try:
-                serialization_config.save.use_pinned_memory_for_d2h = True
-                torch.save(sd, f)
-                f.seek(0)
-                sd_loaded = torch.load(f)
-                self.assertEqual(sd_loaded, sd)
-            finally:
-                serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
     def test_has_format_version(self):
         sd = torch.nn.Linear(2, 3).state_dict()
@@ -5026,6 +4835,224 @@ class TestSerialization(TestCase, SerializationMixin):
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
+
+
+class TestSerializationDeviceType(TestCase):
+    @onlyAccelerator
+    def test_serialization_map_location(self, device):
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
+
+        def generate_map_locations(device_type):
+            return [
+                {'cuda:0': device_type + ':0'},
+                device_type,
+                device_type + ':0',
+                torch.device(device_type),
+                torch.device(device_type, 0)
+            ]
+
+        def load_bytes():
+            with open(test_file_path, 'rb') as f:
+                return io.BytesIO(f.read())
+
+        fileobject_lambdas = [lambda: test_file_path, load_bytes]
+
+        device_type = torch.device(device).type
+        device_index = torch.device(device).index or 0
+        map_locations = generate_map_locations(device_type)
+        intended_device = torch.device(device_type, device_index)
+
+        def check_map_locations(map_locations, dtype, intended_device):
+            for fileobject_lambda in fileobject_lambdas:
+                for map_location in map_locations:
+                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+
+                    self.assertEqual(tensor.device, intended_device)
+                    self.assertEqual(tensor.dtype, dtype)
+                    self.assertEqual(tensor, torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtype, device=intended_device))
+
+        check_map_locations(map_locations, torch.float, intended_device)
+
+    def test_save_different_dtype_unallocated(self, device):
+        def save_load_check(a, b):
+            with io.BytesIO() as f:
+                torch.save([a, b], f)
+                f.seek(0)
+                a_loaded, b_loaded = torch.load(f)
+            self.assertEqual(a, a_loaded)
+            self.assertEqual(b, b_loaded)
+
+        for dtype in all_types_and_complex_and(torch.half,
+                                               torch.bfloat16, torch.bool):
+            a = torch.tensor([], dtype=dtype, device=device)
+
+            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
+                s = torch.TypedStorage(
+                    wrap_storage=a.storage().untyped(),
+                    dtype=other_dtype)
+                save_load_check(a, s)
+                save_load_check(a.storage(), s)
+                b = torch.tensor([], dtype=other_dtype, device=device)
+                save_load_check(a, b)
+
+    def test_save_different_dtype_error(self, device):
+        error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
+
+        a = torch.randn(10, dtype=torch.complex128, device=device)
+        f = io.BytesIO()
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, a.imag], f)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), a.imag], f)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, a.imag.storage()], f)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), a.imag.storage()], f)
+
+        a = torch.randn(10, device=device)
+        s_bytes = torch.TypedStorage(
+            wrap_storage=a.storage().untyped(),
+            dtype=torch.uint8)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a, s_bytes], f)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.save([a.storage(), s_bytes], f)
+
+    def test_skip_data_load(self, device):
+        t_v2 = torch.randn(2, 3, device=device)
+        tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
+
+        sd = {'t_v2': t_v2, 'tt': tt}
+        sd_zeroed = {
+            't_v2': torch.zeros(2, 3, device=device),
+            'tt': TwoTensor(torch.zeros(2, device=device), torch.zeros(2, device=device)),
+        }
+
+        with BytesIOContext() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with safe_globals([TwoTensor]), skip_data():
+                sd_loaded = torch.load(f)
+            self.assertNotEqual(sd_loaded, sd)
+            self.assertEqual(
+                sd_loaded['t_v2'].untyped_storage().nbytes(),
+                sd['t_v2'].untyped_storage().nbytes()
+            )
+            self.assertEqual(
+                sd_loaded['tt'].a.untyped_storage().nbytes(),
+                sd['tt'].a.untyped_storage().nbytes()
+            )
+            for k in sd_loaded:
+                sd_loaded[k] = sd_loaded[k].zero_()
+            self.assertEqual(sd_loaded, sd_zeroed)
+
+    @onlyCUDA
+    def test_serialization_mmap_loading_with_map_location(self, device):
+        class DummyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 1024)
+                self.fc2 = torch.nn.Linear(1024, 5)
+
+            def forward(self, input):
+                return self.fc2(self.fc1(input))
+
+        with TemporaryFileName() as f:
+            with torch.device(device):
+                m = DummyModel()
+            state_dict = m.state_dict()
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True)
+            for v in result.values():
+                self.assertTrue(v.is_cuda)
+
+    @parametrize("materialize_fake", (True, False))
+    def test_skip_data_serialization(self, device, materialize_fake):
+        t_v2 = torch.randn(2, 3, device=device)
+        t_v3 = torch.randn(2, 3, dtype=torch.complex32, device=device)
+        i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]])
+        v = torch.tensor([3, 4, 5], dtype=torch.float32)
+        if not materialize_fake:
+            st = torch.sparse_coo_tensor(i, v, (2, 4))
+        tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
+
+        mode, converter = FakeTensorMode(), FakeTensorConverter()
+
+        def fn(t):
+            return converter.from_real_tensor(mode, t) if materialize_fake else t
+
+        sd = {'t_v2': fn(t_v2), 't_v3': fn(t_v3), 'tt': fn(tt)}
+        sd_expected = {
+            't_v2': torch.zeros(2, 3, device=device),
+            't_v3': torch.zeros(2, 3, dtype=torch.complex32, device=device),
+            'tt': TwoTensor(torch.zeros(2, device=device), torch.zeros(2, device=device)),
+        }
+
+        if not materialize_fake:
+            sd['st'] = st
+            sd_expected['st'] = torch.sparse_coo_tensor(torch.zeros(2, 3), torch.zeros(3), (2, 4))
+
+        with BytesIOContext() as f:
+            with skip_data(materialize_fake_tensors=materialize_fake):
+                torch.save(sd, f)
+            f.seek(0)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, weights_only=True)
+            self.assertEqual(sd_loaded, sd_expected, exact_device=True)
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
+
+        if not materialize_fake:
+            ft = converter.from_real_tensor(mode, torch.randn(2, device=device))
+            exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
+            with self.assertRaisesRegex(
+                exc,
+                r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
+            ):
+                with skip_data(), BytesIOContext() as f:
+                    torch.save(ft, f)
+
+    @onlyAccelerator
+    def test_use_pinned_memory_for_d2h(self, device):
+        def patched_write_record(self, filename, data, nbytes):
+            if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
+                if not data.is_pinned(device=device):
+                    raise RuntimeError("Expected storage to be in pinned memory")
+                return None
+
+        sd = torch.nn.Linear(3, 5, device=device).state_dict()
+
+        with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
+            with tempfile.NamedTemporaryFile() as f:
+                with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
+                    torch.save(sd, f)
+
+            with tempfile.NamedTemporaryFile() as f:
+                pinned_before = serialization_config.save.use_pinned_memory_for_d2h
+                try:
+                    serialization_config.save.use_pinned_memory_for_d2h = True
+                    torch.save(sd, f)
+                finally:
+                    serialization_config.save.use_pinned_memory_for_d2h = pinned_before
+
+        with tempfile.NamedTemporaryFile() as f:
+            pinned_before = serialization_config.save.use_pinned_memory_for_d2h
+            try:
+                serialization_config.save.use_pinned_memory_for_d2h = True
+                torch.save(sd, f)
+                f.seek(0)
+                sd_loaded = torch.load(f)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                serialization_config.save.use_pinned_memory_for_d2h = pinned_before
+
 
 class TestWrapperSubclass(torch.Tensor):
     elem: torch.Tensor
@@ -5397,6 +5424,7 @@ class TestSubclassSerialization(TestCase):
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())
+instantiate_device_type_tests(TestSerializationDeviceType, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)
