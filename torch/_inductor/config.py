@@ -449,6 +449,9 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
+# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
+dedup_reduce_scatters: bool = False
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
@@ -468,13 +471,13 @@ estimate_op_runtime = "default"
 
 runtime_estimations_mms_benchmark: bool = False
 
-# unit: GB/s, uni-directional P2P bandwidth per card
-# default value is NVLink
-intra_node_bw = 300
+# unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
+# None = auto-detect from GPU generation; set to override.
+intra_node_bw: int | None = None
 
-# unit: GB/s, uni-directional P2P bandwidth per node
-# default value is InfiniBand
-inter_node_bw = 25
+# unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
+# None = auto-detect from GPU generation; set to override.
+inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
 # default value is PCIe; modify for your hardware or measured bandwidth
@@ -511,6 +514,14 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# When True, autotuning is spread across real kernel invocations instead of
+# blocking on the first call. Each run() call executes one config and records
+# timing via CUDA events, progressively eliminating underperforming configs.
+# An additional JK gate inside the plugin can still block the feature on True.
+incremental_autotune: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
@@ -583,17 +594,6 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
-# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
-# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
-# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
-# that triton does not use TF32 wherever cublas would not use TF32
-# DEPRECATED. cuBLAS no longer has the above alignment requirements. will remove in the future.
-force_same_precision: bool = Config(
-    justknob="pytorch/compiler:force_same_precision",
-    env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
-    default=False,
-)
-
 # Size hints for multi-kernel dispatch.
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
@@ -628,6 +628,17 @@ def _nvgemm_max_profiling_configs_default() -> int | None:
 
 nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
+# When enabled, adds supplement kernel configs that nvMatmulHeuristics
+# doesn't explore (certain tile/cluster combos that empirically beat
+# cuBLAS on decode shapes). These are added on top of the heuristic
+# picks, increasing the total number of configs benchmarked.
+nvgemm_supplement_configs: bool = (
+    os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
+)
+
+
+# Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
+_conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
 
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
@@ -636,6 +647,15 @@ max_autotune_conv_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# As above, specify candidate backends for conv backward weight autotune.
+max_autotune_conv_bwd_weight_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_WEIGHT_CONV_BACKENDS", _conv_default_backends
+).upper()
+
+# As above, specify candidate backends for conv backward input autotune.
+max_autotune_conv_bwd_input_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_INPUT_CONV_BACKENDS", _conv_default_backends
+).upper()
 
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
@@ -910,7 +930,7 @@ loop_reindexing_after_fusion: bool = (
 # so that the nodes can fuse. for more details: https://gist.github.com/eellison/6f9f4a7ec10a860150b15b719f9285a9
 loop_index_inversion_in_fusion: bool = True
 
-# If fusing two nodes only save less then score_fusion_memory_threshold memory,
+# If fusing two nodes only save less than score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.
 #
 # This is especially helpful to resolve https://github.com/pytorch/pytorch/issues/133242
@@ -943,7 +963,14 @@ max_fusion_buffer_group_pairwise_attempts = 64
 # The check is disabled if set to None.
 max_fusion_unique_io_buffers: int | None = None
 
-# max number of inputs to generate cat as a pointwise op with masked loads
+# max number of inputs to always fuse cat as a pointwise op regardless of
+# per-input op complexity. Beyond this limit (up to max_pointwise_cat_inputs),
+# fusion is only applied when every input has a low op count.
+max_complex_pointwise_cat_inputs = 8
+
+# max number of inputs to generate cat as a pointwise op with masked loads.
+# Inputs beyond max_complex_pointwise_cat_inputs but within this limit are
+# only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -1020,9 +1047,22 @@ combo_kernel_max_num_nodes = 8
 combo_kernel_per_subkernel_blocks = False
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
-combo_kernel_autotune_grouping = False
+combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# Memory-aware combo kernel gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The accepted delta is measured against the original graph peak before combo
+# kernels. When both thresholds are set, the tighter limit wins.
+combo_kernel_peak_memory_increase_gb: float | None = None  # Absolute cap in GB
+combo_kernel_peak_memory_pct_threshold: float | None = 0.05
+# Maximum baseline-index span of a single combo candidate. Groups whose
+# first-to-last baseline-index distance exceeds this are split into
+# sub-windows. Set to -1 (or any negative value) to disable splitting
+# and treat each parallel group as one window.
+combo_kernel_max_distance: int = -1
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1197,9 +1237,9 @@ class aten_distributed_optimizations:
     bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
-    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
-    # as atomic units with memory-bound runtime estimates.
-    enable_fusion_regions: bool | None = None
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) have their
+    # I/O costs corrected to exclude intermediates that inductor will not materialize.
+    enable_fusion_regions: bool = True
 
     # Default bucketing mode for auto and manual overlap scheduling
     # "default": traced bucketing, fully lowered by inductor during compilation
@@ -1219,7 +1259,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
@@ -1234,6 +1276,9 @@ class aten_distributed_optimizations:
     # Replace NCCL collectives with low-contention variants that use
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
+
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
 
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
@@ -1515,8 +1560,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles. Incompatible with cpp_wrapper.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
-# When True, complex_memory_overlap always reports True
-always_complex_memory_overlap_TESTING_ONLY: bool = False
+# When True, all compiled graphs report a cudagraph fail reason. Used by tests
+# that need to exercise the cudagraph-skip path.
+force_disable_cudagraph_TESTING_ONLY: bool = False
 
 # enable linear binary folding
 enable_linear_binary_folding = (
@@ -1610,7 +1656,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )  # type: ignore[assignment]
+    )
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -1631,9 +1677,9 @@ class cpp:
     vec_isa_ok: bool | None = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
-        "original_aten"
-    )
+    descriptive_names: Literal[
+        "torch", "original_aten", "inductor_node"
+    ] = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1886,9 +1932,9 @@ class triton:
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
-        "original_aten"
-    )
+    descriptive_names: Literal[
+        "torch", "original_aten", "inductor_node"
+    ] = "original_aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
@@ -1989,6 +2035,10 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Controls TMA load enablement in template epilogues
+    enable_tma_load_for_template_epilogue = (
+        os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
+    )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -2080,6 +2130,14 @@ class aot_inductor:
     Settings for Ahead-Of-Time Inductor Compilation
     """
 
+    # When True, each kernel in the autotune code allocates fresh tensors,
+    # runs, then immediately dels all tensors. Shared tensors are re-allocated
+    # for each consumer kernel. This prevents OOM from simultaneous live
+    # tensors in star-shaped graphs at the cost of more allocations during
+    # autotuning. When False (default), tensors are shared across kernels
+    # and del'd at their last consumer (faster but higher peak memory).
+    autotune_per_kernel_alloc: bool = False
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -2093,7 +2151,7 @@ class aot_inductor:
 
     # Enable frame pointers for profiling tools (e.g. strobelight)
     enable_frame_pointer = (
-        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
@@ -2517,6 +2575,33 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    #
+    # When True, the rocm-origami pip package is consulted at GEMM compile time
+    # to pre-select a top-K of Triton configs from the DEFAULT search space,
+    # reducing autotuning cost while keeping runtime within ~5% of full
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
+    # toggling at runtime via config.patch has no effect because the rocm-origami
+    # module import is cached at template_heuristics/triton.py load time.
+    #
+    # Active only when all of these hold:
+    #   - IS_ROCM (torch.version.hip is not None)
+    #   - config.max_autotune
+    #   - config.rocm.origami (this knob)
+    #   - config.max_autotune_gemm_search_space == "DEFAULT"
+    #   - rocm-origami is installed (else the import gate sets it inert)
+    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
+    # one-time warning; the regular config generator runs instead.
+    #
+    # Side-effect: when this is True, choices._need_to_fix_layout() returns True
+    # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
+    # on exact strides and would mis-compile under flexible layouts.
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+
+    # Number of top configs origami selects per GEMM. Read once from
+    # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile
+    # time and runtime within the validated 4-8 range).
+    origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
@@ -2547,12 +2632,12 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
-        "Anderson2021"
-    )
-    scheduler_cpu: Literal["Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"] = (
-        "Adams2019"
-    )
+    scheduler_cuda: Literal[
+        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
+    ] = "Anderson2021"
+    scheduler_cpu: Literal[
+        "Anderson2021", "Li2018", "Adams2019", "Mullapudi2016"
+    ] = "Adams2019"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False
@@ -2682,7 +2767,7 @@ _cache_config_ignore_prefix: list[str] = [
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
-    "always_complex_memory_overlap_TESTING_ONLY",
+    "force_disable_cudagraph_TESTING_ONLY",
     # timing affects cache structure, not cache content
     "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
@@ -2793,7 +2878,12 @@ class eager_numerics:
 
     # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
     # Triton bundles its own libdevice.10.bc which may use different polynomial
-    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    # approximations than the installed CUDA toolkit, causing ~1 ULP differences
+    # in transcendental functions such as pow and erf.  The erf difference is
+    # particularly visible in explicit GELU kernels
+    # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
+    # can flip the result of a subsequent ceil(log2(...)) and produce a
+    # different uint8 encoded value (see gh-178045).
     use_pytorch_libdevice: bool = False
 
 

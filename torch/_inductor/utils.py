@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
-    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+    from torch.nn.functional import ScalingType
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -455,6 +455,29 @@ def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.E
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
+def flatten_index(
+    indices: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
+) -> sympy.Expr:
+    """Row-major flatten: per-dimension indices -> flat index."""
+    assert len(indices) == len(sizes)
+    flat = sympy.S.Zero
+    for index, size in zip(indices, sizes):
+        flat = flat * size + index
+    return flat
+
+
+def decompose_index(
+    index: sympy.Expr,
+    sizes: Sequence[sympy.Expr],
+) -> list[sympy.Expr]:
+    """Row-major decomposition: flat index -> per-dimension indices."""
+    return [
+        ModularIndexing(index, sympy_product(sizes[i + 1 :]), size)
+        for i, size in enumerate(sizes)
+    ]
+
+
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
@@ -465,9 +488,9 @@ def ceildiv(number: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Ex
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(number, int) and isinstance(denom, int), (
-        f"{number}: {type(number)}, {denom}: {type(denom)}"
-    )
+    assert isinstance(number, int) and isinstance(
+        denom, int
+    ), f"{number}: {type(number)}, {denom}: {type(denom)}"
     return runtime_ceildiv(number, denom)
 
 
@@ -706,9 +729,11 @@ FN_TYPE = Callable[Concatenate[Any, P], RV]
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(cache: Any) -> None: ...
+    def clear_cache(cache: Any) -> None:
+        ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
+        ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -1150,6 +1175,10 @@ def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
 
+def prefix_is_pointwise(prefix: str) -> bool:
+    return prefix[0] in ("x", "y", "z")
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -1246,7 +1275,7 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
         if isinstance(node.meta.get("val"), torch.Tensor)
     )
 
-    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_arg = output_node(gm).args[0]
     out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
@@ -1569,6 +1598,20 @@ class IndentedBuffer:
         else:
             self._lines.append("")
 
+    def writeline_jit(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to JIT buffer only. On a plain IndentedBuffer, same as writeline."""
+        self.writeline(line)
+
+    def writeline_aot(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
+    def splice_jit(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to JIT buffer only. On a plain IndentedBuffer, same as splice."""
+        self.splice(other_code, strip=strip)
+
+    def splice_aot(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
     def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
         for line in lines:
             self.writeline(line)
@@ -1612,7 +1655,7 @@ class IndentedBuffer:
                 return
             other_code = other_code.rstrip()
             for s in other_code.split("\n"):
-                self.writeline(s)
+                IndentedBuffer.writeline(self, s)
 
     def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
         res = IndentedBuffer(initial_indent=self._indent)
@@ -1632,6 +1675,120 @@ class IndentedBuffer:
 
     def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
         return new_line in self._lines
+
+
+class DualIndentedBuffer(IndentedBuffer):
+    """IndentedBuffer that simultaneously accumulates JIT and AOTI output.
+
+    The base class (self._lines) holds JIT content. self.aot holds AOTI content.
+    By default, writeline/splice write to both. Use _jit/_aot variants for
+    mode-specific writes.
+    """
+
+    def __init__(self, initial_indent: int = 0) -> None:
+        super().__init__(initial_indent)
+        self.aot = IndentedBuffer(initial_indent)
+
+    @property
+    def jit(self) -> IndentedBuffer:
+        """Read-only accessor for JIT buffer (for splicing into result).
+
+        WARNING: Do NOT use jit for writing — writes would go to both buffers
+        because self.writeline is overridden. Use writeline_jit/splice_jit instead.
+        """
+        return self  # type: ignore[return-value]
+
+    def writeline(self, line):  # type: ignore[override]
+        IndentedBuffer.writeline(self, line)
+        self.aot.writeline(line)
+
+    def writeline_jit(self, line) -> None:
+        IndentedBuffer.writeline(self, line)
+
+    def writeline_aot(self, line) -> None:
+        self.aot.writeline(line)
+
+    def writelines(self, lines):  # type: ignore[override]
+        for line in lines:
+            self.writeline(line)
+
+    def splice(self, other_code, strip: bool = False) -> None:  # type: ignore[override]
+        # Splice into each buffer independently. When other_code is itself a
+        # DualIndentedBuffer, each side reads from the matching side.
+        IndentedBuffer.splice(self, other_code, strip=strip)
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        IndentedBuffer.splice(self, other_code, strip=strip)
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def indent(self, offset: int = 1):
+        @contextlib.contextmanager
+        def ctx():
+            self._indent += offset
+            self.aot._indent += offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
+                self.aot._indent -= offset
+
+        return ctx()
+
+    def do_indent(self, offset: int = 1) -> None:
+        self._indent += offset
+        self.aot._indent += offset
+
+    def do_unindent(self, offset: int = 1) -> None:
+        self._indent -= offset
+        self.aot._indent -= offset
+
+    def clear(self) -> None:
+        super().clear()
+        self.aot.clear()
+
+
+class AotOnlyBuffer(IndentedBuffer):
+    """IndentedBuffer for pure-AOTI codegen.
+
+    Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
+    write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
+    sites use writeline_jit/writeline_aot uniformly across pure-JIT,
+    pure-AOTI, and dual-wrapper modes.
+    """
+
+    def writeline_jit(self, line) -> None:
+        pass
+
+    def writeline_aot(self, line) -> None:
+        self.writeline(line)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        pass
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        self.splice(other_code, strip=strip)
+
+
+def make_codegen_buffer() -> IndentedBuffer:
+    """Construct the IndentedBuffer subclass matching the current codegen mode.
+
+    Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    """
+    from .virtualized import V
+
+    if V.graph.aot_mode:
+        return AotOnlyBuffer()
+    return IndentedBuffer()
 
 
 class FakeIndentedBuffer(IndentedBuffer):
@@ -1813,6 +1970,20 @@ def _use_autotune_backend(backend: str) -> bool:
 def _use_conv_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
+def _use_conv_bwd_weight_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_weight_backends.upper().split(",")
+    ]
+
+
+def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_input_backends.upper().split(",")
     ]
 
 
@@ -2424,9 +2595,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.cache
-def try_import_ck_lib() -> tuple[
-    str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
-]:
+def try_import_ck_lib() -> (
+    tuple[str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
+):
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -2627,7 +2798,7 @@ class DebugDirManager:
         self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
         torch._dynamo.config.debug_dir_root = self.new_name
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         shutil.rmtree(self.new_name)
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
@@ -2725,9 +2896,9 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
     # pyrefly: ignore [bad-argument-type]
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -2737,9 +2908,9 @@ def run_and_get_triton_code(
     # pyrefly: ignore [bad-argument-type]
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -2826,7 +2997,7 @@ def get_benchmark_name() -> str | None:
     It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
     scripts, this function may return None.
 
-    There are 2 flavors of --only argument we need handle:
+    There are 2 flavors of --only argument we need to handle:
     1. --only model_name
     2. --only=model_name
     """
@@ -2865,10 +3036,10 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(val, sympy.Expr), (
-        "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    )
-    if val.is_integer:  # type: ignore[attr-defined]
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
         return torch.int64
     else:
         return torch.float64
@@ -3553,9 +3724,9 @@ def copy_misaligned_inputs(
     ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
-        assert isinstance(_inp, torch.Tensor), (
-            f"Expected tensors only, but got: {type(_inp)}"
-        )
+        assert isinstance(
+            _inp, torch.Tensor
+        ), f"Expected tensors only, but got: {type(_inp)}"
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 
@@ -3598,7 +3769,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(e, int_max)
         return True
 
     # Allow for unhinted e as long as we can still statically prove
@@ -3798,6 +3969,13 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def device_supports_fp64(device: torch.device | None) -> bool:
+    """Check if the given device supports float64."""
+    if device is not None and device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
     if (
@@ -3983,7 +4161,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     # Check for cudagraph_unsafe tag
     if (
         isinstance(target, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
+        and torch._C.Tag.cudagraph_unsafe in target.tags
     ):
         return True
 

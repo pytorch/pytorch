@@ -118,6 +118,20 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    def test_addmm_out_dtype_compile(self):
+        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
+        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
+        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
+
+        def fn(bias, x, y):
+            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(bias, a, b)
+        expected = fn(bias, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -194,7 +208,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2891")
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 
@@ -2987,6 +3000,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
+
+    def test_vector_norm_negative_dim_size_one(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/182181
+        def fn(x):
+            return x.norm(dim=-1)
+
+        x = torch.rand(8, 3, 1, device=device_type)
+        self.common(fn, [x])
+
+        # Multiple negative dims, all size 1
+        def fn2(x):
+            return x.norm(dim=(-2, -1))
+
+        y = torch.rand(8, 1, 1, device=device_type)
+        self.common(fn2, [y])
+
+        # torch.linalg.vector_norm directly
+        def fn3(x):
+            return torch.linalg.vector_norm(x, dim=-1)
+
+        self.common(fn3, [x])
+
+        def fn4(x):
+            return torch.linalg.vector_norm(x, dim=(-2, -1))
+
+        self.common(fn4, [y])
 
 
 if __name__ == "__main__":

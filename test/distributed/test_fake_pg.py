@@ -57,6 +57,18 @@ class TestFakePG(TestCase):
         for out_tensor in output_tensors:
             self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
+    def test_allgather_into_tensor_requires_grad(self):
+        # Regression test: fake PG's _allgather_base uses chunk() which
+        # produces multi-output views. Writing into those views inplace when
+        # the input requires grad used to trip an autograd safety check.
+        dist.init_process_group(backend="fake", rank=0, world_size=4)
+        world_size = dist.get_world_size()
+
+        input_tensor = torch.randn(4, requires_grad=True)
+        output_tensor = torch.empty(4 * world_size)
+        dist.all_gather_into_tensor(output_tensor, input_tensor)
+        self.assertEqual(output_tensor.shape, (4 * world_size,))
+
     def test_reduce_scatter(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)

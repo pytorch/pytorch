@@ -73,7 +73,7 @@ def ensure_flash_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
+        return importlib.util.find_spec("flash_attn.cute") is not None
     except ImportError:
         return False
 
@@ -122,9 +122,9 @@ def _hierarchical_indexer_cute(
 
     def indexer(indices: Sequence[Expr]) -> Expr:
         assert offset == Integer(0), "Offset not supported for hierarchical indexing"
-        assert len(indices) == len(size), (
-            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
-        )
+        assert len(indices) == len(
+            size
+        ), f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
         if not indices:
             return Integer(0)
         if len(indices) == 1:

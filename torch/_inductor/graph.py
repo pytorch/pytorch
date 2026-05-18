@@ -497,6 +497,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
         self.name_to_op: dict[str, ir.Operation] = {}
+        # Side table for CuteDSL capture nodes (may include ReinterpretViews)
+        self._cutedsl_capture_nodes: dict[str, ir.IRNode] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
@@ -604,7 +606,7 @@ class GraphLowering(torch.fx.Interpreter):
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
             # NB: This is using the legacy default behavior from
-            # create_symbolic_sizes_strides_storage_offset but we hope we can
+            # transfer_symbols_from_foreign_shape_env but we hope we can
             # just delete this entirely
             source = ConstantSource(
                 f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
@@ -613,8 +615,10 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
-                ex,
+            ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
+                ex.size(),
+                ex.stride(),
+                ex.storage_offset(),
                 source,
             )
 
@@ -776,9 +780,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         def is_grouped(n: Any) -> bool:
-            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            meta_val = n.args[1].meta["val"]
             assert isinstance(meta_val, torch.Tensor)
-            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
+            return n.args[-1] > 1 and meta_val.size(1) > 1
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
             return (
@@ -930,8 +934,8 @@ class GraphLowering(torch.fx.Interpreter):
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
-           We need convert it to channels last layout which results in the second copy.
-        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
+           We need to convert it to channels last layout which results in the second copy.
+        With rule 2, we make sure all the tensors in the chain use channels last layout. So both copies
         can be saved.
         """
         last_conv = None
@@ -994,6 +998,18 @@ class GraphLowering(torch.fx.Interpreter):
     @property
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
+
+    @property
+    def is_dual_wrapper_mode(self) -> bool:
+        """True when generating dual-wrapper-mode C++ for both JIT and AOTI.
+
+        Dual-wrapper mode emits a JIT pass that drives Triton autotune/compile
+        alongside the AOTI output, so it is needed iff at least one device in
+        the graph uses the Triton backend.
+        """
+        if not self.aot_mode or config.triton.autotune_at_compile_time:
+            return False
+        return any(ir.is_triton(d) for d in self.device_types)
 
     def try_get_buffer(
         self, buffer_name: str
@@ -1163,7 +1179,7 @@ class GraphLowering(torch.fx.Interpreter):
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
             f"{hash(data):x}"
         )
-        self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
+        self.allocated_constant_name[name] = orig_name
         return name
 
     def add_tensor_constant(self, data: Tensor, name: str | None = None) -> TensorBox:
@@ -1264,12 +1280,12 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.higher_order.invoke_subgraph,
             )
             gen = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = gen  # type: ignore[assignment]
+            self.graph_inputs[target] = gen
             self.graph_input_names.append(target)
             return gen
         elif is_opaque_reference_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
-            self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
+            self.graph_inputs[target] = opaque_obj
             self.graph_input_names.append(target)
             return opaque_obj
 
@@ -1403,7 +1419,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])  # type: ignore[index]
+            log.debug("  via %s", lowerings[target])
 
             n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
@@ -1438,7 +1454,9 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            if "should_fallback" in n.meta:
+            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
+                "fallback_to_eager"
+            ):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1562,7 +1580,7 @@ class GraphLowering(torch.fx.Interpreter):
         args: tuple[torch.fx.node.Argument, ...],
         kwargs: dict[str, object],
     ) -> None:
-        result = super().output(target, args, kwargs)  # type: ignore[arg-type]
+        result = super().output(target, args, kwargs)
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
             result = (result,)
@@ -1593,7 +1611,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        fx_node_args = V.graph.current_node.args[0]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
             fx_node_args = (fx_node_args,)
@@ -1835,7 +1853,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                n.op == "call_function"
+                is_call_function
                 # this path only for built-in operators
                 and n.target
                 and isinstance(n.target, torch._ops.OpOverload)
@@ -1891,9 +1909,9 @@ class GraphLowering(torch.fx.Interpreter):
                             inp_kwargs,
                         )
                     else:
-                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
                 else:
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
@@ -1918,7 +1936,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # 2: as_strided ops, we need to make sure its input has same size/stride with
             # eager model to align with eager behavior.
             as_strided_ops = [
                 torch.ops.aten.as_strided.default,
@@ -2710,7 +2728,7 @@ class GraphLowering(torch.fx.Interpreter):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
-                linemap=linemap,  # type: ignore[arg-type]
+                linemap=linemap,
                 attrs={
                     **self.constants,
                     **self.torchbind_constants,
@@ -2719,7 +2737,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         self.cache_key = key
         self.cache_path = path
-        self.cache_linemap = linemap  # type: ignore[assignment]
+        self.cache_linemap = linemap
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info

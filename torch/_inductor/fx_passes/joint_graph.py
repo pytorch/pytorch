@@ -222,7 +222,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
             is_needed = True
 
             if existing_views:
-                # Replace the view with the an existing view if available.
+                # Replace the view with an existing view if available.
                 alias = existing_views.get(to_type)
                 if alias:
                     is_needed = False
@@ -741,7 +741,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             and user.target in (aten.index.Tensor, aten.index_put.default)
             and hasattr(user.meta.get("val"), "device")
         ):
-            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
+            user_devices.add(user.meta["val"].device)
         else:
             return  # bail out
 

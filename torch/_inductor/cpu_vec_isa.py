@@ -134,9 +134,7 @@ cdll.LoadLibrary("__lib_path__")
                         [
                             sys.executable,
                             "-c",
-                            VecISA._avx_py_load.replace(
-                                "__lib_path__", output_path
-                            ),
+                            VecISA._avx_py_load.replace("__lib_path__", output_path),
                         ],
                         cwd=output_dir,
                         stderr=subprocess.DEVNULL,
@@ -272,7 +270,7 @@ class VecAVX512VNNI(VecAVX512):
     def __str__(self) -> str:
         return super().__str__() + " avx512_vnni"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
     _avx512_vnni_code = """
 #include <cstdint>
@@ -428,7 +426,7 @@ class InvalidVecISA(VecISA):
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
 
-    def __bool__(self) -> bool:  # type: ignore[override]
+    def __bool__(self) -> bool:
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]

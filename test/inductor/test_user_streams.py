@@ -25,7 +25,7 @@ from torch._inductor.stream_constants import (
     DEFAULT_STREAM_IDX,
     STREAM_NAME_TEMPLATE,
 )
-from torch._inductor.stream_utils import get_stream_name
+from torch._inductor.stream_utils import get_raw_stream_name, get_stream_name
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch.testing import FileCheck
@@ -123,6 +123,10 @@ class TestStreamUtils(InductorTestCase):
         self.assertEqual(get_stream_name(1), "stream1")
         self.assertEqual(get_stream_name(2), "stream2")
         self.assertEqual(get_stream_name(10), "stream10")
+
+    def test_get_raw_stream_name(self):
+        self.assertEqual(get_raw_stream_name(0), "raw_stream0")
+        self.assertEqual(get_raw_stream_name(1), "raw_stream1")
 
     def test_get_stream_name_cached(self):
         """Test that get_stream_name results are cached."""
@@ -227,6 +231,47 @@ class TestUserStreamCompile(InductorTestCase):
         # Verify generated code contains stream handling and synchronize survives
         self.assertIn("torch.cuda.stream", code)
         self.assertIn("synchronize_stream", code)
+
+    @unittest.skipIf(
+        not TEST_CUDA or torch.cuda.device_count() < 2,
+        "requires at least two CUDA devices",
+    )
+    def test_raw_stream_name_does_not_clobber_user_stream_on_cuda_1(self):
+        from torch._inductor.utils import run_and_get_code
+
+        device = torch.device("cuda:1")
+        aux = torch.cuda.Stream(device=device)
+        ev0 = torch.cuda.Event()
+        ev1 = torch.cuda.Event()
+
+        def fn(x, w):
+            ev0.record()
+            with torch.cuda.stream(aux):
+                ev0.wait()
+                a = torch.mm(x, w)
+                ev1.record()
+
+            ev1.wait()
+            c = (a.sin() * a.cos() + 0.1).relu()
+
+            with torch.cuda.stream(aux):
+                d = torch.mm(c, w.t())
+
+            return d
+
+        x = torch.randn(64, 128, device=device)
+        w = torch.randn(128, 64, device=device)
+
+        expected = fn(x, w)
+        torch.cuda.synchronize()
+
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x, w)
+        torch.cuda.synchronize()
+
+        self.assertEqual(actual, expected)
+        self.assertIn("stream1 = get_external_object_by_index", code)
+        self.assertIn("raw_stream1 = get_raw_stream(1)", code)
+        self.assertNotRegex(code, r"(?m)^\s*stream1 = get_raw_stream\(1\)")
 
     def test_compile_preserves_stream_semantics(self):
         """Test that compiled code preserves stream execution semantics."""
@@ -1190,8 +1235,8 @@ with torch.cuda._DeviceGuard(0):
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
     with torch.cuda.stream(default_stream):
         buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        stream0 = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=stream0)
+        raw_stream0 = get_raw_stream(0)
+        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=raw_stream0)
         torch.ops.streams.synchronize_stream.default(1)
     return (buf3, )""",
         )

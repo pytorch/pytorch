@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
@@ -96,6 +97,18 @@ class TestAccelerator(TestCase):
         with torch.accelerator.device_index(0):
             self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    def test_device_index_fullgraph(self):
+        def fn(x):
+            with torch.accelerator.device_index(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device=0)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_multi_device_context_manager(self):
@@ -261,6 +274,10 @@ class TestAccelerator(TestCase):
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
 
+    @unittest.skipIf(
+        TEST_XPU,
+        "bare-bones/opaque bit-field dtypes cause undefined behavior on XPU, see https://github.com/pytorch/pytorch/issues/179888",
+    )
     def test_device_capability_supported_dtypes(self):
         try:
             caps = torch.accelerator.get_device_capability()

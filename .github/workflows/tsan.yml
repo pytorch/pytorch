@@ -54,6 +54,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang18-tsan
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.14t"
       compiler: clang18

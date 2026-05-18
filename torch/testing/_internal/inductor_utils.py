@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import unittest
+
+from collections.abc import Callable
 from subprocess import CalledProcessError
 
 import torch
@@ -19,21 +21,14 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
-from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton
-from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    LazyVal,
-    TestCase,
-)
-
-from collections.abc import Callable
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, LazyVal, TestCase
+from torch.utils._config_module import ConfigModule
+from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
+from torch.utils._triton import has_triton
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -458,7 +453,10 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
-def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
+
+def patch_custom_fallback_pass(
+    predicate: Callable[[torch.fx.Node], bool]
+) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
     we could provide a predicate which returns True for all aten.add.default nodes.
@@ -474,6 +472,5 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
         def uuid(self):
             return None
-
 
     return config.patch(post_grad_custom_pre_pass=Pass())
