@@ -1292,6 +1292,38 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(res1, res2)
 
+    @largeTensorTest("3GB", device=GPU_TYPE, inductor=True)
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("device", (GPU_TYPE,))
+    def test_cache_load_no_int32_guard_on_unindexed_storage(self, device):
+        """
+        The first dimension contributes to the input storage size, but the
+        generated kernel only indexes the selected row.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(x):
+            return x[0] + x[0]
+
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        counters.clear()
+        small = torch.ones((4, 5), device=device, dtype=torch.int8)
+        res1 = compiled_fn(small)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        counters.clear()
+        large = torch.ones((46341, 46341), device=device, dtype=torch.int8)
+        res2 = compiled_fn(large)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.assertEqual(res1, torch.full_like(res1, 2))
+        self.assertEqual(res2, torch.full_like(res2, 2))
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))

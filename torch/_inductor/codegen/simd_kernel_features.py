@@ -14,7 +14,7 @@ import torch
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
-from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
+from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep, StarDep, WeakDep
 from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
@@ -131,12 +131,7 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
-        # Gather all used buffer names
-        buffer_names: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
-            buffer_names.update(node.get_buffer_names())
-            buffer_names.update(node.used_buffer_names())
-        buffers = [V.graph.get_buffer(name) for name in buffer_names]
+        index_sizes = self.indexing_expr_sizes()
 
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
@@ -145,9 +140,107 @@ class SIMDKernelFeatures:
 
         from .simd import SIMDScheduling
 
-        if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
+        if (
+            index_sizes is not None
+            and SIMDScheduling.can_use_32bit_indexing_with_index_sizes(
+                total_numel, index_sizes
+            )
+        ):
             return torch.int32
         return torch.int64
+
+    def indexing_expr_sizes(self) -> tuple[sympy.Expr, ...] | None:
+        """Return upper bounds for emitted indexing expressions plus one.
+
+        32-bit indexing only requires the expressions that become kernel
+        indices to fit in int32.  Falling back to whole-buffer storage is
+        still necessary for indirect or whole-buffer dependencies, but doing
+        so for every buffer adds guards for unused storage dimensions.
+        """
+        result: list[sympy.Expr] = []
+
+        for node in self.scheduler_nodes():
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
+                if isinstance(dep, MemoryDep):
+                    if dep.is_indirect():
+                        size = self.buffer_storage_size(dep.name)
+                    else:
+                        size = self.index_expr_size(dep.index, dep.var_names, dep.size)
+                        if size is None:
+                            size = self.buffer_storage_size(dep.name)
+                    if size is not None:
+                        result.append(size)
+                    continue
+
+                if isinstance(dep, StarDep):
+                    size = self.buffer_storage_size(dep.name)
+                    if size is not None:
+                        result.append(size)
+                    continue
+
+                if isinstance(dep, WeakDep):
+                    continue
+
+                return None
+
+            for index_expr in node.read_writes.index_exprs:
+                size = self.index_expr_size(
+                    index_expr.index, index_expr.var_names, index_expr.size
+                )
+                if size is None:
+                    return None
+                result.append(size)
+
+        return tuple(result)
+
+    @staticmethod
+    def buffer_storage_size(name: str) -> sympy.Expr | None:
+        buf = V.graph.get_buffer(name)
+        if buf.has_tensor_output():
+            return V.graph.sizevars.simplify(buf.get_layout().storage_size())
+        return None
+
+    @staticmethod
+    def index_expr_size(
+        index: sympy.Expr,
+        var_names: tuple[sympy.Symbol, ...],
+        var_sizes: tuple[sympy.Expr, ...],
+    ) -> sympy.Expr | None:
+        index = V.graph.sizevars.simplify(index)
+
+        def nonnegative(expr: sympy.Expr) -> bool:
+            return V.graph.sizevars.statically_known_true(expr >= 0)
+
+        try:
+            if not var_names:
+                if nonnegative(index):
+                    return V.graph.sizevars.simplify(index + 1)
+                return None
+
+            poly = sympy.Poly(index, *var_names)
+        except (sympy.PolynomialError, TypeError):
+            return None
+
+        result = sympy.S.Zero
+        for powers, coeff in poly.terms():
+            degree = sum(powers)
+            if degree == 0:
+                if not nonnegative(coeff):
+                    return None
+                result += coeff
+                continue
+
+            if degree != 1:
+                return None
+
+            var_pos = next(i for i, power in enumerate(powers) if power)
+            if powers[var_pos] != 1 or not nonnegative(coeff):
+                return None
+            result += coeff * (var_sizes[var_pos] - 1)
+
+        if not nonnegative(result):
+            return None
+        return V.graph.sizevars.simplify(result + 1)
 
     def get_reduction_hint(
         self, tiling_scores: dict[str, int] | None = None
