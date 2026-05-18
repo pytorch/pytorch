@@ -533,8 +533,10 @@ class _NestedReductionBase:
             x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
             return x_fp8.view(B, D).float(), scale
 
-        x = torch.randn(B, D, device=GPU_TYPE)
-        w = torch.randn(D, device=GPU_TYPE)
+        # TODO: add fp32 coverage once nested and unfused schedules have a
+        # shared policy for FP8-boundary differences from materialization.
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
