@@ -20,7 +20,6 @@ import torch
 import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
@@ -352,9 +351,27 @@ class IterationRangesEntry(IterationRanges):
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name: str) -> None:
+        old_symbol = self.symbol()
         self.codegen = lambda: name  # type: ignore[assignment]
         self.codegen.cache_clear = lambda: None  # type: ignore[method-assign]
         self.name = name
+        new_symbol = self.symbol()
+        if old_symbol == new_symbol:
+            return
+
+        existing_node = self.kernel.range_tree_nodes.get(new_symbol)
+        if existing_node is not None and existing_node is not self:
+            # Some templates reuse the same textual index name for different
+            # live range entries.  Keep the existing owner in that case.
+            return
+
+        if old_symbol in self.var_list:
+            self.var_list[self.var_list.index(old_symbol)] = new_symbol
+        if old_symbol in self.var_ranges:
+            self.var_ranges[new_symbol] = self.var_ranges.pop(old_symbol)
+        if self.kernel.range_tree_nodes.get(old_symbol) is self:
+            del self.kernel.range_tree_nodes[old_symbol]
+        self.kernel.range_tree_nodes[new_symbol] = self
 
     def cache_clear(self) -> None:
         self.codegen.cache_clear()
@@ -838,13 +855,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.statically_known_equals(size, 1):
+                if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
                     return_getters.append(lambda _: sympy.S.Zero)
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
                     remaining[current_group],
-                    1,
+                    1,  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
@@ -1092,7 +1109,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         """
         if isinstance(index, list):
             return f"[{', '.join(map(self.index_to_str, index))}]"
-        return self.kexpr(self.rename_indexing(index))
+        return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
     def prepare_indexing(
         self,
@@ -1162,14 +1179,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
                 replacements = {}
-                for ps in self.range_tree_nodes[sym].precomputed_args():
+                for ps in self.range_tree_nodes[sym].precomputed_args():  # type: ignore[index]
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
-                    self.range_tree_nodes[sym].expr = sympy_subs(
+                    self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
                         self.range_tree_nodes[sym].expr,
-                        replacements,
+                        replacements,  # type: ignore[index]
                     )
-                self.range_tree_nodes[sym].codegen()
+                self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
     def codegen_nan_check(self) -> None:
@@ -1225,9 +1242,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        if isinstance(index, sympy.Expr):
-            index = index.expand(identity=True)
-        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_index_symbol(range_tree.name)
@@ -1445,9 +1460,11 @@ class SIMDScheduling(BaseScheduling):
         if node1.is_split_scan() and not node2.is_split_scan():
             if node2.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
         elif node2.is_split_scan() and not node1.is_split_scan():
             if node1.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
 
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
@@ -1973,7 +1990,7 @@ class SIMDScheduling(BaseScheduling):
             if len(nodes) != len(node.get_nodes()):
                 assert self.scheduler
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
-            coalesce_analysis = analyze_memory_coalescing(node)
+            coalesce_analysis = node.get_coalesce_analysis()
         else:
             coalesce_analysis = None
 
@@ -2011,9 +2028,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.check_leq(numel, int_max)
+        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.check_leq(size, int_max)
+            V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     def process_kernel(
@@ -2102,7 +2119,7 @@ class SIMDScheduling(BaseScheduling):
         )
 
         if (
-            V.graph.wrapper_code.supports_intermediate_hooks
+            V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
         ):
             # Not every node in the schedule will actually be live on output;
@@ -2468,7 +2485,7 @@ class SIMDScheduling(BaseScheduling):
                     assert isinstance(
                         pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
                     )
-                    coalesce_analysis = analyze_memory_coalescing(pn)
+                    coalesce_analysis = pn.get_coalesce_analysis()
                 else:
                     coalesce_analysis = None
                 features = SIMDKernelFeatures(
