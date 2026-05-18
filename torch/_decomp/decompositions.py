@@ -3199,6 +3199,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3211,6 +3213,57 @@ def _index_copy(
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    index_size = index.size(0) if index.ndim == 1 else 1
+    if tensor.ndim == 0:
+        torch._check(
+            index_size == 1,
+            lambda: (
+                "index_copy_(): When source is scalar, index should have one "
+                f"element (got {index_size})"
+            ),
+        )
+    else:
+        torch._check(
+            tensor.ndim == x.ndim or x.ndim == 0,
+            lambda: (
+                "index_copy_(): When source and destination are not scalars, "
+                "their dimensionality must match. Source dimensionality "
+                f"({tensor.ndim}), destination dimensionality ({x.ndim})"
+            ),
+        )
+    torch._check(
+        index.dtype == torch.long,
+        lambda: f"index_copy_(): Expected a long tensor for index, but got {index.dtype}",
+    )
+    torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            "index_copy_(): self and source expected to have the same dtype, "
+            f"but got (self) {x.dtype} and (source) {tensor.dtype}"
+        ),
+    )
+
+    x_sliced_shape = x.shape[:dim] + x.shape[dim + 1 :] if x.ndim > 0 else ()
+    tensor_sliced_shape = (
+        tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
+    )
+    torch._check(
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
+        lambda: (
+            "index_copy_(): Source/destination tensor must have same slice shapes. "
+            f"Destination slice shape: {' '.join(map(str, x_sliced_shape))} "
+            f"at dimension {dim} and source slice shape: "
+            f"{' '.join(map(str, tensor_sliced_shape))} at dimension 0."
+        ),
+    )
+    tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
+    torch._check(
+        tensor.ndim == 0 or index_size == tensor_size,
+        lambda: (
+            f"index_copy_(): Number of indices ({index_size}) should be "
+            f"equal to source.size(dim) ({tensor_size})"
+        ),
     )
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0

@@ -16870,6 +16870,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = torch.compile(fn)(x_base.clone()[:, 2:, :], index, source)
         self.assertEqual(result, expected)
 
+    def test_index_copy_invalid_source_slice_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/144183
+        def fn(x, index, source):
+            return torch.index_copy(x, 0, index, source)
+
+        x = torch.randn(1, 2, device=self.device)
+        index = torch.tensor([0], device=self.device)
+        source = torch.randn(1, 1, device=self.device)
+        msg = "Source/destination tensor must have same slice shapes"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, index, source)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(x, index, source)
+
     def test_pad_after_gelu(self):
         # Regression test for Voxtral compilation on MPS
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
