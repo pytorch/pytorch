@@ -201,8 +201,14 @@ GEMM_TEMPLATE = r"""
 
 {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
+    const int64_t num_Mc_blocks_per_thread_block = (Mt_blocks + Mc_blocks - 1) / Mc_blocks;
+    const int64_t num_Nc_blocks_per_thread_block = (Nt_blocks + Nc_blocks - 1) / Nc_blocks;
     if (num_Kt_blocks > 1) {
-        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_Kt_blocks]);
+        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[
+            num_Mt_blocks * num_Nt_blocks *
+            num_Mc_blocks_per_thread_block * num_Nc_blocks_per_thread_block *
+            num_Kt_blocks
+        ]);
     }
 {%- endif %}
 
@@ -277,7 +283,12 @@ GEMM_TEMPLATE = r"""
                 }
 {%- if maybe_k_slicing %}
                 if (num_Kt_blocks > 1) {
-                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + (nc / Nc_blocks);
+                    const int64_t n_cache_block_id = (nc - n_block_start) / Nc_blocks;
+                    const int64_t mxn_cache_block_id =
+                        ((n_group_id * num_Nt_blocks + n_slice_id) *
+                         num_Mc_blocks_per_thread_block + my_mc_block_id) *
+                            num_Nc_blocks_per_thread_block +
+                        n_cache_block_id;
                     local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
                         {{ kernel.release_buffer(acc_buf_name) }});
                 } else
@@ -309,11 +320,17 @@ GEMM_TEMPLATE = r"""
                     const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
                     const int64_t m_size = m_end - m_start;
                     const int64_t m_offset = m_start - m_start_unsliced;
+                    const int64_t m_cache_block_id = (mc - m_block_start) / Mc_blocks;
                     for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                         const int64_t n_start = nc * Nr;
                         const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                         const int64_t n_size = n_end - n_start;
-                        const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + (nc / Nc_blocks);
+                        const int64_t n_cache_block_id = (nc - n_block_start) / Nc_blocks;
+                        const int64_t mxn_cache_block_id =
+                            ((n_group_id * num_Nt_blocks + n_slice_id) *
+                             num_Mc_blocks_per_thread_block + m_cache_block_id) *
+                                num_Nc_blocks_per_thread_block +
+                            n_cache_block_id;
                         auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
                         for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
                             auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
@@ -1029,7 +1046,7 @@ class CppGemmTemplate(CppTemplate):
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
             W = transpose_w(W, trans_w)
-            B = expand_bias(B, X)
+            B = expand_bias(B, X)  # type:ignore[arg-type]
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B
@@ -1241,7 +1258,7 @@ class CppGemmTemplate(CppTemplate):
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                     assert all(
                         isinstance(item, torch.Tensor)
                         for item in (x_scale, x_zp, w_scale)
@@ -1257,7 +1274,7 @@ class CppGemmTemplate(CppTemplate):
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                 new_inputs.append(BCompensate)
         return new_inputs, layout
 
@@ -1290,7 +1307,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
