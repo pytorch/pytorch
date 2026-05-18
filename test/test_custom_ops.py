@@ -2748,6 +2748,25 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "no autograd formula"):
             result.sum().backward()
 
+    def test_custom_op_inplace_tag_register_fake_warns(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_register_fake_warns",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x
+
+        with self.assertWarnsRegex(UserWarning, "torch.Tag.inplace"):
+
+            @f.register_fake
+            def _(x):
+                return x.clone()
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            self.assertIsNot(f(fake_x), fake_x)
+
     @skipIfTorchDynamo("recursive dynamo")
     @requires_compile
     @parametrize(
@@ -2998,6 +3017,49 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(out.requires_grad)
         self.assertIsNone(out.grad_fn)
         self.assertEqual(out, x.sin())
+
+    def test_custom_op_out_tag_register_fake_warns(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_register_fake_warns",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        with self.assertWarnsRegex(UserWarning, "torch.Tag.out"):
+
+            @f.register_fake
+            def _(x, *, out):
+                return out.clone()
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_out = torch.empty_like(fake_x)
+            self.assertIsNot(f(fake_x, out=fake_out), fake_out)
+
+    def test_custom_op_register_fake_ordinary_op(self):
+        @torch.library.custom_op(
+            "_torch_testing::register_fake_ordinary_op",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        @f.register_fake
+        def _(x):
+            nonlocal called
+            called = True
+            return x.new_empty(x.shape)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_result = f(fake_x)
+            self.assertIsNot(fake_result, fake_x)
+        self.assertTrue(called)
 
     def test_custom_op_out_tag_register_autograd(self):
         @torch.library.custom_op(
