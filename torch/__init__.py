@@ -2493,6 +2493,8 @@ class _TorchCompileInductorWrapper:
         import torch._dynamo.config as dynamo_config
         import torch._inductor.config as inductor_config
 
+        if not is_grad_enabled():
+            return nullcontext()
         if self.config.get("cpp_wrapper", inductor_config.cpp_wrapper):
             return nullcontext()
         if self.dynamic is True:
@@ -2500,6 +2502,8 @@ class _TorchCompileInductorWrapper:
         if self.config.get("fallback_by_default", inductor_config.fallback_by_default):
             return nullcontext()
         if dynamo_config.enable_invoke_subgraph_regional_compile:
+            return nullcontext()
+        if dynamo_config.trace_autograd_ops:
             return nullcontext()
         if compiled_autograd.in_compiled_autograd_region:
             return nullcontext()

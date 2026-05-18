@@ -111,7 +111,7 @@ class InputPickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError) as e:
+        except (TypeError, AttributeError, NotImplementedError) as e:
             raise NodeHashException from e
         finally:
             self._stream.seek(0)

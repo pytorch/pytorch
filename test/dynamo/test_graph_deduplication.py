@@ -1354,6 +1354,13 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
             0,
         )
 
+    def test_inductor_wrapper_disables_graph_deduplication_when_grad_disabled(self):
+        with torch.no_grad():
+            self.assertEqual(
+                self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
+                0,
+            )
+
     def test_inductor_wrapper_disables_graph_deduplication_for_dynamic_shapes(self):
         self.assertEqual(
             self._compile_and_count_invoke_subgraphs(
@@ -1377,6 +1384,13 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
                 0,
             )
 
+    def test_inductor_wrapper_disables_graph_deduplication_for_trace_autograd_ops(self):
+        with torch._dynamo.config.patch(trace_autograd_ops=True):
+            self.assertEqual(
+                self._compile_and_count_invoke_subgraphs(graph_deduplication=True),
+                0,
+            )
+
     def test_inductor_wrapper_disables_graph_deduplication_for_compiled_autograd(self):
         import torch._dynamo.compiled_autograd as compiled_autograd
 
@@ -1395,6 +1409,29 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
                 self.assertFalse(torch._dynamo.config.use_graph_deduplication)
         finally:
             compiled_autograd.in_compiled_autograd_region = prior
+
+    def test_inductor_wrapper_handles_existing_invoke_subgraph(self):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x, y):
+            return x + y
+
+        @torch.compile(backend="inductor")
+        def fn(x, y):
+            return gn(x, y) + gn(x, y)
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        self.assertEqual(fn(a, b), (a + b) * 2)
+
+    def test_inductor_wrapper_handles_vmap_batched_tensor_metadata(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x):
+            return torch.vmap(torch.mul, in_dims=(0, None))(x, 3.14)
+
+        x = torch.randn(3)
+        self.assertEqual(fn(x), x * 3.14)
 
 
 if __name__ == "__main__":

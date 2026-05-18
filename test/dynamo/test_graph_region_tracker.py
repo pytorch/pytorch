@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+from types import SimpleNamespace
 
 import torch
 import torch.fx
@@ -366,6 +367,27 @@ z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
         )
         key = next(iter(tracker.node_to_duplicates.keys()))
         tracker.track_node(None, key)  # this will fail if the node is added again
+
+    def test_unpickleable_node_metadata_is_not_tracked(self):
+        from torch._dynamo.graph_region_tracker import GraphRegionTracker
+
+        class Unpickleable:
+            def __reduce_ex__(self, protocol):
+                raise NotImplementedError("no pickle")
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = Unpickleable()
+        y = graph.call_function(torch.neg, (x,))
+
+        tx = SimpleNamespace(
+            f_code=SimpleNamespace(co_filename="test.py"),
+            lineno=1,
+            instruction_pointer=0,
+        )
+        tracker = GraphRegionTracker()
+        tracker.track_node(tx, y)
+        self.assertEqual(tracker.node_to_duplicates, {})
 
 
 if __name__ == "__main__":

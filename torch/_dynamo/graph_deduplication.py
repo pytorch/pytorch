@@ -33,6 +33,7 @@ UsageIndex = tuple[int, int]
 log = logging.getLogger(__name__)
 
 last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
+_MISSING = object()
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -87,6 +88,12 @@ when they are created in output_graph.
 
         # Ignore regions with no args for now, could they possibly be evaluated at compile time?
         if not list(external_node_usages):
+            continue
+
+        if any(
+            not _are_valid_invoke_subgraph_outputs(region, inds_with_external_users)
+            for region in region_group
+        ):
             continue
 
         if any(
@@ -250,11 +257,8 @@ def _are_valid_invoke_subgraph_operands(nodes: list[Node]) -> bool:
 
 
 def _is_valid_invoke_subgraph_operand(node: Node) -> bool:
-    if "example_value" in node.meta:
-        example_value = node.meta["example_value"]
-    elif "val" in node.meta:
-        example_value = node.meta["val"]
-    else:
+    example_value = _get_example_value(node)
+    if example_value is _MISSING:
         return False
 
     return (
@@ -265,6 +269,31 @@ def _is_valid_invoke_subgraph_operand(node: Node) -> bool:
         )
         or is_opaque_type(type(example_value))
     )
+
+
+def _are_valid_invoke_subgraph_outputs(
+    region: Region, inds_with_external_users: list[int]
+) -> bool:
+    return all(
+        _is_valid_invoke_subgraph_output(_get_example_value(region[ind]))
+        for ind in inds_with_external_users
+    )
+
+
+def _is_valid_invoke_subgraph_output(example_value: object) -> bool:
+    if example_value is _MISSING or example_value is None:
+        return False
+    if isinstance(example_value, tuple):
+        return all(_is_valid_invoke_subgraph_output(v) for v in example_value)
+    return isinstance(example_value, (torch.Tensor, int, torch.SymInt))
+
+
+def _get_example_value(node: Node) -> object:
+    if "example_value" in node.meta:
+        return node.meta["example_value"]
+    if "val" in node.meta:
+        return node.meta["val"]
+    return _MISSING
 
 
 def _get_external_inputs(
@@ -525,9 +554,10 @@ def _has_aliasing(
     for node in inputs:
         if node in flattened_getitem_nodes:
             continue
-        example_value = node.meta["example_value"]
-        if isinstance(example_value, torch.Tensor):
-            storage = StorageWeakRef(example_value._typed_storage())
+        can_check, storage = _get_tensor_storage_for_alias_check(region, node)
+        if not can_check:
+            return True
+        if storage is not None:
             if storage in input_storages:
                 # input-input aliasing
                 log.debug(
@@ -544,11 +574,20 @@ def _has_aliasing(
         if out_node in flattened_getitem_nodes:
             continue
         if out_node:
-            example_value = out_node.meta["example_value"]
+            example_value = _get_example_value(out_node)
+            if example_value is _MISSING:
+                log.debug(
+                    "NYI: Failed to substitute region %s because node %s has no example value for alias checking",
+                    region,
+                    out_node,
+                )
+                return True
             if isinstance(example_value, list):
                 raise AssertionError("expected example_value to not be a list")
-            if isinstance(example_value, torch.Tensor):
-                storage = StorageWeakRef(example_value._typed_storage())
+            can_check, storage = _get_tensor_storage_for_alias_check(region, out_node)
+            if not can_check:
+                return True
+            if storage is not None:
                 if storage in output_storages:
                     # output-output aliasing
                     log.debug(
@@ -575,8 +614,32 @@ def _has_aliasing(
     return False
 
 
+def _get_tensor_storage_for_alias_check(
+    region: Region, node: Node
+) -> tuple[bool, StorageWeakRef | None]:
+    example_value = _get_example_value(node)
+    if example_value is _MISSING:
+        log.debug(
+            "NYI: Failed to substitute region %s because node %s has no example value for alias checking",
+            region,
+            node,
+        )
+        return False, None
+    if not isinstance(example_value, torch.Tensor):
+        return True, None
+    try:
+        return True, StorageWeakRef(example_value._typed_storage())
+    except NotImplementedError:
+        log.debug(
+            "NYI: Failed to substitute region %s because node %s has tensor storage that cannot be inspected",
+            region,
+            node,
+        )
+        return False, None
+
+
 def _is_tuple_node(node: Node) -> bool:
-    return isinstance(node.meta["example_value"], tuple)
+    return isinstance(_get_example_value(node), tuple)
 
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
@@ -602,7 +665,7 @@ def _get_flattened_node_indices(node: Node, region: Region) -> OrderedSet[int]:
 def _create_getitem_nodes(
     node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
 ) -> tuple[list[Node], dict[tuple[int, ...], int]]:
-    tup = node.meta["example_value"]
+    tup = _get_example_value(node)
     if not isinstance(tup, tuple):
         raise AssertionError("_get_getitem_children expects tuple")
 
