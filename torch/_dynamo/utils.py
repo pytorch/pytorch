@@ -4579,6 +4579,17 @@ def is_utils_checkpoint(obj: Any) -> bool:
     return obj is torch.utils.checkpoint.checkpoint
 
 
+def is_utils_checkpoint_wrapped(obj: Any) -> bool:
+    missing = object()
+    return (
+        callable(obj)
+        and inspect.getattr_static(obj, "_torch_checkpoint_wrapped_function", missing)
+        is not missing
+        and inspect.getattr_static(obj, "_torch_checkpoint_kwargs", missing)
+        is not missing
+    )
+
+
 def is_invoke_subgraph(obj: Any) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
