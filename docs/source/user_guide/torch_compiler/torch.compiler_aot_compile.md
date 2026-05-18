@@ -368,15 +368,6 @@ if __name__ == "__main__":
     main()
 ```
 
-:::{note}
-Save/load of distributed artifacts via `save_compiled_function` /
-`load_compiled_function` is not yet supported when the compiled graph
-references `DeviceMesh` objects, because `DeviceMesh` contains
-`ProcessGroup` objects that cannot be serialized. Use `aot_compile()` within
-the same `torchrun` job rather than precompiling to a file for later
-deployment.
-:::
-
 ## Limitations
 
 - **`fullgraph=True` is required.** If `torch.compile` encounters a graph
@@ -387,8 +378,3 @@ deployment.
   explicitly disabled.
 - **Not all backends are supported.** Custom backends must implement the
   `SerializableCallable` interface to be compatible with save/load.
-- **Save/load with distributed DTensor is not yet supported.** Compiled
-  artifacts that reference `DeviceMesh` objects cannot be serialized to disk
-  because `ProcessGroup` objects are not picklable. See the
-  {ref}`distributed training <distributed-training-with-dtensor>` section for
-  the recommended workflow.
