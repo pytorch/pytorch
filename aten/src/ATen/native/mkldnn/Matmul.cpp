@@ -633,7 +633,7 @@ void mkldnn_matmul_i8i8i32(
 }
 
 template <typename dst_t>
-static void _mkldnn_matmul_i8i8_acc_with_primitive(
+static void _mkldnn_matmul_i8i8_dtype_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -704,21 +704,21 @@ static void _mkldnn_matmul_i8i8_acc_with_primitive(
   primitive.execute(stream, args);
 }
 
-void mkldnn_matmul_i8i8_acc(
+void mkldnn_matmul_i8i8_dtype(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
 // x: u8 or s8 * w:s8 -> y:f32 or y:bf16
   if (result.scalar_type() == at::kFloat) {
-    _mkldnn_matmul_i8i8_acc_with_primitive<float>(
+    _mkldnn_matmul_i8i8_dtype_with_primitive<float>(
         mat1, mat2, result);
   } else if (result.scalar_type() == at::kBFloat16) {
-    _mkldnn_matmul_i8i8_acc_with_primitive<at::BFloat16>(
+    _mkldnn_matmul_i8i8_dtype_with_primitive<at::BFloat16>(
         mat1, mat2, result);
   } else {
     TORCH_CHECK(
         false,
-        "mkldnn_matmul_i8i8_acc: only float32 and bfloat16 are supported");
+        "mkldnn_matmul_i8i8_dtype_out: only float32 and bfloat16 are supported for result");
   }
 }
 
