@@ -34,6 +34,7 @@ _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
 
 
+# Per-thread [op, chain, idx] that lets op.redispatch() skip the C++ dispatcher.
 _fast_dispatch_tls = threading.local()
 
 
