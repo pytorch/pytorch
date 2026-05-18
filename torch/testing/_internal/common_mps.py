@@ -578,13 +578,11 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "scatter_reduceamax": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reduceamin": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reducemean": [torch.bool],
+            # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
+            # to int32 (silently lossy). amin/amax for int64 go through the
+            # sign-flip encode + ulong atomic_min/max bracket and work fine.
+            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            "scatter_reduceprod": [torch.int64],
             "segment_reduce": None,
             "_segment.reduce": None,
             "segment.reduce": None,
