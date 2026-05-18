@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -12,7 +11,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -97,6 +96,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
+    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -188,7 +188,7 @@ def tag_to_layout_constraint(
 ) -> Callable[..., tuple[Any, Any]] | None:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
-    if tag == torch._C.Tag.needs_contiguous_strides:
+    if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
         return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
@@ -280,7 +280,7 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
-        return x.is_integer is True
+        return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
 
@@ -358,6 +358,57 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     return x
 
 
+def _get_current_node_arg_source_node(index: int) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+
+    if index < len(current_node.args):
+        source_node = current_node.args[index]
+        if isinstance(source_node, torch.fx.Node):
+            return source_node
+
+    if len(current_node.args) != 1 or not isinstance(current_node.args[0], Sequence):
+        return None
+    source_node = current_node.args[0]
+    if index >= len(source_node):
+        return None
+    source_node = source_node[index]
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
+def _get_current_node_sequence_arg_source_node(
+    arg_index: int, sequence_index: int
+) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+    if arg_index >= len(current_node.args):
+        return None
+
+    source_node = current_node.args[arg_index]
+    if not isinstance(source_node, Sequence):
+        return None
+    if sequence_index >= len(source_node):
+        return None
+    source_node = source_node[sequence_index]
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
+def _get_current_node_kwarg_source_node(name: str) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+    source_node = current_node.kwargs.get(name)
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -403,16 +454,23 @@ def transform_args(
             kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
-        def promote(arg: Any) -> Any:
+        def promote(arg: Any, source_node: torch.fx.Node | None) -> Any:
             if isinstance(arg, TensorBox):
-                return to_dtype(arg, dtype)
+                return _to_dtype_preserving_explicit_lowp_source(
+                    arg, dtype, source_node
+                )
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(value=arg.value, dtype=dtype, device=device)
             else:
                 return arg
 
-        args = [promote(a) for a in args]
-        kwargs = {k: promote(v) for k, v in kwargs.items()}
+        args = [
+            promote(a, _get_current_node_arg_source_node(i)) for i, a in enumerate(args)
+        ]
+        kwargs = {
+            k: promote(v, _get_current_node_kwarg_source_node(k))
+            for k, v in kwargs.items()
+        }
 
     if broadcast:
         broadcasted = broadcast_tensors(
@@ -566,7 +624,11 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+def promote_constants(
+    inputs: Sequence[_T],
+    override_return_dtype: torch.dtype | None = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+) -> Sequence[_T | BaseView | BaseConstant]:
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -660,24 +722,25 @@ def _add_with_alpha_fma(a, b, alpha):
 
 
 def make_pointwise(
-    fn,
-    override_return_dtype=None,
-    override_device=None,
-    override_fn_when_input_bool=None,
-    allow_alpha=False,
-    use_fma_for_alpha=False,
-    triton_fallback=None,
-):
+    fn: Callable[..., Any],
+    override_return_dtype: torch.dtype | None = None,
+    override_device: torch.device | None = None,
+    override_fn_when_input_bool: Callable[..., Any] | None = None,
+    allow_alpha: bool = False,
+    use_fma_for_alpha: bool = False,
+    triton_fallback: Callable[..., _T] | None = None,
+) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: TensorBox, alpha=None):
+    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
+        # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -745,6 +808,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
+                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -755,7 +819,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type]
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -764,8 +828,15 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
-    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1):
+foreach_node_t = TypeVar("foreach_node_t", bound=IRNode)
+
+
+def make_foreach_pointwise(
+    pw_fn: Callable[..., foreach_node_t],
+    allow_alpha: bool = False,
+    scalar_kwarg: str = "alpha",
+) -> Callable[..., list[foreach_node_t]]:
+    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1) -> list[foreach_node_t]:
         # For ops like addcmul/addcdiv, the scalar `value` arrives as a
         # positional arg (not keyword) due to the ATen schema. Extract it
         # from the end of inputs if present.
@@ -809,7 +880,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        def apply_fn(args):
+        def apply_fn(args) -> foreach_node_t:
             if allow_alpha:
                 return pw_fn(*args, **{scalar_kwarg: scalar_val})
             else:
@@ -820,7 +891,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
     return inner
 
 
-def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
+def foreach_group_loop(
+    groups: Mapping[tuple[Any, bool], list[tuple[int, Any]]],
+    num_outputs: int,
+    apply_fn: Callable[..., foreach_node_t],
+    realize_outputs: bool,
+) -> list[foreach_node_t]:
     """
     Common loop over grouped foreach arguments.
 
@@ -830,7 +906,7 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
     """
-    outputs = [None] * num_outputs
+    outputs: list[foreach_node_t | None] = [None] * num_outputs
     for (device, use_foreach), group in groups.items():
         operation_list: list[str] = []
         for output_ind, args in group:
@@ -849,7 +925,8 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
-    return outputs
+
+    return cast(list[foreach_node_t], outputs)
 
 
 def to_dtype(
@@ -877,26 +954,70 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+def _is_user_visible_dtype_cast(node: torch.fx.Node) -> bool:
+    # Internal converts inserted to express an op's low-precision result are not
+    # user-visible precision barriers.
+    if node.meta.get("original_aten") is aten._to_copy.default:
+        return True
+
+    dtype_cast_fns = (
+        "to",
+        "type",
+        "type_as",
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "bool",
+        "byte",
+        "char",
+        "short",
+        "int",
+        "long",
+        "as_tensor",
+        "asarray",
+    )
+
+    def is_dtype_cast_target(target: Any) -> bool:
+        if target in dtype_cast_fns:
+            return True
+        name = getattr(target, "__name__", None)
+        return name in dtype_cast_fns
+
+    source_fn_stack = node.meta.get("source_fn_stack") or ()
+    return any(
+        isinstance(entry, tuple) and len(entry) >= 2 and is_dtype_cast_target(entry[1])
+        for entry in source_fn_stack
+    )
+
+
+def _is_explicit_dtype_cast(
+    node: torch.fx.Node | None, dtype: torch.dtype
+) -> TypeGuard[torch.fx.Node]:
+    if not isinstance(node, torch.fx.Node):
+        return False
+    if node.target is not prims.convert_element_type.default:
+        return False
+    if not _is_user_visible_dtype_cast(node):
+        return False
+
+    target_dtype = node.args[1] if len(node.args) > 1 else node.kwargs.get("dtype")
+    if target_dtype != dtype:
+        return False
+
+    src_node = node.args[0] if node.args else None
+    if not isinstance(src_node, torch.fx.Node):
+        return True
+
+    src_val = src_node.meta.get("val")
+    return not (isinstance(src_val, torch.Tensor) and src_val.dtype == dtype)
+
+
 def _has_explicit_lowp_cast_source(
     node: torch.fx.Node | None, source_dtype: torch.dtype
 ) -> bool:
-    def is_explicit_lowp_cast(node: torch.fx.Node) -> bool:
-        if node.target is not prims.convert_element_type.default:
-            return False
-
-        dtype = node.args[1] if len(node.args) > 1 else node.kwargs.get("dtype")
-        if dtype != source_dtype:
-            return False
-
-        src_node = node.args[0] if node.args else None
-        if not isinstance(src_node, torch.fx.Node):
-            return True
-
-        src_val = src_node.meta.get("val")
-        return not (isinstance(src_val, torch.Tensor) and src_val.dtype == dtype)
-
     def produces_source_dtype(node: torch.fx.Node) -> bool:
-        if is_explicit_lowp_cast(node):
+        if _is_explicit_dtype_cast(node, source_dtype):
             return True
 
         val = node.meta.get("val")
@@ -914,7 +1035,7 @@ def _has_explicit_lowp_cast_source(
         visited.add(cur)
         if not produces_source_dtype(cur):
             continue
-        if is_explicit_lowp_cast(cur):
+        if _is_explicit_dtype_cast(cur, source_dtype):
             return True
         stack.extend(
             input_node
@@ -922,6 +1043,47 @@ def _has_explicit_lowp_cast_source(
             if produces_source_dtype(input_node)
         )
     return False
+
+
+def _to_dtype_preserving_explicit_lowp_source(
+    x: TensorBox,
+    dtype: torch.dtype,
+    source_node: torch.fx.Node | None,
+    *,
+    copy: bool = False,
+    use_compute_types: bool = True,
+) -> TensorBox:
+    src_dtype = x.get_dtype()
+    low_pr_fp = (torch.bfloat16, torch.float16)
+    if (
+        src_dtype != dtype
+        and src_dtype in low_pr_fp
+        and not ir.is_storage_and_layout(x)
+        and _has_explicit_lowp_cast_source(source_node, src_dtype)
+    ):
+
+        def _to_dtype_preserve_explicit_lowp_source(x):
+            rounded = ops.to_dtype(
+                x,
+                src_dtype,
+                src_dtype=src_dtype,
+                use_compute_types=False,
+            )
+            result = ops.to_dtype(
+                rounded,
+                dtype,
+                src_dtype=src_dtype,
+                use_compute_types=use_compute_types,
+            )
+            if not use_compute_types and dtype in low_pr_fp:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+        return make_pointwise(
+            _to_dtype_preserve_explicit_lowp_source, override_return_dtype=dtype
+        )(x)
+
+    return to_dtype(x, dtype, copy=copy, use_compute_types=use_compute_types)
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
@@ -984,11 +1146,17 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
-    use_compute_types = not (src_dtype in low_pr_fp or dtype in low_pr_fp)
-
     current_node = (
         getattr(V.graph, "current_node", None) if V.graph is not None else None
     )
+    use_compute_types = not (
+        (
+            config.emulate_precision_casts
+            and (src_dtype in low_pr_fp or dtype in low_pr_fp)
+        )
+        or (dtype in low_pr_fp and _is_explicit_dtype_cast(current_node, dtype))
+    )
+
     current_input_node: torch.fx.Node | None = None
     if (
         isinstance(current_node, torch.fx.Node)
@@ -997,35 +1165,9 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     ):
         current_input_node = current_node.args[0]
 
-    if (
-        src_dtype != dtype
-        and src_dtype in low_pr_fp
-        and not ir.is_storage_and_layout(x)
-        and _has_explicit_lowp_cast_source(current_input_node, src_dtype)
-    ):
-
-        def _to_dtype_preserve_explicit_lowp_source(x):
-            rounded = ops.to_dtype(
-                x,
-                src_dtype,
-                src_dtype=src_dtype,
-                use_compute_types=False,
-            )
-            result = ops.to_dtype(
-                rounded,
-                dtype,
-                src_dtype=src_dtype,
-                use_compute_types=use_compute_types,
-            )
-            if not use_compute_types and dtype in low_pr_fp:
-                result = ops.to_dtype(result, dtype)
-            return result
-
-        return make_pointwise(
-            _to_dtype_preserve_explicit_lowp_source, override_return_dtype=dtype
-        )(x)
-
-    return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
+    return _to_dtype_preserving_explicit_lowp_source(
+        x, dtype, current_input_node, copy=True, use_compute_types=use_compute_types
+    )
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
@@ -1226,7 +1368,13 @@ def where(cond, a, b):
         if isinstance(args[i], ir.Constant):
             args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
     return make_pointwise(fn, override_return_dtype=dtype)(
-        args[0], to_dtype(args[1], dtype), to_dtype(args[2], dtype)
+        args[0],
+        _to_dtype_preserving_explicit_lowp_source(
+            args[1], dtype, _get_current_node_arg_source_node(1)
+        ),
+        _to_dtype_preserving_explicit_lowp_source(
+            args[2], dtype, _get_current_node_arg_source_node(2)
+        ),
     )
 
 
@@ -1274,7 +1422,7 @@ def squeeze(x, dim=None):
         if isinstance(dim, (int, sympy.Expr))
         else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1681,8 +1829,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
-        prev_end = inputs_ranges[-1][-1]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
+        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -2159,7 +2307,12 @@ def cat(inputs, dim=0):
     dtype = get_promoted_dtype(
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    inputs = [to_dtype(inp, dtype) for inp in inputs]
+    inputs = [
+        _to_dtype_preserving_explicit_lowp_source(
+            inp, dtype, _get_current_node_sequence_arg_source_node(0, i)
+        )
+        for i, inp in enumerate(inputs)
+    ]
 
     def unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
         if isinstance(x, TensorBox):
@@ -2323,7 +2476,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1] + offset,
                 original_shape[dim2],
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
@@ -2331,7 +2484,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1],
                 original_shape[dim2] - offset,
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
 
     base_idx = (0, 0)
@@ -2492,7 +2645,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.check_leq(size, dim_size)
-    sizevars.check_lt(0, step)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.guarding_hint_or_throw(dim_size) > 0:
@@ -3560,6 +3713,13 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
+# native implementations)
+make_fallback(aten.bincount.default, warn=False)
+make_fallback(aten._unique2.default, warn=False)
+make_fallback(aten.unique_dim.default, warn=False)
+make_fallback(aten.unique_consecutive.default, warn=False)
+make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
@@ -3568,6 +3728,12 @@ make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
+
+# AMP / GradScaler ops: both the in-place (_amp_update_scale_) and functional
+# (_amp_update_scale) variants need explicit fallbacks.  Inductor uses the
+# functional form when the input tensor is a computed (non-leaf) value.
+make_fallback(aten._amp_update_scale_.default, warn=False)
+make_fallback(aten._amp_update_scale.default, warn=False)
 
 
 # Implemented / Half implemented
@@ -3668,7 +3834,9 @@ def copy(self, src, non_blocking=False):
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        x = to_dtype(x, self.get_dtype())
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, self.get_dtype(), _get_current_node_arg_source_node(1)
+        )
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
@@ -3759,7 +3927,9 @@ def arange_start_step(
 
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
-    src = to_dtype(src, x.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, x.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
@@ -3770,8 +3940,8 @@ def select_scatter(x, src, dim: int, index: int):
         # unbacked index
         return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
 
-    V.graph.sizevars.check_leq(0, index)
-    V.graph.sizevars.check_lt(index, x.get_size()[dim])
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3795,7 +3965,9 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    src = to_dtype(src, x.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, x.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -5179,7 +5351,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -6753,7 +6925,9 @@ def _make_reduction_inner(
     x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
 ):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     size = x.get_size()
     axis = OrderedSet[int](_validate_reduction_axis(x, axis))
 
@@ -6831,8 +7005,10 @@ def _make_reduction_inner(
     )
 
 
-def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
-    def inner(x, axis=None, keepdims=False, *, dtype=None):
+def make_reduction(
+    reduction_type: ReductionType, override_return_dtype=None
+) -> Callable[..., TensorBox]:
+    def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
@@ -6863,7 +7039,9 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
 
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     axis = _validate_dim(x, axis)
 
     return dict(
@@ -6878,13 +7056,17 @@ def _make_scan_inner(x, *, axis, dtype):
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     # compute in higher-precision until end of mean lowering
     output_dtype = x.get_dtype()
     if output_dtype in (torch.float16, torch.bfloat16):
-        x = to_dtype(x, torch.float)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, torch.float, _get_current_node_arg_source_node(0)
+        )
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
@@ -6988,7 +7170,9 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
 def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     out_dtype = x.get_dtype()
     compute_dtype = get_computation_dtype(out_dtype)
-    x = to_dtype(x, compute_dtype, copy=False)
+    x = _to_dtype_preserving_explicit_lowp_source(
+        x, compute_dtype, _get_current_node_arg_source_node(0), copy=False
+    )
     kwargs = dict(
         x=x,
         axis=axis,
@@ -7148,7 +7332,9 @@ def copy_(dst, src, non_blocking=False):
         # dst.copy_(dst) can happen from the reinplacing pass
         return dst
     src = to_device(src, dst.get_device())
-    src = to_dtype(src, dst.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, dst.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     src = expand(src, dst.get_size())
     return mutate_to(dst, src)
 
@@ -7311,7 +7497,9 @@ def cumsum(x, axis=None, dtype=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
         dtype = dtype or x.get_dtype()
-        return to_dtype(x, dtype, copy=True)
+        return _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0), copy=True
+        )
 
     def combine_fn(a_tuple, b_tuple):
         (a,) = a_tuple
@@ -7335,7 +7523,9 @@ def cumprod(x, axis=None, dtype=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
         dtype = dtype or x.get_dtype()
-        return to_dtype(x, dtype, copy=True)
+        return _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0), copy=True
+        )
 
     def combine_fn(a_tuple, b_tuple):
         (a,) = a_tuple
@@ -8236,7 +8426,9 @@ if hasattr(torch.ops.fsdp, "copy_"):
             # dst.copy_(dst) can happen from the reinplacing pass
             return dst
         src = to_device(src, dst.get_device())
-        src = to_dtype(src, dst.get_dtype())
+        src = _to_dtype_preserving_explicit_lowp_source(
+            src, dst.get_dtype(), _get_current_node_arg_source_node(1)
+        )
         src = expand(src, dst.get_size())
         return mutate_to(dst, src)
 
@@ -8274,7 +8466,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitialized_val = 0.0
 
-    if V.graph.sizevars.statically_known_equals(old_numel, 0):
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
     strides = x.maybe_get_stride()
@@ -8549,7 +8741,7 @@ def associative_scan(
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
@@ -8703,7 +8895,7 @@ def prepare_softmax_online(x, dim):
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
     hint, num_split = ir.Reduction.num_splits(
         **kwargs,
-        reduction_type="online_softmax_reduce",
+        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
         reduction_numel=rnumel,
     )
 

@@ -802,6 +802,53 @@ class TestConvolutionNN(NNTestCase):
                 dtype,
             )
 
+    def test_conv_shapecheck_meta_kernel_larger_than_input(self):
+        """Meta tensors should raise the same error as eager when kernel > input.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/177451
+        """
+        input_tensor = torch.randn(2, 4, 5, 5)
+        weight_tensor = torch.randn(6, 4, 3, 3)
+        kwargs = dict(bias=None, stride=3, padding=0, dilation=[2, 3], groups=1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Kernel size can't be greater than actual input size"
+        ):
+            F.conv2d(input_tensor, weight_tensor, **kwargs)
+
+        input_meta = input_tensor.to("meta")
+        weight_meta = weight_tensor.to("meta")
+        with self.assertRaisesRegex(
+            RuntimeError, "Kernel size can't be greater than actual input size"
+        ):
+            F.conv2d(input_meta, weight_meta, **kwargs)
+
+        torch._dynamo.reset()
+        compiled_conv = torch.compile(
+            lambda inp, w: F.conv2d(inp, w, **kwargs), backend="aot_eager"
+        )
+        with self.assertRaisesRegex(RuntimeError, "Kernel size can't be greater"):
+            compiled_conv(input_tensor, weight_tensor)
+
+        # Boundary: kernel exactly fits
+        input_exact = torch.randn(2, 4, 5, 7)
+        self.assertEqual(
+            F.conv2d(input_exact, weight_tensor, **kwargs).shape,
+            torch.Size([2, 6, 1, 1]),
+        )
+        self.assertEqual(
+            F.conv2d(input_exact.to("meta"), weight_meta, **kwargs).shape,
+            torch.Size([2, 6, 1, 1]),
+        )
+        torch._dynamo.reset()
+        compiled_valid = torch.compile(
+            lambda inp, w: F.conv2d(inp, w, **kwargs), backend="aot_eager"
+        )
+        self.assertEqual(
+            compiled_valid(input_exact, weight_tensor).shape,
+            torch.Size([2, 6, 1, 1]),
+        )
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = torch.randn(2, 3, 6, 6)
