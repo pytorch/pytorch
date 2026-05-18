@@ -1557,7 +1557,21 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_ldl_solve,
         decorators=[
             skipCUDAIfNoCusolver,
-            skipCUDAIfRocm,
+            # ROCm: ldl_solve requires cuSOLVER which is unavailable on ROCm.
+            # rocSOLVER exposes the LDL factorization (?sytrf) but not the solve (?sytrs/?hetrs),
+            # so this can only be re-enabled once a MAGMA-backed ldl_solve path is wired up
+            # (see TODO at aten/src/ATen/native/cuda/linalg/BatchLinearAlgebra.cpp re: MAGMA 2.6.0+).
+            DecorateInfo(
+                unittest.skip("Skipped on ROCm (no cuSOLVER)"),
+                device_type="cuda",
+                dtypes=(
+                    torch.float32,
+                    torch.float64,
+                    torch.complex64,
+                    torch.complex128,
+                ),
+                active_if=TEST_WITH_ROCM,
+            ),
             skipCPUIfNoLapack,
         ],
         skips=(
