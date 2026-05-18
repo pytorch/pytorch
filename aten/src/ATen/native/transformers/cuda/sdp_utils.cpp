@@ -23,6 +23,7 @@
 #endif
 
 #include <c10/core/SymInt.h>
+#include <cstdint>
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
@@ -271,6 +272,45 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     return false;
   }
   return true;
+}
+
+bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug) {
+#if defined(USE_ROCM)
+  return true;
+#else
+  if (!has_only_dense_inputs(params)) {
+    return true;
+  }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major < 8) {
+    return true;
+  }
+  const int64_t alignment_bytes =
+      minimum_gemm_alignment(params) * params.query.element_size();
+  const auto ptr_mod = [alignment_bytes](const at::Tensor& tensor) {
+    return uint64_t(tensor.const_data_ptr()) % alignment_bytes;
+  };
+  const auto is_aligned = [&ptr_mod](const at::Tensor& tensor) {
+    return tensor.numel() == 0 || ptr_mod(tensor) == 0;
+  };
+  if (!is_aligned(params.query) || !is_aligned(params.key) ||
+      !is_aligned(params.value)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention on sm80 or newer requires q, k, and v data pointers to be aligned to ",
+          alignment_bytes,
+          " bytes. Got query.data_ptr() % alignment_bytes: ",
+          ptr_mod(params.query),
+          ", key.data_ptr() % alignment_bytes: ",
+          ptr_mod(params.key),
+          ", value.data_ptr() % alignment_bytes: ",
+          ptr_mod(params.value),
+          ".");
+    }
+    return false;
+  }
+  return true;
+#endif
 }
 
 template <int Major, int Minor>
@@ -899,7 +939,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifdef USE_ROCM
       check_head_dim_size_flash<true /* caller_is_meff */>
 #else
-      check_head_dim_size_mem_efficient
+      check_head_dim_size_mem_efficient,
+      check_data_ptr_alignment_mem_efficient
 #endif
   );
   for (auto& constraint : general_constraints) {
