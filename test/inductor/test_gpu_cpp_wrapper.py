@@ -76,6 +76,27 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
+    def test_debug_sync_graph(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA-only codegen test")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+        self.assertEqual(result, x * 2)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+        expected_sync = (
+            "hipDeviceSynchronize" if torch.version.hip else "cudaDeviceSynchronize"
+        )
+        self.assertEqual(code.count(expected_sync), 2)
+
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
