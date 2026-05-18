@@ -4332,9 +4332,19 @@ class PyCodeCache:
 
 
 def _load_triton_kernel_from_source(
-    kernel_name: str, source_code: str
+    kernel_name: str,
+    source_code: str,
+    device_str: str | None = None,
+    extra: str = "",
+    device_props: Any | None = None,
 ) -> CachingAutotuner:
-    return getattr(PyCodeCache.load(source_code), kernel_name)
+    if device_str is None:
+        return getattr(PyCodeCache.load(source_code, extra=extra), kernel_name)
+
+    from torch._inductor.runtime.hints import triton_meta_device_context
+
+    with triton_meta_device_context(device_str, device_props):
+        return getattr(PyCodeCache.load(source_code, extra=extra), kernel_name)
 
 
 @torch_key_cache

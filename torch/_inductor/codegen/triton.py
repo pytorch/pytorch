@@ -6700,18 +6700,18 @@ class TritonScheduling(SIMDScheduling):
             return  # External handler handled it
 
         compile_wrapper = IndentedBuffer()
+        current_device = V.graph.get_current_device_or_throw()
 
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
-            async_compile.triton(subs_name, src_code)
+            async_compile.triton(subs_name, src_code, device_str=str(current_device))
 
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
 
         compile_wrapper.splice(src_code, strip=True)
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        compile_wrapper.writeline(f"''', device_str={str(current_device)!r})")
 
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)

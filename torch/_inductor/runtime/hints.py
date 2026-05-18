@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import collections
+import contextlib
+import contextvars
 import functools
 import typing
 from enum import auto, Enum
@@ -150,6 +152,12 @@ class DeviceProperties(typing.NamedTuple):
     max_threads_per_block: int | None = None
     warp_size: int | None = None
 
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}.create_from_device_str("
+            f"{self.type!r}, {self.index!r})"
+        )
+
     @classmethod
     @functools.cache
     def create(cls, device) -> DeviceProperties:
@@ -162,7 +170,7 @@ class DeviceProperties(typing.NamedTuple):
             device_type = "hip"
 
         device_interface = get_interface_for_device(device)
-        props = device_interface.get_device_properties(device)
+        props = device_interface.Worker.get_device_properties(device)
         try:
             multi_processor_count = props.multi_processor_count
         except AttributeError:
@@ -176,7 +184,9 @@ class DeviceProperties(typing.NamedTuple):
             type=device_type,
             index=device.index,
             multi_processor_count=multi_processor_count,
-            cc=device_interface.get_compute_capability(device),
+            cc=cls._compute_capability_from_properties(
+                device_type, props, device_interface, device
+            ),
             major=getattr(props, "major", None),
             regs_per_multiprocessor=getattr(props, "regs_per_multiprocessor", None),
             max_threads_per_multi_processor=getattr(
@@ -185,6 +195,113 @@ class DeviceProperties(typing.NamedTuple):
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
+
+    @staticmethod
+    def _compute_capability_from_properties(
+        device_type: str, props, device_interface, device
+    ):
+        if (
+            device_type == "cuda"
+            and hasattr(props, "major")
+            and hasattr(props, "minor")
+        ):
+            return props.major * 10 + props.minor
+        if device_type == "hip" and hasattr(props, "gcnArchName"):
+            return props.gcnArchName.split(":", 1)[0]
+        return device_interface.get_compute_capability(device)
+
+    @classmethod
+    def create_from_device_str(
+        cls, device_str: str, index: int | None = None
+    ) -> DeviceProperties:
+        device_type, parsed_index = _device_type_and_index(device_str)
+        if parsed_index is not None:
+            index = parsed_index
+
+        if (device_props := _triton_meta_device_props.get()) is not None:
+            if _matches_device(device_props, device_type, index):
+                return device_props
+
+        # PyTorch exposes ROCm devices as cuda devices. DeviceProperties.create()
+        # normalizes the resulting properties back to type="hip".
+        torch_device_type = "cuda" if device_type == "hip" else device_type
+        if index is None:
+            device = torch.device(torch_device_type)
+        else:
+            device = torch.device(torch_device_type, index)
+
+        if index is None and torch_device_type != "cpu":
+            from torch._dynamo.device_interface import get_interface_for_device
+
+            device_interface = get_interface_for_device(device)
+            index = device_interface.current_device()
+            device = torch.device(torch_device_type, index)
+
+        return cls.create(device)
+
+
+_triton_meta_device_str: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "triton_meta_device_str", default=None
+)
+_triton_meta_device_props: contextvars.ContextVar[DeviceProperties | None] = (
+    contextvars.ContextVar("triton_meta_device_props", default=None)
+)
+
+
+def _device_type_and_index(device_str: str) -> tuple[str, int | None]:
+    raw_device_type, _, raw_index = device_str.partition(":")
+    torch_device_type = "cuda" if raw_device_type == "hip" else raw_device_type
+    if raw_index:
+        device = torch.device(torch_device_type, int(raw_index))
+    else:
+        device = torch.device(torch_device_type)
+    device_type = "hip" if raw_device_type == "hip" else device.type
+    return device_type, device.index
+
+
+def _canonical_device_type(device_type: str) -> str:
+    return "cuda" if device_type == "hip" else device_type
+
+
+def _matches_device(
+    device_props: DeviceProperties, device_type: str, index: int | None
+) -> bool:
+    return _canonical_device_type(device_type) == _canonical_device_type(
+        device_props.type
+    ) and (index is None or device_props.index == index)
+
+
+@contextlib.contextmanager
+def triton_meta_device_context(
+    device_str: str, device_props: DeviceProperties | None = None
+):
+    device_str_token = _triton_meta_device_str.set(device_str)
+    device_props_token = _triton_meta_device_props.set(device_props)
+    try:
+        yield
+    finally:
+        _triton_meta_device_props.reset(device_props_token)
+        _triton_meta_device_str.reset(device_str_token)
+
+
+def runtime_device_properties(device_props: DeviceProperties) -> DeviceProperties:
+    device_str = _triton_meta_device_str.get()
+    if device_str is None:
+        return device_props
+
+    device_type, parsed_index = _device_type_and_index(device_str)
+    if not _matches_device(device_props, device_type, None):
+        return device_props
+
+    return DeviceProperties.create_from_device_str(device_str, parsed_index)
+
+
+def triton_meta_device_cache_key(
+    device_str: str, device_props: DeviceProperties | None = None
+) -> str:
+    if device_props is None:
+        device_props = DeviceProperties.create_from_device_str(device_str)
+    return repr((device_str, device_props._asdict()))
 
 
 class HalideInputSpec(typing.NamedTuple):

@@ -216,17 +216,20 @@ class CompiledTritonKernels:
     _cache: dict[str, CodeCacheFuture] = {}
 
     @staticmethod
-    def key(kernel_src: str):
+    def key(kernel_src: str, extra: str = ""):
         """
         Generates a cache key given a triton kernel's full source code.
         This source includes the inductor meta, compilation metadata, the kernel itself, etc.
         `kernel_src` should be the exact string passed to async_compile.triton()'s first argument.
         """
         # Hashes the kernel source with torch_key into a single hash key
-        return code_hash(kernel_src, extra=torch_key())
+        cache_extra = torch_key()
+        if extra:
+            cache_extra += b"\0" + extra.encode()
+        return code_hash(kernel_src, extra=cache_extra)
 
     @staticmethod
-    def save(kernel_src: str, future: CodeCacheFuture):
+    def save(kernel_src: str, future: CodeCacheFuture, extra: str = ""):
         """
         Saves a compiled triton kernel to the cache.
         TODO: We store a LambdaFuture as that's the callable returned by async_compile.triton,
@@ -235,12 +238,12 @@ class CompiledTritonKernels:
         TODO: Source code here is not just the kernel's source code, but also includes the inductor preamble, etc.
         so it could be less strict.
         """
-        key = CompiledTritonKernels.key(kernel_src)
+        key = CompiledTritonKernels.key(kernel_src, extra=extra)
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_src: str) -> CodeCacheFuture | None:
-        key = CompiledTritonKernels.key(kernel_src)
+    def get(kernel_src: str, extra: str = "") -> CodeCacheFuture | None:
+        key = CompiledTritonKernels.key(kernel_src, extra=extra)
         return CompiledTritonKernels._cache.get(key, None)
 
     @staticmethod
@@ -248,8 +251,8 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache = {}
 
     @staticmethod
-    def remove_future(kernel_src: str) -> None:
-        key = CompiledTritonKernels.key(kernel_src)
+    def remove_future(kernel_src: str, extra: str = "") -> None:
+        key = CompiledTritonKernels.key(kernel_src, extra=extra)
 
         # Delete the LambdaFuture if there is one
         if key in CompiledTritonKernels._cache:
@@ -390,8 +393,20 @@ class AsyncCompile:
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
           and pickled by to us via `CachingAutotuner.save_cache_hook`.
         """
+        from torch._inductor.runtime.hints import (
+            DeviceProperties,
+            triton_meta_device_cache_key,
+        )
+
+        device_props = DeviceProperties.create_from_device_str(device_str)
+        device_cache_key = triton_meta_device_cache_key(device_str, device_props)
         load_kernel = functools.partial(
-            _load_triton_kernel_from_source, kernel_name, source_code
+            _load_triton_kernel_from_source,
+            kernel_name,
+            source_code,
+            device_str,
+            device_cache_key,
+            device_props,
         )
 
         def reload_kernel_in_parent():
@@ -405,9 +420,7 @@ class AsyncCompile:
         _compile_start()
 
         if os.environ.get("TRITON_INTERPRET", "0") == "1":
-            return getattr(
-                torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
-            )
+            return load_kernel()
 
         is_parallel = self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
@@ -415,12 +428,14 @@ class AsyncCompile:
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
-        if (future := CompiledTritonKernels.get(source_code)) is not None:
+        if (
+            future := CompiledTritonKernels.get(source_code, extra=device_cache_key)
+        ) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
                 # Remove the future now that we've cache hit
-                CompiledTritonKernels.remove_future(source_code)
+                CompiledTritonKernels.remove_future(source_code, extra=device_cache_key)
                 future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
@@ -480,20 +495,22 @@ class AsyncCompile:
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
-                CompiledTritonKernels.remove_future(source_code)
+                CompiledTritonKernels.remove_future(source_code, extra=device_cache_key)
 
                 kernel.restore_after_unpickle(old_values=None)
 
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    static_triton_bundle_key=CompiledTritonKernels.key(
+                        source_code, extra=device_cache_key
+                    ),
                 )
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
             future = LambdaFuture(get_result, future=task)
-            CompiledTritonKernels.save(source_code, future)
+            CompiledTritonKernels.save(source_code, future, extra=device_cache_key)
             return future
         else:
             with dynamo_timed(
@@ -512,7 +529,9 @@ class AsyncCompile:
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
                         warm_cache_only=False,
-                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                        static_triton_bundle_key=CompiledTritonKernels.key(
+                            source_code, extra=device_cache_key
+                        ),
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)

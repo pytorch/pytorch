@@ -5104,7 +5104,11 @@ class Scheduler:
         if not async_compile.use_process_pool():
             fut = None
         else:
-            fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
+            fut = async_compile.triton(
+                kernel_name="triton_",
+                source_code=src_code,
+                device_str=str(V.graph.get_current_device_or_throw()),
+            )
             assert isinstance(fut, LambdaFuture)
 
         return (fut, mod)

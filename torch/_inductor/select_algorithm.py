@@ -4477,7 +4477,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     with open(c.bmreq.module_path) as file:
                         source_code = file.read()
                     future = async_compile.triton(
-                        kernel_name=c.bmreq.kernel_name, source_code=source_code
+                        kernel_name=c.bmreq.kernel_name,
+                        source_code=source_code,
+                        device_str=str(c.bmreq.output_tensor_meta.device),
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
                 else:

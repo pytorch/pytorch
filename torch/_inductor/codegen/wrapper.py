@@ -3076,7 +3076,7 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        compile_wrapper.writeline(f"''', device_str={str(current_device)!r})")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
