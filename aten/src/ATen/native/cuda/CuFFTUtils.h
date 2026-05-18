@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
 
 #include <string>
@@ -39,17 +38,19 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
       return "CUFFT_INVALID_SIZE";
     case CUFFT_UNALIGNED_DATA:
       return "CUFFT_UNALIGNED_DATA";
-    case CUFFT_INCOMPLETE_PARAMETER_LIST:
-      return "CUFFT_INCOMPLETE_PARAMETER_LIST";
     case CUFFT_INVALID_DEVICE:
       return "CUFFT_INVALID_DEVICE";
-    case CUFFT_PARSE_ERROR:
-      return "CUFFT_PARSE_ERROR";
     case CUFFT_NO_WORKSPACE:
       return "CUFFT_NO_WORKSPACE";
     case CUFFT_NOT_IMPLEMENTED:
       return "CUFFT_NOT_IMPLEMENTED";
-#ifndef __HIP_PLATFORM_HCC__
+#if CUDA_VERSION <= 12090
+    case CUFFT_INCOMPLETE_PARAMETER_LIST:
+      return "CUFFT_INCOMPLETE_PARAMETER_LIST";
+    case CUFFT_PARSE_ERROR:
+      return "CUFFT_PARSE_ERROR";
+#endif
+#if !defined(USE_ROCM) && CUDA_VERSION <= 12090
     case CUFFT_LICENSE_ERROR:
       return "CUFFT_LICENSE_ERROR";
 #endif
@@ -67,7 +68,7 @@ static inline void CUFFT_CHECK(cufftResult error)
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 

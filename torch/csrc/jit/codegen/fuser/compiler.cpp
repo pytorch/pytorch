@@ -1,26 +1,18 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
-#include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <atomic>
-#include <iostream>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -31,9 +23,7 @@ std::mutex& fusionBackendLock() {
 }
 } // namespace
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
@@ -54,16 +44,15 @@ bool hasFusionBackend(at::Device::Type backend_type) {
   return getFusionBackends().count(backend_type);
 }
 
-const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
+static const FusedKernelConstructor& getConstructor(
+    at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().at(backend_type);
 }
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> next_kernel_id{0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int debug_fusion{-1};
 
 size_t nCompiledKernels() {
@@ -72,8 +61,8 @@ size_t nCompiledKernels() {
 
 int debugFuser() {
   if (debug_fusion < 0) {
-    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-    debug_fusion = debug_env ? atoi(debug_env) : 0;
+    const auto debug_env = c10::utils::get_env("PYTORCH_FUSION_DEBUG");
+    debug_fusion = debug_env ? atoi(debug_env->c_str()) : 0;
   }
   return debug_fusion;
 }
@@ -125,7 +114,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     // This needs to be revisited when you start allowing
     // other things e.g. nonconstant scalars.
     if (producer->kind() == prim::Param &&
-        val->type()->isSubtypeOf(TensorType::get())) {
+        val->type()->isSubtypeOf(*TensorType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -205,12 +194,12 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device) {
+    const at::Device& device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();
 
-  for (size_t i = 0; i < input_desc.size(); i++) {
+  for (const auto i : c10::irange(input_desc.size())) {
     const auto& desc = input_desc[i];
 
     // TODO: can't get rid of this use of TensorType
@@ -227,15 +216,15 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>
+  std::vector<std::pair<const Value*, const std::optional<TensorDesc>>>
       flat_inputs;
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
-      if (p->type()->isSubtypeOf(FloatType::get())) {
-        flat_inputs.emplace_back(p, c10::nullopt);
+      if (p->type()->isSubtypeOf(*FloatType::get())) {
+        flat_inputs.emplace_back(p, std::nullopt);
       }
-      if (!p->type()->isSubtypeOf(TensorType::get())) {
+      if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
       }
       if (const Node* chunk = usedInFusedChunk(p)) {
@@ -283,7 +272,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
 
   const bool use_cuda = device.is_cuda();
-  const std::string name = "kernel_" + c10::to_string(next_kernel_id++);
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
@@ -299,6 +288,4 @@ std::shared_ptr<FusedKernel> compileKernel(
       spec.hasRandom());
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

@@ -3,10 +3,9 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/jit/python/pybind.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
  public:
@@ -14,57 +13,49 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       std::unique_ptr<RpcCommandBase> rpc,
       const MessageType& messageType) const override;
 
-  void processPythonCall(
+  c10::intrusive_ptr<JitFuture> processPythonCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+      const std::vector<c10::Stream>& streams) const override;
 
-  void processScriptCall(
+  c10::intrusive_ptr<JitFuture> processScriptCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+      const std::vector<c10::Stream>& streams) const override;
 
-  TypePtr getScriptRemoteCallType(
-      ScriptRemoteCall& scriptRemoteCall) const override;
-
-  void processScriptRemoteCall(
-      ScriptRemoteCall& scriptRemoteCall,
-      const std::function<void(void)>& postProcessing,
-      std::vector<at::IValue>& stack,
-      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const override;
-
-  void processPythonRemoteCall(
+  c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       RpcCommandBase& rpc,
-      const std::function<void(Message)>& markComplete,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      const std::vector<c10::Stream>& streams) const override;
 
-  void processPythonRRefFetchCall(
+  c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      const std::vector<c10::Stream>& streams) const override;
+
+  c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
+      RpcCommandBase& rpc) const override;
 
   void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
 
-  void processRpcWithErrors(
+  c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture,
-      std::shared_ptr<LazyStreamContext> ctx) const override;
+      const std::vector<c10::Stream>& streams) const override;
 
   bool cudaAvailable() const override;
 
-  void processRRefBackward(
-      RpcCommandBase& rpc,
-      const int64_t messageId,
-      const c10::intrusive_ptr<JitFuture>& responseFuture) const override;
+  c10::intrusive_ptr<JitFuture> processRRefBackward(
+      RpcCommandBase& rpc) const override;
+
+  // Helpers to run user-defined functions, operators and other computations.
+
+  c10::intrusive_ptr<JitFuture> runJitFunction(
+      const c10::QualifiedName& name,
+      std::vector<at::IValue>& stack,
+      const std::vector<c10::Stream>& streams,
+      bool isAsyncExecution) const;
+
+  c10::intrusive_ptr<JitFuture> runPythonFunction(
+      const py::object& function,
+      const std::vector<c10::Stream>& streams,
+      bool isAsyncExecution) const;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

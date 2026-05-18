@@ -8,16 +8,14 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Forward declaration.
 class BackwardPassCleanupGuard;
 
 // This is a singleton class responsible for running distributed backward
 // passes. This engine relies heavily on the vanilla autograd engine and tries
-// to re-use it as much as possible. This class is mostly responsible for the
+// to reuse it as much as possible. This class is mostly responsible for the
 // distributed aspects of autograd and tries to hook into the autograd engine
 // where convenient.
 
@@ -46,7 +44,7 @@ class TORCH_API DistEngine {
   // The gradients are accumulated in the provided autograd context.
   c10::intrusive_ptr<c10::ivalue::Future> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<SendRpcBackward>& sendFunction,
+      const c10::intrusive_ptr<SendRpcBackward>& sendFunction,
       bool retainGraph);
 
   // Number of backward passes currently running for the Distributed Engine.
@@ -54,21 +52,17 @@ class TORCH_API DistEngine {
 
   // Returns key-value pairs consisting of useful debugging information related
   // to distributed autograd.
-  std::unordered_map<std::string, int> getDebugInfo() const;
+  std::unordered_map<std::string, int64_t> getDebugInfo() const;
+
+  DistEngine(const DistEngine&) = delete;
+  DistEngine& operator=(const DistEngine&) = delete;
+  DistEngine(DistEngine&&) = delete;
+  DistEngine& operator=(DistEngine&&) = delete;
 
  private:
   // Make sure this is a singleton.
   DistEngine();
   ~DistEngine();
-
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine(const DistEngine&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine& operator=(const DistEngine&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine(DistEngine&&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine& operator=(DistEngine&&) = delete;
 
   // Validates the input roots for the backward computations and retrieves the
   // appropriate root edges and corresponding gradients. Populates root_edges
@@ -88,7 +82,7 @@ class TORCH_API DistEngine {
       const ContextPtr& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
-      const std::shared_ptr<torch::autograd::Node>& graphRoot,
+      const c10::intrusive_ptr<torch::autograd::Node>& graphRoot,
       torch::autograd::edge_list& outputEdges,
       bool retainGraph);
 
@@ -100,7 +94,7 @@ class TORCH_API DistEngine {
   // traverse the GraphTask instead of using the GraphTask embedded
   // cpu_ready_queue, this is because dist engine might run the same GraphTask
   // from different SendFunctions concurrently in different threads. The method
-  // will only mark the GraphTask as completed when it needes to, which means it
+  // will only mark the GraphTask as completed when it needs to, which means it
   // might not mark as completed for every call as dist engine would like to
   // keep the GraphTask alive when it not receives all gradients.
   //
@@ -131,7 +125,7 @@ class TORCH_API DistEngine {
   // context.
   c10::intrusive_ptr<c10::ivalue::Future> runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<torch::autograd::Node>& graphRoot,
+      const c10::intrusive_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges,
       bool incrementOutStandingTasks = true);
 
@@ -164,9 +158,8 @@ class TORCH_API DistEngine {
 // Guard to clean up resources once the backward pass is done.
 class BackwardPassCleanupGuard {
  public:
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  explicit BackwardPassCleanupGuard(const ContextPtr& autogradContext)
-      : autogradContext_(autogradContext) {}
+  explicit BackwardPassCleanupGuard(ContextPtr autogradContext)
+      : autogradContext_(std::move(autogradContext)) {}
 
   ~BackwardPassCleanupGuard() {
     DistEngine::getInstance().cleanupBackwardPass(autogradContext_);
@@ -176,6 +169,4 @@ class BackwardPassCleanupGuard {
   ContextPtr autogradContext_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

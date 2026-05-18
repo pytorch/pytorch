@@ -6,7 +6,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <torch/library.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <torch/all.h>
 #include <stdexcept>
 
@@ -19,15 +19,16 @@ constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
 
 struct TestCPUGenerator : public c10::GeneratorImpl {
   TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(kCustomRNG)}, value_(value) { }
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~TestCPUGenerator() = default;
+  ~TestCPUGenerator() override = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }
-  c10::optional<float> next_float_normal_sample() { return next_float_normal_sample_; }
-  c10::optional<double> next_double_normal_sample() { return next_double_normal_sample_; }
-  void set_next_float_normal_sample(c10::optional<float> randn) { next_float_normal_sample_ = randn; }
-  void set_next_double_normal_sample(c10::optional<double> randn) { next_double_normal_sample_ = randn; }
+  std::optional<float> next_float_normal_sample() { return next_float_normal_sample_; }
+  std::optional<double> next_double_normal_sample() { return next_double_normal_sample_; }
+  void set_next_float_normal_sample(std::optional<float> randn) { next_float_normal_sample_ = randn; }
+  void set_next_double_normal_sample(std::optional<double> randn) { next_double_normal_sample_ = randn; }
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
+  void set_offset(uint64_t offset) override { throw std::runtime_error("not implemented"); }
+  uint64_t get_offset() const override { throw std::runtime_error("not implemented"); }
   uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
   void set_state(const c10::TensorImpl& new_state) override { throw std::runtime_error("not implemented"); }
@@ -37,95 +38,95 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   static DeviceType device_type() { return DeviceType::CPU; }
 
   uint64_t value_;
-  c10::optional<float> next_float_normal_sample_;
-  c10::optional<double> next_double_normal_sample_;
+  std::optional<float> next_float_normal_sample_;
+  std::optional<double> next_double_normal_sample_;
 };
 
 // ==================================================== Random ========================================================
 
-Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
+Tensor& random_(Tensor& self, std::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, std::optional<int64_t> to, std::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
+Tensor& random_to(Tensor& self, int64_t to, std::optional<Generator> generator) {
   return random_from_to(self, 0, to, generator);
 }
 
 // ==================================================== Normal ========================================================
 
-Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
-Tensor& normal_Tensor_float_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_Tensor_float_out(const Tensor& mean, double std, std::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_float_Tensor_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_float_Tensor_out(double mean, const Tensor& std, std::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, std::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor normal_Tensor_float(const Tensor& mean, double std, std::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_float_Tensor(double mean, const Tensor& std, std::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, std::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
 // ==================================================== Uniform =======================================================
 
-Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
+Tensor& uniform_(Tensor& self, double from, double to, std::optional<Generator> generator) {
   return at::native::templates::uniform_impl_<native::templates::cpu::UniformKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+Tensor& cauchy_(Tensor& self, double median, double sigma, std::optional<Generator> generator) {
   return at::native::templates::cauchy_impl_<native::templates::cpu::CauchyKernel, TestCPUGenerator>(self, median, sigma, generator);
 }
 
 // ================================================== LogNormal =======================================================
 
-Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& log_normal_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   return at::native::templates::log_normal_impl_<native::templates::cpu::LogNormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
 // ================================================== Geometric =======================================================
 
-Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& geometric_(Tensor& self, double p, std::optional<Generator> gen) {
   return at::native::templates::geometric_impl_<native::templates::cpu::GeometricKernel, TestCPUGenerator>(self, p, gen);
 }
 
 // ================================================== Exponential =====================================================
 
-Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+Tensor& exponential_(Tensor& self, double lambda, std::optional<Generator> gen) {
   return at::native::templates::exponential_impl_<native::templates::cpu::ExponentialKernel, TestCPUGenerator>(self, lambda, gen);
 }
 
 // ================================================== Bernoulli =======================================================
 
-Tensor& bernoulli_Tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_Tensor(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p_, gen);
 }
 
-Tensor& bernoulli_float(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_float(Tensor& self, double p, std::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
 }
 
-Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& result) {
+Tensor& bernoulli_out(const Tensor& self, std::optional<Generator> gen, Tensor& result) {
   return at::native::templates::bernoulli_out_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(result, self, gen);
 }
 
@@ -164,7 +165,6 @@ static constexpr auto MAGIC_NUMBER = 424242424242424242ULL;
 
 // ==================================================== Random ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, RandomFromTo) {
   const at::Device device("cpu");
   test_random_from_to<TestCPUGenerator, torch::kBool, bool>(device);
@@ -177,7 +177,6 @@ TEST_F(RNGTest, RandomFromTo) {
   test_random_from_to<TestCPUGenerator, torch::kFloat64, double>(device);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Random) {
   const at::Device device("cpu");
   test_random<TestCPUGenerator, torch::kBool, bool>(device);
@@ -192,17 +191,15 @@ TEST_F(RNGTest, Random) {
 
 // This test proves that Tensor.random_() distribution is able to generate unsigned 64 bit max value(64 ones)
 // https://github.com/pytorch/pytorch/issues/33299
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Random64bits) {
   auto gen = at::make_generator<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
   auto actual = torch::empty({1}, torch::kInt64);
-  actual.random_(std::numeric_limits<int64_t>::min(), c10::nullopt, gen);
+  actual.random_(std::numeric_limits<int64_t>::min(), std::nullopt, gen);
   ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
 }
 
 // ==================================================== Normal ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -217,7 +214,6 @@ TEST_F(RNGTest, Normal) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_float_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -232,7 +228,6 @@ TEST_F(RNGTest, Normal_float_Tensor_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_float_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -247,7 +242,6 @@ TEST_F(RNGTest, Normal_Tensor_float_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -262,7 +256,6 @@ TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_float_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -276,7 +269,6 @@ TEST_F(RNGTest, Normal_float_Tensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_float) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -290,7 +282,6 @@ TEST_F(RNGTest, Normal_Tensor_float) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
@@ -306,7 +297,6 @@ TEST_F(RNGTest, Normal_Tensor_Tensor) {
 
 // ==================================================== Uniform =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Uniform) {
   const auto from = -24.24;
   const auto to = 42.42;
@@ -324,7 +314,6 @@ TEST_F(RNGTest, Uniform) {
 
 // ==================================================== Cauchy ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
@@ -342,7 +331,6 @@ TEST_F(RNGTest, Cauchy) {
 
 // ================================================== LogNormal =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, LogNormal) {
   const auto mean = 12.345;
   const auto std = 6.789;
@@ -360,7 +348,6 @@ TEST_F(RNGTest, LogNormal) {
 
 // ================================================== Geometric =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Geometric) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -377,7 +364,6 @@ TEST_F(RNGTest, Geometric) {
 
 // ================================================== Exponential =====================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Exponential) {
   const auto lambda = 42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -394,7 +380,6 @@ TEST_F(RNGTest, Exponential) {
 
 // ==================================================== Bernoulli =====================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_Tensor) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -408,7 +393,6 @@ TEST_F(RNGTest, Bernoulli_Tensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_scalar) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -422,7 +406,6 @@ TEST_F(RNGTest, Bernoulli_scalar) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -435,7 +418,6 @@ TEST_F(RNGTest, Bernoulli) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_2) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -448,7 +430,6 @@ TEST_F(RNGTest, Bernoulli_2) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_p) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -461,7 +442,6 @@ TEST_F(RNGTest, Bernoulli_p) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_p_2) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -474,7 +454,6 @@ TEST_F(RNGTest, Bernoulli_p_2) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_out) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);

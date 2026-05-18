@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
@@ -28,8 +28,14 @@ class TestE2EBase : public ::testing::Test {
     autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
-    store = c10::make_intrusive<c10d::TCPStore>(
-        serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
+    c10d::TCPStoreOptions opts{
+        /* port */ 0,
+        /* isServer */ true,
+        numWorkers,
+        /* waitWorkers */ true,
+        /* timeout */ std::chrono::seconds(10)};
+
+    store = c10::make_intrusive<c10d::TCPStore>(serverAddress, opts);
 
     buildRpcAgent();
 
@@ -82,9 +88,10 @@ class TestE2EBase : public ::testing::Test {
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    jitFuture->addCallback([ownerRRefId = ownerRRef->rrefId()](JitFuture& jitFuture) {
-      callback::finishCreatingOwnerRRef(jitFuture, ownerRRefId);
-    });
+    jitFuture->addCallback(
+        [ownerRRefId = ownerRRef->rrefId()](JitFuture& jitFuture) {
+          callback::finishCreatingOwnerRRef(jitFuture, ownerRRefId);
+        });
     return ownerRRef;
   }
 

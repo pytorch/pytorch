@@ -1,14 +1,15 @@
-#include <climits>
-
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#include <map>
+#include <set>
 
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local AllocationPlanner* allocation_planner{nullptr};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CPUProfilingAllocator* profiling_allocator{nullptr};
 
 struct MemBlock {
@@ -33,7 +34,7 @@ struct MemEvent {
 bool overlaps(const MemBlock& a, const MemBlock& b) {
   // two blocks dont overlap if
   // |---a--------|--------------b--------|
-  // strat_a     end_a <= start_b       end_b
+  // start_a     end_a <= start_b       end_b
   return !(
       (a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
 }
@@ -151,10 +152,8 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
   uint64_t max_offset{0};
   for (const auto& mem_event : mem_events) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint64_t alloc_offset;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint64_t new_offset, new_size;
+    uint64_t alloc_offset = 0;
+    uint64_t new_offset = 0, new_size = 0;
     if (mem_event.type == EventType::Allocate) {
       auto it = free_size_to_offset.lower_bound(mem_event.size);
       if (it == free_size_to_offset.end()) {

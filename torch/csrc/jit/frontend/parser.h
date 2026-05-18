@@ -1,11 +1,10 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Decl;
 struct ParserImpl;
@@ -29,5 +28,4 @@ struct TORCH_API Parser {
   std::unique_ptr<ParserImpl> pImpl;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

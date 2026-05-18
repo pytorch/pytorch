@@ -1,28 +1,25 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/csrc/Export.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace detail {
 
-typedef c10::variant<
-  enumtype::kZeros,
-  enumtype::kReflect,
-  enumtype::kReplicate,
-  enumtype::kCircular
-> conv_padding_mode_t;
+typedef std::variant<
+    enumtype::kZeros,
+    enumtype::kReflect,
+    enumtype::kReplicate,
+    enumtype::kCircular>
+    conv_padding_mode_t;
 
 template <size_t D>
-using conv_padding_t = c10::variant<
-  ExpandingArray<D>,
-  enumtype::kValid,
-  enumtype::kSame>;
+using conv_padding_t =
+    std::variant<ExpandingArray<D>, enumtype::kValid, enumtype::kSame>;
 
 /// Options for a `D`-dimensional convolution or convolution transpose module.
 template <size_t D>
@@ -31,10 +28,10 @@ struct ConvNdOptions {
   ConvNdOptions(
       int64_t in_channels,
       int64_t out_channels,
-      ExpandingArray<D> kernel_size) :
-                in_channels_(in_channels),
-                out_channels_(out_channels),
-                kernel_size_(std::move(kernel_size)) {}
+      ExpandingArray<D> kernel_size)
+      : in_channels_(in_channels),
+        out_channels_(out_channels),
+        kernel_size_(std::move(kernel_size)) {}
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
@@ -62,8 +59,8 @@ struct ConvNdOptions {
   /// This parameter __can__ be changed after construction.
   TORCH_ARG(padding_t, padding) = 0;
 
-public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+ public:
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 
@@ -92,7 +89,8 @@ public:
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or
+  /// `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(conv_padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -109,10 +107,10 @@ struct ConvOptions {
   ConvOptions(
       int64_t in_channels,
       int64_t out_channels,
-      ExpandingArray<D> kernel_size) :
-                in_channels_(in_channels),
-                out_channels_(out_channels),
-                kernel_size_(std::move(kernel_size)) {}
+      ExpandingArray<D> kernel_size)
+      : in_channels_(in_channels),
+        out_channels_(out_channels),
+        kernel_size_(std::move(kernel_size)) {}
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
@@ -140,8 +138,8 @@ struct ConvOptions {
   /// This parameter __can__ be changed after construction.
   TORCH_ARG(padding_t, padding) = 0;
 
-public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+ public:
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 
@@ -159,7 +157,8 @@ public:
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or
+  /// `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -197,7 +196,7 @@ struct ConvFuncOptions {
   using padding_t = torch::nn::detail::conv_padding_t<D>;
 
   /// optional bias of shape `(out_channels)`. Default: ``None``
-  TORCH_ARG(torch::Tensor, bias) = Tensor();
+  TORCH_ARG(torch::Tensor, bias);
 
   /// The stride of the convolving kernel.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -209,8 +208,8 @@ struct ConvFuncOptions {
   /// numbers.
   TORCH_ARG(padding_t, padding) = 0;
 
-public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+ public:
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 
@@ -262,10 +261,10 @@ struct ConvTransposeOptions {
   ConvTransposeOptions(
       int64_t in_channels,
       int64_t out_channels,
-      ExpandingArray<D> kernel_size) :
-                in_channels_(in_channels),
-                out_channels_(out_channels),
-                kernel_size_(std::move(kernel_size)) {}
+      ExpandingArray<D> kernel_size)
+      : in_channels_(in_channels),
+        out_channels_(out_channels),
+        kernel_size_(std::move(kernel_size)) {}
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
@@ -313,7 +312,8 @@ struct ConvTransposeOptions {
   /// This parameter __can__ be changed after construction.
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or
+  /// `torch::kCircular`. Default: `torch::kZeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -321,7 +321,8 @@ struct ConvTransposeOptions {
 ///
 /// Example:
 /// ```
-/// ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
+/// ConvTranspose1d model(ConvTranspose1dOptions(3, 2,
+/// 3).stride(1).bias(false));
 /// ```
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 
@@ -329,7 +330,8 @@ using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 ///
 /// Example:
 /// ```
-/// ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
+/// ConvTranspose2d model(ConvTranspose2dOptions(3, 2,
+/// 3).stride(1).bias(false));
 /// ```
 using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 
@@ -337,7 +339,8 @@ using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 ///
 /// Example:
 /// ```
-/// ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
+/// ConvTranspose3d model(ConvTranspose3dOptions(2, 2,
+/// 2).stride(1).bias(false));
 /// ```
 using ConvTranspose3dOptions = ConvTransposeOptions<3>;
 
@@ -349,7 +352,7 @@ namespace functional {
 template <size_t D>
 struct ConvTransposeFuncOptions {
   /// optional bias of shape `(out_channels)`. Default: ``None``
-  TORCH_ARG(torch::Tensor, bias) = Tensor();
+  TORCH_ARG(torch::Tensor, bias);
 
   /// The stride of the convolving kernel.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -361,7 +364,8 @@ struct ConvTransposeFuncOptions {
   /// numbers.
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
-  /// Additional size added to one side of each dimension in the output shape. Default: 0
+  /// Additional size added to one side of each dimension in the output shape.
+  /// Default: 0
   TORCH_ARG(ExpandingArray<D>, output_padding) = 0;
 
   /// Split input into groups, `in_channels` should be divisible by
@@ -374,7 +378,8 @@ struct ConvTransposeFuncOptions {
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
-/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose1d`.
+/// `ConvTransposeFuncOptions` specialized for
+/// `torch::nn::functional::conv_transpose1d`.
 ///
 /// Example:
 /// ```
@@ -383,7 +388,8 @@ struct ConvTransposeFuncOptions {
 /// ```
 using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 
-/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose2d`.
+/// `ConvTransposeFuncOptions` specialized for
+/// `torch::nn::functional::conv_transpose2d`.
 ///
 /// Example:
 /// ```
@@ -392,7 +398,8 @@ using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 /// ```
 using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
 
-/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose3d`.
+/// `ConvTransposeFuncOptions` specialized for
+/// `torch::nn::functional::conv_transpose3d`.
 ///
 /// Example:
 /// ```
@@ -403,5 +410,4 @@ using ConvTranspose3dFuncOptions = ConvTransposeFuncOptions<3>;
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -1,5 +1,3 @@
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
 
@@ -8,13 +6,13 @@
 
 namespace at {
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
+std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
-    out << "'" << t.name << "'";
+    out << '\'' << t.name << '\'';
   } else {
-    out << "argument #" << t.pos << " '" << t.name << "'";
+    out << "argument #" << t.pos << " '" << t.name << '\'';
   }
   return out;
 }
@@ -67,9 +65,17 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
 }
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
   TORCH_CHECK(
     t->sizes().equals(sizes),
+    "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
+    " for ", t, " (while checking arguments for ", c, ")");
+}
+
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
+  TORCH_CHECK(
+    t->sym_sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
     " for ", t, " (while checking arguments for ", c, ")");
 }
@@ -82,7 +88,15 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t s
     " (while checking arguments for ", c, ")");
 }
 
-void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, const c10::SymInt& size) {
+  TORCH_CHECK(
+    t->sym_size(dim) == size,
+    "Expected tensor to have size ", size, " at dimension ", dim,
+    ", but got size ", t->size(dim), " for ", t,
+    " (while checking arguments for ", c, ")");
+}
+
+static void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
   const TensorArg* t0 = nullptr;
   for (auto& t : tensors) {
     if (!t->defined()) continue;
@@ -128,17 +142,17 @@ void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  if (! (t1->is_cuda()) || ! (t2->is_cuda())) {
+  if (t1->is_cpu() || t2->is_cpu()) {
     std::ostringstream oss;
-    if (! t1->is_cuda()) {
+    if (t1->is_cpu()) {
       oss << "Tensor for " << t1 << " is on CPU, ";
     }
-    if (! t2->is_cuda()) {
+    if (t2->is_cpu()) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
-    oss << "but expected " << ((!(t1->is_cuda() || t2->is_cuda())) ? "them" : "it")
-        << " to be on GPU (while checking arguments for " << c << ")";
-    AT_ERROR(oss.str());
+    oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
+        << " to be on GPU (while checking arguments for " << c << ')';
+    TORCH_CHECK(false, oss.str());
   }
   TORCH_CHECK(
     t1->get_device() == t2->get_device(),
@@ -182,8 +196,8 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
         i++;
       }
       oss << "; but got " << t->toString()
-          << " instead (while checking arguments for " << c << ")";
-      AT_ERROR(oss.str());
+          << " instead (while checking arguments for " << c << ')';
+      TORCH_CHECK(false, oss.str());
     }
 }
 
@@ -213,7 +227,7 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
   }
 }
 
-void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
+static void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   TORCH_CHECK(
     !t.defined() || t.options().backend() == backend,
     "Expected tensor to have ", toString(backend),
@@ -227,7 +241,7 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backe
   }
 }
 
-void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+static void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
   TORCH_CHECK(
       !t.defined() || t.device().type() == device_type,
       "Expected tensor to have ", device_type,
@@ -256,33 +270,13 @@ void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout)
 }
 
 void * maybe_data_ptr(const Tensor& tensor) {
-  return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
+  return tensor.defined() ? tensor.data_ptr() : nullptr;
 }
 
 void * maybe_data_ptr(const TensorArg& tensor) {
-  return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
+  return tensor->defined() ? tensor->data_ptr() : nullptr;
 }
 
-// See TensorUtils.h on why this is useful now that we cache is_contiguous.
-bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t dim = sizes.size();
-  int64_t expected_stride = 1;
-  bool contig_if_nonempty = true;
-  for (int64_t i = dim - 1; i >= 0; i--) {
-    if (sizes[i] == 0) {
-      return true;
-    }
-    if (contig_if_nonempty) {
-      if (sizes[i] != 1 && strides[i] != expected_stride) {
-        contig_if_nonempty = false;
-      }
-      expected_stride *= sizes[i];
-    }
-  }
-  return contig_if_nonempty;
-}
-
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -317,22 +311,6 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-size_t computeStorageNbytes(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    size_t itemsize_bytes) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  size_t size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
-    if(sizes[i] == 0) {
-      return 0;
-    }
-    size += strides[i]*(sizes[i]-1);
-  }
-  return size * itemsize_bytes;
-}
-
 // On a high level,
 // 1. separate `oldshape` into chunks of dimensions, where the dimensions are
 //    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] *
@@ -345,12 +323,12 @@ size_t computeStorageNbytes(
 // templatized for DimVector and IntArrayRef use cases,
 // see overloads of computeStride() below.
 //
-template <typename ResultVec, typename NewShapeVec>
-inline c10::optional<ResultVec> computeStride_impl(
-    IntArrayRef oldshape,
-    IntArrayRef oldstride,
+template <typename ResultVec, typename NewShapeVec, typename Numel>
+inline static std::optional<ResultVec> computeStride_impl(
+    const NewShapeVec& oldshape,
+    const NewShapeVec& oldstride,
     const NewShapeVec& newshape,
-    ResultVec toResult(const IntArrayRef&)
+    ResultVec toResult(const NewShapeVec&)
 ) {
   if (oldshape.empty()) {
     return ResultVec(newshape.size(), 1);
@@ -361,19 +339,20 @@ inline c10::optional<ResultVec> computeStride_impl(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  const int64_t numel = c10::multiply_integers(oldshape);
-  if (numel == 0 && oldshape.equals(newshape)) {
+  const Numel numel = c10::multiply_integers(oldshape);
+  bool zero_numel = TORCH_GUARD_OR_FALSE(sym_eq(numel, 0));
+  if (zero_numel && oldshape.equals(newshape)) {
     return toResult(oldstride);
   }
 
   ResultVec newstride(newshape.size());
-  if (numel == 0) {
+  if (zero_numel) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
       } else {
         newstride[view_d] =
-          std::max<int64_t>(newshape[view_d+1], 1) * newstride[view_d+1];
+          std::max<Numel>(newshape[view_d+1], Numel(1)) * newstride[view_d+1];
       }
     }
     return newstride;
@@ -381,24 +360,38 @@ inline c10::optional<ResultVec> computeStride_impl(
 
   int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
+  Numel chunk_base_stride = oldstride.back();
   // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
+  Numel tensor_numel = 1;
+  Numel view_numel = 1;
+
+ // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE below could result in returning
+ // std::nullopt which has an effect of falling back to a clone when unbacked symints are present.
+ // But it will not result in returning different or wrong results.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 &&
-         oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+        (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+     // We want to accumulate stuff in view_numel until view_numel == tensor_numel, if we do not
+     // know if that is satisfied we keep accumulating. For example if view_numel = 1 and tensor_numel = u1,
+     // we want to take that path, view_numel will become u0. Next iteration if u0==u1 we want to stop.
+     // That's why we use TORCH_GUARD_OR_TRUE below.
+
+     // we use TORCH_GUARD_OR_FALSE and not TORCH_GUARD_OR_TRUE when comparing newshape[view_d] ==1 because
+     // if we know view_numel < tensor_numel is false, we want to stop. Unless we know for sure newshape[view_d]==1
+     // in that case we would stop in the next iteration anyway. For example, if view_numel = u0 and tensor_numel = u1,
+     // and u0==u1, then want to stop unless newshape[view_d]==1. taking one more iteration will keep [view_numel = u0
+     // and tensor_numel = u1].
       while (view_d >= 0 &&
-            (view_numel < tensor_numel || newshape[view_d] == 1)) {
+            (TORCH_GUARD_OR_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (view_numel != tensor_numel) {
-        return c10::nullopt;
+      if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+        return std::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -408,25 +401,33 @@ inline c10::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return newstride;
 }
 
-c10::optional<std::vector<int64_t>> computeStride(
+std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape) {
   auto toResult = [](const IntArrayRef& a) { return a.vec(); };
-  return computeStride_impl<std::vector<int64_t>, IntArrayRef>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<DimVector> computeStride(
+std::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape) {
+  auto toResult = [](const SymIntArrayRef& a) { return SymDimVector(a); };
+  return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
+}
+
+std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape) {
   auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
-  return computeStride_impl<DimVector, DimVector>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<DimVector, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail

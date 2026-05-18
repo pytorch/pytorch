@@ -2,16 +2,15 @@
 #define THCP_EVENT_INC
 
 #include <ATen/cuda/CUDAEvent.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/python_headers.h>
-#include <THC/THC.h>
 
-struct THCPEvent {
-  PyObject_HEAD
+struct THCPEvent : THPEvent {
   at::cuda::CUDAEvent cuda_event;
 };
-extern PyObject *THCPEventClass;
+extern PyObject* THCPEventClass;
 
-void THCPEvent_init(PyObject *module);
+void THCPEvent_init(PyObject* module);
 
 inline bool THCPEvent_Check(PyObject* obj) {
   return THCPEventClass && PyObject_IsInstance(obj, THCPEventClass);

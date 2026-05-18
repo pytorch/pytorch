@@ -3,15 +3,13 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initPythonIRBindings(PyObject* module);
 
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 struct ConcretePythonOp : public PythonOp {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static Symbol Kind;
 
   ConcretePythonOp(Graph* graph) : PythonOp(graph, ::c10::prim::PythonOp) {}
@@ -44,10 +42,9 @@ struct ConcretePythonOp : public PythonOp {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  c10::optional<THPObjectPtr> autogradFunction() const override;
+  std::optional<THPObjectPtr> autogradFunction() const override;
   void writeScalars(std::ostream& out) const override;
   void lint_python() const override;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

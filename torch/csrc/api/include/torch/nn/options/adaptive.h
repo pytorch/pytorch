@@ -1,20 +1,23 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `AdaptiveLogSoftmaxWithLoss` module.
 ///
 /// Example:
 /// ```
-/// AdaptiveLogSoftmaxWithLoss model(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+/// AdaptiveLogSoftmaxWithLoss model(AdaptiveLogSoftmaxWithLossOptions(8, 10,
+/// {4, 8}).div_value(2.).head_bias(true));
 /// ```
 struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
-  /* implicit */ AdaptiveLogSoftmaxWithLossOptions(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs);
+  /* implicit */ AdaptiveLogSoftmaxWithLossOptions(
+      int64_t in_features,
+      int64_t n_classes,
+      std::vector<int64_t> cutoffs);
 
   /// Number of features in the input tensor
   TORCH_ARG(int64_t, in_features);
@@ -33,5 +36,4 @@ struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
   TORCH_ARG(bool, head_bias) = false;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

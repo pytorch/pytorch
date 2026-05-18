@@ -4,12 +4,11 @@
 
 #include <array>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // FakeGuardImpl is hardcoded to have eight devices.  Not for
 // any good reason, just to simplify code.
-constexpr size_t kFakeGuardImplMaxDevices = 8;
+constexpr DeviceIndex kFakeGuardImplMaxDevices = 8;
 
 /**
  * A fake implementation of DeviceGuardImplInterface suitable for testing.
@@ -20,8 +19,8 @@ template <DeviceType T>
 struct FakeGuardImpl final : public DeviceGuardImplInterface {
   static constexpr DeviceType static_type = T;
   // Runtime device type is not used
-  FakeGuardImpl(DeviceType) {}
-  FakeGuardImpl() {}
+  FakeGuardImpl(DeviceType /*unused*/) {}
+  FakeGuardImpl() = default;
   DeviceType type() const override {
     return T;
   }
@@ -60,15 +59,15 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
 
   // Event-related functions
   void record(
-      void** event,
-      const Stream& stream,
-      const DeviceIndex device_index,
-      const EventFlag flag) const override {}
-  void block(void* event, const Stream& stream) const override {}
-  bool queryEvent(void* event) const override {
+      void** /*event*/,
+      const Stream& /*stream*/,
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const override {}
+  void block(void* /*event*/, const Stream& /*stream*/) const override {}
+  bool queryEvent(void* /*event*/) const override {
     return true;
   }
-  void destroyEvent(void* event, const DeviceIndex device_index)
+  void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept override {}
 
   // Convenience methods for testing
@@ -97,11 +96,7 @@ template <DeviceType T>
 thread_local DeviceIndex FakeGuardImpl<T>::current_device_ = 0;
 
 template <DeviceType T>
-constexpr DeviceType FakeGuardImpl<T>::static_type;
-
-template <DeviceType T>
 thread_local std::array<StreamId, kFakeGuardImplMaxDevices>
     FakeGuardImpl<T>::current_streams_ = {0, 0, 0, 0, 0, 0, 0, 0};
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

@@ -2,11 +2,8 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Return value of a builtin operator or a TorchScript function.
 class TORCH_API ScriptResp final : public RpcCommandBase {
@@ -14,13 +11,12 @@ class TORCH_API ScriptResp final : public RpcCommandBase {
   explicit ScriptResp(at::IValue&& values);
 
   const at::IValue& value();
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptResp> fromMessage(const Message& message);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::IValue value_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

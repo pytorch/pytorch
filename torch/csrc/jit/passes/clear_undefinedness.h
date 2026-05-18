@@ -3,11 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Undefinedness makes argument matching fail for regular tensor operations
 // if 1+ arguments are undefined or possibly undefined tensors.
@@ -20,5 +19,4 @@ namespace jit {
 // When this happens, this pass will be removed
 TORCH_API void ClearUndefinedness(const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,5 +1,6 @@
 import torch
 
+
 NUM_REPEATS = 1000
 NUM_REPEAT_OF_REPEATS = 1000
 
@@ -16,7 +17,8 @@ class WithTorchFunction:
 
         self._tensor = torch.tensor(data, requires_grad=requires_grad)
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
@@ -24,7 +26,8 @@ class WithTorchFunction:
 
 
 class SubWithTorchFunction(torch.Tensor):
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 

@@ -4,7 +4,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 using at::Dimname;
@@ -12,13 +11,11 @@ using at::DimnameList;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
-using std::make_unique;
 
 static Dimname dimnameFromString(const std::string& str) {
   return Dimname::fromSymbol(Symbol::dimname(str));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, isNamed) {
   auto tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.has_names());
@@ -50,7 +47,6 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, attachMetadata) {
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
@@ -69,7 +65,6 @@ TEST(NamedTensorTest, attachMetadata) {
   ASSERT_FALSE(tensor.has_names());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, internalSetNamesInplace) {
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
@@ -85,12 +80,11 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   ASSERT_TRUE(dimnames_equal(retrieved_names, names));
 
   // Drop names
-  at::internal_set_names_inplace(tensor, at::nullopt);
+  at::internal_set_names_inplace(tensor, std::nullopt);
   ASSERT_TRUE(tensor.get_named_tensor_meta() == nullptr);
-  ASSERT_TRUE(tensor.opt_names() == at::nullopt);
+  ASSERT_TRUE(tensor.opt_names() == std::nullopt);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, empty) {
   auto N = Dimname::fromSymbol(Symbol::dimname("N"));
   auto C = Dimname::fromSymbol(Symbol::dimname("C"));
@@ -99,10 +93,10 @@ TEST(NamedTensorTest, empty) {
   std::vector<Dimname> names = { N, C, H, W };
 
   auto tensor = at::empty({});
-  ASSERT_EQ(tensor.opt_names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), std::nullopt);
 
   tensor = at::empty({1, 2, 3});
-  ASSERT_EQ(tensor.opt_names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), std::nullopt);
 
   tensor = at::empty({1, 2, 3, 4}, names);
   ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), names));
@@ -111,7 +105,6 @@ TEST(NamedTensorTest, empty) {
   ASSERT_THROW(at::empty({1, 2, 3}, names), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, dimnameToPosition) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -159,7 +152,6 @@ static void check_unify_error(DimnameList names, DimnameList other_names) {
   ASSERT_THROW(tensornames_unify_from_right(names, other_names), c10::Error);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, unifyFromRight) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -180,7 +172,6 @@ TEST(NamedTensorTest, unifyFromRight) {
   check_unify_error({ H, None, C }, { H });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, alias) {
   // tensor.alias is not exposed in Python so we test its name propagation here
   auto N = dimnameFromString("N");
@@ -192,7 +183,6 @@ TEST(NamedTensorTest, alias) {
   ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), aliased.opt_names().value()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, NoNamesGuard) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
@@ -217,7 +207,6 @@ static std::vector<Dimname> nchw() {
   return { N, C, H, W };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, TensorNamePrint) {
   auto names = nchw();
   {
@@ -234,7 +223,6 @@ TEST(NamedTensorTest, TensorNamePrint) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NamedTensorTest, TensorNamesCheckUnique) {
   auto names = nchw();
   {

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -25,6 +26,7 @@ c_stderr = ctypes.c_void_p.in_dll(libc, "stderr")
 
 class RedirectsTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
 
     def tearDown(self):
@@ -53,7 +55,7 @@ class RedirectsTest(unittest.TestCase):
         libc.printf(b"foo again from c\n")
         os.system("echo foo again from cmd")
 
-        with open(stdout_log, "r") as f:
+        with open(stdout_log) as f:
             # since we print from python, c, cmd -> the stream is not ordered
             # do a set comparison
             lines = set(f.readlines())
@@ -77,7 +79,7 @@ class RedirectsTest(unittest.TestCase):
         libc.fprintf(c_stderr, b"bar again from c\n")
         os.system("echo bar again from cmd 1>&2")
 
-        with open(stderr_log, "r") as f:
+        with open(stderr_log) as f:
             lines = set(f.readlines())
             self.assertEqual(
                 {"bar from python\n", "bar from c\n", "bar from cmd\n"}, lines
@@ -102,13 +104,13 @@ class RedirectsTest(unittest.TestCase):
         print("again stdout from python")
         libc.fprintf(c_stderr, b"again stderr from c\n")
 
-        with open(stdout_log, "r") as f:
+        with open(stdout_log) as f:
             lines = set(f.readlines())
             self.assertEqual(
                 {"redir stdout from python\n", "redir stdout from c\n"}, lines
             )
 
-        with open(stderr_log, "r") as f:
+        with open(stderr_log) as f:
             lines = set(f.readlines())
             self.assertEqual(
                 {"redir stderr from python\n", "redir stderr from c\n"}, lines
@@ -122,7 +124,7 @@ class RedirectsTest(unittest.TestCase):
                 print_fn(i)
 
         with open(stdout_log) as fp:
-            actual = {int(line.split(":")[1]) for line in fp.readlines()}
+            actual = {int(line.split(":")[1]) for line in fp}
             expected = set(range(num_lines))
             self.assertSetEqual(expected, actual)
 
@@ -137,3 +139,10 @@ class RedirectsTest(unittest.TestCase):
             libc.printf(bytes(f"c:{i}\n", "utf-8"))
 
         self._redirect_large_buffer(c_print)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

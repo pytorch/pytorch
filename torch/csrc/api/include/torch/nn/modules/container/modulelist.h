@@ -1,12 +1,13 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// A list of `Module`s that registers its elements.
 ///
@@ -52,7 +53,6 @@ namespace nn {
 /// iteration over submodules, positional access, adding a new module after
 /// construction via `push_back`, as well as joining two `ModuleList`s via
 /// `extend`.
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ModuleListImpl : public Cloneable<ModuleListImpl> {
  public:
   using Iterator = std::vector<std::shared_ptr<Module>>::iterator;
@@ -70,7 +70,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// Special cloning function for `ModuleList` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<ModuleListImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
@@ -90,7 +90,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   void push_back(std::shared_ptr<Module> module) {
     modules_.push_back(std::move(module));
     const auto index = modules_.size() - 1;
-    register_module(c10::to_string(index), modules_[index]);
+    register_module(std::to_string(index), modules_[index]);
   }
 
   /// Adds a new `Module` to the `ModuleList` container, moving or copying
@@ -98,7 +98,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    using Type = typename std::remove_reference<M>::type;
+    using Type = std::remove_reference_t<M>;
     push_back(std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -146,7 +146,14 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
     TORCH_CHECK(index < size(), "Index out of range");
-    return *modules_[index]->as<T>();
+    auto module = modules_[index]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        index,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Attempts to return the module at the given index as the requested type.
@@ -158,7 +165,14 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
     TORCH_CHECK(index < size(), "Index out of range");
-    return *modules_[index]->as<T>();
+    const auto module = modules_[index]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        index,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Attempts to return a `std::shared_ptr` whose dynamic type is that of the
@@ -201,15 +215,17 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
     TORCH_CHECK(index <= size(), "Index out of range");
 
     if (index == size())
-      push_back(module);
+      push_back(std::move(module));
     else {
       modules_.insert(
           modules_.begin() + Iterator::difference_type(index),
           std::move(module));
 
-      for (size_t i = index; i < size() - 1; ++i)
-        replace_module(c10::to_string(index), modules_[index]);
-      register_module(c10::to_string(size() - 1), modules_.back());
+      for (const auto i : c10::irange(index, size() - 1)) {
+        (void)i; // Suppress unused variable warning
+        replace_module(std::to_string(index), modules_[index]);
+      }
+      register_module(std::to_string(size() - 1), modules_.back());
     }
   }
 
@@ -225,7 +241,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void insert(size_t index, M&& module) {
-    using Type = typename std::remove_reference<M>::type;
+    using Type = std::remove_reference_t<M>;
     insert(index, std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -253,5 +269,4 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 /// module storage semantics.
 TORCH_MODULE(ModuleList);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

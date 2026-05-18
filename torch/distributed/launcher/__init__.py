@@ -7,8 +7,4 @@
 # LICENSE file in the root directory of this source tree.
 
 
-from torch.distributed.launcher.api import (  # noqa: F401
-    LaunchConfig,
-    elastic_launch,
-    launch_agent,
-)
+from torch.distributed.launcher.api import elastic_launch, launch_agent, LaunchConfig

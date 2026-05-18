@@ -1,15 +1,58 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+#include <cmath>
+#include <utility>
+
+
+namespace at::native {
+
+Tensor quantize_per_tensor_dynamic(
+    const Tensor& self,
+    ScalarType dtype,
+    bool reduce_range) {
+  TORCH_CHECK( (dtype == ScalarType::QInt8 || dtype == ScalarType::QUInt8 || dtype == ScalarType::Half), "dtype ", dtype, "not supported");
+  auto input_contig = self.contiguous();
+  if (dtype == ScalarType::Half) {
+    return input_contig.to(ScalarType::Half);
+  }
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
+
+  if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    reduce_range = false;
+  }
+
+  int qmin = 0;
+  int qmax = 0;
+
+  if (dtype == ScalarType::QInt8) {
+    qmin = -128;
+    qmax = 127;
+  } else {
+    // for now, this branch executes for dtype == ScalarType::QUInt8
+    // additional cases will be added when quantization support for other dtypes becomes available
+    qmin = 0;
+    qmax = 255;
+  }
+
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/qmin,
+      /*qmax=*/qmax,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
+  return at::native::quantize_per_tensor(self, q_params.scale, q_params.zero_point, dtype);
+}
 
 Tensor quantize_per_tensor(
     const Tensor& self,
@@ -17,6 +60,15 @@ Tensor quantize_per_tensor(
     int64_t zero_point,
     ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
+  return quantizer->quantize(self);
+}
+
+Tensor quantize_per_tensor_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
   return quantizer->quantize(self);
 }
 
@@ -29,14 +81,14 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
   for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
-        scales[i].item<double>(),
-        zero_points[i].item<int64_t>(),
+        scales[static_cast<int64_t>(i)].item<double>(),
+        zero_points[static_cast<int64_t>(i)].item<int64_t>(),
         dtype));
   }
   return quantized_tensors;
 }
 
-Tensor quantize_per_channel_cpu(
+Tensor quantize_per_channel(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -45,19 +97,19 @@ Tensor quantize_per_channel_cpu(
   auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
-Tensor dequantize_cpu(const Tensor& self) {
-  TORCH_CHECK(!self.is_quantized());
+
+Tensor dequantize_cpu_or_cuda(const Tensor& self) {
   return self.to(at::kFloat);
 }
 
-Tensor dequantize_quantized_cpu(const Tensor& self) {
+Tensor dequantize_quantized(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }
@@ -123,7 +175,7 @@ Tensor& set_storage_quantized_(
     IntArrayRef sizes,
     IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(storage);
+  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -136,13 +188,13 @@ QScheme qscheme_quant(const Tensor& self) {
 
 Tensor quantized_clone(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat>
   // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
   // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {
@@ -156,7 +208,7 @@ Tensor quantized_clone(
         self.options().memory_format(memory_format),
         self.q_scale(),
         self.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
   } else if (self.qscheme() == at::kPerChannelAffine) {
     dst = at::_empty_per_channel_affine_quantized(
         self.sizes(),
@@ -164,7 +216,7 @@ Tensor quantized_clone(
         self.q_per_channel_zero_points(),
         self.q_per_channel_axis(),
         self.options().memory_format(memory_format),
-        c10::nullopt);
+        std::nullopt);
   } else {
     TORCH_CHECK(false, "clone for quantized Tensor only works for \
       PerTensorAffine and PerChannelAffine qscheme right now");
@@ -179,7 +231,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.device().type() == kCPU && other.device().type() == kCPU,
       "quantized_equal is implemented only for the QuantizedCPU backend");
-  if (!other.is_quantized()) {
+  if (!self.is_quantized() || !other.is_quantized()) {
     return false;
   }
 
@@ -195,7 +247,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   if (self.sizes() != other.sizes()) {
     return false;
   }
-  if (self.element_size() != other.element_size()) {
+  if (self.scalar_type() != other.scalar_type()) {
     return false;
   }
 
@@ -203,9 +255,15 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void* self_data = self_contig.data_ptr();
-  void* other_data = other_contig.data_ptr();
-  return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
+  const void* self_data = self_contig.const_data_ptr();
+  const void* other_data = other_contig.const_data_ptr();
+  auto data_size = self.numel() * self.element_size();
+  // For QUint4x2 and QUInt2x4, two elements are packed in one byte
+  if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {
+      TORCH_INTERNAL_ASSERT(self.element_size() == 1);
+      data_size = (data_size>>1) + (data_size&1);
+  }
+  return 0 == memcmp(self_data, other_data, data_size);
 }
 
 /* Calculate the quantization params for the activation tensor */
@@ -233,20 +291,18 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
-float calculate_quant_loss(
+static float calculate_quant_loss(
     const float* input,
-    int numel,
+    int64_t numel,
     float xmin,
     float xmax,
     float* q_input,
-    int bit_width) {
+    int64_t bit_width) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  float qmax = (1 << bit_width) - 1;
+  float qmax = static_cast<float>((1 << bit_width) - 1);
   float scale = data_range == 0
-      ? 1.0
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+      ? 1.0f
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
   float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
 
@@ -260,7 +316,7 @@ float calculate_quant_loss(
   // remainder loop
   for (; i < numel; i++) {
     q_input[i] = std::max(
-        0.0f, std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
+        0.0f, std::min<float>(std::nearbyint((input[i] - xmin) * inverse_scale), qmax));
     q_input[i] = q_input[i] * scale + xmin;
     norm += (input[i] - q_input[i]) * (input[i] - q_input[i]);
   }
@@ -279,15 +335,24 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const int64_t n_bins,
     const double ratio,
     int64_t bit_width) {
+  const float* input_row = input_tensor.const_data_ptr<float>();
+  TORCH_CHECK_VALUE(input_row != nullptr, "input tensor is empty and has no data");
 
-  const float* input_row = input_tensor.data_ptr<float>();
+  if (numel < 0 || numel > input_tensor.numel()) {
+    TORCH_CHECK(false, "numel is out of the bound of input tensor");
+  }
+
+  TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
+      " greater than input_tensor.numel() ", input_tensor.numel());
+
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
+  float n_bins_float = static_cast<float>(n_bins);
 
-  float stepsize = (xmax - xmin) / n_bins;
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  int min_bins = n_bins * (1.0 - (float) ratio);
-  const float* input = input_tensor.contiguous().data_ptr<float>();
+  float stepsize = (xmax - xmin) / n_bins_float;
+  float min_bins = static_cast<float>(n_bins_float* (1.0 - ratio));
+  Tensor input_tensor_contig = input_tensor.contiguous();
+  const float* input = input_tensor_contig.const_data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =
@@ -298,7 +363,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   float cur_max = xmax;
   float cur_loss = loss;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float thr = min_bins * stepsize;
   while (cur_min + thr < cur_max) {
     // move left
@@ -328,5 +392,4 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   xmin_tensor[0] = xmin;
   return std::make_tuple(xmax_tensor, xmin_tensor);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

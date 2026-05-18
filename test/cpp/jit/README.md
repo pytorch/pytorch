@@ -36,7 +36,7 @@ The following commands assume you are in PyTorch root.
 
 ```bash
 # ... Build PyTorch from source, e.g.
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 # (re)build just the binary
 ninja -C build bin/test_jit
 # run tests

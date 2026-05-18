@@ -1,12 +1,11 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `InstanceNorm` module.
 struct TORCH_API InstanceNormOptions {
@@ -34,7 +33,8 @@ struct TORCH_API InstanceNormOptions {
 ///
 /// Example:
 /// ```
-/// InstanceNorm1d model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm1d
+/// model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm1dOptions = InstanceNormOptions;
 
@@ -42,7 +42,8 @@ using InstanceNorm1dOptions = InstanceNormOptions;
 ///
 /// Example:
 /// ```
-/// InstanceNorm2d model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm2d
+/// model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm2dOptions = InstanceNormOptions;
 
@@ -50,7 +51,8 @@ using InstanceNorm2dOptions = InstanceNormOptions;
 ///
 /// Example:
 /// ```
-/// InstanceNorm3d model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// InstanceNorm3d
+/// model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using InstanceNorm3dOptions = InstanceNormOptions;
 
@@ -61,16 +63,17 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::instance_norm(input, F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
+/// F::instance_norm(input,
+/// F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
 /// ```
 struct TORCH_API InstanceNormFuncOptions {
-  TORCH_ARG(Tensor, running_mean) = Tensor();
+  TORCH_ARG(Tensor, running_mean);
 
-  TORCH_ARG(Tensor, running_var) = Tensor();
+  TORCH_ARG(Tensor, running_var);
 
-  TORCH_ARG(Tensor, weight) = Tensor();
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = Tensor();
+  TORCH_ARG(Tensor, bias);
 
   TORCH_ARG(bool, use_input_stats) = true;
 
@@ -81,5 +84,4 @@ struct TORCH_API InstanceNormFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -18,6 +18,8 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
+#include <algorithm>
+
 using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::OperatorHandle;
@@ -46,7 +48,6 @@ private:
   bool* called_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy(Tensor dummy) -> ()").catchAllKernel<MockKernel>(&called));
@@ -58,7 +59,6 @@ TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObj
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaAfterKernelInOptionsObject_thenCanBeCalled) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy(Tensor dummy) -> ()"));
@@ -70,7 +70,6 @@ TEST(OperatorRegistrationTest, whenRegisteringWithSchemaAfterKernelInOptionsObje
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringWithNameBeforeKernelInOptionsObject_thenCanBeCalled) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy").catchAllKernel<MockKernel>(&called));
@@ -82,7 +81,6 @@ TEST(OperatorRegistrationTest, whenRegisteringWithNameBeforeKernelInOptionsObjec
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringWithNameAfterKernelInOptionsObject_thenCanBeCalled) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy"));
@@ -94,14 +92,12 @@ TEST(OperatorRegistrationTest, whenRegisteringWithNameAfterKernelInOptionsObject
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringWithoutSchema_thenFails) {
   expectThrows<c10::Error>([] {
     c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
   }, "In operator registration: Tried to register an operator without specifying a schema or operator name.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPU));
 
@@ -113,7 +109,6 @@ TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   " backend.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCallsCatchallKernel) {
   bool called = false;
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
@@ -143,7 +138,6 @@ TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCalls
 //   }, "for an operator which already has a catch-all kernel registered");
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegisteringCatchallKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
   {
@@ -177,7 +171,6 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegiste
 //   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPU. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
   {
@@ -193,7 +186,6 @@ TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteri
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_thenOnlyRegistersSchema) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
@@ -205,14 +197,12 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_t
   " backend.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithoutSchema_thenFails) {
   expectThrows<c10::Error>([&] {
     c10::RegisterOperators().op("_test::dummy");
   }, "Cannot infer operator schema in registration of operator _test::dummy because there is no kernel specified.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRunningOutOfScope_thenSchemaIsGone) {
   {
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
@@ -222,7 +212,6 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRunningOutOfScope_thenS
   EXPECT_FALSE(op.has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
   // as long as we don't register non-catchall kernels, ops without tensor arguments are fine
   auto registrar = c10::RegisterOperators().op("_test::dummy() -> ()");
@@ -231,7 +220,6 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegi
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegisteringInSameOpCall_thenFails) {
   expectThrows<c10::Error>([&] {
     auto registrar = c10::RegisterOperators()
@@ -241,7 +229,6 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
   }, "In operator registration: Tried to register multiple kernels with same dispatch key CPU for operator schema _test::dummy");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSameOpCall_thenFails) {
   expectThrows<c10::Error>([&] {
     auto registrar = c10::RegisterOperators()
@@ -251,7 +238,6 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSam
   }, "Tried to register multiple catch-all kernels for operator schema _test::dummy");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnboxedWithCPUDispatchKey) {
   bool called_kernel_cpu = false;
   auto registrar= c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
@@ -265,7 +251,7 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CPU), dummyTensor(c10::DispatchKey::CUDA));
   EXPECT_TRUE(called_kernel_cpu);
 
-  // Ensure that disptach key from tensor is not used here.
+  // Ensure that dispatch key from tensor is not used here.
   called_kernel_cpu = false;
   expectThrows<c10::Error>([&] {
     callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CUDA), dummyTensor(c10::DispatchKey::CPU));
@@ -273,7 +259,11 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
   " backend.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::string expectedMessageForBackend(DispatchKey key) {
+  std::string key_str(c10::toString(key));
+  return "Could not run '_test::dummy' with arguments from the '" + key_str + "' backend";
+}
+
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
@@ -294,44 +284,45 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
   EXPECT_FALSE(called_kernel1);
   EXPECT_TRUE(called_kernel2);
 
-  expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  }, "Could not run '_test::dummy' with arguments from the 'XLA'"
-  " backend.");
+  // Test for out of tree lazy backends- ::Lazy key is now registered to TS backend in tree
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA}) {
+    std::string expectMessage = expectedMessageForBackend(key);
+    expectThrows<c10::Error>([&] {
+      callOp(*op, dummyTensor(key));
+    }, expectMessage.c_str());
 
-  // also assert that the error message contains the available tensor type ids, but don't assert their order
-  expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  }, "CPU");
-  expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  }, "CUDA");
+    // also assert that the error message contains the available tensor type ids, but don't assert their order
+    expectThrows<c10::Error>([&] {
+      callOp(*op, dummyTensor(key));
+    }, "CPU");
+    expectThrows<c10::Error>([&] {
+      callOp(*op, dummyTensor(key));
+    }, "CUDA");
+  }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_stackbased_kernel = false;
 void stackBasedKernel(const OperatorHandle&, c10::Stack* stack) {
   called_stackbased_kernel = true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndNoneCanInferSchema_thenFails) {
-  bool called_kernel = false;
   expectThrows<c10::Error>([&] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<&stackBasedKernel>(c10::DispatchKey::CPU)
       .kernel<&stackBasedKernel>(c10::DispatchKey::CUDA)
-      .kernel<&stackBasedKernel>(c10::DispatchKey::XLA));
+      .kernel<&stackBasedKernel>(c10::DispatchKey::XLA)
+      .kernel<&stackBasedKernel>(c10::DispatchKey::Lazy));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::dummy");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<&stackBasedKernel>(c10::DispatchKey::CPU)
     .kernel<&stackBasedKernel>(c10::DispatchKey::CUDA)
-    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA));
+    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA)
+    .kernel<&stackBasedKernel>(c10::DispatchKey::Lazy));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -346,19 +337,21 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanI
   EXPECT_TRUE(called_stackbased_kernel);
   EXPECT_FALSE(called_kernel);
 
-  called_kernel = called_stackbased_kernel = false;
-  callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  EXPECT_TRUE(called_stackbased_kernel);
-  EXPECT_FALSE(called_kernel);
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
+    called_kernel = called_stackbased_kernel = false;
+    callOp(*op, dummyTensor(key));
+    EXPECT_TRUE(called_stackbased_kernel);
+    EXPECT_FALSE(called_kernel);
+  }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
     .kernel<&stackBasedKernel>(c10::DispatchKey::CPU)
     .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel)
-    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA));
+    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA)
+    .kernel<&stackBasedKernel>(c10::DispatchKey::Lazy));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -373,19 +366,21 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCan
   EXPECT_FALSE(called_stackbased_kernel);
   EXPECT_TRUE(called_kernel);
 
-  called_kernel = called_stackbased_kernel = false;
-  callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  EXPECT_TRUE(called_stackbased_kernel);
-  EXPECT_FALSE(called_kernel);
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
+    called_kernel = called_stackbased_kernel = false;
+    callOp(*op, dummyTensor(key));
+    EXPECT_TRUE(called_stackbased_kernel);
+    EXPECT_FALSE(called_kernel);
+  }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<&stackBasedKernel>(c10::DispatchKey::CPU)
     .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel)
-    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA));
+    .kernel<&stackBasedKernel>(c10::DispatchKey::XLA)
+    .kernel<&stackBasedKernel>(c10::DispatchKey::Lazy));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -400,17 +395,18 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndOnlyOneC
   EXPECT_FALSE(called_stackbased_kernel);
   EXPECT_TRUE(called_kernel);
 
-  called_kernel = called_stackbased_kernel = false;
-  callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  EXPECT_TRUE(called_stackbased_kernel);
-  EXPECT_FALSE(called_kernel);
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
+    called_kernel = called_stackbased_kernel = false;
+    callOp(*op, dummyTensor(key));
+    EXPECT_TRUE(called_stackbased_kernel);
+    EXPECT_FALSE(called_kernel);
+  }
 }
 
 struct DummyKernelWithIntParam final : OperatorKernel {
   void operator()(Tensor, int64_t) {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_thenFails) {
   bool called_kernel = false;
   expectThrows<c10::Error>([&] {
@@ -421,10 +417,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
-  (*stack)[1] = (*stack)[1].toString()->string() + op.schema().name();
+  (*stack)[1] = (*stack)[1].toStringRef() + op.schema().name();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {
   auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
@@ -432,10 +427,9 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCal
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBackend_thenCannotBeCalled) {
   auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CUDA, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
@@ -447,10 +441,8 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBacke
   }, "Could not run '_test::dummy' with arguments from the 'CPU' backend.");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called = false;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenRegularKernelCanBeCalled) {
   auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
@@ -466,7 +458,6 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenFallbackKernelCanBeCalled) {
   auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
@@ -480,10 +471,9 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   called = false;
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
   EXPECT_FALSE(called);
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForSameBackend_thenCallsRegularKernel) {
   auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
@@ -499,9 +489,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_autograd = false;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_nonautograd = false;
 
 void nonautograd_kernel(Tensor a) {
@@ -512,7 +500,6 @@ void autograd_kernel(Tensor a) {
   called_autograd = true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
@@ -530,7 +517,6 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   EXPECT_TRUE(called_autograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<decltype(nonautograd_kernel), nonautograd_kernel>(DispatchKey::CPU)
@@ -545,38 +531,33 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   EXPECT_TRUE(called_autograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
+TEST(
+    OperatorRegistrationTest,
+    whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
+  auto registrar = c10::RegisterOperators().op(
+      "_test::dummy(Tensor dummy) -> ()",
+      c10::RegisterOperators::options()
+          .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
+          .kernel<decltype(autograd_kernel), &autograd_kernel>(
+              DispatchKey::Autograd));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
-  // catchAll now maps to CompositeImplicitAutograd which has higher precedence than Autograd
+  // catchAll now maps to CompositeImplicitAutograd which has
+  // higher precedence than Autograd
   called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
+  op->typed<void(Tensor)>().call(
+      dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+
+  called_nonautograd = called_autograd = false;
+  op->typed<void(Tensor)>().call(dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
-  EXPECT_TRUE(called_nonautograd);
-  EXPECT_FALSE(called_autograd);
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, AutogradBackendOverridesAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::AutogradCPU)
@@ -606,22 +587,21 @@ TEST(OperatorRegistrationTest, AutogradBackendOverridesAutogradKernel) {
   EXPECT_FALSE(called_nonautograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(OperatorRegistrationTest, AutogradXLAOverridesAutogradKernel) {
+void LazyBackendsAutogradOverridesAutogradKernel(DispatchKey key) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::AutogradXLA)
+    .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(c10::getAutogradKeyFromBackend(toBackendComponent(key)))
     .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
+  std::string expectedMessage = expectedMessageForBackend(key);
   expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
-  }, "Could not run '_test::dummy' with arguments from the 'XLA'"
-  " backend.");
+    callOp(*op, dummyTensor(key));
+  }, expectedMessage.c_str());
 
   called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
+  op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 
@@ -631,8 +611,14 @@ TEST(OperatorRegistrationTest, AutogradXLAOverridesAutogradKernel) {
   EXPECT_FALSE(called_nonautograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(OperatorRegistrationTest, whenRegisterWithXLAKernelAndCatchAll_AutogradXLAIsNotFilled) {
+// no longer test ::Lazy key here
+// since it is now registered to TS backend in-tree and thus behaves differently,
+// does not throw the expected 'could not run..' messages
+TEST(OperatorRegistrationTest, AutogradXLAOverridesAutogradKernel) {
+  LazyBackendsAutogradOverridesAutogradKernel(DispatchKey::XLA);
+}
+
+void whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey key) {
   {
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
       .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
@@ -641,39 +627,57 @@ TEST(OperatorRegistrationTest, whenRegisterWithXLAKernelAndCatchAll_AutogradXLAI
     ASSERT_TRUE(op.has_value());
 
     called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
+    op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
     EXPECT_TRUE(called_nonautograd);
     EXPECT_FALSE(called_autograd);
 
     called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
+    op->typed<void (Tensor)>().call(dummyTensor(key));
     EXPECT_FALSE(called_autograd);
     EXPECT_TRUE(called_nonautograd);
   }
   {
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::XLA)
+      .kernel<decltype(autograd_kernel), &autograd_kernel>(key)
       .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
 
-    // When there's direct registration to XLA backend, AutogradXLA doesn't pick up catchAll
+    // When there's direct registration to XLA / Lazy backend, Autograd{XLA, Lazy} doesn't pick up catchAll
     // kernel in precompute but just keep fallthrough kernel from backend fallback.
-    // Thus it falls through AutogradXLA and reaches the kernel at XLA key.
+    // Thus it falls through Autograd{XLA, Lazy} and reaches the kernel at XLA / Lazy key.
     called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
+    op->typed<void (Tensor)>().call(dummyTensor(key, /*requires_grad=*/true));
     EXPECT_FALSE(called_nonautograd);
     EXPECT_TRUE(called_autograd);
 
     called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
+    op->typed<void (Tensor)>().call(dummyTensor(key));
     EXPECT_TRUE(called_autograd);
     EXPECT_FALSE(called_nonautograd);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(OperatorRegistrationTest, whenRegisterWithXLAKernelAndCatchAll_AutogradXLAIsNotFilled) {
+  whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey::XLA);
+}
+
+TEST(OperatorRegistrationTest, whenRegisterWithLazyKernelAndCatchAll_AutogradLazyIsNotFilled) {
+  whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey::Lazy);
+}
+
+TEST(OperatorRegistrationTest, whenregisteringwithinvalidoverloadname) {
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.default", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.__name__", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "__name__ is not a legal overload name for aten operators");
+}
+
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
@@ -682,7 +686,6 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingC
   }, "Mismatch in kernel C++ signatures");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBackendWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
@@ -691,7 +694,6 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBacke
   }, "Mismatch in kernel C++ signatures");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
@@ -700,7 +702,6 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchA
   }, "Mismatch in kernel C++ signatures");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCppSignatures_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
     .kernel(DispatchKey::CPU, [] (int64_t) {}));
@@ -710,7 +711,6 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCpp
   }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
     .catchAllKernel([] (int64_t) {}));
@@ -720,7 +720,6 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismat
   }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingCppSignatures_thenFails) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("dummy(int a) -> ()");
@@ -730,7 +729,6 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingC
   }, "Mismatch in kernel C++ signatures");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("dummy(int a) -> ()");
@@ -741,7 +739,6 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCpp
   }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("dummy(int a) -> ()", [] (int64_t) {});
@@ -853,7 +850,6 @@ struct testArgTypes final {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   // TODO Test Scalar
 
@@ -876,7 +872,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool a) -> bool");
   testArgTypes<std::string>::test(
     "string1", [] (const std::string& v) {EXPECT_EQ("string1", v);},
-    "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
+    "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toStringRef());},
     "(str a) -> str");
   testArgTypes<Tensor>::test(
     dummyTensor(c10::DispatchKey::CPU), [] (const Tensor& v) {EXPECT_EQ(c10::DispatchKey::CPU, extractDispatchKey(v));},
@@ -885,56 +881,56 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
 
   // optional types (with has_value() == true)
-  testArgTypes<c10::optional<double>>::test(
-    c10::optional<double>(1.5), [] (const c10::optional<double>& v) {EXPECT_EQ(1.5, v.value());},
-    c10::optional<double>(2.5), [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
+  testArgTypes<std::optional<double>>::test(
+    std::optional<double>(1.5), [] (const std::optional<double>& v) {EXPECT_EQ(1.5, v.value());},
+    std::optional<double>(2.5), [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
     "(float? a) -> float?");
-  testArgTypes<c10::optional<int64_t>>::test(
-    c10::optional<int64_t>(1), [] (const c10::optional<int64_t>& v) {EXPECT_EQ(1, v.value());},
-    c10::optional<int64_t>(2), [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
+  testArgTypes<std::optional<int64_t>>::test(
+    std::optional<int64_t>(1), [] (const std::optional<int64_t>& v) {EXPECT_EQ(1, v.value());},
+    std::optional<int64_t>(2), [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
     "(int? a) -> int?");
-  testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(true), [] (const c10::optional<bool>& v) {EXPECT_EQ(true, v.value());},
-    c10::optional<bool>(false), [] (const IValue& v) {EXPECT_EQ(false, v.toBool());},
+  testArgTypes<std::optional<bool>>::test(
+    std::optional<bool>(true), [] (const std::optional<bool>& v) {EXPECT_EQ(true, v.value());},
+    std::optional<bool>(false), [] (const IValue& v) {EXPECT_EQ(false, v.toBool());},
     "(bool? a) -> bool?");
-  testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(false), [] (const c10::optional<bool>& v) {EXPECT_EQ(false, v.value());},
-    c10::optional<bool>(true), [] (const IValue& v) {EXPECT_EQ(true, v.toBool());},
+  testArgTypes<std::optional<bool>>::test(
+    std::optional<bool>(false), [] (const std::optional<bool>& v) {EXPECT_EQ(false, v.value());},
+    std::optional<bool>(true), [] (const IValue& v) {EXPECT_EQ(true, v.toBool());},
     "(bool? a) -> bool?");
-  testArgTypes<c10::optional<std::string>>::test(
-    c10::optional<std::string>("string1"), [] (const c10::optional<std::string>& v) {EXPECT_EQ("string1", v.value());},
-    c10::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
+  testArgTypes<std::optional<std::string>>::test(
+    std::optional<std::string>("string1"), [] (const std::optional<std::string>& v) {EXPECT_EQ("string1", v.value());},
+    std::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toStringRef());},
     "(str? a) -> str?");
-  testArgTypes<c10::optional<Tensor>>::test(
-    c10::optional<Tensor>(dummyTensor(c10::DispatchKey::CPU)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::DispatchKey::CPU, extractDispatchKey(v.value()));},
-    c10::optional<Tensor>(dummyTensor(c10::DispatchKey::CUDA)), [] (const IValue& v) {EXPECT_EQ(c10::DispatchKey::CUDA, extractDispatchKey(v.toTensor()));},
+  testArgTypes<std::optional<Tensor>>::test(
+    std::optional<Tensor>(dummyTensor(c10::DispatchKey::CPU)), [] (const std::optional<Tensor>& v) {EXPECT_EQ(c10::DispatchKey::CPU, extractDispatchKey(v.value()));},
+    std::optional<Tensor>(dummyTensor(c10::DispatchKey::CUDA)), [] (const IValue& v) {EXPECT_EQ(c10::DispatchKey::CUDA, extractDispatchKey(v.toTensor()));},
     "(Tensor? a) -> Tensor?");
 
 
   // optional types (with has_value() == false)
-  testArgTypes<c10::optional<double>>::test(
-    c10::optional<double>(c10::nullopt), [] (const c10::optional<double>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<double>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<double>>::test(
+    std::optional<double>(std::nullopt), [] (const std::optional<double>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<double>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(float? a) -> float?");
-  testArgTypes<c10::optional<int64_t>>::test(
-    c10::optional<int64_t>(c10::nullopt), [] (const c10::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<int64_t>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<int64_t>>::test(
+    std::optional<int64_t>(std::nullopt), [] (const std::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<int64_t>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int? a) -> int?");
-  testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(c10::nullopt), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<bool>>::test(
+    std::optional<bool>(std::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<bool>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
-  testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(c10::nullopt), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<bool>>::test(
+    std::optional<bool>(std::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<bool>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
-  testArgTypes<c10::optional<std::string>>::test(
-    c10::optional<std::string>(c10::nullopt), [] (const c10::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<std::string>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<std::string>>::test(
+    std::optional<std::string>(std::nullopt), [] (const std::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<std::string>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(str? a) -> str?");
-  testArgTypes<c10::optional<Tensor>>::test(
-    c10::optional<Tensor>(c10::nullopt), [] (const c10::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<Tensor>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<Tensor>>::test(
+    std::optional<Tensor>(std::nullopt), [] (const std::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<Tensor>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(Tensor? a) -> Tensor?");
 
 
@@ -1139,33 +1135,33 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Tensor[] a) -> Tensor[]");
 
   // Test optional of list (with nullopt)
-  testArgTypes<c10::optional<c10::List<int64_t>>>::test(
-    c10::optional<c10::List<int64_t>>(c10::nullopt), [] (const c10::optional<c10::List<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<c10::List<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<std::optional<c10::List<int64_t>>>::test(
+    std::optional<c10::List<int64_t>>(std::nullopt), [] (const std::optional<c10::List<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<c10::List<int64_t>>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with empty list)
-  testArgTypes<c10::optional<c10::List<int64_t>>>::test(
-    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const c10::optional<c10::List<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
-    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
+  testArgTypes<std::optional<c10::List<int64_t>>>::test(
+    std::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const std::optional<c10::List<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
+    std::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with values)
-  testArgTypes<c10::optional<c10::List<int64_t>>>::test(
-    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({1, 2})), [] (const c10::optional<c10::List<int64_t>>& v) {expectListEquals({1, 2}, v.value());},
-    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({3, 4})), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
+  testArgTypes<std::optional<c10::List<int64_t>>>::test(
+    std::optional<c10::List<int64_t>>(c10::List<int64_t>({1, 2})), [] (const std::optional<c10::List<int64_t>>& v) {expectListEquals({1, 2}, v.value());},
+    std::optional<c10::List<int64_t>>(c10::List<int64_t>({3, 4})), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
     "(int[]? a) -> int[]?");
 
   // Test list of optional (with empty list)
-  testArgTypes<c10::List<c10::optional<int64_t>>>::test(
-    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({})), [] (const c10::List<c10::optional<int64_t>>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<c10::optional<int64_t>>>().size());},
+  testArgTypes<c10::List<::std::optional<int64_t>>>::test(
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({})), [] (const c10::List<::std::optional<int64_t>>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<::std::optional<int64_t>>>().size());},
     "(int?[] a) -> int?[]");
 
   // Test list of optional (with values)
-  testArgTypes<c10::List<c10::optional<int64_t>>>::test(
-    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const c10::List<c10::optional<int64_t>>& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v);},
-    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const IValue& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v.to<c10::List<c10::optional<int64_t>>>());},
+  testArgTypes<c10::List<::std::optional<int64_t>>>::test(
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, std::nullopt, 2})), [] (const c10::List<::std::optional<int64_t>>& v) {expectListEquals<std::optional<int64_t>>({3, std::nullopt, 2}, v);},
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, std::nullopt, 2})), [] (const IValue& v) {expectListEquals<std::optional<int64_t>>({3, std::nullopt, 2}, v.to<c10::List<::std::optional<int64_t>>>());},
     "(int?[] a) -> int?[]");
 
   // dict types
@@ -1237,15 +1233,15 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
 
   // weird deeply nested type
-  using DeeplyNestedType = c10::List<c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>>;
+  using DeeplyNestedType = c10::List<c10::Dict<std::string, c10::List<::std::optional<c10::Dict<int64_t, std::string>>>>>;
   auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
     c10::Dict<int64_t, std::string> inner3;
     inner3.insert(1, "1");
-    c10::List<c10::optional<c10::Dict<int64_t, std::string>>> inner2;
+    c10::List<::std::optional<c10::Dict<int64_t, std::string>>> inner2;
     inner2.push_back(std::move(inner3));
-    c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>> inner1;
+    c10::Dict<std::string, c10::List<::std::optional<c10::Dict<int64_t, std::string>>>> inner1;
     inner1.insert("key", std::move(inner2));
-    c10::List<c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>> result;
+    c10::List<c10::Dict<std::string, c10::List<::std::optional<c10::Dict<int64_t, std::string>>>>> result;
     result.push_back(inner1);
     return result;
   };
@@ -1255,7 +1251,16 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(NewOperatorRegistrationTest, erroroutwithinvalidoverloadname) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.default(Tensor self) -> Tensor");
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.__name__(Tensor self) -> Tensor");
+  }, "__name__ is not a legal overload name for aten operators");
+}
+
 TEST(NewOperatorRegistrationTest, testBasics) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("dummy(Tensor self) -> Tensor");
@@ -1265,9 +1270,11 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   m.def("dummy4", [](const Tensor& self, const Tensor& other) { return other; });
   m.impl("dummy", c10::DeviceType::CPU, [](const Tensor& self) { return self; });
   m.impl("dummy", c10::DeviceType::XLA, [](const Tensor& self) { return self; });
+  m.impl("dummy", c10::DeviceType::Lazy, [](const Tensor& self) { return self; });
   // Internal API
   m.impl("dummy2", c10::DispatchKey::CPU, [](const Tensor& self) { return self; });
   m.impl("dummy2", c10::DispatchKey::XLA, [](const Tensor& self) { return self; });
+  m.impl("dummy2", c10::DispatchKey::Lazy, [](const Tensor& self) { return self; });
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy", ""}).has_value());
   // Should have a schema even if there are no impls
@@ -1277,7 +1284,6 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy4", ""}).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, importTopLevel) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("def1(Tensor self) -> Tensor");
@@ -1296,7 +1302,6 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
   ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, overload) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn(Tensor self) -> Tensor");
@@ -1308,7 +1313,6 @@ TEST(NewOperatorRegistrationTest, overload) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload2"}).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, importNamespace) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("def1(Tensor self) -> Tensor");
@@ -1325,7 +1329,6 @@ TEST(NewOperatorRegistrationTest, importNamespace) {
   ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, schema) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("def1(Tensor self) -> Tensor");
@@ -1344,7 +1347,6 @@ TEST(NewOperatorRegistrationTest, schema) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""})->schema().isDefaultAliasAnalysisKind());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
   auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
   m1.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
@@ -1363,7 +1365,6 @@ TEST(NewOperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchal
   EXPECT_TRUE(called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn(Tensor dummy) -> ()");
@@ -1379,7 +1380,6 @@ TEST(NewOperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel
   EXPECT_FALSE(called_autograd);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradKernel) {
   bool math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
@@ -1400,15 +1400,15 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradKernel) {
     ASSERT_TRUE(math_called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
+    callOp(*op, dummyTensor(key));
     ASSERT_TRUE(math_called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
+    callOp(*op, dummyTensor(key, /*requires_grad=*/true));
     ASSERT_TRUE(math_called);
   }
 
@@ -1425,7 +1425,6 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradKernel) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradAndAutogradKernel) {
   bool math_called = false;
   bool autograd_called = false;
@@ -1452,7 +1451,6 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradAndAutogr
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradAndCatchAllKernel) {
   bool math_called = false;
   bool catchall_called = false;
@@ -1480,7 +1478,6 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeImplicitAutogradAndCatchA
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, AutogradBackendOverridesCompositeImplicitAutogradKernel) {
   bool math_called = false;
   bool autograd_called = false;
@@ -1520,7 +1517,6 @@ TEST(NewOperatorRegistrationTest, AutogradBackendOverridesCompositeImplicitAutog
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, BackendOverridesCompositeImplicitAutogradKernel) {
   bool math_called = false;
   bool backend_called = false;
@@ -1561,7 +1557,6 @@ TEST(NewOperatorRegistrationTest, BackendOverridesCompositeImplicitAutogradKerne
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradKernel) {
   bool called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
@@ -1583,16 +1578,16 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradKernel) {
     ASSERT_TRUE(called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
+    callOp(*op, dummyTensor(key));
     ASSERT_TRUE(called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     called = false;
-    // AutogradXLA is fallthrough, calls XLA kernel
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
+    // Autograd{XLA, Lazy} is fallthrough, calls XLA / Lazy kernel
+    callOp(*op, dummyTensor(key, /*requires_grad=*/true));
     ASSERT_TRUE(called);
   }
 
@@ -1610,7 +1605,6 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradKernel) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradAndCompositeImplicitAutogradKernel) {
   bool backend_called = false;
   bool math_called = false;
@@ -1636,17 +1630,17 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradAndCompos
     ASSERT_TRUE(backend_called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     backend_called = math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA));
+    callOp(*op, dummyTensor(key));
     ASSERT_TRUE(backend_called);
     ASSERT_FALSE(math_called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     backend_called = math_called = false;
-    // AutogradXLA is fallthrough, calls XLA kernel
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
+    // Autograd{XLA, Lazy} is fallthrough, calls XLA / Lazy kernel
+    callOp(*op, dummyTensor(key, /*requires_grad=*/true));
     ASSERT_FALSE(math_called);
     ASSERT_TRUE(backend_called);
   }
@@ -1667,7 +1661,6 @@ TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradAndCompos
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, BackendOverridesCompositeExplicitAutogradKernel) {
   bool default_called = false;
   bool backend_called = false;
@@ -1710,7 +1703,6 @@ TEST(NewOperatorRegistrationTest, BackendOverridesCompositeExplicitAutogradKerne
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatch) {
   bool cpu_called = false;
   bool cuda_called = false;
@@ -1744,16 +1736,15 @@ TEST(NewOperatorRegistrationTest, dispatch) {
     ASSERT_TRUE(autograd_called);
   }
 
-  {
+  for (c10::DispatchKey key : {c10::DispatchKey::XLA, c10::DispatchKey::Lazy}) {
     autograd_called = false;
     auto op = Dispatcher::singleton().findSchema({"test::fn_autograd", ""});
     ASSERT_TRUE(op.has_value());
-    callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
+    callOp(*op, dummyTensor(key, /*requires_grad=*/true));
     ASSERT_TRUE(autograd_called);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
   bool cpu_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
@@ -1795,30 +1786,27 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool sparsecpu_called, math_called = false;
+  bool fpga_called = false, math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { sparsecpu_called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::FPGA, [&](const Tensor& x) { fpga_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::CompositeImplicitAutograd, [&](const Tensor& x) { math_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
 
   {
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
-    ASSERT_TRUE(sparsecpu_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::FPGA));
+    ASSERT_TRUE(fpga_called);
   }
 
   {
     expectThrows<c10::Error>([&] {
-      callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
+      callOp(*op, dummyTensor(c10::DispatchKey::FPGA, /*requires_grad=*/true));
     }, "test::fn has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther.");
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   bool privateuse1_called = false;
   bool catchall_called = false;
@@ -1857,18 +1845,15 @@ TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   }
 
   {
-    // TODO(#43908): currently this will fallthrough AutogradPrivateUse1 then call catchall kernel
-    // at AutogradCPU, while backend extenders are indeed expecting to call PrivateUse1 kernel.
-    // This confusing behavior is caused by we registering fallthrough as backend fallback for
-    // Autograd keys. Note users could always work around this by registering the same kernel to
-    // AutogradPrivateUse1 as shown below until we support it.
     auto op = Dispatcher::singleton().findOp({"test::fn", ""});
     ASSERT_TRUE(op.has_value());
     catchall_called = false;
+    privateuse1_called = false;
     callOp(*op,
            dummyTensor(c10::DispatchKey::PrivateUse1, /*requires_grad=*/true),
            dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(catchall_called);
+    ASSERT_FALSE(catchall_called);
+    ASSERT_TRUE(privateuse1_called);
   }
 
   m.impl("fn", c10::DispatchKey::AutogradPrivateUse1, [&](const Tensor& x, const Tensor& y) { privateuse1_called = true; return x; });
@@ -1884,7 +1869,27 @@ TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(NewOperatorRegistrationTest, registerCompositeImplicitAutogradWithCPUKernel_andCallAutogradOtherKernel_callsComposite) {
+  bool math_called = false;
+  bool cpu_called = false;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> Tensor");
+  m.impl("fn", c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; });
+  m.impl("fn", c10::DispatchKey::CompositeImplicitAutograd, [&](const Tensor& x) { math_called = true; return x; });
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  {
+    math_called = cpu_called = false;
+    // Meta should redispatch to the AutogradOther backend,
+    // which the composite kernel should be registered to.
+    callOp(*op, dummyTensor(c10::DispatchKey::Meta, /*requires_grad=*/true));
+    ASSERT_TRUE(math_called);
+    ASSERT_FALSE(cpu_called);
+  }
+}
+
 TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cpu_called = false;
   bool cuda_called = false;
@@ -1921,7 +1926,6 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, fallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
   m.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
@@ -1931,10 +1935,9 @@ TEST(NewOperatorRegistrationTest, fallback) {
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool cpu_called = false;
   bool backend_generic_called = false;
@@ -1955,7 +1958,6 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   ASSERT_TRUE(backend_generic_called);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, TorchLibraryTwiceIsError) {
   {
     auto m = MAKE_TORCH_LIBRARY(test);
@@ -1971,7 +1973,6 @@ Tensor dummy_fn(const Tensor& x) {
   return x;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, CppFunction) {
   // Just show off the possible ways to register functions
   auto m = MAKE_TORCH_LIBRARY(test);
@@ -1999,7 +2000,6 @@ struct OpRegistrationListenerForDelayedListenerTest : public c10::OpRegistration
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, testDelayedListener) {
   auto listener = std::make_unique<OpRegistrationListenerForDelayedListenerTest>();
   auto listener_ptr = listener.get();
@@ -2019,7 +2019,6 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
   auto danglingImpls = Dispatcher::singleton().findDanglingImpls();
   std::string error_str = "Discovered operators that have been registered through the dispatcher"
@@ -2036,11 +2035,8 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
   ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_kernel_cpu = false;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_kernel_autograd = false;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool called_kernel_tracing = false;
 
 void cpu_kernel(Tensor) {
@@ -2071,7 +2067,6 @@ void tracing_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, Te
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_call_redispatchesToLowerPriorityKernels) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn(Tensor dummy) -> ()");
@@ -2095,7 +2090,6 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_call_redi
   EXPECT_TRUE(called_kernel_cpu);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_callBoxed_redispatchesToLowerPriorityKernels) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn(Tensor dummy) -> ()");
@@ -2119,7 +2113,6 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_callBoxed
   EXPECT_TRUE(called_kernel_cpu);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCallingConventions_redispatchesToLowerPriorityKernels) {
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn(Tensor dummy) -> ()");
@@ -2143,6 +2136,87 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCall
   EXPECT_TRUE(called_kernel_tracing);
   EXPECT_TRUE(called_kernel_autograd);
   EXPECT_TRUE(called_kernel_cpu);
+}
+
+TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
+  // should return every registered op
+  auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(std::nullopt);
+  // should return every registered op with a cpu kernel
+  auto cpu_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::DispatchKey::CPU);
+  ASSERT_TRUE(all_ops.size() > 0);
+  ASSERT_TRUE(cpu_ops.size() > 0);
+
+  auto cmp_lambda = [](const c10::OperatorName a, const c10::OperatorName& b) -> bool {
+      return c10::toString(a) < c10::toString(b);
+  };
+
+  std::sort(all_ops.begin(), all_ops.end(), cmp_lambda);
+  std::sort(cpu_ops.begin(), cpu_ops.end(), cmp_lambda);
+  ASSERT_TRUE(std::includes(all_ops.begin(), all_ops.end(), cpu_ops.begin(), cpu_ops.end(), cmp_lambda));
+}
+
+Tensor symint_op(const Tensor& self, int64_t length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymNonSymCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_op", "");
+
+  opHandle.typed<Tensor(const Tensor&, int64_t)>().call(dummyTensor(c10::DispatchKey::CPU), 4);
+  opHandle.typed<Tensor(const Tensor&, c10::SymInt)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+
+  expectThrows<c10::Error>([&] {
+    opHandle.typed<Tensor(const Tensor&, const c10::SymInt&)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+  }, "Tried to access or call an operator with a wrong signature");
+}
+
+Tensor symint_op2(const Tensor& self, c10::SymInt length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymSymCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op2));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_op", "");
+
+  opHandle.typed<Tensor(const Tensor&, int64_t)>().call(dummyTensor(c10::DispatchKey::CPU), 4);
+  opHandle.typed<Tensor(const Tensor&, c10::SymInt)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+  // TODO: We should reject this on principle, but today it accidentally works
+  // due to going through the boxed calling convention.
+  //
+  // First, we attempt to test if const SymInt& has SymInt. It does not,
+  // because we only accept something as SymInt if it has exactly SymInt in
+  // its signature. So we check if there is a non-symint kernel. But there is
+  // no non-SymInt kernel, because we only registered a real SymInt kernel.
+  // When this occurs, we fall back to the boxed calling convention.  And the
+  // boxed calling convention can deal with const SymInt& fine, as during
+  // boxing it will just create a SymInt to push onto the argument stack and
+  // everything is fine.
+  opHandle.typed<Tensor(const Tensor&, const c10::SymInt&)>().call(dummyTensor(c10::DispatchKey::CPU), c10::SymInt(4));
+}
+
+Tensor symint_op3(const Tensor& self, const c10::SymInt& length) {
+  return self.clone();
+}
+
+TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
+  }, "doesn't match the expected function schema");
 }
 
 }

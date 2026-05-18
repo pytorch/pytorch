@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/Export.h>
 
 #ifdef _WIN32
 #include <WinError.h>
@@ -22,13 +22,10 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
-int wmkstemps(wchar_t* tmpl, int suffix_len) {
+inline int wmkstemps(wchar_t* tmpl, int suffix_len) {
   int len;
   wchar_t* name;
   int fd = -1;
@@ -61,7 +58,7 @@ int wmkstemps(wchar_t* tmpl, int suffix_len) {
 #endif
 
 struct TempFile {
-  TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
+  AT_DISALLOW_COPY_AND_ASSIGN(TempFile);
 
   TempFile(const std::string& t, int suffix) {
 #ifdef _MSC_VER
@@ -135,7 +132,4 @@ struct TempFile {
   std::string name_;
 };
 
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

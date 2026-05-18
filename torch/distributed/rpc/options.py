@@ -1,12 +1,12 @@
-from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
-from . import constants as rpc_contants
-
+# mypy: allow-untyped-defs
 import torch
 
-from typing import Dict, List, Optional, Union
+from . import _is_tensorpipe_available, constants as rpc_contants
 
 
-DeviceType = Union[int, str, torch.device]
+DeviceType = int | str | torch.device
+
+__all__ = ["TensorPipeRpcBackendOptions"]
 
 
 def _to_device(device: DeviceType) -> torch.device:
@@ -19,11 +19,12 @@ def _to_device(device: DeviceType) -> torch.device:
     return device
 
 
-def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.device, torch.device]:
-    full_device_map : Dict[torch.device, torch.device] = {}
-    reverse_map : Dict[torch.device, torch.device] = {}
-    for k in device_map:
-        v = device_map[k]
+def _to_device_map(
+    device_map: dict[DeviceType, DeviceType],
+) -> dict[torch.device, torch.device]:
+    full_device_map: dict[torch.device, torch.device] = {}
+    reverse_map: dict[torch.device, torch.device] = {}
+    for k, v in device_map.items():
         k, v = torch.device(k), torch.device(v)
         if v in reverse_map:
             raise ValueError(
@@ -35,11 +36,17 @@ def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.devic
     return full_device_map
 
 
-def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
+def _to_device_list(devices: list[DeviceType]) -> list[torch.device]:
     return list(map(_to_device, devices))
 
 
+if _is_tensorpipe_available:  # type: ignore[has-type]
+    from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+else:
+    _TensorPipeRpcBackendOptionsBase = object  # type: ignore[assignment, misc]
 
+
+# pyrefly: ignore [invalid-inheritance]
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     r"""
     The backend options for
@@ -73,25 +80,24 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             requests, the agent will properly synchronize CUDA streams for
             all devices in this ``List``.
     """
+
     def __init__(
         self,
         *,
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Optional[Dict[str, Dict[DeviceType, DeviceType]]] = None,
-        devices: Optional[List[DeviceType]] = None,
-        _transports: List = None,
-        _channels: List = None,
+        device_maps: dict[str, dict[DeviceType, DeviceType]] | None = None,
+        devices: list[DeviceType] | None = None,
+        _transports: list | None = None,
+        _channels: list | None = None,
     ):
         full_device_maps = (
-            {} if device_maps is None else
-            {k : _to_device_map(v) for k, v in device_maps.items()}
+            {}
+            if device_maps is None
+            else {k: _to_device_map(v) for k, v in device_maps.items()}
         )
-        full_device_list = (
-            [] if devices is None else
-            _to_device_list(devices)
-        )
+        full_device_list = [] if devices is None else _to_device_list(devices)
         super().__init__(
             num_worker_threads,
             _transports,
@@ -102,19 +108,20 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             full_device_list,
         )
 
-    def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
+    def set_device_map(self, to: str, device_map: dict[DeviceType, DeviceType]):
         r"""
         Set device mapping between each RPC caller and callee pair. This
         function can be called multiple times to incrementally add
         device placement configurations.
 
         Args:
-            worker_name (str): Callee name.
+            to (str): Callee name.
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be
                 invertible.
 
-        Example::
+        Example:
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')
@@ -124,7 +131,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> options = TensorPipeRpcBackendOptions(
             >>>     num_worker_threads=8,
             >>>     device_maps={"worker1": {0: 1}}
-            >>>     # maps worker0's cuda:0 to worker1's cuda:1
+            >>> # maps worker0's cuda:0 to worker1's cuda:1
             >>> )
             >>> options.set_device_map("worker1", {1: 2})
             >>> # maps worker0's cuda:1 to worker1's cuda:2
@@ -159,7 +166,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
 
         super()._set_device_map(to, full_device_map)
 
-    def set_devices(self, devices: List[DeviceType]):
+    def set_devices(self, devices: list[DeviceType]):
         r"""
         Set local devices used by the TensorPipe RPC agent. When processing
         CUDA RPC requests, the TensorPipe RPC agent will properly synchronize

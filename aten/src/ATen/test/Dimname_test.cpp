@@ -2,13 +2,12 @@
 
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 using at::NameType;
 using at::Symbol;
 using at::Dimname;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, isValidIdentifier) {
   ASSERT_TRUE(Dimname::isValidName("a"));
   ASSERT_TRUE(Dimname::isValidName("batch"));
@@ -30,14 +29,12 @@ TEST(DimnameTest, isValidIdentifier) {
   ASSERT_FALSE(Dimname::isValidName("01"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, wildcardName) {
   Dimname wildcard = Dimname::wildcard();
   ASSERT_EQ(wildcard.type(), NameType::WILDCARD);
   ASSERT_EQ(wildcard.symbol(), Symbol::dimname("*"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, createNormalName) {
   auto foo = Symbol::dimname("foo");
   auto dimname = Dimname::fromSymbol(foo);
@@ -52,7 +49,7 @@ TEST(DimnameTest, createNormalName) {
 static void check_unify_and_match(
     const std::string& dimname,
     const std::string& other,
-    at::optional<const std::string> expected) {
+    std::optional<const std::string> expected) {
   auto dimname1 = Dimname::fromSymbol(Symbol::dimname(dimname));
   auto dimname2 = Dimname::fromSymbol(Symbol::dimname(other));
   auto result = dimname1.unify(dimname2);
@@ -67,11 +64,10 @@ static void check_unify_and_match(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, unifyAndMatch) {
   check_unify_and_match("a", "a", "a");
   check_unify_and_match("a", "*", "a");
   check_unify_and_match("*", "a", "a");
   check_unify_and_match("*", "*", "*");
-  check_unify_and_match("a", "b", c10::nullopt);
+  check_unify_and_match("a", "b", std::nullopt);
 }

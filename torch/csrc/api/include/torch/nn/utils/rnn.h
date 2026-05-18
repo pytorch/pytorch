@@ -1,19 +1,22 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace utils {
-namespace rnn {
+#include <utility>
+
+namespace torch::nn::utils::rnn {
 
 inline Tensor invert_permutation(const Tensor& permutation) {
   if (!permutation.defined()) {
     return torch::Tensor();
   }
-  Tensor output = torch::empty_like(permutation, torch::MemoryFormat::Contiguous);
-  output.scatter_(0, permutation,
-                  torch::arange(0, permutation.numel(), permutation.device()));
+  Tensor output =
+      torch::empty_like(permutation, torch::MemoryFormat::Contiguous);
+  output.scatter_(
+      0,
+      permutation,
+      torch::arange(0, permutation.numel(), permutation.device()));
   return output;
 }
 
@@ -64,16 +67,16 @@ class PackedSequence {
       unsorted_indices = invert_permutation(sorted_indices);
     }
     TORCH_CHECK(
-      batch_sizes.device().type() == kCPU,
-      "batch_sizes should always be on CPU. "
-      "Instances of PackedSequence should never be created manually. "
-      "They should be instantiated by functions like pack_sequence "
-      "and pack_padded_sequences in nn::utils::rnn. "
-      "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence");
-    data_ = data;
-    batch_sizes_ = batch_sizes;
-    sorted_indices_ = sorted_indices;
-    unsorted_indices_ = unsorted_indices;
+        batch_sizes.device().type() == kCPU,
+        "batch_sizes should always be on CPU. "
+        "Instances of PackedSequence should never be created manually. "
+        "They should be instantiated by functions like pack_sequence "
+        "and pack_padded_sequences in nn::utils::rnn. "
+        "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence");
+    data_ = std::move(data);
+    batch_sizes_ = std::move(batch_sizes);
+    sorted_indices_ = std::move(sorted_indices);
+    unsorted_indices_ = std::move(unsorted_indices);
   }
 
   const Tensor& data() const {
@@ -96,11 +99,11 @@ class PackedSequence {
     // Why not convert `batch_sizes`?
     // See NOTE [ device and dtype of a PackedSequence ]
     return PackedSequence(
-      data_.pin_memory(),
-      batch_sizes_,
-      sorted_indices_.defined() ? sorted_indices_.pin_memory() : Tensor(),
-      unsorted_indices_.defined() ? unsorted_indices_.pin_memory() : Tensor()
-    );
+        data_.pin_memory(),
+        batch_sizes_,
+        sorted_indices_.defined() ? sorted_indices_.pin_memory() : Tensor(),
+        unsorted_indices_.defined() ? unsorted_indices_.pin_memory()
+                                    : Tensor());
   }
 
   PackedSequence to(TensorOptions options) const {
@@ -117,11 +120,19 @@ class PackedSequence {
       return *this;
     } else {
       // Does not forward device or dtype args, device is set from data.device()
-      Tensor sorted_indices = sorted_indices_.defined() ?
-        sorted_indices_.to(options.device(data.device()).dtype(sorted_indices_.dtype())) : Tensor();
-      Tensor unsorted_indices = unsorted_indices_.defined() ?
-        unsorted_indices_.to(options.device(data.device()).dtype(unsorted_indices_.dtype())) : Tensor();
-      return PackedSequence(data, batch_sizes_, sorted_indices, unsorted_indices);
+      Tensor sorted_indices = sorted_indices_.defined()
+          ? sorted_indices_.to(
+                options.device(data.device()).dtype(sorted_indices_.dtype()))
+          : Tensor();
+      Tensor unsorted_indices = unsorted_indices_.defined()
+          ? unsorted_indices_.to(
+                options.device(data.device()).dtype(unsorted_indices_.dtype()))
+          : Tensor();
+      return PackedSequence(
+          std::move(data),
+          batch_sizes_,
+          std::move(sorted_indices),
+          std::move(unsorted_indices));
     }
   }
 
@@ -158,9 +169,10 @@ class PackedSequence {
 /// ``true``, ``B x T x *`` `input` is expected.
 ///
 /// For unsorted sequences, use `enforce_sorted = false`. If `enforce_sorted` is
-/// ``true``, the sequences should be sorted by length in a decreasing order, i.e.
-/// ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
-/// one.
+/// ``true``, the sequences should be sorted by length in a decreasing order,
+/// i.e.
+/// ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
+/// shortest one.
 ///
 /// Note:
 ///     This function accepts any input that has at least two dimensions. You
@@ -171,7 +183,8 @@ class PackedSequence {
 /// Arguments:
 ///     input (Tensor): padded batch of variable length sequences.
 ///     lengths (Tensor): list of sequences lengths of each batch element.
-///     batch_first (bool, optional): if ``true``, the input is expected in ``B x T x *``
+///     batch_first (bool, optional): if ``true``, the input is expected in ``B
+///     x T x *``
 ///         format. Default: ``false``.
 ///     enforce_sorted (bool, optional): if ``true``, the input is expected to
 ///         contain sequences sorted by length in a decreasing order. If
@@ -189,33 +202,37 @@ inline PackedSequence pack_padded_sequence(
   if (enforce_sorted) {
     sorted_indices = Tensor();
   } else {
-    std::tie(lengths, sorted_indices) = torch::sort(lengths, /*dim=*/-1, /*descending=*/true);
+    std::tie(lengths, sorted_indices) =
+        torch::sort(lengths, /*dim=*/-1, /*descending=*/true);
     sorted_indices = sorted_indices.to(input.device());
     int64_t batch_dim = batch_first ? 0 : 1;
     input = input.index_select(batch_dim, sorted_indices);
   }
 
-  Tensor data, batch_sizes;
-  std::tie(data, batch_sizes) = torch::_pack_padded_sequence(input, lengths, batch_first);
-  return PackedSequence(data, batch_sizes, sorted_indices, {});
+  auto [data, batch_sizes] =
+      torch::_pack_padded_sequence(input, lengths, batch_first);
+  return PackedSequence(
+      std::move(data), std::move(batch_sizes), std::move(sorted_indices), {});
 }
 
 /// Pads a packed batch of variable length sequences.
 ///
 /// It is an inverse operation to `pack_padded_sequence`.
 ///
-/// The returned Tensor's data will be of size ``T x B x *``, where `T` is the length
-/// of the longest sequence and `B` is the batch size. If ``batch_first`` is true,
-/// the data will be transposed into ``B x T x *`` format.
+/// The returned Tensor's data will be of size ``T x B x *``, where `T` is the
+/// length of the longest sequence and `B` is the batch size. If ``batch_first``
+/// is true, the data will be transposed into ``B x T x *`` format.
 ///
 /// Batch elements will be ordered decreasingly by their length.
 ///
 /// Arguments:
 ///     sequence (PackedSequence): batch to pad
-///     batch_first (bool, optional): if ``true``, the output will be in ``B x T x *``
+///     batch_first (bool, optional): if ``true``, the output will be in ``B x T
+///     x *``
 ///         format.
 ///     padding_value (double, optional): values for padded elements.
-///     total_length (int64_t, optional): if specified, the output will be padded to
+///     total_length (int64_t, optional): if specified, the output will be
+///     padded to
 ///         have length `total_length`. This method will throw error
 ///         if `total_length` is less than the max sequence length in
 ///         `sequence`.
@@ -224,28 +241,35 @@ inline PackedSequence pack_padded_sequence(
 ///     Tuple of Tensor containing the padded sequence, and a Tensor
 ///     containing the list of lengths of each sequence in the batch.
 inline std::tuple<Tensor, Tensor> pad_packed_sequence(
-    PackedSequence sequence,
+    const PackedSequence& sequence,
     bool batch_first = false,
     double padding_value = 0.0,
-    c10::optional<int64_t> total_length = torch::nullopt) {
+    std::optional<int64_t> total_length = std::nullopt) {
   int64_t max_seq_length = sequence.batch_sizes().size(0);
   if (total_length.has_value()) {
     int64_t total_length_val = total_length.value();
     TORCH_CHECK(
-      total_length_val >= max_seq_length,
-      "Expected total_length to be at least the length "
-      "of the longest sequence in input, but got "
-      "total_length=", total_length_val, " and max sequence length being ", max_seq_length);
+        total_length_val >= max_seq_length,
+        "Expected total_length to be at least the length "
+        "of the longest sequence in input, but got "
+        "total_length=",
+        total_length_val,
+        " and max sequence length being ",
+        max_seq_length);
     max_seq_length = total_length_val;
   }
-  Tensor padded_output, lengths;
-  std::tie(padded_output, lengths) = torch::_pad_packed_sequence(
-    sequence.data(), sequence.batch_sizes(), batch_first, padding_value, max_seq_length);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor unsorted_indices = sequence.unsorted_indices();
+  auto [padded_output, lengths] = torch::_pad_packed_sequence(
+      sequence.data(),
+      sequence.batch_sizes(),
+      batch_first,
+      padding_value,
+      max_seq_length);
+  const Tensor& unsorted_indices = sequence.unsorted_indices();
   if (unsorted_indices.defined()) {
     int64_t batch_dim = batch_first ? 0 : 1;
-    return std::make_tuple(padded_output.index_select(batch_dim, unsorted_indices), lengths.index({unsorted_indices}));
+    return std::make_tuple(
+        padded_output.index_select(batch_dim, unsorted_indices),
+        lengths.index({unsorted_indices.cpu()}));
   }
   return std::make_tuple(padded_output, lengths);
 }
@@ -269,9 +293,12 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 ///
 /// Arguments:
 ///     sequences (torch::ArrayRef<Tensor>): list of variable length sequences.
-///     batch_first (bool, optional): output will be in ``B x T x *`` if true, or in
+///     batch_first (bool, optional): output will be in ``B x T x *`` if true,
+///     or in
 ///         ``T x B x *`` otherwise
 ///     padding_value (double, optional): value for padded elements. Default: 0.
+///     padding_side (str, optional): the side to pad the sequences on. Default:
+///         "right".
 ///
 /// Returns:
 ///     Tensor of size ``T x B x *`` if `batch_first` is ``false``.
@@ -279,8 +306,9 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
-    double padding_value = 0) {
-  return at::pad_sequence(sequences, batch_first, padding_value);
+    double padding_value = 0,
+    std::string_view padding_side = "right") {
+  return at::pad_sequence(sequences, batch_first, padding_value, padding_side);
 }
 
 /// Packs a list of variable length Tensors
@@ -290,27 +318,31 @@ inline Tensor pad_sequence(
 /// including zero.
 ///
 /// For unsorted sequences, use `enforce_sorted = false`. If ``enforce_sorted``
-/// is ``true``, the sequences should be sorted in the order of decreasing length.
+/// is ``true``, the sequences should be sorted in the order of decreasing
+/// length.
 ///
 ///
 /// Arguments:
-///     sequences (torch::ArrayRef<Tensor>): A list of sequences of decreasing length.
-///     enforce_sorted (bool, optional): if ``true``, checks that the input
+///     sequences (torch::ArrayRef<Tensor>): A list of sequences of decreasing
+///     length. enforce_sorted (bool, optional): if ``true``, checks that the
+///     input
 ///         contains sequences sorted by length in a decreasing order. If
 ///         ``false``, this condition is not checked. Default: ``true``.
 ///
 /// Returns:
 ///     a `PackedSequence` object
-inline PackedSequence pack_sequence(ArrayRef<Tensor> sequences, bool enforce_sorted = true) {
+inline PackedSequence pack_sequence(
+    ArrayRef<Tensor> sequences,
+    bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
-  for (size_t i = 0; i < sequences.size(); i++) {
-    lengths[i] = sequences[i].size(0);
+  for (const auto i : c10::irange(sequences.size())) {
+    lengths[static_cast<int64_t>(i)] = sequences[i].size(0);
   }
   return pack_padded_sequence(
-    at::pad_sequence(sequences), lengths, /*batch_first=*/false, /*enforce_sorted=*/enforce_sorted);
+      at::pad_sequence(sequences),
+      std::move(lengths),
+      /*batch_first=*/false,
+      /*enforce_sorted=*/enforce_sorted);
 }
 
-} // namespace rnn
-} // namespace utils
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::utils::rnn

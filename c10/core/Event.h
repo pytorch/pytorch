@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineEvent.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -50,11 +54,8 @@ struct Event final {
   Event& operator=(const Event&) = delete;
 
   // Move constructor and move assignment operator
-  Event(Event&& other) : impl_{std::move(other.impl_)} {}
-  Event& operator=(Event&& other) {
-    impl_.swap(std::move(other.impl_));
-    return *this;
-  }
+  Event(Event&&) noexcept = default;
+  Event& operator=(Event&&) noexcept = default;
 
   // Destructor
   ~Event() = default;
@@ -88,7 +89,7 @@ struct Event final {
   /**
    * Increments the event's version and enqueues a job with this version
    * in the stream's work queue. When the stream process that job
-   * it nofifies all streams waiting on / blocked by that version of the
+   * it notifies all streams waiting on / blocked by that version of the
    * event to continue and marks that version as recorded.
    * */
   void record(const Stream& stream) {
@@ -115,6 +116,18 @@ struct Event final {
    */
   bool query() const {
     return impl_.query();
+  }
+
+  double elapsedTime(const Event& event) const {
+    return impl_.elapsedTime(event.impl_);
+  }
+
+  void* eventId() const {
+    return impl_.eventId();
+  }
+
+  void synchronize() const {
+    impl_.synchronize();
   }
 
  private:

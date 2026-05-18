@@ -3,68 +3,61 @@ set -x
 set -e
 
 VALGRIND_SUP="${PWD}/`dirname $0`/valgrind.sup"
-pushd $1
+export CPP_TESTS_DIR=$1
 
 VALGRIND=${VALGRIND:=ON}
-./basic
-./atest
-./scalar_test
-./broadcast_test
-./wrapdim_test
-./apply_utils_test
-./dlconvertor_test
-./native_test
-./scalar_tensor_test
-./tensor_interop_test
-./undefined_tensor_test
-./extension_backend_test
-./xla_tensor_test
-./tensor_iterator_test
-./Dimname_test
-./Dict_test
-./NamedTensor_test
-./cpu_generator_test
-./vmap_test
-if [[ -x ./cudnn_test ]]; then
-  ./cudnn_test
-fi
-if [[ -x ./cuda_generator_test ]]; then
-  ./cuda_generator_test
-fi
-if [[ -x ./apply_test ]]; then
-  ./apply_test
-fi
-if [[ -x ./stream_test ]]; then
-  ./stream_test
-fi
-if [[ -x ./cuda_half_test ]]; then
-  ./cuda_half_test
-fi
-if [[ -x ./cuda_vectorized_test ]]; then
-  ./cuda_vectorized_test
-fi
-if [[ -x ./cuda_distributions_test ]]; then
-  ./cuda_distributions_test
-fi
-if [[ -x ./cuda_optional_test ]]; then
-  ./cuda_optional_test
-fi
-if [[ -x ./cuda_tensor_interop_test ]]; then
-  ./cuda_tensor_interop_test
-fi
-if [[ -x ./cuda_complex_test ]]; then
-  ./cuda_complex_test
-fi
-if [[ -x ./cuda_complex_math_test ]]; then
-  ./cuda_complex_math_test
-fi
-if [[ -x ./cuda_cub_test ]]; then
-  ./cuda_cub_test
-fi
-if [ "$VALGRIND" == "ON" ]
-then
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
-fi
+python test/run_test.py --cpp --verbose -i \
+  cpp/basic \
+  cpp/atest \
+  cpp/scalar_test \
+  cpp/broadcast_test \
+  cpp/wrapdim_test \
+  cpp/apply_utils_test \
+  cpp/dlconvertor_test \
+  cpp/native_test \
+  cpp/scalar_tensor_test \
+  cpp/undefined_tensor_test \
+  cpp/extension_backend_test \
+  cpp/lazy_tensor_test \
+  cpp/tensor_iterator_test \
+  cpp/Dimname_test \
+  cpp/Dict_test \
+  cpp/NamedTensor_test \
+  cpp/cpu_generator_test \
+  cpp/legacy_vmap_test \
+  cpp/operators_test
 
-popd
+run_if_exists() {
+  local test_name="$1"
+  if [[ -x "${CPP_TESTS_DIR}/${test_name}" ]]; then
+    python test/run_test.py --cpp --verbose -i "cpp/${test_name}"
+  else
+    echo "Warning: $test_name does not exist."
+  fi
+}
+
+run_if_exists tensor_interop_test
+run_if_exists cudnn_test
+run_if_exists cuda_generator_test
+run_if_exists apply_test
+run_if_exists stream_test
+run_if_exists cuda_half_test
+run_if_exists cuda_vectorized_test
+run_if_exists cuda_distributions_test
+run_if_exists cuda_optional_test
+run_if_exists cuda_tensor_interop_test
+run_if_exists cuda_complex_test
+run_if_exists cuda_complex_math_test
+run_if_exists cuda_cub_test
+run_if_exists cuda_atomic_ops_test
+run_if_exists cuda_allocator_test
+
+if [ "$VALGRIND" == "ON" ]; then
+  # NB: As these tests are invoked by valgrind, let's leave them for now as it's
+  # unclear if valgrind -> python -> gtest would work
+  export LD_LIBRARY_PATH="${CPP_TESTS_DIR}:${LD_LIBRARY_PATH}"
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/basic" --gtest_filter='-*CUDA'
+  if [[ -x ${CPP_TESTS_DIR}/tensor_interop_test ]]; then
+    valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/tensor_interop_test"
+  fi
+fi

@@ -3,19 +3,15 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Response for the RRefBackwardReq.
 class TORCH_API RRefBackwardResp : public rpc::RpcCommandBase {
  public:
   RRefBackwardResp() = default;
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<RRefBackwardResp> fromMessage(
       const rpc::Message& message);
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

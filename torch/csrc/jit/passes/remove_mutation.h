@@ -1,21 +1,21 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+#include <utility>
+
+namespace torch::jit {
 
 struct TORCH_API MutationRemover {
   MutationRemover(
       std::shared_ptr<Graph> graph,
-      c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
-      : aliasDb_(nullptr), graph_(std::move(graph)) {
-    mutation_filter_ = mutation_filter;
-  }
+      std::optional<std::function<bool(Node*)>> mutation_filter = std::nullopt)
+      : mutation_filter_(std::move(mutation_filter)),
+        aliasDb_(nullptr),
+        graph_(std::move(graph)) {}
 
   // return true if graph is modified
   bool removeListMutation();
@@ -33,8 +33,9 @@ struct TORCH_API MutationRemover {
 
   bool inplaceOpVariant(Node* n);
 
+  static bool hasSideEffectOrAlias(Value* v, AliasDb* aliasDb);
+
  private:
-  bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
   bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
@@ -55,7 +56,7 @@ struct TORCH_API MutationRemover {
     return aliasDb_.get();
   }
 
-  c10::optional<std::function<bool(Node*)>> mutation_filter_;
+  std::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
@@ -71,7 +72,10 @@ TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
 // return true if graph is modified
 TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
-    c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
+    std::optional<std::function<bool(Node*)>> mutation_filter = std::nullopt);
 
-} // namespace jit
-} // namespace torch
+// Replaces in-place aten activation ops with their functional equivalence
+TORCH_API bool InplaceToFunctionalActivation(
+    const std::shared_ptr<Graph>& graph);
+
+} // namespace torch::jit

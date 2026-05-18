@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: mobile"]
+# mypy: allow-untyped-defs
+
+import io
+
+import cv2  # @manual
+
 import torch
 import torch.utils.bundled_inputs
-import io
-import cv2
 from torch.testing._internal.common_utils import TestCase
 
+
 torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
+
 
 def model_size(sm):
     buffer = io.BytesIO()
     torch.jit.save(sm, buffer)
     return len(buffer.getvalue())
 
+
 def save_and_load(sm):
     buffer = io.BytesIO()
     torch.jit.save(sm, buffer)
     buffer.seek(0)
     return torch.jit.load(buffer)
+
 
 """Return an InflatableArg that contains a tensor of the compressed image and the way to decode it
 
@@ -25,18 +34,26 @@ def save_and_load(sm):
                   if in NCHW format, N should be 1
     quality -- the quality needed to compress the image
 """
+
+
 def bundle_jpeg_image(img_tensor, quality):
     # turn NCHW to HWC
     if img_tensor.dim() == 4:
-        assert(img_tensor.size(0) == 1)
+        if img_tensor.size(0) != 1:
+            raise AssertionError(
+                f"img_tensor.size(0) must be 1, got {img_tensor.size(0)}"
+            )
         img_tensor = img_tensor[0].permute(1, 2, 0)
     pixels = img_tensor.numpy()
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     _, enc_img = cv2.imencode(".JPEG", pixels, encode_param)
     enc_img_tensor = torch.from_numpy(enc_img)
     enc_img_tensor = torch.flatten(enc_img_tensor).byte()
-    obj = torch.utils.bundled_inputs.InflatableArg(enc_img_tensor, "torch.ops.fb.decode_bundled_image({})")
+    obj = torch.utils.bundled_inputs.InflatableArg(
+        enc_img_tensor, "torch.ops.fb.decode_bundled_image({})"
+    )
     return obj
+
 
 def get_tensor_from_raw_BGR(im) -> torch.Tensor:
     raw_data = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
@@ -51,6 +68,7 @@ class TestBundledImages(TestCase):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
                 return arg
+
         im = cv2.imread("caffe2/test/test_img/p1.jpg")
         tensor = torch.from_numpy(im)
         inflatable_arg = bundle_jpeg_image(tensor, 90)
@@ -67,7 +85,7 @@ class TestBundledImages(TestCase):
         self.assertEqual(len(inflated), 1)
         self.assertEqual(len(inflated[0]), 1)
         self.assertEqual(raw_data.shape, decoded_data.shape)
-        self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol=1e-01))
+        self.assertEqual(raw_data, decoded_data, atol=0.1, rtol=1e-01)
 
         # Check if fb::image_decode_to_NCHW works as expected
         with open("caffe2/test/test_img/p1.jpg", "rb") as fp:
@@ -76,4 +94,11 @@ class TestBundledImages(TestCase):
             byte_tensor = torch.tensor(list(fp.read())).byte()
             im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
-            self.assertTrue(torch.allclose(raw_data, im2_tensor, atol=0.1, rtol=1e-01))
+            self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

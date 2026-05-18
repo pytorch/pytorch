@@ -8,10 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/ScalarType.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace nnc {
+namespace torch::jit::mobile::nnc {
 
 // Specify the requirements on an input tensor.
 // TODO: support input tensor with dynamic shape (PR #54982)
@@ -22,10 +19,10 @@ struct TORCH_API InputSpec {
   explicit InputSpec(const c10::IValue& value);
 
   // Serialize the spec into an IValue.
-  C10_NODISCARD c10::IValue serialize() const;
+  [[nodiscard]] c10::IValue serialize() const;
 
   // Check whether the input tensor adheres to the spec.
-  C10_NODISCARD bool validate(const at::Tensor& input) const;
+  [[nodiscard]] bool validate(const at::Tensor& input) const;
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
@@ -40,13 +37,15 @@ struct TORCH_API OutputSpec {
   explicit OutputSpec(const c10::IValue& value);
 
   // Serialize the spec into an IValue.
-  C10_NODISCARD c10::IValue serialize() const;
+  [[nodiscard]] c10::IValue serialize() const;
 
   // Allocate an output tensor in accordance with the spec.
-  C10_NODISCARD at::Tensor allocate() const;
+  [[nodiscard]] at::Tensor allocate() const;
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
+  std::optional<double> qscale_;
+  std::optional<int64_t> qzero_;
 };
 
 // Hold the temporary buffers / states needed during the execution.
@@ -82,11 +81,21 @@ struct TORCH_API MemoryPlan {
 
   explicit MemoryPlan(const c10::IValue& value);
 
-  C10_NODISCARD c10::IValue serialize() const;
+  [[nodiscard]] c10::IValue serialize() const;
 
   void allocate(ExecutionState* state) const;
 
   std::vector<int64_t> buffer_sizes_;
+};
+
+// Location of a symbolic shape among dimensions of the inputs
+struct TORCH_API SymbolicShapePosition {
+  SymbolicShapePosition() = default;
+  SymbolicShapePosition(int64_t input_idx, int64_t dim_idx)
+      : input_idx_(input_idx), dim_idx_(dim_idx) {}
+
+  int64_t input_idx_;
+  int64_t dim_idx_;
 };
 
 // Represents a compiled NNC function which has a 1-1 correspondence with a
@@ -124,11 +133,11 @@ class TORCH_API Function {
 
   // The parameters (e.g. weights / bias tensors) to be passed to the generated
   // NNC kernel.
-  const std::vector<at::Tensor>& parameters() const {
+  const c10::impl::GenericList& parameters() const {
     return parameters_;
   }
 
-  void set_parameters(const std::vector<at::Tensor>& parameters) {
+  void set_parameters(const c10::impl::GenericList& parameters) {
     parameters_ = parameters;
   }
 
@@ -144,7 +153,7 @@ class TORCH_API Function {
     return output_specs_;
   }
 
-  void set_output_spec(const std::vector<OutputSpec>& output_specs) {
+  void set_output_specs(const std::vector<OutputSpec>& output_specs) {
     output_specs_ = output_specs;
   }
 
@@ -156,14 +165,24 @@ class TORCH_API Function {
     memory_plan_ = memory_plan;
   }
 
+  const std::vector<SymbolicShapePosition>& sym_shape_positions() const {
+    return sym_shape_positions_;
+  }
+
+  void set_sym_shape_positions(
+      const std::vector<SymbolicShapePosition>& sym_shape_pos) {
+    sym_shape_positions_ = sym_shape_pos;
+  }
+
  private:
   void init_execution_state() const;
 
   c10::QualifiedName name_;
   std::string nnc_kernel_id_;
-  std::vector<at::Tensor> parameters_;
+  c10::impl::GenericList parameters_{at::AnyType::get()};
   std::vector<InputSpec> input_specs_;
   std::vector<OutputSpec> output_specs_;
+  std::vector<SymbolicShapePosition> sym_shape_positions_;
   MemoryPlan memory_plan_;
   mutable std::unique_ptr<ExecutionState> execution_state_;
 };
@@ -185,10 +204,10 @@ class TORCH_API CompilationUnit {
   // Serialize all registered functions into an IValue. The IValue will be save
   // into the compiled TorchScript model file ahead-of-time on the host, and
   // will be deserialized at runtime on the target device.
-  C10_NODISCARD c10::IValue serialize() const;
+  [[nodiscard]] c10::IValue serialize() const;
 
   // Execute a registered function.
-  C10_NODISCARD c10::impl::GenericList run(
+  [[nodiscard]] c10::impl::GenericList run(
       const c10::QualifiedName& function_name,
       const c10::impl::GenericList& inputs) const;
 
@@ -196,12 +215,9 @@ class TORCH_API CompilationUnit {
   void register_function(std::unique_ptr<Function> fn);
 
  private:
-  C10_NODISCARD Function* find_function(const c10::QualifiedName& qn) const;
+  [[nodiscard]] Function* find_function(const c10::QualifiedName& qn) const;
 
   std::unordered_map<c10::QualifiedName, std::unique_ptr<Function>> functions_;
 };
 
-} // namespace nnc
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile::nnc

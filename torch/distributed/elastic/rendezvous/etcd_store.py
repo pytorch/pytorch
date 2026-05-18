@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -8,12 +9,15 @@ import datetime
 import random
 import time
 from base64 import b64decode, b64encode
-from typing import Optional
-
-import etcd  # type: ignore[import]
 
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 
 # Delay (sleep) for a small random amount to reduce CAS failures.
@@ -25,8 +29,9 @@ def cas_delay():
 # pyre-fixme[11]: Annotation `Store` is not defined as a type.
 class EtcdStore(Store):
     """
-    Implements a c10 Store interface by piggybacking on the rendezvous etcd
-    instance. This is the store object returned by ``EtcdRendezvous``
+    Implement a c10 Store interface by piggybacking on the rendezvous etcd instance.
+
+    This is the store object returned by ``EtcdRendezvous``.
     """
 
     def __init__(
@@ -34,7 +39,7 @@ class EtcdStore(Store):
         etcd_client,
         etcd_store_prefix,
         # Default timeout same as in c10d/Store.hpp
-        timeout: Optional[datetime.timedelta] = None,
+        timeout: datetime.timedelta | None = None,
     ):
         super().__init__()  # required for pybind trampoline.
 
@@ -50,6 +55,7 @@ class EtcdStore(Store):
     def set(self, key, value):
         """
         Write a key/value pair into ``EtcdStore``.
+
         Both key and value may be either Python ``str`` or ``bytes``.
         """
         self.client.set(key=self.prefix + self._encode(key), value=self._encode(value))
@@ -78,8 +84,9 @@ class EtcdStore(Store):
 
     def add(self, key, num: int) -> int:
         """
-        Atomically increment a value by an integer amount. The integer is
-        represented as a string using base 10. If key is not present,
+        Atomically increment a value by an integer amount.
+
+        The integer is represented as a string using base 10. If key is not present,
         a default value of ``0`` will be assumed.
 
         Returns:
@@ -113,9 +120,10 @@ class EtcdStore(Store):
             except etcd.EtcdCompareFailed:
                 cas_delay()
 
-    def wait(self, keys, override_timeout: Optional[datetime.timedelta] = None):
+    # pyrefly: ignore [bad-override]
+    def wait(self, keys, override_timeout: datetime.timedelta | None = None):
         """
-        Waits until all of the keys are published, or until timeout.
+        Wait until all of the keys are published, or until timeout.
 
         Raises:
             LookupError - if timeout occurs
@@ -127,9 +135,7 @@ class EtcdStore(Store):
         # No return value on success
 
     def check(self, keys) -> bool:
-        """
-        Check if all of the keys are immediately present (without waiting).
-        """
+        """Check if all of the keys are immediately present (without waiting)."""
         b64_keys = [self.prefix + self._encode(key) for key in keys]
         kvs = self._try_wait_get(
             b64_keys,
@@ -143,9 +149,9 @@ class EtcdStore(Store):
     # In case of `str`, utf-8 encoding is assumed.
     #
     def _encode(self, value) -> str:
-        if type(value) == bytes:
+        if type(value) is bytes:
             return b64encode(value).decode()
-        elif type(value) == str:
+        elif type(value) is str:
             return b64encode(value.encode()).decode()
         raise ValueError("Value must be of type str or bytes")
 
@@ -154,9 +160,9 @@ class EtcdStore(Store):
     # Return type is `bytes`, which is more convenient with the Store interface.
     #
     def _decode(self, value) -> bytes:
-        if type(value) == bytes:
+        if type(value) is bytes:
             return b64decode(value)
-        elif type(value) == str:
+        elif type(value) is str:
             return b64decode(value.encode())
         raise ValueError("Value must be of type str or bytes")
 
@@ -174,25 +180,32 @@ class EtcdStore(Store):
 
         while True:
             # Read whole directory (of keys), filter only the ones waited for
-            all_nodes = self.client.get(key=self.prefix)
-            req_nodes = {
-                node.key: node.value for node in all_nodes.children if node.key in b64_keys
-            }
+            all_nodes = None
+            try:
+                all_nodes = self.client.get(key=self.prefix)
+                req_nodes = {
+                    node.key: node.value
+                    for node in all_nodes.children
+                    if node.key in b64_keys
+                }
 
-            if len(req_nodes) == len(b64_keys):
-                # All keys are available
-                return req_nodes
+                if len(req_nodes) == len(b64_keys):
+                    # All keys are available
+                    return req_nodes
+            except etcd.EtcdKeyNotFound:
+                pass
 
             watch_timeout = deadline - time.time()
             if watch_timeout <= 0:
                 return None
 
             try:
+                index = all_nodes.etcd_index + 1 if all_nodes else 0
                 self.client.watch(
                     key=self.prefix,
                     recursive=True,
                     timeout=watch_timeout,
-                    index=all_nodes.etcd_index + 1,
+                    index=index,
                 )
             except etcd.EtcdWatchTimedOut:
                 if time.time() >= deadline:

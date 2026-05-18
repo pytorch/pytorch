@@ -2,8 +2,10 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
+
+TORCH_API bool canFuseOnCPULegacy();
+TORCH_API void overrideCanFuseOnCPULegacy(bool value);
 
 // NB: Be sure to run DCE before fusion, because dead instructions
 // can prevent fusion opportunities from being exploited.
@@ -30,5 +32,4 @@ TORCH_API void CustomFuseGraph(
     Symbol kind,
     size_t arg_limit = std::numeric_limits<size_t>::max());
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

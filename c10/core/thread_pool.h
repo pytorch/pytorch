@@ -1,20 +1,22 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
 #include <utility>
+#include <vector>
 
-#include <c10/util/Optional.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Registry.h>
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
 
 namespace c10 {
 
-// TODO: move this to C10 and make it C10_API
 class C10_API TaskThreadPoolBase {
  public:
   virtual void run(std::function<void()> func) = 0;
@@ -31,22 +33,18 @@ class C10_API TaskThreadPoolBase {
    */
   virtual bool inThreadPool() const = 0;
 
-  virtual ~TaskThreadPoolBase() noexcept {}
+  virtual ~TaskThreadPoolBase() noexcept = default;
 
-  static size_t defaultNumThreads() {
-    auto num_threads = std::thread::hardware_concurrency();
-#if defined(_M_X64) || defined(__x86_64__)
-    num_threads /= 2;
-#endif
-    return num_threads;
-  }
+  static size_t defaultNumThreads();
 };
 
 class C10_API ThreadPool : public c10::TaskThreadPoolBase {
  protected:
   struct task_element_t {
     bool run_with_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void()> no_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void(std::size_t)> with_id;
 
     explicit task_element_t(std::function<void()> f)
@@ -57,7 +55,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
   std::queue<task_element_t> tasks_;
   std::vector<std::thread> threads_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable condition_;
   std::condition_variable completed_;
   std::atomic_bool running_;
@@ -72,9 +70,9 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   explicit ThreadPool(
       int pool_size,
       int numa_node_id = -1,
-      std::function<void()> init_thread = nullptr);
+      const std::function<void()>& init_thread = nullptr);
 
-  ~ThreadPool();
+  ~ThreadPool() override;
 
   size_t size() const override;
 
@@ -105,7 +103,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
 class C10_API TaskThreadPool : public c10::ThreadPool {
  public:
-  explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
+  explicit TaskThreadPool(int pool_size, int numa_node_id = -1)
       : ThreadPool(pool_size, numa_node_id, [numa_node_id]() {
           setThreadName("CaffeTaskThread");
           NUMABind(numa_node_id);

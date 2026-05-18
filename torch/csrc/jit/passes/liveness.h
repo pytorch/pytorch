@@ -5,13 +5,13 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/sparse_bitset.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <list>
 #include <unordered_map>
 #include <vector>
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 using SparseBitVector = ::c10::SparseBitVector<256>;
 
@@ -19,5 +19,4 @@ using SparseBitVector = ::c10::SparseBitVector<256>;
 // "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
 TORCH_API std::unordered_map<Node*, std::vector<Value*>> BuildLivenessSets(
     std::shared_ptr<Graph> graph);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

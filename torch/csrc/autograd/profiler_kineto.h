@@ -1,257 +1,243 @@
 #pragma once
 
-#include <torch/csrc/autograd/profiler_legacy.h>
+#include <string>
+#include <vector>
 
-#ifdef USE_KINETO
-// skip Kineto dependency on mobile
-#ifdef C10_MOBILE
-#undef USE_KINETO
-#endif
-#endif
-
-#ifdef USE_KINETO
-namespace libkineto {
-struct TraceActivity;
-class ActivityTraceInterface;
-}
-#endif
+#include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/events.h>
+#include <torch/csrc/profiler/stubs/base.h>
+#include <torch/csrc/profiler/util.h>
 
 namespace torch {
-namespace autograd {
-namespace profiler {
 
-enum class C10_API_ENUM ActivityType {
-  CPU = 0,
-  CUDA, // CUDA kernels, runtime
-  NUM_KINETO_ACTIVITIES, // must be the last one
-};
+namespace profiler::impl {
+struct Result;
+namespace kineto {
+struct ActivityTraceWrapper;
+} // namespace kineto
+} // namespace profiler::impl
 
-#ifdef USE_KINETO
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  c10::optional<std::vector<std::string>> dtypes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-  // Extra arguments for computing op flops
-  c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-};
+namespace autograd::profiler {
+using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
+using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
-  uint64_t startThreadId() const {
-    return start_thread_id_;
-  }
+  KinetoEvent(
+      const std::shared_ptr<const torch::profiler::impl::Result>& /*result*/,
+      const bool verbose);
 
-  uint64_t endThreadId() const {
-    return end_thread_id_;
-  }
-
-  uint8_t activityType() const {
-    return activity_type_;
-  }
-
-  uint64_t fwdThreadId() const {
-    return fwd_thread_id_;
-  }
-
-  bool hasShapes() const {
-    return shapes_ != c10::nullopt;
-  }
-
-  const std::vector<std::vector<int64_t>>& shapes() const {
-    return *shapes_;
-  }
-
-  bool hasTypes() const {
-    return dtypes_ != c10::nullopt;
-  }
-
-  const std::vector<std::string>& dtypes() const {
-    return *dtypes_;
-  }
-
-  uint64_t flops() const {
-    return flops_;
-  }
-
-  int64_t sequenceNr() const {
-    return sequence_nr_;
-  }
-
-  bool hasStack() const {
-    return stack_ != c10::nullopt;
-  }
-
-  const std::vector<std::string>& stack() const {
-    return *stack_;
-  }
-
-  uint8_t scope() const {
-    return scope_;
-  }
-
-  KinetoEvent& startThreadId(uint64_t start_thread_id) {
-    start_thread_id_ = start_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& endThreadId(uint64_t end_thread_id) {
-    end_thread_id_ = end_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& fwdThreadId(uint64_t fwd_thread_id) {
-    fwd_thread_id_ = fwd_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
-    shapes_ = shapes;
-    return *this;
-  }
-
-  KinetoEvent& dtypes(const std::vector<std::string>& dtypes) {
-    dtypes_ = dtypes;
-    return *this;
-  }
-
-  KinetoEvent& flops(uint64_t flops) {
-    flops_ = flops;
-    return *this;
-  }
-
-  KinetoEvent& sequenceNr(int64_t sequence_nr) {
-    sequence_nr_ = sequence_nr;
-    return *this;
-  }
-
-  KinetoEvent& stack(const std::vector<std::string>& st) {
-    stack_ = st;
-    return *this;
-  }
-
-  KinetoEvent& scope(uint8_t scope) {
-    scope_ = scope;
-    return *this;
-  }
-
-  KinetoEvent& setAsync(bool is_async) {
-    is_async_ = is_async;
-    return *this;
-  }
-
-  // Kineto fields
-
-  KinetoEvent& activity(const libkineto::TraceActivity& activity);
-
-  std::string name() const {
-    return name_;
-  }
-
-  bool isAsync() const {
-    return is_async_;
-  }
-
-  uint64_t deviceIndex() const {
-    return device_index_;
-  }
-
-  uint64_t startUs() const {
-    return start_us_;
-  }
-
-  uint64_t durationUs() const {
-    return duration_us_;
-  }
-
-  uint64_t correlationId() const {
-    return correlation_id_;
-  }
-
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
-    correlation_id_ = correlation_id;
-    return *this;
-  }
-
-  uint64_t linkedCorrelationId() const {
-    return linked_correlation_id_;
-  }
-
-  int64_t deviceResourceId() const {
-    return device_resource_id_;
-  }
-
+  uint64_t startThreadId() const;
+  uint64_t endThreadId() const;
+  uint8_t activityType() const;
+  uint64_t fwdThreadId() const;
+  bool hasShapes() const;
+  const c10::ArrayRef<std::vector<int64_t>> shapes() const;
+  bool hasTypes() const;
+  const c10::ArrayRef<std::string> dtypes() const;
+  bool hasConcreteInputs() const;
+  const c10::ArrayRef<c10::IValue> concreteInputs() const;
+  bool hasKwinputs() const;
+  bool isHiddenEvent() const;
+  const std::unordered_map<std::string, c10::IValue> kwinputs() const;
+  uint64_t flops() const;
+  int64_t sequenceNr() const;
+  bool hasStack() const;
+  const c10::ArrayRef<std::string> stack() const;
+  uint8_t scope() const;
+  bool hasModuleHierarchy() const;
+  const c10::ArrayRef<std::string> moduleHierarchy() const;
+  int64_t debugHandle() const;
+  std::string name() const;
+  std::string overload_name() const;
   c10::DeviceType deviceType() const;
+  int deviceIndex() const;
+  int64_t nBytes() const;
+  uint64_t startNs() const;
+  uint64_t endNs() const;
+  uint64_t durationNs() const;
+  bool isAsync() const;
+  uint64_t correlationId() const;
+  uint64_t linkedCorrelationId() const;
+  uint32_t flowId() const;
+  uint32_t flowType() const;
+  bool flowStart() const;
+  int64_t externalId() const;
+  int64_t deviceResourceId() const;
+  std::string backend() const;
+  bool isPythonFunction() const;
+  int64_t cudaElapsedUs() const;
+  int64_t privateuse1ElapsedUs() const;
+  void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
+  extra_meta_t extraMeta() const;
+  std::string metadataJson() const;
 
-  uint64_t start_thread_id_ = 0;
-  uint64_t end_thread_id_ = 0;
-  uint64_t fwd_thread_id_ = 0;
-  int64_t sequence_nr_ = -1;
-  uint8_t scope_ = 0;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
+      const;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputStrides()
+      const;
+  int64_t pythonId() const;
+  int64_t pythonParentId() const;
+  int64_t pythonModuleId() const;
 
-  uint8_t activity_type_ = 0;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes_;
-  c10::optional<std::vector<std::string>> stack_;
-  c10::optional<std::vector<std::string>> dtypes_;
-  uint64_t flops_ = 0;
+ private:
+  torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackEnd() const;
 
-  std::string name_;
-  uint64_t device_index_ = 0;
-  uint64_t start_us_ = 0;
-  uint64_t duration_us_ = 0;
-  uint64_t correlation_id_ = 0;
-  uint64_t linked_correlation_id_ = 0;
-  int64_t device_resource_id_ = 0;
-  bool is_async_{false};
+  std::shared_ptr<const torch::profiler::impl::Result> result_;
+  std::vector<std::string> python_stack_;
+
+  // Copy fields from result so we can return ArrayRefs.
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::string> dtypes_;
+  std::vector<c10::IValue> concrete_inputs_;
+  std::unordered_map<std::string, c10::IValue> kwinputs_;
+  std::vector<torch::profiler::impl::shape> structured_input_shapes_;
+  std::vector<torch::profiler::impl::shape> structured_input_strides_;
 };
 
 // Consolidating events returned directly from Kineto
 // with events manually created by us (e.g. start/stop marks,
 // memory allocation events)
 struct TORCH_API ProfilerResult {
+  ProfilerResult();
   ProfilerResult(
+      uint64_t start_time,
       std::vector<KinetoEvent> events,
-      thread_event_lists legacy_events,
-      std::unique_ptr<libkineto::ActivityTraceInterface> trace);
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+          trace,
+      std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
+
+  uint64_t trace_start_ns() const {
+    return trace_start_ns_;
+  }
 
   const std::vector<KinetoEvent>& events() const {
     return events_;
   }
 
-  const thread_event_lists& legacy_events() const {
-    return legacy_events_;
+  const std::vector<experimental_event_t>& event_tree() const {
+    return event_tree_;
   }
 
   void save(const std::string& path);
 
  private:
-  bool saved_ = false;
+  uint64_t trace_start_ns_ = 0;
   std::vector<KinetoEvent> events_;
-  thread_event_lists legacy_events_;
-  std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
+  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
+  std::vector<experimental_event_t> event_tree_;
 };
 
+/*
+ * This API is used by backends to record latency of events that
+ * happened in the backend but were not visible to pytorch runtime.
+ * For example, if part of the model is lowered to a dsp backend, then
+ * the execution of that part of the model is delegated to the backend.
+ * When backend finishes execution it has an option to provide profiling
+ * information (latency only at the moment) corresponding to different operators
+ * that were executed in the backend.
+ * When such events are recorded by backend using this API, the event
+ * records will be collected by active kineto profiler. If no kineto profiler
+ * is active then the event is ignored.
+ * This provides us with a way to generate all the profiling information
+ * for a model regardless of where model (or part of it) executed.
+ * @param start_time_us: start time in us of the event
+ * @param end_time_us: end time in us of the event
+ * @param debug_handle: debug handle to correlate this event/op with
+ * model level module/source information
+ * @param scope: scope of the event, e.g. LITE_INTERPRETER, RECORD_FN etc.
+ * @param event_name: name of the event, e.g. op name
+ * @param backend_name: name of the backend where the event took place.
+ */
+TORCH_API void reportBackendEventToActiveKinetoProfiler(
+    const int64_t start_time_us,
+    const int64_t end_time_us,
+    const int64_t debug_handle,
+    const at::RecordScope scope,
+    const std::string& event_name,
+    const std::string& backend_name);
+
 TORCH_API void enableProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes = {});
+
+/*
+ * Same as enableProfiler but with callback to do post-processing of
+ * KinetoEvents.
+ * enableProfilerWithEventPostProcess enables profiler to capture
+ * specified activities, with specified RecordFunction scope, if any.
+ * Additionally, it takes a functor that does in-place post processing of
+ * events, e.g. populate stack trace or module hierarchy information lazily
+ * using debug_handle.
+ * Example usage is with lite interpreter that has recording scope of
+ * LITE_INTERPRETER. In this case lite interpreter runtime, records debug
+ * handles in RecordFunction, along with other information. Debug handles are
+ * eventually passed down to KinetoEvent and recorded as part of the event.
+ * KinetoEdgeCPUProfiler, in torch/csrc/jit/mobile/profiler_edge.cpp, enables
+ * profiler using post-processing callback, via
+ * enableProfilerWithEventPostProcess, that takes these debug handles and
+ * generates stack trace and module hierarchy information, once profiling is
+ * done.
+ */
+using post_process_t = std::function<void(
+    /*debug_handle */ int64_t,
+    /*jit_stack    */ std::vector<std::string>&,
+    /*jit_modules  */ std::vector<std::string>&)>;
+TORCH_API void enableProfilerWithEventPostProcess(
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    post_process_t&& cb,
+    const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+using ActivityFilter = std::unordered_map<
+    torch::profiler::impl::ActivityType,
+    std::unordered_set<std::string>>;
 TORCH_API void prepareProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter = {});
 
-TORCH_API void addMetadata(
-    const std::string& key, const std::string& value);
-#endif // USE_KINETO
+TORCH_API void toggleCollectionDynamic(
+    const bool enable,
+    const std::set<torch::profiler::impl::ActivityType>& activities);
 
-} // namespace profiler
-}} // namespace torch::autograd
+TORCH_API void startMemoryProfile();
+TORCH_API void stopMemoryProfile();
+TORCH_API void exportMemoryProfile(const std::string& path);
+
+/**
+ * When a C++ thread really has no control over how the profiler was enabled,
+ * for example, by some unreachable Python code, it can call these functions
+ * to test/join/unjoin itself into the collection set of a profiler, if any.
+ * Without calling these functions, the symptom may be "not seeing GPU events
+ * from some child C++ threads". This is an example on how to use them,
+ *
+ *    using namespace torch::autograd::profiler;
+ *    bool enabled = isProfilerEnabledInMainThread();
+ *    if (enabled != saved_enabled_state) {
+ *      if (enabled) {
+ *        enableProfilerInChildThread();
+ *      } else {
+ *        disableProfilerInChildThread();
+ *      }
+ *      saved_enabled_state = enabled;
+ *    }
+ */
+TORCH_API bool isProfilerEnabledInMainThread();
+TORCH_API void enableProfilerInChildThread();
+TORCH_API void disableProfilerInChildThread();
+
+} // namespace autograd::profiler
+
+namespace profiler::impl {
+
+// Experimental.
+TORCH_API void _reportVulkanEventToProfiler(vulkan_id_t id);
+
+} // namespace profiler::impl
+
+} // namespace torch

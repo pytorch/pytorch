@@ -1,19 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <torch/library.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/threshold_native.h>
+#endif
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qthreshold_stub);
 
 // the underlying implementation for quantized threshold kernel
-Tensor quantized_threshold_impl(
+static Tensor quantized_threshold_impl(
     const Tensor& qx,
     const Scalar& threshold,
     const Scalar& value) {
@@ -39,5 +44,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::threshold"), TORCH_FN(threshold_quantized_cpu));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

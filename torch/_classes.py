@@ -1,31 +1,37 @@
 import types
+from typing import Any
+
 import torch._C
 
+
 class _ClassNamespace(types.ModuleType):
-    def __init__(self, name):
-        super(_ClassNamespace, self).__init__('torch.classes' + name)
+    def __init__(self, name: str) -> None:
+        super().__init__("torch.classes" + name)
         self.name = name
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
         if proxy is None:
-            raise RuntimeError(f'Class {self.name}.{attr} not registered!')
+            raise RuntimeError(f"Class {self.name}.{attr} not registered!")
         return proxy
 
-class _Classes(types.ModuleType):
-    def __init__(self):
-        super(_Classes, self).__init__('torch.classes')
 
-    def __getattr__(self, name):
+class _Classes(types.ModuleType):
+    __file__ = "_classes.py"
+
+    def __init__(self) -> None:
+        super().__init__("torch.classes")
+
+    def __getattr__(self, name: str) -> _ClassNamespace:
         namespace = _ClassNamespace(name)
         setattr(self, name, namespace)
         return namespace
 
     @property
-    def loaded_libraries(self):
+    def loaded_libraries(self) -> Any:
         return torch.ops.loaded_libraries
 
-    def load_library(self, path):
+    def load_library(self, path: str) -> None:
         """
         Loads a shared library from the given path into the current process.
 
@@ -44,6 +50,7 @@ class _Classes(types.ModuleType):
             path (str): A path to a shared library to load.
         """
         torch.ops.load_library(path)
+
 
 # The classes "namespace"
 classes = _Classes()

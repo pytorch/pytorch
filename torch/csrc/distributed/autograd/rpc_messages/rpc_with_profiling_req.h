@@ -6,16 +6,14 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
  public:
   // For sending RPCs, invoked when client is creating this RPC command.
   RpcWithProfilingReq(
       rpc::MessageType messageType,
-      rpc::Message&& wrappedMessage,
+      c10::intrusive_ptr<rpc::Message> wrappedMessage,
       torch::autograd::profiler::ProfilerConfig&& profilerConfig,
       rpc::ProfilingId profilingKeyId);
 
@@ -30,7 +28,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::ProfilingId profilingKeyId);
 
   // Convert this RPC Command to a Message that can be sent over the wire.
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingReq> fromMessage(
       const rpc::Message& message);
 
@@ -48,15 +46,16 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
 
  private:
   // message type
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const rpc::MessageType messageType_;
   // wrapped message
-  rpc::Message wrappedMessage_;
+  c10::intrusive_ptr<rpc::Message> wrappedMessage_;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const torch::autograd::profiler::ProfilerConfig profilerConfig_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const rpc::ProfilingId profilingKeyId_;
 };
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

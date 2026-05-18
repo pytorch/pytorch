@@ -2,8 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Intrusive doubly linked lists with sane reverse iterators.
 // The header file is named generic_graph_node_list.h because it is ONLY
@@ -60,12 +59,12 @@ struct generic_graph_node_list_iterator {
   generic_graph_node_list_iterator(T* cur, int d) : cur(cur), d(d) {}
   generic_graph_node_list_iterator(
       const generic_graph_node_list_iterator& rhs) = default;
-  generic_graph_node_list_iterator(generic_graph_node_list_iterator&& rhs) =
-      default;
+  generic_graph_node_list_iterator(
+      generic_graph_node_list_iterator&& rhs) noexcept = default;
   generic_graph_node_list_iterator& operator=(
       const generic_graph_node_list_iterator& rhs) = default;
   generic_graph_node_list_iterator& operator=(
-      generic_graph_node_list_iterator&& rhs) = default;
+      generic_graph_node_list_iterator&& rhs) noexcept = default;
   T* operator*() const {
     return cur;
   }
@@ -184,8 +183,7 @@ static inline bool operator!=(
   return *a != *b;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 

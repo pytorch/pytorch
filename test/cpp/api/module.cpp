@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -18,7 +19,6 @@ struct AGIUnit2 : torch::nn::Module {
 
 struct ModuleTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CanEnableAndDisableTrainingMode) {
   Linear module(3, 4);
   ASSERT_TRUE(module->is_training());
@@ -30,7 +30,6 @@ TEST_F(ModuleTest, CanEnableAndDisableTrainingMode) {
   ASSERT_TRUE(module->is_training());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ZeroGrad) {
   Linear module(3, 4);
   auto weight = torch::ones({8, 3}, torch::requires_grad());
@@ -46,12 +45,10 @@ TEST_F(ModuleTest, ZeroGrad) {
   for (auto& parameter : module->parameters()) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
-    ASSERT_TRUE(grad.defined());
-    ASSERT_EQ(grad.sum().item<float>(), 0);
+    ASSERT_FALSE(grad.defined());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ZeroGradWithUndefined) {
   struct TestModule : torch::nn::Module {
     TestModule() {
@@ -68,15 +65,19 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_TRUE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());
 
-  module.zero_grad();
+  module.zero_grad(false); // set_to_none = false
 
   ASSERT_TRUE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());
 
   ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
+
+  module.zero_grad();
+
+  ASSERT_FALSE(module.x.grad().defined());
+  ASSERT_FALSE(module.y.grad().defined());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -87,7 +88,6 @@ TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
       "Submodule name must not be empty");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
@@ -97,7 +97,6 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
       "Submodule 'linear' already defined");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
   torch::nn::Module model;
   ASSERT_THROWS_WITH(
@@ -105,7 +104,6 @@ TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
       "Submodule 'linear' is not defined");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ReplaceModule) {
   struct TestModel : public torch::nn::Module {
     torch::nn::Linear l1{nullptr};
@@ -119,7 +117,6 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, UnregisterModule) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
@@ -131,7 +128,6 @@ TEST_F(ModuleTest, UnregisterModule) {
   ASSERT_TRUE(model.children().empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -142,7 +138,6 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
       "Parameter name must not be empty");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
@@ -152,12 +147,12 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
       "Parameter 'p' already defined");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
   struct TestModel : public torch::nn::Module {};
   {
     TestModel model;
-    model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
+    model.register_parameter(
+        "undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
     ASSERT_EQ(model.parameters().size(), 0);
   }
   {
@@ -168,15 +163,13 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
     ASSERT_EQ(model.parameters().size(), 0);
 
     ASSERT_EQ(
-      count_substr_occurrences(
-        warnings.str(),
-        "Ignoring the `requires_grad=true` function parameter"
-      ),
-    1);
+        count_substr_occurrences(
+            warnings.str(),
+            "Ignoring the `requires_grad=true` function parameter"),
+        1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -187,7 +180,6 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
       "Buffer name must not be empty");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
@@ -196,7 +188,6 @@ TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
       model.register_buffer("p", torch::ones(5)), "Buffer 'p' already defined");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CanGetName) {
   // CHECK instead of REQUIRE because demangling may fail.
   AGIUnit agi;
@@ -208,7 +199,6 @@ TEST_F(ModuleTest, CanGetName) {
   EXPECT_EQ(test::AGIUnit2().name(), "Foo");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, AsCastsModulesCorrectly) {
   Linear module(3, 4);
   ASSERT_EQ(module->as<Linear>(), module.get());
@@ -238,7 +228,8 @@ TEST_F(ModuleTest, AsCastsModulesCorrectly) {
 }
 
 void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
-  torch::Device to_device, torch::Dtype to_dtype) {
+    torch::Device to_device,
+    torch::Dtype to_dtype) {
   {
     // Case 1: Undefined tensors as parameters
     Linear module(LinearOptions(10, 20).bias(false));
@@ -257,7 +248,8 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
   {
     // Case 2: Undefined tensors as buffers
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(true));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(false).affine(true));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->running_mean.defined());
 
@@ -273,17 +265,15 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
   test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCPU, torch::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
-  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(
+      torch::kCUDA, torch::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
   {
     Linear module(LinearOptions(10, 20).bias(false));
@@ -297,7 +287,8 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_TRUE(pointer_equal(named_params["weight"], module->weight));
   }
   {
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(false).affine(false));
 
     auto buffers = module->buffers();
     ASSERT_EQ(buffers.size(), 0);
@@ -305,7 +296,8 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_EQ(named_buffers.size(), 0);
   }
   {
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(true).affine(false));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(true).affine(false));
 
     auto buffers = module->buffers();
     ASSERT_EQ(buffers.size(), 3);
@@ -313,15 +305,18 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_EQ(named_buffers.size(), 3);
 
     ASSERT_TRUE(pointer_equal(buffers[0], named_buffers["running_mean"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["running_mean"], module->running_mean));
+    ASSERT_TRUE(
+        pointer_equal(named_buffers["running_mean"], module->running_mean));
     ASSERT_TRUE(pointer_equal(buffers[1], named_buffers["running_var"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["running_var"], module->running_var));
-    ASSERT_TRUE(pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["num_batches_tracked"], module->num_batches_tracked));
+    ASSERT_TRUE(
+        pointer_equal(named_buffers["running_var"], module->running_var));
+    ASSERT_TRUE(
+        pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
+    ASSERT_TRUE(pointer_equal(
+        named_buffers["num_batches_tracked"], module->num_batches_tracked));
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
@@ -347,15 +342,22 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
     }
   }
   {
-    module->to(torch::kInt32);
-    for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter.dtype(), torch::kInt32);
-    }
-  }
-  {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
       ASSERT_EQ(parameter.dtype(), torch::kFloat64);
+    }
+  }
+}
+
+TEST_F(ModuleTest, Conversion_NoGrad_MultiCUDA) {
+  Linear module(128, 64);
+  for (auto& parameter : module->parameters()) {
+    parameter.requires_grad_(false);
+  }
+  {
+    module->to(torch::kInt32);
+    for (auto& parameter : module->parameters()) {
+      ASSERT_EQ(parameter.dtype(), torch::kInt32);
     }
   }
   {
@@ -370,19 +372,17 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CallingCloneOnModuleThatDoesNotOverrideCloneThrows) {
   struct UnCloneable : Module {};
   UnCloneable module;
   ASSERT_THROWS_WITH(module.clone(), "clone() has not been implemented");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
   struct Cloneable : Module {
     std::shared_ptr<Module> clone(
-        const torch::optional<torch::Device>& device =
-            torch::nullopt) const override {
+        const std::optional<torch::Device>& device =
+            std::nullopt) const override {
       return nullptr;
     }
   };
@@ -409,7 +409,9 @@ struct TestDistinctParametersModule
   torch::Tensor buffer;
 };
 
-void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> m2) {
+void testDistinctParameters(
+    std::shared_ptr<Module> m1,
+    std::shared_ptr<Module> m2) {
   auto params1 = m1->named_parameters();
   auto params2 = m2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
@@ -437,7 +439,6 @@ void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> 
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
   auto module = std::make_shared<TestDistinctParametersModule>();
   torch::NoGradGuard no_grad;
@@ -445,7 +446,6 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
   testDistinctParameters(module, module2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_CUDA) {
   auto module = std::make_shared<TestDistinctParametersModule>();
   torch::NoGradGuard no_grad;
@@ -455,7 +455,6 @@ TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_CUDA) {
   testDistinctParameters(module, module2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
   auto module = std::make_shared<TestDistinctParametersModule>();
   torch::NoGradGuard no_grad;
@@ -478,7 +477,6 @@ TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
   testDistinctParameters(module, module2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
   // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
@@ -511,7 +509,6 @@ TEST_F(ModuleTest, ClonePreservesExternalReferences) {
       pointer_equal(module2->weight, module->named_parameters()["weight"]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
   // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
@@ -556,7 +553,6 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
   ASSERT_EQ(b->module->value, a->module->value);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
   // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
@@ -591,7 +587,6 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     ModuleTest,
     CloningToAParticularDevicePlacesAllParametersThere_MultiCUDA) {
@@ -636,14 +631,12 @@ struct ParameterTestModule : Module {
   torch::Tensor a, b, c;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, HasCorrectNumberOfParameters) {
   ParameterTestModule module;
   ASSERT_EQ(module.parameters().size(), 3);
   ASSERT_EQ(module.named_parameters().size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ContainsParametersWithTheCorrectName) {
   ParameterTestModule module;
   auto parameters = module.named_parameters();
@@ -662,14 +655,12 @@ struct BufferTestModule : Module {
   torch::Tensor a, b, c;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, HasCorrectNumberOfBuffers) {
   BufferTestModule module;
   ASSERT_EQ(module.buffers().size(), 3);
   ASSERT_EQ(module.named_buffers().size(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ContainsBuffersWithTheCorrectName) {
   BufferTestModule module;
   auto buffers = module.named_buffers();
@@ -685,7 +676,6 @@ struct AImpl : torch::nn::Module {
 };
 TORCH_MODULE(A);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     ModuleTest,
     DefaultConstructorOfModuleHolderCallsDefaultConstructorOfImpl) {
@@ -695,7 +685,6 @@ TEST_F(
   ASSERT_EQ(a->x_, 123);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     ModuleTest,
     ValueConstructorOfModuleHolderCallsCorrectConstructorInImpl) {
@@ -705,7 +694,6 @@ TEST_F(
   ASSERT_EQ(a->x_, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NullptrConstructorLeavesTheModuleHolderInEmptyState) {
   A a = nullptr;
   ASSERT_FALSE(a);
@@ -728,20 +716,18 @@ struct TestModule : public torch::nn::Module {
   torch::Tensor p1, p2, b1, b2;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForFlatModel) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   std::vector<std::shared_ptr<torch::nn::Module>> modules =
@@ -749,13 +735,12 @@ TEST_F(ModuleTest, ModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForFlatModel) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
@@ -763,14 +748,13 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), i ? std::to_string(i - 1) : std::string());
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
@@ -779,21 +763,20 @@ TEST_F(ModuleTest, NamedModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ChildrenReturnsExpectedSubmodulesForFlatModel) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->children();
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -802,7 +785,6 @@ TEST_F(ModuleTest, ChildrenReturnsExpectedSubmodulesForFlatModel) {
   ASSERT_EQ(modules, model->modules(/*include_self=*/false));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedChildrenReturnsExpectedNamedSubmodulesForFlatModel) {
   torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
   torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
@@ -810,14 +792,13 @@ TEST_F(ModuleTest, NamedChildrenReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> parameters = module.parameters();
@@ -826,7 +807,6 @@ TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
   ASSERT_EQ(parameters[1].data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   torch::OrderedDict<std::string, torch::Tensor> parameters =
@@ -838,7 +818,6 @@ TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
   ASSERT_EQ(parameters[1]->data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> buffers = module.buffers();
@@ -847,7 +826,6 @@ TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
   ASSERT_EQ(buffers[1].data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   torch::OrderedDict<std::string, torch::Tensor> buffers =
@@ -862,7 +840,7 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
 struct TestContainer : torch::nn::Module {
   TestContainer(int64_t number, std::vector<TestContainer> modules = {})
       : tensor(torch::tensor(number)) {
-    for (size_t i = 0; i < modules.size(); ++i) {
+    for (const auto i : c10::irange(modules.size())) {
       register_module(
           std::to_string(i),
           std::make_shared<TestContainer>(std::move(modules[i])));
@@ -889,30 +867,29 @@ std::shared_ptr<TestContainer> make_deeply_nested_test_container() {
 
 std::vector<std::pair<std::string, int64_t>>
 make_key_value_pairs_for_deeply_nested_container() {
-  return {{"test_prefix", 0},
-          {"test_prefix.0", 1},
-          {"test_prefix.0.0", 2},
-          {"test_prefix.0.1", 3},
-          {"test_prefix.1", 4},
-          {"test_prefix.2", 5},
-          {"test_prefix.2.0", 6},
-          {"test_prefix.2.1", 7},
-          {"test_prefix.2.1.0", 8},
-          {"test_prefix.2.1.1", 9}};
+  return {
+      {"test_prefix", 0},
+      {"test_prefix.0", 1},
+      {"test_prefix.0.0", 2},
+      {"test_prefix.0.1", 3},
+      {"test_prefix.1", 4},
+      {"test_prefix.2", 5},
+      {"test_prefix.2.0", 6},
+      {"test_prefix.2.1", 7},
+      {"test_prefix.2.1.0", 8},
+      {"test_prefix.2.1.1", 9}};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForDeepModel) {
   auto model = make_deeply_nested_test_container();
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
 
   ASSERT_EQ(modules.size(), 10);
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(get_test_container_item(modules[i]), i);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForDeepModel) {
   auto model = make_deeply_nested_test_container();
   torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
@@ -921,13 +898,12 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForDeepModel) {
 
   ASSERT_EQ(modules.size(), expected.size());
 
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     ASSERT_EQ(modules[i].key(), expected[i].first);
     ASSERT_EQ(get_test_container_item(modules[i].value()), expected[i].second);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ChildrensReturnsExpectedSubmodulesForDeepModel) {
   auto model = make_deeply_nested_test_container();
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->children();
@@ -938,7 +914,6 @@ TEST_F(ModuleTest, ChildrensReturnsExpectedSubmodulesForDeepModel) {
   ASSERT_EQ(get_test_container_item(modules[2]), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedChildrensReturnsExpectedNamedSubmodulesForDeepModel) {
   auto model = make_deeply_nested_test_container();
   torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
@@ -956,7 +931,6 @@ TEST_F(ModuleTest, NamedChildrensReturnsExpectedNamedSubmodulesForDeepModel) {
   ASSERT_EQ(modules[2].key(), "2");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ModuleApplyIteratesCorreclty) {
   auto model = make_deeply_nested_test_container();
   int64_t index = 0;
@@ -966,7 +940,6 @@ TEST_F(ModuleTest, ModuleApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ConstModuleApplyIteratesCorreclty) {
   std::shared_ptr<const TestContainer> model =
       make_deeply_nested_test_container();
@@ -977,7 +950,6 @@ TEST_F(ModuleTest, ConstModuleApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedModuleApplyIteratesCorreclty) {
   auto model = make_deeply_nested_test_container();
   auto expected = make_key_value_pairs_for_deeply_nested_container();
@@ -993,7 +965,6 @@ TEST_F(ModuleTest, NamedModuleApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ConstNamedModuleApplyIteratesCorreclty) {
   std::shared_ptr<const TestContainer> model =
       make_deeply_nested_test_container();
@@ -1011,7 +982,6 @@ TEST_F(ModuleTest, ConstNamedModuleApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ModulePointerApplyIteratesCorreclty) {
   auto model = make_deeply_nested_test_container();
   int64_t index = 0;
@@ -1021,7 +991,6 @@ TEST_F(ModuleTest, ModulePointerApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, NamedModulePointerApplyIteratesCorreclty) {
   auto model = make_deeply_nested_test_container();
   auto expected = make_key_value_pairs_for_deeply_nested_container();
@@ -1037,7 +1006,6 @@ TEST_F(ModuleTest, NamedModulePointerApplyIteratesCorreclty) {
   ASSERT_EQ(index, 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
   {
     TestModule module(1);
@@ -1060,7 +1028,6 @@ TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
 
 struct EmptyModule : torch::nn::Module {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, PrettyPrint) {
   struct TestModule : torch::nn::Module {
     TestModule(int x, float y) : x_(x), y_(y) {}
@@ -1073,7 +1040,6 @@ TEST_F(ModuleTest, PrettyPrint) {
     float y_;
   };
 
-
   ASSERT_EQ(c10::str(EmptyModule{}), "EmptyModule");
   ASSERT_EQ(c10::str(TestModule(1, 3.14)), "TestModule(x=1, y=3.14)");
 }
@@ -1085,7 +1051,6 @@ struct ModuleWithNonTensorForwardImpl : torch::nn::Module {
 };
 TORCH_MODULE(ModuleWithNonTensorForward);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, CanCallForwardOnNonTensorForwardThroughPimpl) {
   ModuleWithNonTensorForward m;
   ASSERT_EQ(m(torch::ones(123)), 123);

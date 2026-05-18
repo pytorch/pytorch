@@ -1,12 +1,18 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/autograd/generated/ViewFuncs.h"
 
 #include <torch/library.h>
-
-
-#include <ATen/RedispatchFunctions.h>
+#include <ATen/FunctionalInverses.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 // ${generated_comment}
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Operators.h>
+#else
+$ops_headers
+#endif
 
 using namespace at;
 using torch::autograd::CreationMeta;

@@ -1,4 +1,4 @@
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/Utils.h>
 
@@ -25,9 +25,9 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
   // do random permutation inside each island.
   data += tid;
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  const auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
+  curand_init(seed, tid, offset, &state);
   for (int i = island_size - 1; i > 0; i--) {
     unsigned int r = curand(&state) % (i + 1);
     if (i != r) {
@@ -40,7 +40,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
 // See note [Algorithm of randperm]
 template<typename T, typename scalar_t>
-void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n, c10::optional<at::Generator> &gen_) {
+void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n, std::optional<at::Generator> &gen_) {
   auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int64_t counter_offset = n;
   at::PhiloxCudaState rng_engine_inputs;
@@ -52,6 +52,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   T mask = static_cast<T>((1UL << bits) - 1);
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
     keys, data, mask, n, rng_engine_inputs);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 }

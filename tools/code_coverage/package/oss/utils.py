@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import os
 import subprocess
-from typing import List, Optional
 
-from ..util.setting import TOOLS_FOLDER, CompilerType, TestType
+from ..util.setting import CompilerType, TestType, TOOLS_FOLDER
 from ..util.utils import print_error, remove_file
 
 
 def get_oss_binary_folder(test_type: TestType) -> str:
-    assert test_type in {TestType.CPP, TestType.PY}
+    if test_type not in {TestType.CPP, TestType.PY}:
+        raise AssertionError(f"Invalid test_type: {test_type}")
     # TODO: change the way we get binary file -- binary may not in build/bin ?
     return os.path.join(
         get_pytorch_folder(), "build/bin" if test_type == TestType.CPP else "test"
     )
 
 
-def get_oss_shared_library() -> List[str]:
+def get_oss_shared_library() -> list[str]:
     lib_dir = os.path.join(get_pytorch_folder(), "build", "lib")
     return [
         os.path.join(lib_dir, lib)
@@ -24,7 +26,8 @@ def get_oss_shared_library() -> List[str]:
 
 
 def get_oss_binary_file(test_name: str, test_type: TestType) -> str:
-    assert test_type in {TestType.CPP, TestType.PY}
+    if test_type not in {TestType.CPP, TestType.PY}:
+        raise AssertionError(f"Invalid test_type: {test_type}")
     binary_folder = get_oss_binary_folder(test_type)
     binary_file = os.path.join(binary_folder, test_name)
     if test_type == TestType.PY:
@@ -42,13 +45,11 @@ def get_llvm_tool_path() -> str:
 def get_pytorch_folder() -> str:
     # TOOLS_FOLDER in oss: pytorch/tools/code_coverage
     return os.path.abspath(
-        os.environ.get(
-            "PYTORCH_FOLDER", os.path.join(TOOLS_FOLDER, os.path.pardir, os.path.pardir)
-        )
+        os.environ.get("PYTORCH_FOLDER", os.path.dirname(os.path.dirname(TOOLS_FOLDER)))
     )
 
 
-def detect_compiler_type() -> Optional[CompilerType]:
+def detect_compiler_type() -> CompilerType | None:
     # check if user specifies the compiler type
     user_specify = os.environ.get("CXX", None)
     if user_specify:
@@ -76,14 +77,13 @@ def clean_up_gcda() -> None:
         remove_file(item)
 
 
-def get_gcda_files() -> List[str]:
+def get_gcda_files() -> list[str]:
     folder_has_gcda = os.path.join(get_pytorch_folder(), "build")
     if os.path.isdir(folder_has_gcda):
         # TODO use glob
         # output = glob.glob(f"{folder_has_gcda}/**/*.gcda")
         output = subprocess.check_output(["find", folder_has_gcda, "-iname", "*.gcda"])
-        output = output.decode("utf-8").split("\n")
-        return output
+        return output.decode("utf-8").split("\n")
     else:
         return []
 

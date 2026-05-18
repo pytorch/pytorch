@@ -1,16 +1,22 @@
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/reduction.h>
-#include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
-template <typename Op>
-void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
+namespace detail {
+template <typename T>
+void deducer(BinaryOpNode<T>);
+
+bool deducer(...);
+} // namespace detail
+
+template <
+    typename D,
+    std::enable_if_t<
+        std::is_same_v<decltype(detail::deducer(std::declval<D>())), void>>* =
+        nullptr>
+static void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -19,39 +25,39 @@ void verifyBitwiseOp(const BitwiseOpNode<Op>* v, IRVerifier* verifier) {
   }
 }
 
-void IRVerifier::visit(const And* v) {
+void IRVerifier::visit(const AndPtr& v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Or* v) {
+void IRVerifier::visit(const OrPtr& v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Xor* v) {
+void IRVerifier::visit(const XorPtr& v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Lshift* v) {
+void IRVerifier::visit(const LshiftPtr& v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Rshift* v) {
+void IRVerifier::visit(const RshiftPtr& v) {
   verifyBitwiseOp(v, this);
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Mod* v) {
+void IRVerifier::visit(const ModPtr& v) {
   if (!v->dtype().is_integral() && !v->dtype().is_floating_point()) {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const CompareSelect* v) {
+void IRVerifier::visit(const CompareSelectPtr& v) {
   if (v->ret_val1()->dtype() != v->ret_val2()->dtype()) {
     throw malformed_ir("bad dtype in CompareSelect");
   }
@@ -61,21 +67,21 @@ void IRVerifier::visit(const CompareSelect* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Ramp* v) {
+void IRVerifier::visit(const RampPtr& v) {
   if (v->stride()->dtype() != v->base()->dtype()) {
     throw malformed_ir("Bad stride in Ramp");
   }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Load* v) {
-  const auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+void IRVerifier::visit(const LoadPtr& v) {
+  auto indices = v->indices();
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Load base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {
@@ -86,14 +92,15 @@ void IRVerifier::visit(const Load* v) {
   if (indices.size() > 1 && index_dtype.lanes() > 1) {
     throw malformed_ir("Multilane is only allowed in a flattened index");
   }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    throw malformed_ir("Index scalar dtype is not Int!");
+  if (index_dtype.scalar_type() != ScalarType::Int &&
+      index_dtype.scalar_type() != ScalarType::Long) {
+    throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
 
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const IfThenElse* v) {
+void IRVerifier::visit(const IfThenElsePtr& v) {
   if (!v->condition()->dtype().is_integral()) {
     throw unsupported_dtype();
   }
@@ -106,19 +113,31 @@ void IRVerifier::visit(const IfThenElse* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Intrinsics* v) {
+void IRVerifier::visit(const IntrinsicsPtr& v) {
+  if (v->op_type() == kIsNan) {
+    if (v->dtype().scalar_type() != c10::kInt) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+    IRVisitor::visit(v);
+    return;
+  }
   // TODO: add a check for OpArgCount and op_type
+  for (auto const& param : v->params()) {
+    if (param->dtype() != v->dtype()) {
+      throw malformed_ir("bad dtype in intrinsic arg");
+    }
+  }
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Store* v) {
-  const auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+void IRVerifier::visit(const StorePtr& v) {
+  auto indices = v->indices();
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Store base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {
@@ -129,8 +148,9 @@ void IRVerifier::visit(const Store* v) {
   if (indices.size() > 1 && index_dtype.lanes() > 1) {
     throw malformed_ir("Multilane is only allowed in a flattened index");
   }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    throw malformed_ir("Index scalar dtype is not Int!");
+  if (index_dtype.scalar_type() != ScalarType::Int &&
+      index_dtype.scalar_type() != ScalarType::Long) {
+    throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
   if (v->buf()->dtype() != v->value()->dtype()) {
     throw malformed_ir("buf and value dtype mismatch in Store");
@@ -139,7 +159,7 @@ void IRVerifier::visit(const Store* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const For* v) {
+void IRVerifier::visit(const ForPtr& v) {
   if (!v->var()) {
     throw malformed_ir("nullptr Var in For loop");
   } else if (!v->start()) {
@@ -152,8 +172,8 @@ void IRVerifier::visit(const For* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+void IRVerifier::visit(const BlockPtr& v) {
+  for (const StmtPtr& s : v->stmts()) {
     if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
@@ -161,24 +181,22 @@ void IRVerifier::visit(const Block* v) {
   IRVisitor::visit(v);
 }
 
-void IRVerifier::visit(const ExternalCall* v) {
+void IRVerifier::visit(const ExternalCallPtr& v) {
   IRVisitor::visit(v);
 }
 
-void verify(Stmt* s) {
+void verify(const StmtPtr& s) {
   IRVerifier verifier;
   s->accept(&verifier);
 }
 
-void verify(const Expr* e) {
+void verify(const ExprPtr& e) {
   IRVerifier verifier;
   e->accept(&verifier);
 }
 
-void verify(ExprHandle e) {
+void verify(const ExprHandle& e) {
   verify(e.node());
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

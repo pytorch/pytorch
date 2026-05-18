@@ -1,24 +1,28 @@
+# mypy: allow-untyped-defs
+
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/rl/main.py
 # and https://pytorch.org/tutorials/intermediate/rpc_tutorial.html
 
 import numpy as np
-from itertools import count
 
 import torch
 import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributed.rpc import RRef, rpc_sync, rpc_async, remote
+from torch.distributed.rpc import remote, rpc_async, rpc_sync, RRef
 from torch.distributions import Categorical
-
 from torch.testing._internal.dist_utils import dist_init, worker_name
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
+)
+
 
 TOTAL_EPISODE_STEP = 5000
 GAMMA = 0.1
 SEED = 543
+
 
 def _call_method(method, rref, *args, **kwargs):
     r"""
@@ -42,8 +46,9 @@ class Policy(nn.Module):
     Copying the code to make these two examples independent.
     See https://github.com/pytorch/examples/tree/master/reinforcement_learning
     """
-    def __init__(self):
-        super(Policy, self).__init__()
+
+    def __init__(self) -> None:
+        super().__init__()
         self.affine1 = nn.Linear(4, 128)
         self.dropout = nn.Dropout(p=0.6)
         self.affine2 = nn.Linear(128, 2)
@@ -66,6 +71,7 @@ class DummyEnv:
     tests in this file. It is designed to run for a set max number of iterations,
     returning random states and rewards at each step.
     """
+
     def __init__(self, state_dim=4, num_iters=10, reward_threshold=475.0):
         self.state_dim = state_dim
         self.num_iters = num_iters
@@ -95,7 +101,8 @@ class Observer:
     select an action. Then, the observer applies the action to its environment
     and reports the reward to the agent.
     """
-    def __init__(self):
+
+    def __init__(self) -> None:
         self.id = rpc.get_worker_info().id
         self.env = DummyEnv()
         self.env.seed(SEED)
@@ -107,8 +114,8 @@ class Observer:
             agent_rref (RRef): an RRef referencing the agent object.
             n_steps (int): number of steps in this episode
         """
-        state, ep_reward = self.env.reset(), 0
-        for step in range(n_steps):
+        state, _ep_reward = self.env.reset(), 0
+        for _ in range(n_steps):
             # send the state to the agent to get an action
             action = _remote_method(Agent.select_action, agent_rref, self.id, state)
 
@@ -165,18 +172,17 @@ class Agent:
         r"""
         Run one episode. The agent will tell each observer to run n_steps.
         """
-        futs = []
-        for ob_rref in self.ob_rrefs:
-            # make async RPC to kick off an episode on all observers
-            futs.append(
-                rpc_async(
-                    ob_rref.owner(),
-                    _call_method,
-                    args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps)
-                )
+        # make async RPC to kick off an episode on all observers
+        futs = [
+            rpc_async(
+                ob_rref.owner(),
+                _call_method,
+                args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps),
             )
+            for ob_rref in self.ob_rrefs
+        ]
 
-        # wait until all obervers have finished this episode
+        # wait until all observers have finished this episode
         for fut in futs:
             fut.wait()
 
@@ -196,7 +202,7 @@ class Agent:
             rewards.extend(self.rewards[ob_id])
 
         # use the minimum observer reward to calculate the running reward
-        min_reward = min([sum(self.rewards[ob_id]) for ob_id in self.rewards])
+        min_reward = min(sum(self.rewards[ob_id]) for ob_id in self.rewards)
         self.running_reward = 0.05 * min_reward + (1 - 0.05) * self.running_reward
 
         # clear saved probs and rewards
@@ -210,7 +216,7 @@ class Agent:
             returns.insert(0, R)
         returns = torch.tensor(returns)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
-        for log_prob, R in zip(probs, returns):
+        for log_prob, R in zip(probs, returns, strict=True):
             policy_loss.append(-log_prob * R)
         self.optimizer.zero_grad()
         policy_loss = torch.cat(policy_loss).sum()
@@ -220,12 +226,12 @@ class Agent:
 
 
 def run_agent(agent, n_steps):
-    for i_episode in count(1):
+    while True:
         agent.run_episode(n_steps=n_steps)
-        last_reward = agent.finish_episode()
+        agent.finish_episode()
 
         if agent.running_reward > agent.reward_threshold:
-            print("Solved! Running reward is now {}!".format(agent.running_reward))
+            print(f"Solved! Running reward is now {agent.running_reward}!")
             break
 
 

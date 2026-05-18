@@ -1,38 +1,68 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/ScalarOps.h>
+#include <ATen/Config.h>
 
-namespace at {
-namespace meta {
+#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/Resize.h>
+#include <ATen/native/GroupedMMUtils.h>
+#include <ATen/BlasBackend.h>
+#if !defined(__s390x__) && !defined(__powerpc__)
+#include <cpuinfo.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmv.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul_cpu_dispatch.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/matmul.h>
+#endif
+
+namespace at::meta {
 TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() <= 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
 
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
-     "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
+    "size mismatch, got input (", self.size(0), "), mat (", mat.size(0), "x", mat.size(1), "), vec (", vec.size(0), ")");
+
+  TORCH_CHECK(self.scalar_type() == mat.scalar_type() && mat.scalar_type() == vec.scalar_type(),
+    "addmv input tensors must have the same dtype, but got ", self.scalar_type(), ", ", mat.scalar_type(), ", and ", vec.scalar_type());
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, mat.options(), names);
-  auto result = maybe_get_output(0);
-  //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
-  TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",
-  "size equal to mat.size(0), yet got output size ", result.sizes(), " and mat.size(0) ", mat.size(0));
+  set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
-}
+} // namespace at::meta
 
-namespace native {
-
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+namespace at::native {
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 
 template<typename scalar_t>
-scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
-constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+template<typename scalar_t>
+scalar_t vdot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
+
+static constexpr bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
@@ -54,7 +84,7 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
-              beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
+              beta_, self.scalar_type(), std::nullopt /* layout */, at::kCPU, std::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents is ignored
@@ -62,22 +92,29 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
+
+      NoNamesGuard guard;
+      if (use_mkldnn_matmul(mat, vec, /*result=*/Tensor())){
+        mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
+        return;
+      }
+
       auto r_stride = result.stride(0);
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, mat.scalar_type(), "addmv_impl_cpu", [&] {
         auto beta = beta_.to<scalar_t>();
         auto alpha = alpha_.to<scalar_t>();
         if (mat.stride(0) == 1 && lda_cond(mat.size(0), mat.size(1), mat.stride(1))) {
-          gemv<scalar_t>('n', mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1),
-              vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+          gemv<scalar_t>('n', mat.size(0), mat.size(1), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(1),
+              vec.const_data_ptr<scalar_t>(), vec.stride(0), beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else if (mat.stride(1) == 1 && lda_cond(mat.size(1), mat.size(0), mat.stride(0))) {
-          gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
-              vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+          gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(0),
+              vec.const_data_ptr<scalar_t>(), vec.stride(0), beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else {
           Tensor cmat = mat.contiguous();
-          gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
-              vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+          gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, cmat.const_data_ptr<scalar_t>(), cmat.stride(0),
+              vec.const_data_ptr<scalar_t>(), vec.stride(0), beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
       });
     }
@@ -90,20 +127,20 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //it's not a hard error, because we allow resizing result, but it becomes a hard error
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
-  if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
-    Tensor self_addmv = at::empty({self.size(0)}, self.options());
+  if (result.dim() > 1 || (result.numel() != self.size(0) && result.numel() != 1)) {
+    Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }
   return at::addmv_out(result, result, self, vec, 0, 1);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  Tensor result = at::empty({self.size(0)}, self.options());
+  Tensor result = at::empty({self.size(0)}, vec.options());
   //inplace version is more efficient if we can use it
   return at::addmv_(result, self, vec, 0, 1);
 }
 
-inline void dot_check(const Tensor& self, const Tensor& other) {
+static inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
       "1D tensors expected, but got ",
@@ -133,33 +170,69 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 }
 
 Tensor dot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return (at::native::dot(self.conj(), other.conj())).conj();
+       } else {
+         return at::native::vdot(self.conj(), other);
+       }
+    } else if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self);
+    }
+  }
 
+  at::NoNamesGuard guard;
   dot_check(self, other);
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
+
+  if (use_mkldnn_matmul(self, other, /*result=*/Tensor())){
+    // mkldnn matmul expect result have sizes info to create ideep tensor
+    auto r =  at::empty({1, 1}, self.options());
+    mkldnn_matmul(self, other, r, /*beta=*/0);
+    return r;
+  }
+
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
-    result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
+    result.fill_(dot_impl<scalar_t>(self.numel(), self.const_data_ptr<scalar_t>(), self.stride(0), other.const_data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
   // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()){
     return at::dot(self, other);
   }
 
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return at::native::vdot(other.conj(), self.conj());
+    } else {
+      return at::native::dot(self.conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return (at::native::dot(self, other.conj())).conj();
+  }
+
+  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
+
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
-    result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
+    result.fill_(vdot_impl<scalar_t>(self.numel(), self.const_data_ptr<scalar_t>(), self.stride(0), other.const_data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
 
 }
 
-}}  // namespace at::native
+}  // namespace at::native

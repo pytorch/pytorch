@@ -2,20 +2,20 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 const std::string ScriptCall::BUILTIN_OP_NAMESPACE_("torch.ops.aten.");
 const std::string ScriptCall::ATEN_PREFIX_("aten::");
 
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<at::IValue>&& stack)
     : op_(std::move(op)), stack_(stack), isAsyncExecution_(false) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<at::IValue>&& stack,
     const bool isAsyncExecution)
     : qualifiedName_(qualifiedName),
@@ -23,19 +23,21 @@ ScriptCall::ScriptCall(
       isAsyncExecution_(isAsyncExecution) {}
 
 bool ScriptCall::hasOp() const {
-  return op_ ? true : false;
+  return op_.has_value();
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
-  return *op_;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return op_.value();
 }
 
 bool ScriptCall::hasQualifiedName() const {
-  return qualifiedName_ ? true : false;
+  return qualifiedName_.has_value();
 }
 
-const c10::QualifiedName ScriptCall::qualifiedName() const {
-  return *qualifiedName_;
+const c10::QualifiedName& ScriptCall::qualifiedName() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return qualifiedName_.value();
 }
 
 const std::vector<at::IValue>& ScriptCall::stack() const {
@@ -51,7 +53,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     ivalues.push_back(value);
   }
 
-  if (hasOp()) {
+  if (op_.has_value()) {
     TORCH_CHECK(
         !hasQualifiedName(),
         "It is builtin operator call, qualifiedName_ should not be set.");
@@ -73,7 +75,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     TORCH_CHECK(
         !hasOp(),
         "It is TorchScript function call, operator should not be set.");
-    ivalues.emplace_back((*qualifiedName_).qualifiedName());
+    ivalues.emplace_back(qualifiedName().qualifiedName());
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -83,11 +85,15 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
 
 std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
+  TORCH_INTERNAL_ASSERT(
+      ivalues.size() > 1,
+      "At least 2 IValues are required to build a ScriptCall.");
+
   // Last element in the vector is always qualifiedName for both
-  // builitin operator and TorchScript function
+  // builtin operator and TorchScript function
   // If the qualifiedName is not a builtin operator name, then treat it
   // as TorchScript function name
-  const std::string& qualifiedName = ivalues.back().toStringRef();
+  std::string qualifiedName = ivalues.back().toStringRef();
 
   if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE_) == 0) {
     ivalues.pop_back();
@@ -108,7 +114,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 
@@ -116,12 +122,12 @@ Message ScriptCall::toMessageImpl() && {
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
 }
 
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
   auto value = jit::unpickle(
       payload,
@@ -129,7 +135,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
 
-  auto values = value.toTuple()->elements();
+  auto values = value.toTupleRef().elements().vec();
   return fromIValues(values);
 }
 
@@ -143,7 +149,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   auto symbol = at::Symbol::fromQualString(schema.name());
 
   for (auto op : torch::jit::getAllOperatorsFor(symbol)) {
-    if (toString(op->schema()).compare(str_schema) == 0) {
+    if (toString(op->schema()) == str_schema) {
       return op;
     }
   }
@@ -151,6 +157,4 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

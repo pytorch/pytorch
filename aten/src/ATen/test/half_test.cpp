@@ -1,16 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Arithmetic) {
   Half zero = 0;
   Half one = 1;
@@ -26,8 +25,7 @@ TEST(TestHalf, Arithmetic) {
   ASSERT_EQ(one + one, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(TestHalf, Comparisions) {
+TEST(TestHalf, Comparisons) {
   Half zero = 0;
   Half one = 1;
   ASSERT_LT(zero, one);
@@ -40,7 +38,6 @@ TEST(TestHalf, Comparisions) {
   ASSERT_EQ(zero, -zero);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Cast) {
   Half value = 1.5f;
   ASSERT_EQ((int)value, 1);
@@ -52,7 +49,6 @@ TEST(TestHalf, Cast) {
   ASSERT_EQ((bool)Half(0.0f), false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Construction) {
   ASSERT_EQ(Half((short)3), Half(3.0f));
   ASSERT_EQ(Half((unsigned short)3), Half(3.0f));
@@ -69,13 +65,11 @@ static std::string to_string(const Half& h) {
   return ss.str();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Half2String) {
   ASSERT_EQ(to_string(Half(3.5f)), "3.5");
   ASSERT_EQ(to_string(Half(-100.0f)), "-100");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, HalfNumericLimits) {
   using limits = std::numeric_limits<Half>;
   ASSERT_EQ(limits::lowest(), -65504.0f);
@@ -92,11 +86,11 @@ TEST(TestHalf, HalfNumericLimits) {
 // Check the declared type of members of numeric_limits<Half> matches
 // the declared type of that member on numeric_limits<float>
 
-#define ASSERT_SAME_TYPE(name)                                \
-  static_assert(                                              \
-      std::is_same<                                           \
-          decltype(std::numeric_limits<Half>::name),          \
-          decltype(std::numeric_limits<float>::name)>::value, \
+#define ASSERT_SAME_TYPE(name)                         \
+  static_assert(                                       \
+      std::is_same_v<                                  \
+          decltype(std::numeric_limits<Half>::name),   \
+          decltype(std::numeric_limits<float>::name)>, \
       "decltype(" #name ") differs")
 
 ASSERT_SAME_TYPE(is_specialized);
@@ -123,9 +117,10 @@ ASSERT_SAME_TYPE(max_exponent10);
 ASSERT_SAME_TYPE(traps);
 ASSERT_SAME_TYPE(tinyness_before);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, CommonMath) {
+#ifndef NDEBUG
   float threshold = 0.00001;
+#endif
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
   assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
@@ -170,4 +165,12 @@ TEST(TestHalf, CommonMath) {
   assert(std::abs(std::isnan(Half(0.0)) - std::isnan(0.0f)) <= threshold);
   assert(std::abs(std::isinf(Half(0.0)) - std::isinf(0.0f)) <= threshold);
 #endif
+}
+
+TEST(TestHalf, ComplexHalf) {
+  Half real = 3.0f;
+  Half imag = -10.0f;
+  auto complex = c10::complex<Half>(real, imag);
+  ASSERT_EQ(complex.real(), real);
+  ASSERT_EQ(complex.imag(), imag);
 }

@@ -10,102 +10,138 @@ namespace {
 
 using namespace api::utils;
 
-Tensor mean(
-    const at::Tensor& input_arg,
-    const IntArrayRef dim,
-    const bool keepdim,
-    const optional<ScalarType> dtype) {
+Tensor mean_dim(
+    const at::Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
-      input_arg.dim() == 4,
-      "Vulkan mean expects 4-dimensional input!");
-
-  static const std::unordered_set<int64_t> expected_dims_set({2, 3});
-  std::unordered_set<int64_t> dims_set;
-
-  for (const auto& d : dim) {
-    dims_set.insert(utils::normalize(d, 4));
-  }
-
+      self.dim() >= 2 && self.dim() <= 4,
+      "Vulkan mean_dim supports 2d, 3d, 4d tensors as input!");
   TORCH_CHECK(
-      dims_set == expected_dims_set,
-      "Vulkan mean currently only supports image-wide reduction!");
+      dim >= -self.dim() && dim < self.dim(),
+      "Vulkan mean.dim dimension out of range expected to be in range of [",
+      -self.dim(),
+      ",",
+      self.dim() - 1,
+      "], but got ",
+      dim);
 
+  // Get the global Vulkan context
   api::Context* const context = api::context();
 
-  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  // Cast the input Tensor to a vTensor
+  const Tensor input = self.is_vulkan() ? self : self.vulkan();
   const vTensor& v_input = convert(input);
-  const IntArrayRef v_input_sizes = v_input.sizes();
 
-  c10::SmallVector<int64_t, 4u> output_sizes{
-    v_input_sizes[Layout::Activation4D::batch],
-    v_input_sizes[Layout::Activation4D::channels],
-  };
+  // Normalize dim into range [0, self.dim()]
+  dim = utils::normalize(dim, self.dim());
 
+  // Create the output texture
+  std::vector<int64_t> output_size = v_input.sizes();
+  uint32_t dim_size = output_size[dim];
   if (keepdim) {
-    output_sizes.push_back(1);
-    output_sizes.push_back(1);
+    output_size[dim] = 1;
+  } else {
+    output_size.erase(output_size.begin() + dim);
+  }
+
+  ScalarType type = self.scalar_type();
+  if (dtype.has_value()) {
+    type = dtype.value();
   }
 
   vTensor v_output{
-    context,
-    output_sizes,
-    v_input.options(),
+      context,
+      output_size,
+      convert_dtype(type),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY(v_input.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        int32_t range;
-        uvec3 iextents;
-      } block {
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            v_input_sizes[Layout::Activation4D::width] *
-            v_input_sizes[Layout::Activation4D::height]),
-        v_input.extents()
-      };
+  // Required to determine how to insert memory barriers in the command buffer
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
-          v_input.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  // Shift dim into 4d range
+  if (self.dim() < 4) {
+    dim += (4 - self.dim());
   }
-  command_pool.submit(context->gpu().queue, command_buffer);
 
+  // Create the params buffer
+  const struct Block final {
+    uvec2 dim_info;
+    int32_t channel;
+  } block{
+      {static_cast<uint32_t>(dim), dim_size},
+      static_cast<int32_t>(get_dim<Dim4D::Channel>(v_input)),
+  };
+
+  api::UniformParamsBuffer params(context, block);
+
+  context->submit_compute_job(
+      // shader descriptor
+      keepdim ? VK_KERNEL(mean_dim_keepdim) : VK_KERNEL(mean_dim),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
   return convert(v_output);
+}
+
+Tensor mean_dim_IntList(
+    const at::Tensor& self,
+    const OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    const std::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      opt_dim.has_value(), "Vulkan mean without a dim arg is not implemented");
+
+  std::set<int64_t> dims_set;
+
+  if (opt_dim.has_value()) {
+    auto dims = opt_dim.value();
+    for (const auto& d : dims) {
+      TORCH_CHECK(
+          d >= -self.dim() && d < self.dim(),
+          "Vulkan mean.dim_IntList dimension out of range expected to be in range of [",
+          -self.dim(),
+          ",",
+          self.dim() - 1,
+          "], but got ",
+          d);
+      int64_t dim_normalized = utils::normalize(d, self.dim());
+      if (dims_set.find(dim_normalized) != dims_set.end()) {
+        TORCH_CHECK(
+            false,
+            "dim ",
+            dim_normalized,
+            " appears multiple times in the list of dims")
+      }
+      dims_set.insert(dim_normalized);
+    }
+    Tensor output = self;
+    for (auto it = dims_set.rbegin(); it != dims_set.rend(); ++it) {
+      output = mean_dim(output, *it, keepdim, dtype);
+    }
+    return output;
+  }
+  return self;
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("mean.dim", TORCH_FN(mean));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mean.dim"), TORCH_FN(mean_dim_IntList));
 }
 
 #endif /* USE_VULKAN_API */

@@ -1,16 +1,14 @@
 #include <torch/csrc/jit/backends/backend_init.h>
 
+#include <pybind11/iostream.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
-#include <torch/csrc/jit/backends/backend_resolver.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Get all types that are shared in the module hierarchy rooted at \p mod.
-std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
+static std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
   // Maintain a set of all TypePtrs.
   std::unordered_set<TypePtr> types;
   // Maintain another set of TypePtrs that have been encountered more than once.
@@ -32,7 +30,7 @@ std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
 // Selectively lower \p mod to a backend. \p to_backend
 // is called to lower modules. \p modules_to_lower contains
 // qualified names of submodules of \p mod that should be lowered.
-void toBackendSelectiveImpl(
+static void toBackendSelectiveImpl(
     Module& mod,
     const py::function& to_backend,
     const std::vector<std::string>& modules_to_lower,
@@ -118,7 +116,7 @@ void toBackendSelectiveImpl(
   }
 }
 
-Module codegen_func(
+static Module codegen_func(
     const std::string& backend_name,
     const Module& orig_module,
     const py::dict& method_compile_spec) {
@@ -147,6 +145,10 @@ void initJitBackendBindings(PyObject* module) {
       [=](const std::string& backend_name,
           py::handle orig_module,
           const py::dict& method_compile_spec) {
+        py::scoped_ostream_redirect cerr(
+            std::cerr, py::module_::import("sys").attr("stderr"));
+        py::scoped_ostream_redirect cout(
+            std::cout, py::module_::import("sys").attr("stdout"));
         return py::module::import("torch.jit._recursive")
             .attr("wrap_cpp_module")(codegen_func(
                 backend_name,
@@ -159,6 +161,10 @@ void initJitBackendBindings(PyObject* module) {
       [=](py::handle orig_module,
           const py::function& to_backend,
           const std::vector<std::string>& modules_to_lower) {
+        py::scoped_ostream_redirect cerr(
+            std::cerr, py::module_::import("sys").attr("stderr"));
+        py::scoped_ostream_redirect cout(
+            std::cout, py::module_::import("sys").attr("stdout"));
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
           // Clone the Module to avoid editing types that are shared with
@@ -180,5 +186,4 @@ void initJitBackendBindings(PyObject* module) {
             "Object ", py::str(orig_module), " is not a ScriptModule"));
       });
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

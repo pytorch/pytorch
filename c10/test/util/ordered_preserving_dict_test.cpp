@@ -4,6 +4,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <gtest/gtest.h>
 
@@ -15,14 +16,15 @@ using dict_int_int =
     ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
-  for (int64_t i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     dict[i] = i + 1;
   }
 
-  int64_t i = 0;
+  int64_t entry_i = 0;
   for (auto entry : dict) {
-    TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
-    ++i;
+    TORCH_INTERNAL_ASSERT(
+        entry.first == entry_i && entry.second == entry_i + 1);
+    ++entry_i;
   }
 
   // erase a few entries by themselves
@@ -33,35 +35,35 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  for (size_t i = 0; i < 20; ++i)
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     begin++;
+  }
 
   auto end = begin;
-  for (size_t i = 0; i < 20; ++i) {
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     erase_set.insert(end->first);
     end++;
   }
   dict.erase(begin, end);
 
-  std::vector<size_t> order;
-  for (size_t i = 0; i < 100; ++i) {
+  std::vector<int64_t> order;
+  for (const auto i : c10::irange(100)) {
     if (!erase_set.count(i)) {
       order.push_back(i);
     }
   }
 
-  i = 0;
+  entry_i = 0;
   for (auto entry : dict) {
-    TORCH_INTERNAL_ASSERT(order[i] == entry.first);
-    TORCH_INTERNAL_ASSERT(dict[order[i]] == entry.second);
-    TORCH_INTERNAL_ASSERT(entry.second == order[i] + 1);
-    i++;
+    TORCH_INTERNAL_ASSERT(order[entry_i] == entry.first);
+    TORCH_INTERNAL_ASSERT(dict[order[entry_i]] == entry.second);
+    TORCH_INTERNAL_ASSERT(entry.second == order[entry_i] + 1);
+    entry_i++;
   }
   TORCH_INTERNAL_ASSERT(dict.size() == order.size());
   return dict;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, InsertAndDeleteBasic) {
   dict_int_int dict;
   test_dict(dict);
@@ -69,7 +71,6 @@ TEST(OrderedPreservingDictTest, InsertAndDeleteBasic) {
   test_dict(dict);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, InsertExistingDoesntAffectOrder) {
   dict_int_int dict;
   dict[0] = 1;
@@ -85,7 +86,6 @@ TEST(OrderedPreservingDictTest, InsertExistingDoesntAffectOrder) {
   TORCH_INTERNAL_ASSERT(dict.begin()->first == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, testRefType) {
   std::shared_ptr<int64_t> t;
   using dict_references = ska_ordered::
@@ -104,7 +104,6 @@ TEST(OrderedPreservingDictTest, testRefType) {
   TORCH_INTERNAL_ASSERT(ptr.use_count() == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, DictCollisions) {
   struct BadHash {
     size_t operator()(const int64_t input) {
@@ -117,12 +116,12 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
   for (auto init_dict_size : {27, 34, 41}) {
     bad_hash_dict dict;
-    for (int64_t i = 0; i < init_dict_size; ++i) {
+    for (const auto i : c10::irange(init_dict_size)) {
       dict[i] = i + 1;
     }
 
     int64_t i = 0;
-    for (auto entry : dict) {
+    for (const auto& entry : dict) {
       TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
       ++i;
     }
@@ -135,20 +134,20 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    for (size_t i = 0; i < 10; ++i) {
+    for ([[maybe_unused]] const auto j : c10::irange(10)) {
       begin++;
     }
     auto end = begin;
-    for (size_t i = 0; i < 7; ++i) {
+    for ([[maybe_unused]] const auto j : c10::irange(7)) {
       erase_set.insert(end->first);
       end++;
     }
     dict.erase(begin, end);
 
     std::vector<int64_t> order;
-    for (int64_t i = 0; i < init_dict_size; ++i) {
-      if (!erase_set.count(i)) {
-        order.push_back(i);
+    for (const auto j : c10::irange(init_dict_size)) {
+      if (!erase_set.count(j)) {
+        order.push_back(j);
       }
     }
 
@@ -166,37 +165,41 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 // Tests taken from
 // https://github.com/Tessil/ordered-map/blob/master/tests/ordered_map_tests.cpp
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_insert) {
   // insert x values in vector, range insert x-15 values from vector to map,
   // check values
   const int nb_values = 1000;
   std::vector<std::pair<int, int>> values;
-  for (int i = 0; i < nb_values; i++) {
-    // NOLINTNEXTLINE(modernize-use-emplace,performance-inefficient-vector-operation)
-    values.push_back(std::make_pair(i, i + 1));
+  for (const auto i : c10::irange(nb_values)) {
+    values.emplace_back(i, i + 1);
   }
 
   dict_int_int map = {{-1, 0}, {-2, 0}};
   map.insert(values.begin() + 10, values.end() - 5);
 
-  TORCH_INTERNAL_ASSERT(map.size(), 987);
+  ASSERT_EQUAL_PRIM(map.size(), 987);
 
   ASSERT_EQUAL_PRIM(map.at(-1), 0);
 
   ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
-  for (int i = 10, j = 2; i < nb_values - 5; i++, j++) {
+  auto begin = map.begin();
+  begin++;
+  begin++;
+  for (int i = 10; i < nb_values - 5; i++, begin++) {
+    // Check range inserted kv pairs: map(i) = i + 1 for i = 10,....995
     ASSERT_EQUAL_PRIM(map.at(i), i + 1);
+    // Check range inserted kv pairs are correctly indexed/ordered
+    TORCH_INTERNAL_ASSERT(begin->first == i);
+    TORCH_INTERNAL_ASSERT(begin->second == i + 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_erase_all) {
   // insert x values, delete all
   const std::size_t nb_values = 1000;
   dict_int_int map;
-  for (size_t i = 0; i < nb_values; ++i) {
+  for (const int64_t i : c10::irange<int64_t>(nb_values)) {
     map[i] = i + 1;
   }
   auto it = map.erase(map.begin(), map.end());
@@ -204,19 +207,18 @@ TEST(OrderedPreservingDictTest, test_range_erase_all) {
   ASSERT_TRUE(map.empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_range_erase) {
   // insert x values, delete all with iterators except 10 first and 780 last
   // values
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::int64_t>;
 
-  const std::size_t nb_values = 1000;
+  const int64_t nb_values = 1000;
   HMap map;
-  for (size_t i = 0; i < nb_values; ++i) {
-    map[c10::guts::to_string(i)] = i;
+  for (const auto i : c10::irange(nb_values)) {
+    map[std::to_string(i)] = i;
     auto begin = map.begin();
-    for (size_t j = 0; j <= i; ++j, begin++) {
+    for (int64_t j = 0; j <= i; ++j, begin++) {
       TORCH_INTERNAL_ASSERT(begin->second == j);
     }
   }
@@ -239,14 +241,12 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     if (i >= 10 && i < 220) {
       continue;
     }
-    auto exp_it =
-        std::pair<std::string, std::int64_t>(c10::guts::to_string(i), i);
+    auto exp_it = std::pair<std::string, std::int64_t>(std::to_string(i), i);
     TORCH_INTERNAL_ASSERT(*it == exp_it);
     ++it;
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_move_constructor_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move(
@@ -261,7 +261,6 @@ TEST(OrderedPreservingDictTest, test_move_constructor_empty) {
   TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_move_operator_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move;
@@ -276,7 +275,6 @@ TEST(OrderedPreservingDictTest, test_move_operator_empty) {
   TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
@@ -285,15 +283,14 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
   HMap map_move(std::move(map));
 
   ASSERT_EQUAL_PRIM(map_move.size(), 3);
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-  ASSERT_EQUAL_PRIM(map.size(), 0);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  ASSERT_TRUE(map.empty());
 
   map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
   TORCH_INTERNAL_ASSERT(
       map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
@@ -302,29 +299,28 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
   HMap map_move = std::move(map);
 
   ASSERT_EQUAL_PRIM(map_move.size(), 3);
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-  ASSERT_EQUAL_PRIM(map.size(), 0);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  ASSERT_TRUE(map.empty());
 
   map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
   TORCH_INTERNAL_ASSERT(
       map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
 
   const std::size_t nb_values = 100;
   HMap map;
-  for (size_t i = 0; i < nb_values; ++i) {
-    map[c10::guts::to_string(i)] = c10::guts::to_string(i);
+  for (const auto i : c10::irange(nb_values)) {
+    map[std::to_string(i)] = std::to_string(i);
   }
 
   HMap map_copy = map;
   HMap map_copy2(map);
   HMap map_copy3;
-  map_copy3[c10::guts::to_string(0)] = c10::guts::to_string(0);
+  map_copy3[std::to_string(0)] = std::to_string(0);
 
   map_copy3 = map;
 
@@ -335,7 +331,6 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   TORCH_INTERNAL_ASSERT(map_copy == map_copy3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(map);
@@ -347,7 +342,6 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
   TORCH_INTERNAL_ASSERT(map_copy.find("") == map_copy.end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(16);
@@ -363,7 +357,6 @@ TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
 /**
  * at
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_at) {
   // insert x values, use at for known and unknown values.
   const ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>
@@ -383,7 +376,6 @@ TEST(OrderedPreservingDictTest, test_at) {
 /**
  * equal_range
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_equal_range) {
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{0, 10}, {-2, 20}};
@@ -400,7 +392,6 @@ TEST(OrderedPreservingDictTest, test_equal_range) {
 /**
  * operator[]
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_access_operator) {
   // insert x values, use at for known and unknown values.
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
@@ -416,7 +407,6 @@ TEST(OrderedPreservingDictTest, test_access_operator) {
 /**
  * swap
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap) {
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
@@ -448,7 +438,6 @@ TEST(OrderedPreservingDictTest, test_swap) {
           {1, 10}, {8, 80}, {3, 30}, {4, 40}}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
@@ -458,6 +447,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
   swap(map, map2);
 
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(readability-container-size-empty)
       map ==
       (ska_ordered::
            order_preserving_flat_hash_map<std::int64_t, std::int64_t>{}));

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Example of Timer and Compare APIs:
 
 $ python -m examples.compare
@@ -12,14 +13,14 @@ import torch
 import torch.utils.benchmark as benchmark_utils
 
 
-class FauxTorch(object):
+class FauxTorch:
     """Emulate different versions of pytorch.
 
     In normal circumstances this would be done with multiple processes
     writing serialized measurements, but this simplifies that model to
     make the example clearer.
     """
-    def __init__(self, real_torch, extra_ns_per_element):
+    def __init__(self, real_torch, extra_ns_per_element) -> None:
         self._real_torch = real_torch
         self._extra_ns_per_element = extra_ns_per_element
 
@@ -44,7 +45,7 @@ class FauxTorch(object):
         return self.extra_overhead(self._real_torch.matmul(*args, **kwargs))
 
 
-def main():
+def main() -> None:
     tasks = [
         ("add", "add", "torch.add(x, y)"),
         ("add", "add (extra +0)", "torch.add(x, y + zero)"),

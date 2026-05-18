@@ -1,16 +1,14 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
@@ -30,8 +28,7 @@ struct TORCH_API PartitionDesc {
       // so dim - 1 is no longer contiguous
       cont[dim_ - 1] = false;
     }
-    // NOLINTNEXTLINE(modernize-make-shared)
-    subTensorDesc_.reset(new TensorDesc(_desc.scalar_type, cont));
+    subTensorDesc_ = std::make_shared<TensorDesc>(_desc.scalar_type, cont);
   }
 
   bool isNoop() const {
@@ -58,6 +55,4 @@ struct TORCH_API PartitionDesc {
       subTensorDesc_; // descriptor for the subtensor, if it exists
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

@@ -1,38 +1,37 @@
-"""
-This module converts objects into numpy array.
-"""
+"""This module converts objects into numpy array."""
+
 import numpy as np
+
 import torch
 
 
-def make_np(x):
+def make_np(x: torch.Tensor) -> np.ndarray:
     """
+    Convert an object into numpy array.
+
     Args:
-      x: An instance of torch tensor or caffe blob name
+      x: An instance of torch tensor
 
     Returns:
         numpy.array: Numpy array
     """
     if isinstance(x, np.ndarray):
         return x
-    if isinstance(x, str):  # Caffe2 will pass name of blob(s) to fetch
-        return _prepare_caffe2(x)
     if np.isscalar(x):
         return np.array([x])
     if isinstance(x, torch.Tensor):
+        if x.device.type == "meta":
+            return np.random.randn(1)
         return _prepare_pytorch(x)
     raise NotImplementedError(
-        'Got {}, but numpy array, torch tensor, or caffe2 blob name are expected.'.format(type(x)))
+        f"Got {type(x)}, but numpy array or torch tensor are expected."
+    )
 
 
-def _prepare_pytorch(x):
-    if isinstance(x, torch.autograd.Variable):
-        x = x.data
-    x = x.cpu().numpy()
-    return x
-
-
-def _prepare_caffe2(x):
-    from caffe2.python import workspace
-    x = workspace.FetchBlob(x)
+def _prepare_pytorch(x: torch.Tensor) -> np.ndarray:
+    if x.dtype == torch.bfloat16:
+        x = x.to(torch.float16)
+    # pyrefly: ignore [bad-assignment]
+    x = x.detach().cpu().numpy()
+    # pyrefly: ignore [bad-return]
     return x

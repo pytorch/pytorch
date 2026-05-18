@@ -1,19 +1,14 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <string>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/core/symbol.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
-namespace c10 {
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-} // namespace c10
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Symbol;
 
@@ -38,7 +33,7 @@ enum class AttributeKind {
 };
 static inline const char* toString(AttributeKind kind) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static const char* names[] = {
+  static constexpr const char* names[] = {
       "f",
       "c",
       "cs",
@@ -165,6 +160,7 @@ struct TORCH_API GraphsAttr : public AttributeValue {
 struct IRAttributeError : public std::exception {
   IRAttributeError(Symbol name, bool defined) {
     std::stringstream ss;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()
          << "' is undefined";
@@ -181,5 +177,4 @@ struct IRAttributeError : public std::exception {
  private:
   std::string msg;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

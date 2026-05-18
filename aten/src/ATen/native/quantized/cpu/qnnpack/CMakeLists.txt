@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 include(GNUInstallDirs)
 
@@ -12,7 +12,6 @@ include(GNUInstallDirs)
 project(PYTORCH_QNNPACK C CXX ASM)
 
 # ---[ Options.
-option(PYTORCH_QNNPACK_CUSTOM_THREADPOOL "Build QNNPACK for custom thread pool" OFF)
 set(PYTORCH_QNNPACK_LIBRARY_TYPE "default" CACHE STRING "Type of library (shared, static, or default) to build")
 set_property(CACHE PYTORCH_QNNPACK_LIBRARY_TYPE PROPERTY STRINGS default static shared)
 option(PYTORCH_QNNPACK_BUILD_TESTS "Build QNNPACK unit tests" ON)
@@ -174,8 +173,8 @@ set(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/deconv-run.cc
   src/fc-run.cc
+  src/fc-unpack.cc
   src/fc-dynamic-run.cc
-  src/pack_block_sparse.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -194,6 +193,7 @@ set(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8conv/8x8-neon.c
   src/q8dwconv/mp8x25-neon.c
   src/q8dwconv/mp8x25-neon-per-channel.c
+  src/q8dwconv/mp8x27-neon.c
   src/q8dwconv/up8x9-neon.c
   src/q8dwconv/up8x9-neon-per-channel.c
   src/q8gavgpool/mp8x7p7q-neon.c
@@ -244,6 +244,7 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8conv/4x4c2-sse2.c
   src/q8dwconv/mp8x25-sse2.c
   src/q8dwconv/mp8x25-sse2-per-channel.c
+  src/q8dwconv/mp8x27-sse2.c
   src/q8dwconv/up8x9-sse2.c
   src/q8dwconv/up8x9-sse2-per-channel.c
   src/q8gavgpool/mp8x7p7q-sse2.c
@@ -319,7 +320,6 @@ endif()
 target_include_directories(pytorch_qnnpack PUBLIC include)
 target_include_directories(pytorch_qnnpack PUBLIC src)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
-set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog
@@ -331,6 +331,9 @@ if(NOT TARGET clog)
     "${CONFU_DEPENDENCIES_BINARY_DIR}/clog")
   # We build static version of clog but a dynamic library may indirectly depend on it
   set_property(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(clog PRIVATE "-Wno-unused-result")
+  endif()
 endif()
 target_link_libraries(pytorch_qnnpack PUBLIC clog)
 
@@ -372,13 +375,7 @@ elseif(NOT TARGET pthreadpool AND USE_SYSTEM_PTHREADPOOL)
     IMPORTED_LOCATION "${PTHREADPOOL_LIBRARY}")
   add_library(pthreadpool_interface INTERFACE)
 endif()
-if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
-  # Depend on pthreadpool interface, but not on implementation.
-  # This is used when QNNPACK user (e.g. Caffe2) provides its own threadpool implementation.
-  target_link_libraries(pytorch_qnnpack PUBLIC pthreadpool_interface)
-else()
-  target_link_libraries(pytorch_qnnpack PUBLIC pthreadpool)
-endif()
+target_link_libraries(pytorch_qnnpack PUBLIC pthreadpool)
 
 # ---[ Configure FXdiv
 if(NOT TARGET fxdiv AND NOT USE_SYSTEM_FXDIV)
@@ -396,6 +393,12 @@ elseif(NOT TARGET fxdiv AND USE_SYSTEM_FXDIV)
   set_property(TARGET fxdiv PROPERTY LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fxdiv)
+
+# -- [ CMake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0" AND NOT (USE_SYSTEM_PSIMD OR USE_SYSTEM_FP16))
+  message(WARNING "Ancient psimd/FP16 forces CMake compatibility")
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
 
 # ---[ Configure psimd
 if(NOT TARGET psimd AND NOT USE_SYSTEM_PSIMD)
@@ -428,6 +431,11 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fp16)
+
+# -- [ Undo cmake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
+endif()
 
 install(TARGETS pytorch_qnnpack
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

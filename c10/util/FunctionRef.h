@@ -36,7 +36,7 @@ class function_ref;
 template <typename Ret, typename... Params>
 class function_ref<Ret(Params...)> {
   Ret (*callback)(intptr_t callable, Params... params) = nullptr;
-  intptr_t callable;
+  intptr_t callable{};
 
   template <typename Callable>
   static Ret callback_fn(intptr_t callable, Params... params) {
@@ -50,14 +50,17 @@ class function_ref<Ret(Params...)> {
 
   template <typename Callable>
   function_ref(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Callable&& callable,
-      typename std::enable_if<!std::is_same<
-          typename std::remove_reference<Callable>::type,
-          function_ref>::value>::type* = nullptr,
-      typename std::enable_if<std::is_convertible<
-          typename std::result_of<Callable && (Params && ...)>::type,
-          Ret>::value>::type* = nullptr)
-      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+      std::enable_if_t<!std::is_same_v<
+          std::remove_reference_t<Callable>,
+          function_ref>>* /*unused*/
+      = nullptr,
+      std::enable_if_t<std::is_convertible_v<
+          typename std::invoke_result_t<Callable, Params...>,
+          Ret>>* /*unused*/
+      = nullptr)
+      : callback(callback_fn<std::remove_reference_t<Callable>>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}
 
   Ret operator()(Params... params) const {

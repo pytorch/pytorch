@@ -1,7 +1,10 @@
 import argparse
 import sys
+
+from utils import Event, gen_sparse_coo, gen_sparse_coo_and_csr, gen_sparse_csr
+
 import torch
-from utils import gen_sparse_csr, gen_sparse_coo, Event
+
 
 def test_sparse_csr(m, n, k, nnz, test_count):
     start_timer = Event(enable_timing=True)
@@ -19,6 +22,7 @@ def test_sparse_csr(m, n, k, nnz, test_count):
 
     return sum(times) / len(times)
 
+
 def test_sparse_coo(m, n, k, nnz, test_count):
     start_timer = Event(enable_timing=True)
     stop_timer = Event(enable_timing=True)
@@ -35,6 +39,7 @@ def test_sparse_coo(m, n, k, nnz, test_count):
 
     return sum(times) / len(times)
 
+
 def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
     start = Event(enable_timing=True)
     stop = Event(enable_timing=True)
@@ -47,41 +52,44 @@ def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
         start.record()
         coo.matmul(mat)
         stop.record()
-
         times.append(start.elapsed_time(stop))
 
-        coo_mean_time = sum(times) / len(times)
+    coo_mean_time = sum(times) / len(times)
 
-        times = []
-        for _ in range(test_count):
-            start.record()
-            csr.matmul(mat)
-            stop.record()
-            times.append(start.elapsed_time(stop))
+    times = []
+    for _ in range(test_count):
+        start.record()
+        csr.matmul(mat)
+        stop.record()
+        times.append(start.elapsed_time(stop))
 
-            csr_mean_time = sum(times) / len(times)
+    csr_mean_time = sum(times) / len(times)
 
     return coo_mean_time, csr_mean_time
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SpMM")
 
-    parser.add_argument("--format", default='csr', type=str)
-    parser.add_argument("--m", default='1000', type=int)
-    parser.add_argument("--n", default='1000', type=int)
-    parser.add_argument("--k", default='1000', type=int)
-    parser.add_argument("--nnz_ratio", default='0.1', type=float)
-    parser.add_argument("--outfile", default='stdout', type=str)
-    parser.add_argument("--test_count", default='10', type=int)
+    parser.add_argument("--format", default="csr", type=str)
+    parser.add_argument("--m", default="1000", type=int)
+    parser.add_argument("--n", default="1000", type=int)
+    parser.add_argument("--k", default="1000", type=int)
+    parser.add_argument("--nnz-ratio", "--nnz_ratio", default="0.1", type=float)
+    parser.add_argument("--outfile", default="stdout", type=str)
+    parser.add_argument("--test-count", "--test_count", default="10", type=int)
 
     args = parser.parse_args()
 
-    if args.outfile == 'stdout':
+    if args.outfile == "stdout":
         outfile = sys.stdout
-    elif args.outfile == 'stderr':
+        need_close = False
+    elif args.outfile == "stderr":
         outfile = sys.stderr
+        need_close = False
     else:
-        outfile = open(args.outfile, "a")
+        outfile = open(args.outfile, "a")  # noqa: SIM115
+        need_close = True
 
     test_count = args.test_count
     m = args.m
@@ -90,16 +98,57 @@ if __name__ == "__main__":
     nnz_ratio = args.nnz_ratio
 
     nnz = int(nnz_ratio * m * k)
-    if args.format == 'csr':
+    if args.format == "csr":
         time = test_sparse_csr(m, n, k, nnz, test_count)
-    elif args.format == 'coo':
+    elif args.format == "coo":
         time = test_sparse_coo(m, n, k, nnz, test_count)
-    elif args.format == 'both':
+    elif args.format == "both":
         time_coo, time_csr = test_sparse_coo_and_csr(m, nnz, test_count)
 
-    if args.format == 'both':
-        print("format=coo", " nnz_ratio=", nnz_ratio, " m=", m, " n=", n, " k=", k, " time=", time_coo, file=outfile)
-        print("format=csr", " nnz_ratio=", nnz_ratio, " m=", m, " n=", n, " k=", k, " time=", time_csr, file=outfile)
+    if args.format == "both":
+        print(
+            "format=coo",
+            " nnz_ratio=",
+            nnz_ratio,
+            " m=",
+            m,
+            " n=",
+            n,
+            " k=",
+            k,
+            " time=",
+            time_coo,
+            file=outfile,
+        )
+        print(
+            "format=csr",
+            " nnz_ratio=",
+            nnz_ratio,
+            " m=",
+            m,
+            " n=",
+            n,
+            " k=",
+            k,
+            " time=",
+            time_csr,
+            file=outfile,
+        )
     else:
-        print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m, " n=", n, " k=", k, " time=", time,
-              file=outfile)
+        print(
+            "format=",
+            args.format,
+            " nnz_ratio=",
+            nnz_ratio,
+            " m=",
+            m,
+            " n=",
+            n,
+            " k=",
+            k,
+            " time=",
+            time,
+            file=outfile,
+        )
+    if need_close:
+        outfile.close()

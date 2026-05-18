@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void LowerGradOf(Graph& g) {
   for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
@@ -25,6 +24,12 @@ void LowerGradOf(Graph& g) {
                        ->insertBefore(else_block->return_node())
                        ->output();
       for (size_t i = 0; i < it->outputs().size(); ++i) {
+        // the else block returns a tensor for each of the outputs of the GradOf
+        // i.e. assuming that all the outputs are tensors. This might not be
+        // true, e.g. backward for cat() returns a list of gradient tensors.
+        // This is fixed in DifferentiableGraphBackward, where the list sizes
+        // are stored during the forward pass, and then undefined tensors are
+        // turned into lists of undefined tensors where necessary.
         else_block->registerOutput(undef);
         if_stat->outputs().at(i)->copyMetadata(it->outputs().at(i));
       }
@@ -35,5 +40,4 @@ void LowerGradOf(Graph& g) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

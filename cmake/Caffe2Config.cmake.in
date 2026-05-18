@@ -5,16 +5,8 @@
 
 # library version information
 
-set(CAFFE2_VERSION_MAJOR @CAFFE2_VERSION_MAJOR@)
-set(CAFFE2_VERSION_MINOR @CAFFE2_VERSION_MINOR@)
-set(CAFFE2_VERSION_PATCH @CAFFE2_VERSION_PATCH@)
-set(CAFFE2_VERSION "@CAFFE2_VERSION@")
-
 # Utils functions.
 include("${CMAKE_CURRENT_LIST_DIR}/public/utils.cmake")
-
-# Include threads lib.
-include("${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake")
 
 # Depending on whether Caffe2 uses gflags during compile time or
 # not, invoke gflags.
@@ -78,35 +70,48 @@ else()
   endif()
 endif()
 
+if (@USE_ROCM@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake")
+endif()
+
 if(@USE_CUDA@)
   # The file public/cuda.cmake exclusively uses CAFFE2_USE_*.
   # If Caffe2 was compiled with the libraries below, they must
   # be found again when including the Caffe2 target.
   set(CAFFE2_USE_CUDA @USE_CUDA@)
-  set(CAFFE2_USE_CUDNN @USE_CUDNN@)
-  set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
+
+  # Add current directory to module path so we pick up FindCUDAToolkit.cmake
+  set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
+  set(CMAKE_MODULE_PATH "${old_CMAKE_MODULE_PATH}")
+
   if(@CAFFE2_USE_CUDA@ AND NOT CAFFE2_USE_CUDA)
     message(FATAL_ERROR
       "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
       "libraries. Please set the proper CUDA prefixes and / or install "
       "CUDA.")
   endif()
-  if(@CAFFE2_USE_CUDNN@ AND NOT CAFFE2_USE_CUDNN)
+endif()
+
+if(@USE_XPU@)
+  # Add current directory to module path so we pick up FindSYCLToolkit.cmake
+  set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  include("${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake")
+  set(CMAKE_MODULE_PATH "${old_CMAKE_MODULE_PATH}")
+
+  if(@USE_XPU@ AND NOT PYTORCH_FOUND_XPU)
     message(FATAL_ERROR
-      "Your installed Caffe2 version uses cuDNN but I cannot find the cuDNN "
-      "libraries. Please set the proper cuDNN prefixes and / or install "
-      "cuDNN.")
-  endif()
-  if(@CAFFE2_USE_TENSORRT@ AND NOT CAFFE2_USE_TENSORRT)
-    message(FATAL_ERROR
-      "Your installed Caffe2 version uses TensorRT but I cannot find the TensorRT "
-      "libraries. Please set the proper TensorRT prefixes and / or install "
-      "TensorRT.")
+      "Your installed Caffe2 version uses XPU but I cannot find the XPU runtime"
+      "libraries. Please set the proper oneAPI paths and / or install "
+      "oneAPI.")
   endif()
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
+if(@CAFFE2_USE_MKL@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
+endif()
 
 if(@USE_MKLDNN@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")

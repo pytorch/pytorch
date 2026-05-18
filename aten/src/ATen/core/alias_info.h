@@ -1,8 +1,11 @@
 #pragma once
+#include <set>
+#include <string>
 #include <unordered_set>
 #include <vector>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 
 namespace c10 {
 /**
@@ -17,6 +20,15 @@ namespace c10 {
  */
 class AliasInfo {
  public:
+  AliasInfo() = default;
+  AliasInfo(bool is_write, const std::set<std::string>& before_qual_strings, const std::set<std::string>& after_qual_strings) : isWrite_(is_write) {
+    for (const auto& s: before_qual_strings) {
+      beforeSets_.insert(Symbol::fromQualString(s));
+    }
+    for (const auto& s : after_qual_strings) {
+      afterSets_.insert(Symbol::fromQualString(s));
+    }
+  }
   // Symbol for the set that can alias anything
   static Symbol wildcardSet() {
     static const Symbol wc = Symbol::fromQualString("alias::*");
@@ -88,18 +100,18 @@ inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
 
 // this does match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
-  out << "(";
+  out << '(';
   bool first = true;
   for (const auto& set : aliasInfo.beforeSets()) {
     if (first) {
       first = false;
     } else {
-      out << "|";
+      out << '|';
     }
     out << set.toUnqualString();
   }
   if (aliasInfo.isWrite()) {
-    out << "!";
+    out << '!';
   }
   if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
     out << " -> ";
@@ -108,12 +120,43 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
       if (first) {
         first = false;
       } else {
-        out << "|";
+        out << '|';
       }
       out << set.toUnqualString();
     }
   }
-  out << ")";
+  out << ')';
   return out;
 }
 } // namespace c10
+
+namespace std {
+template <>
+  struct hash<c10::AliasInfo> {
+    size_t operator()(const c10::AliasInfo& aliasInfo) const {
+      auto hash = std::hash<bool>()(aliasInfo.isWrite());
+
+      // NOTE: for unordered_set hashes, we couldn't use hash_combine
+      // because hash_combine is order dependent. Instead, we choose to
+      // use XOR as the combining function as XOR is commutative.
+      size_t before_set_hash_seed = 0;
+      for (auto &e: aliasInfo.beforeSets()) {
+        auto symbol_hash = std::hash<c10::Symbol>()(e);
+        before_set_hash_seed = before_set_hash_seed ^ symbol_hash;
+      }
+      size_t after_set_hash_seed = 0;
+      for (auto &e: aliasInfo.afterSets()) {
+        auto symbol_hash = std::hash<c10::Symbol>()(e);
+        after_set_hash_seed = after_set_hash_seed ^ symbol_hash;
+      }
+
+      hash = c10::hash_combine(hash, before_set_hash_seed);
+      hash = c10::hash_combine(hash, after_set_hash_seed);
+      for (auto &e: aliasInfo.containedTypes()) {
+        auto contained_type_hash = std::hash<c10::AliasInfo>()(e);
+        hash = c10::hash_combine(hash, contained_type_hash);
+      }
+      return hash;
+    }
+  };
+}

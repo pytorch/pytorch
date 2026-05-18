@@ -11,5 +11,8 @@
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 
 
-def get_error_handler():
+__all__ = ["get_error_handler"]
+
+
+def get_error_handler() -> ErrorHandler:
     return ErrorHandler()

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -12,33 +13,17 @@ import os
 import time
 import traceback
 import warnings
-from typing import Optional
+from typing import Any
 
 
-log = logging.getLogger(__name__)
+__all__ = ["ErrorHandler"]
 
-
-def _write_error(e: BaseException, error_file: Optional[str]):
-    data = {
-        "message": {
-            "message": f"{type(e).__name__}: {e}",
-            "extraInfo": {
-                "py_callstack": traceback.format_exc(),
-                "timestamp": str(int(time.time())),
-            },
-        }
-    }
-
-    if error_file:
-        with open(error_file, "w") as fp:
-            json.dump(data, fp)
-    else:
-        log.error(json.dumps(data, indent=2))
+logger = logging.getLogger(__name__)
 
 
 class ErrorHandler:
     """
-    Writes the provided exception object along with some other metadata about
+    Write the provided exception object along with some other metadata about
     the error in a structured way in JSON format to an error file specified by the
     environment variable: ``TORCHELASTIC_ERROR_FILE``. If this environment
     variable is not set, then simply logs the contents of what would have been
@@ -48,16 +33,18 @@ class ErrorHandler:
     Subclasses should override ``initialize()`` and ``record_exception()``.
     """
 
-    def _get_error_file_path(self) -> Optional[str]:
+    def _get_error_file_path(self) -> str | None:
         """
-        Returns the error file path. May return ``None`` to have the
-        structured error be logged only.
+        Return the error file path.
+
+        May return ``None`` to have the structured error be logged only.
         """
         return os.environ.get("TORCHELASTIC_ERROR_FILE", None)
 
     def initialize(self) -> None:
         """
-        Called prior to running code that we wish to capture errors/exceptions.
+        Call prior to running code that we wish to capture errors/exceptions.
+
         Typically registers signal/fault handlers. Users can override this
         function to add custom initialization/registrations that aid in
         propagation/information of errors/signals/exceptions/faults.
@@ -65,51 +52,78 @@ class ErrorHandler:
         try:
             faulthandler.enable(all_threads=True)
         except Exception as e:
-            warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to enable fault handler. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def _write_error_file(self, file_path: str, error_msg: str) -> None:
-        """
-        Writes error message to the file.
-        """
+        """Write error message to the file."""
         try:
             with open(file_path, "w") as fp:
                 fp.write(error_msg)
         except Exception as e:
-            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Writes a structured information about the exception into an error file in
-        JSON format. If the error file cannot be determined, then logs the content
+        Write a structured information about the exception into an error file in JSON format.
+
+        If the error file cannot be determined, then logs the content
         that would have been written to the error file.
         """
-        _write_error(e, self._get_error_file_path())
+        file = self._get_error_file_path()
+        if file:
+            data = {
+                "message": {
+                    "message": f"{type(e).__name__}: {e}",
+                    "extraInfo": {
+                        "py_callstack": traceback.format_exc(),
+                        "timestamp": str(int(time.time())),
+                    },
+                }
+            }
+            with open(file, "w") as fp:
+                json.dump(data, fp)
+
+    def override_error_code_in_rootcause_data(
+        self,
+        rootcause_error_file: str,
+        rootcause_error: dict[str, Any],
+        error_code: int = 0,
+    ):
+        """Modify the rootcause_error read from the file, to correctly set the exit code."""
+        if "message" not in rootcause_error:
+            logger.warning(
+                "child error file (%s) does not have field `message`. \n"
+                "cannot override error code: %s",
+                rootcause_error_file,
+                error_code,
+            )
+        elif isinstance(rootcause_error["message"], str):
+            logger.warning(
+                "child error file (%s) has a new message format. \n"
+                "skipping error code override",
+                rootcause_error_file,
+            )
+        else:
+            rootcause_error["message"]["errorCode"] = error_code
 
     def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
-        """
-        Dumps parent error file from child process's root cause error and error code.
-        """
-        with open(rootcause_error_file, "r") as fp:
+        """Dump parent error file from child process's root cause error and error code."""
+        with open(rootcause_error_file) as fp:
             rootcause_error = json.load(fp)
             # Override error code since the child process cannot capture the error code if it
-            # is terminated by singals like SIGSEGV.
+            # is terminated by signals like SIGSEGV.
             if error_code:
-                if "message" not in rootcause_error:
-                    log.warning(
-                        f"child error file ({rootcause_error_file}) does not have field `message`. \n"
-                        f"cannot override error code: {error_code}"
-                    )
-                elif isinstance(rootcause_error["message"], str):
-                    log.warning(
-                        f"child error file ({rootcause_error_file}) has a new message format. \n"
-                        f"skipping error code override"
-                    )
-                else:
-                    rootcause_error["message"]["errorCode"] = error_code
-
-            log.info(
-                f"child error file ({rootcause_error_file}) contents:\n"
-                f"{json.dumps(rootcause_error, indent=2)}"
+                self.override_error_code_in_rootcause_data(
+                    rootcause_error_file, rootcause_error, error_code
+                )
+            logger.debug(
+                "child error file (%s) contents:\n%s",
+                rootcause_error_file,
+                json.dumps(rootcause_error, indent=2),
             )
 
         my_error_file = self._get_error_file_path()
@@ -126,27 +140,31 @@ class ErrorHandler:
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
             self._write_error_file(my_error_file, json.dumps(rootcause_error))
-            log.info(f"dumped error file to parent's {my_error_file}")
+            logger.info("dumped error file to parent's %s", my_error_file)
         else:
-            log.error(
-                f"no error file defined for parent, to copy child error file ({rootcause_error_file})"
+            logger.error(
+                "no error file defined for parent, to copy child error file (%s)",
+                rootcause_error_file,
             )
 
     def _rm(self, my_error_file):
         if os.path.isfile(my_error_file):
             # Log the contents of the original file.
-            with open(my_error_file, "r") as fp:
+            with open(my_error_file) as fp:
                 try:
                     original = json.dumps(json.load(fp), indent=2)
-                    log.warning(
-                        f"{my_error_file} already exists"
-                        f" and will be overwritten."
-                        f" Original contents:\n{original}"
+                    logger.warning(
+                        "%s already exists"
+                        " and will be overwritten."
+                        " Original contents:\n%s",
+                        my_error_file,
+                        original,
                     )
-                except json.decoder.JSONDecodeError as err:
-                    log.warning(
-                        f"{my_error_file} already exists"
-                        f" and will be overwritten."
-                        f" Unable to load original contents:\n"
+                except json.decoder.JSONDecodeError:
+                    logger.warning(
+                        "%s already exists"
+                        " and will be overwritten."
+                        " Unable to load original contents:\n",
+                        my_error_file,
                     )
             os.remove(my_error_file)

@@ -1,8 +1,8 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 AttributeValue::Ptr GraphAttr::clone() const {
   return Ptr(new GraphAttr(name, value_->copy()));
@@ -10,11 +10,10 @@ AttributeValue::Ptr GraphAttr::clone() const {
 
 std::unique_ptr<AttributeValue> GraphsAttr::clone() const {
   std::vector<std::shared_ptr<Graph>> copy(value_.size());
-  for (size_t i = 0; i < value_.size(); ++i) {
+  for (const auto i : c10::irange(value_.size())) {
     copy[i] = value_.at(i)->copy();
   }
   return Ptr(new GraphsAttr(name, std::move(copy)));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

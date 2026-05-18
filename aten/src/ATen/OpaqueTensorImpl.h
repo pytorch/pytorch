@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -28,41 +29,45 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       bool is_non_overlapping_and_dense = true)
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
-    set_storage_access_should_throw();
-    set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
-    sizes_and_strides_.set_sizes(sizes);
-    refresh_numel();
-    is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
+    constructor_impl(sizes, is_non_overlapping_and_dense);
   }
 
+  OpaqueTensorImpl(
+      TensorImpl::ImplType impl_type,
+      c10::Storage&& storage,
+      at::DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      OpaqueHandle opaque_handle,
+      c10::IntArrayRef sizes,
+      bool is_non_overlapping_and_dense = true)
+      : TensorImpl(impl_type, std::move(storage), key_set, data_type),
+        opaque_handle_(std::move(opaque_handle)) {
+    constructor_impl(sizes, is_non_overlapping_and_dense);
+  }
+
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     TensorImpl::release_resources();
     opaque_handle_ = {};
   }
 
-  IntArrayRef strides() const override {
-    AT_ERROR("opaque tensors do not have strides");
-  }
-
-  int64_t stride(int64_t d) const override {
-    AT_ERROR("opaque tensors do not have strides");
-  }
-
   void set_size(int64_t dim, int64_t new_size) override {
-    AT_ERROR("opaque tensors do not have set_size");
+    TORCH_CHECK(false, "opaque tensors do not have set_size");
   }
 
   void set_stride(int64_t dim, int64_t new_stride) override {
-    AT_ERROR("opaque tensors do not have set_stride");
+    TORCH_CHECK(false, "opaque tensors do not have set_stride");
   }
 
   void set_storage_offset(int64_t storage_offset) override {
-    AT_ERROR("opaque tensors do not have set_storage_offset");
+    TORCH_CHECK(false, "opaque tensors do not have set_storage_offset");
   }
 
 #ifdef DEBUG
   bool has_storage() const override {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "OpaqueTensorImpl assumes that storage_ is never set");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !storage_, "OpaqueTensorImpl assumes that storage_ is never set");
     return false;
   }
 #endif
@@ -77,7 +82,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        sizes_and_strides_.sizes_arrayref());
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -97,7 +106,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        sizes_and_strides_.sizes_arrayref());
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -174,6 +187,17 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
  private:
   const char* tensorimpl_type_name() const override {
     return "OpaqueTensorImpl";
+  }
+
+  void constructor_impl(
+      c10::IntArrayRef sizes,
+      bool is_non_overlapping_and_dense) {
+    set_storage_access_should_throw();
+    set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
+    sizes_and_strides_.set_sizes(sizes);
+    refresh_numel();
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 
   OpaqueHandle opaque_handle_;

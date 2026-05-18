@@ -1,5 +1,5 @@
 #pragma once
-
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/Layout.h>
@@ -15,13 +15,12 @@ struct THPLayout {
   char name[LAYOUT_NAME_LEN + 1];
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-extern PyTypeObject THPLayoutType;
+TORCH_PYTHON_API extern PyTypeObject THPLayoutType;
 
-inline bool THPLayout_Check(PyObject *obj) {
+inline bool THPLayout_Check(PyObject* obj) {
   return Py_TYPE(obj) == &THPLayoutType;
 }
 
-PyObject * THPLayout_New(at::Layout layout, const std::string& name);
+PyObject* THPLayout_New(at::Layout layout, const std::string& name);
 
-void THPLayout_init(PyObject *module);
+void THPLayout_init(PyObject* module);

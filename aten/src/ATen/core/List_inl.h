@@ -5,8 +5,8 @@
 
 namespace c10 {
 
-template<class T> TypePtr getTypePtr();
-std::string toString(TypePtr typePtr);
+template<class T> decltype(auto) getTypePtr();
+std::string toString(const Type& type);
 
 template<class T>
 List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
@@ -21,7 +21,7 @@ List<T>::List()
 : List(make_intrusive<c10::detail::ListImpl>(
   typename c10::detail::ListImpl::list_type(),
   getTypePtr<T>())) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead.");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead.");
 }
 
 template<class T>
@@ -29,7 +29,7 @@ List<T>::List(ArrayRef<T> values)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     getTypePtr<T>())) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
   impl_->list.reserve(values.size());
   for (const T& element : values) {
     impl_->list.push_back(element);
@@ -39,7 +39,7 @@ List<T>::List(ArrayRef<T> values)
 template<class T>
 List<T>::List(std::initializer_list<T> initial_values)
 : List(ArrayRef<T>(initial_values)) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
 }
 
 template<class T>
@@ -47,7 +47,7 @@ List<T>::List(TypePtr elementType)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     std::move(elementType))) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
+  static_assert(std::is_same_v<T, IValue> || std::is_same_v<T, c10::intrusive_ptr<ivalue::Future>>,
                 "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
 
@@ -63,8 +63,8 @@ List<T> toTypedList(impl::GenericList list) {
   // as List<Tensor> before we changed that argument to be List<optional<Tensor>>. When deserializing, we
   // have list.use_count() == 1 and can deserialize the List<Tensor> directly as List<optional<Tensor>>.
   TORCH_CHECK(*list.impl_->elementType == *getTypePtr<T>()
-    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(getTypePtr<T>()))
-    , "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
+    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(*getTypePtr<T>()))
+    , "Tried to cast a List<", toString(*list.impl_->elementType), "> to a List<", toString(*getTypePtr<T>()), ">. Types mismatch.");
   return List<T>(std::move(list.impl_));
 }
 
@@ -76,18 +76,6 @@ template<class T>
 impl::GenericList toList(const List<T>& list) {
   return GenericList(list.impl_);
 }
-}
-
-template<class T>
-List<T>::List(List&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-}
-
-template<class T>
-List<T>& List<T>::operator=(List&& rhs) noexcept {
-  impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-  return *this;
 }
 
 template<class T>
@@ -130,9 +118,13 @@ namespace detail {
 
 namespace impl {
 
-template<class T, class Iterator>
-ListElementReference<T, Iterator>::operator T() const {
-  return c10::detail::list_element_to<T>(*iterator_);
+template <class T, class Iterator>
+ListElementReference<T, Iterator>::operator std::conditional_t<
+    std::is_reference_v<typename c10::detail::ivalue_to_const_ref_overload_return<
+        T>::type>,
+    const T&,
+    T>() const {
+  return iterator_->template to<T>();
 }
 
 template<class T, class Iterator>
@@ -143,24 +135,24 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 
 template<class T, class Iterator>
 ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(const T& new_value) && {
-  *iterator_ = c10::detail::ListElementFrom<T>::from(std::move(new_value));
+  *iterator_ = c10::detail::ListElementFrom<T>::from(new_value);
   return *this;
 }
 
 template<class T, class Iterator>
-ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(ListElementReference<T, Iterator>&& rhs) && {
+ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(ListElementReference<T, Iterator>&& rhs) && noexcept {
   *iterator_ = *rhs.iterator_;
   return *this;
 }
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs)  noexcept {
   std::swap(*lhs.iterator_, *rhs.iterator_);
 }
 
 template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
-  T lhs_tmp = lhs;
+  const T& lhs_tmp = lhs;
   return lhs_tmp == rhs;
 }
 
@@ -176,8 +168,8 @@ list_element_to_const_ref(const IValue& element) {
 }
 
 template<>
-inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
-list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
+inline typename ListElementConstReferenceTraits<std::optional<std::string>>::const_reference
+list_element_to_const_ref<std::optional<std::string>>(const IValue& element) {
   return element.toOptionalStringRef();
 }
 
@@ -194,8 +186,8 @@ void List<T>::set(size_type pos, value_type&& value) const {
 }
 
 template<class T>
-typename List<T>::value_type List<T>::get(size_type pos) const {
-  return c10::detail::list_element_to<T>(impl_->list.at(pos));
+typename List<T>::internal_const_reference_type List<T>::get(size_type pos) const {
+  return operator[](pos);
 }
 
 template<class T>
@@ -206,7 +198,7 @@ typename List<T>::internal_const_reference_type List<T>::operator[](size_type po
 template<class T>
 typename List<T>::internal_reference_type List<T>::operator[](size_type pos) {
   static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
-  return {impl_->list.begin() + pos};
+  return {impl_->list.begin() + static_cast<typename c10::detail::ListImpl::list_type::difference_type>(pos)};
 }
 
 template<class T>
@@ -357,6 +349,5 @@ template <class T>
 void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
-}
 
-#include <ATen/core/jit_type.h>
+}

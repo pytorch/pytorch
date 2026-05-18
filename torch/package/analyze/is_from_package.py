@@ -1,6 +1,7 @@
-from .._mangling import is_mangled
-from typing import Any
 from types import ModuleType
+from typing import Any
+
+from .._mangling import is_mangled
 
 
 def is_from_package(obj: Any) -> bool:
@@ -9,7 +10,7 @@ def is_from_package(obj: Any) -> bool:
 
     Note: packaged objects from externed modules will return ``False``.
     """
-    if type(obj) == ModuleType:
+    if type(obj) is ModuleType:
         return is_mangled(obj.__name__)
     else:
         return is_mangled(type(obj).__module__)

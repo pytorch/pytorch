@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/batch/parameter_server.py
 # and https://pytorch.org/tutorials/intermediate/rpc_async_execution.html#batch-updating-parameter-server
@@ -10,12 +12,11 @@ import torch
 import torch.distributed.rpc as rpc
 import torch.nn as nn
 from torch import optim
-
-from torch.testing._internal.dist_utils import (
-    dist_init,
-    worker_name,
+from torch.testing._internal.dist_utils import dist_init, worker_name
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
 )
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+
 
 batch_size = 20
 in_features = 100
@@ -27,8 +28,7 @@ def timed_log(text):
     print(f"{datetime.now().strftime('%H:%M:%S')} {text}")
 
 
-class BatchUpdateParameterServer(object):
-
+class BatchUpdateParameterServer:
     def __init__(self, batch_update_size):
         self.model = nn.Linear(in_features, out_features)
         self.lock = threading.Lock()
@@ -46,10 +46,15 @@ class BatchUpdateParameterServer(object):
     @rpc.functions.async_execution
     def update_and_fetch_model(ps_rref, grads):
         self = ps_rref.local_value()
-        for p, g in zip(self.model.parameters(), grads):
-            p.grad += g
+        for p, g in zip(self.model.parameters(), grads, strict=True):
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad += g
         with self.lock:
-            timed_log(f"PS got {self.curr_update_size}/{self.batch_update_size} updates")
+            timed_log(
+                f"PS got {self.curr_update_size}/{self.batch_update_size} updates"
+            )
             self.curr_update_size += 1
             fut = self.future_model
 
@@ -66,8 +71,7 @@ class BatchUpdateParameterServer(object):
         return fut
 
 
-class Trainer(object):
-
+class Trainer:
     def __init__(self, ps_rref):
         self.ps_rref = ps_rref
         self.loss_fn = nn.L1Loss()
@@ -102,22 +106,19 @@ def run_ps(trainers):
     timed_log("Start training")
     start = perf_counter()
     ps_rref = rpc.RRef(BatchUpdateParameterServer(len(trainers)))
-    futs = []
-    for trainer in trainers:
-        futs.append(
-            rpc.rpc_async(trainer, run_trainer, args=(ps_rref,))
-        )
+    futs = [
+        rpc.rpc_async(trainer, run_trainer, args=(ps_rref,)) for trainer in trainers
+    ]
 
     torch.futures.wait_all(futs)
     stop = perf_counter()
     timed_log("Finish training")
-    timed_log(f"Time spent training: {stop-start}s")
+    timed_log(f"Time spent training: {stop - start}s")
+
 
 class ParameterServerTest(RpcAgentTestFixture):
-
     @dist_init(setup_rpc=False)
     def test_batch_updating_parameter_server(self):
-
         if self.rank != 0:
             rpc.init_rpc(
                 name=worker_name(self.rank),

@@ -1,7 +1,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <iostream>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 NVRTC* load_nvrtc() {
   auto self = new NVRTC();
@@ -10,4 +9,4 @@ NVRTC* load_nvrtc() {
   return self;
 }
 
-}} // at::cuda
+} // at::cuda

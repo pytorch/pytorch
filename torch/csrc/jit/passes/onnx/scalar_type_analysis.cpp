@@ -1,22 +1,16 @@
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
 }
 
 namespace {
-class ScalarTypeHashFunction {
- public:
-  size_t operator()(const c10::ScalarType& type) const {
-    return static_cast<size_t>(type);
-  }
-};
-
 const int ONNX_OPSET_14 = 14;
 
 static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
@@ -30,6 +24,14 @@ static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
         {c10::kBool, 9},
         {c10::kHalf, 10},
         {c10::kDouble, 11},
+        {c10::kQInt8, 12},
+        {c10::kQUInt8, 13},
+        {c10::kQInt32, 14},
+        {c10::kBFloat16, 15},
+        {c10::kFloat8_e4m3fn, 16},
+        {c10::kFloat8_e5m2, 17},
+        {c10::kFloat8_e4m3fnuz, 18},
+        {c10::kFloat8_e5m2fnuz, 19},
 };
 
 static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
@@ -45,12 +47,17 @@ static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
 // There is no operator-wise special case handling needed.
 static const std::unordered_set<NodeKind> standardOps = {
     onnx::Add,
-    onnx::Sub,
-    onnx::Mul,
+    onnx::Concat,
     onnx::Div,
     onnx::Gemm,
-    onnx::Pow,
+    onnx::Min,
+    onnx::Max,
     onnx::Mod,
+    onnx::Mul,
+    onnx::Pow,
+    onnx::Sub,
+    onnx::MatMul,
+    onnx::Conv,
 };
 
 // For these operators, all inputs share the same scalar type.
@@ -63,6 +70,8 @@ static const std::unordered_set<NodeKind> comparisonOps = {
     onnx::LessOrEqual,
 };
 
+static const std::unordered_set<NodeKind> selectorOps = {onnx::Where};
+
 static bool IsStandardOp(const NodeKind& nkind) {
   return standardOps.find(nkind) != standardOps.end();
 }
@@ -71,24 +80,29 @@ static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
 }
 
+static bool IsSelectorOp(const NodeKind& nkind) {
+  return selectorOps.find(nkind) != selectorOps.end();
+}
+
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  AT_ASSERT(typePtr != nullptr);
+  TORCH_INTERNAL_ASSERT(typePtr != nullptr);
   return typePtr->withScalarType({scalar_type});
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
-  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind);
+  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind) ||
+      IsSelectorOp(nodeKind);
 }
 
-static c10::optional<c10::ScalarType> PromoteScalarTypes(
+static std::optional<c10::ScalarType> PromoteScalarTypes(
     const std::vector<c10::ScalarType>& types) {
   if (types.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto st = types[0];
-  for (size_t i = 1; i < types.size(); ++i) {
+  for (const auto i : c10::irange(1, types.size())) {
     st = c10::promoteTypes(st, types[i]);
   }
   return st;
@@ -96,8 +110,8 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
 
 // Type promotion between scalars and tensors
 // per logic here
-// https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
-static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
+// https://pytorch.org/docs/main/tensor_attributes.html#tensor-attributes
+static std::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     const std::vector<c10::ScalarType>& typesFromTensors,
     const std::vector<c10::ScalarType>& typesFromScalars) {
   auto typeFromTensor = PromoteScalarTypes(typesFromTensors);
@@ -116,9 +130,9 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     return 0;
   };
 
-  if (c10::nullopt == typeFromScalar) {
+  if (std::nullopt == typeFromScalar) {
     return typeFromTensor;
-  } else if (c10::nullopt == typeFromTensor) {
+  } else if (std::nullopt == typeFromTensor) {
     return typeFromScalar;
   }
 
@@ -131,20 +145,58 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
   return typeFromTensor;
 }
 
-static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
+static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
 
   auto get_scalar_type =
-      [](const Value* input) -> c10::optional<at::ScalarType> {
+      [](const Value* input) -> std::optional<at::ScalarType> {
     if (auto* tensor_type = input->type()->castRaw<TensorType>()) {
       return tensor_type->scalarType();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
+  auto emplace_type_from_scalar =
+      [&typesFromTensors, &typesFromScalars](at::ScalarType scalar_type) {
+        // Mimic PyTorch scalar type promotion logic
+        // from https://github.com/pytorch/pytorch/issues/9515
+        // Quoting:
+        //    A Tensor is a considered a "wrapped number" if it is
+        //    auto-wrapped from a C++ or Python number type. Integer types are
+        //    wrapped as 0-dim int64 tensors and floating-point types are
+        //    wrapped as 0-dim double tensors.
+        auto default_scalar_type =
+            at::typeMetaToScalarType(at::get_default_dtype());
+        switch (scalar_type) {
+          case at::kDouble:
+          case at::kFloat:
+            // floating-point numbers wrapped as float32/float64 tensors are
+            // considered to have default type, instead of double.
+            typesFromScalars.emplace_back(default_scalar_type);
+            break;
+          case at::kLong:
+          case at::kBool:
+            // bool and integer numbers remain the same type.
+            typesFromScalars.emplace_back(scalar_type);
+            break;
+          default:
+            // other types are not from wrapped numbers,
+            // track them as types from tensors.
+            typesFromTensors.emplace_back(scalar_type);
+            break;
+        }
+      };
 
+  size_t input_idx = 0;
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
+        // We skip the 'condition' input (i.e., the first input) in case of
+        // onnx::Where operator.
+        if (IsSelectorOp(n->kind()) && input_idx == 0) {
+          input_idx++;
+          return;
+        }
+
         auto nkind = input->node()->kind();
         if (nkind == onnx::Gather &&
             input->node()->input(0)->node()->kind() == onnx::Shape) {
@@ -161,42 +213,45 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           auto tensor = input->node()->t(attr::value);
           auto rank = tensor.dim();
           auto scalar_type = tensor.scalar_type();
-          // Mimic PyTorch scalar type promotion logic
-          // from https://github.com/pytorch/pytorch/issues/9515
-          // Quoting:
-          //    A Tensor is a considered a "wrapped number" if it is
-          //    auto-wrapped from a C++ or Python number type. Integer types are
-          //    wrapped as 0-dim int64 tensors and floating-point types are
-          //    wrapped as 0-dim double tensors.
+
           if (rank == 0) {
-            auto default_scalar_type =
-                at::typeMetaToScalarType(at::get_default_dtype());
-            switch (scalar_type) {
-              case at::kDouble:
-                // floating-point numbers wrapped as double tensors are
-                // considered to have default type, instead of double.
-                typesFromScalars.emplace_back(default_scalar_type);
-                break;
-              case at::kLong:
-              case at::kBool:
-                // bool and integer numbers remain the same type.
-                typesFromScalars.emplace_back(scalar_type);
-                break;
-              default:
-                // other types are not from wrapped numbers,
-                // track them as types from tensors.
-                typesFromTensors.emplace_back(scalar_type);
-                break;
-            }
+            emplace_type_from_scalar(scalar_type);
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
         } else if (auto scalar_type = get_scalar_type(input)) {
-          typesFromTensors.emplace_back(*scalar_type);
+          auto tensor_type = input->type()->castRaw<TensorType>();
+          // get_scalar_type returns non-null value already guarantees
+          // that the input has a valid tensor_type.
+          TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
+          // ONNX model track shape related computes that were done in pytorch
+          // by python numbers as tensor computes. This is the only way for ONNX
+          // to track them properly since ONNX only has tensor type, otherwise
+          // the computation result will be tracked statically as constant, and
+          // the model won't work for another input that differs in shape.
+
+          // Now for type promotion logic, scalars should be treated differently
+          // with tensors. More info regarding type promotion logic commented at
+          // `emplace_type_from_scalar`. Here we filter out rank 0 tensors and
+          // run it with `emplace_type_from_scalar` to determine if they are
+          // considered scalars for type promotion.
+
+          // NOTE that this might introduce regression that a REAL 0-rank tensor
+          // is now being recognized as scalar. The downside is the model will
+          // drop in accuracy for these cases as certain computations will
+          // happen in lower precision data types.
+          auto rank = tensor_type->dim();
+          if (rank && rank.value() == 0) {
+            emplace_type_from_scalar(scalar_type.value());
+          } else {
+            typesFromTensors.emplace_back(scalar_type.value());
+          }
+
+          input_idx++;
         }
       });
 
-  c10::optional<c10::ScalarType> st = c10::nullopt;
+  std::optional<c10::ScalarType> st = std::nullopt;
   const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
@@ -216,7 +271,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
       // are tensors or scalars. (Previously only scalars support implicit
       // casting).
       // Per logic here
-      // https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+      // https://pytorch.org/docs/main/tensor_attributes.html#tensor-attributes
       st = PromoteScalarTypesWithCategory(typesFromTensors, typesFromScalars);
     }
   }
@@ -224,10 +279,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   return st;
 }
 
-static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
+static std::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
     const Node* n,
     const c10::ScalarType& scalar_type) {
-  // StandardOps do not support uint8\int8\int16 in ONNX now.
+  // Some of standardOps do not support uint8\int8\int16 type for ONNX
+  // opset version < 14.
+  // Fix in this ONNX PR:
+  // https://github.com/onnx/onnx/pull/3334
   if (n->kind() != onnx::Gemm && IsStandardOp(n->kind()) &&
       (scalar_type == c10::kByte || scalar_type == c10::kChar ||
        scalar_type == c10::kShort)) {
@@ -241,23 +299,33 @@ static void UpdateScalarTypeForInputs(
     const c10::ScalarType& scalar_type) {
   const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
   if (onnx_type < 0) {
-    std::cerr << "Warning: ONNX Scalar Type Analysis - Scalar type: "
-              << c10::toString(scalar_type)
-              << " of input tensor in operator: " << n->kind().toDisplayString()
-              << " not supported in ONNX. " << std::endl;
+    TORCH_WARN(
+        "ONNX Scalar Type Analysis - Scalar type: ",
+        c10::toString(scalar_type),
+        " of input tensor in operator: ",
+        n->kind().toDisplayString(),
+        " not supported in ONNX. ");
     return;
   }
 
+  size_t input_idx = 0;
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_scalar_type =
-        input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
+        input_tensor_type ? input_tensor_type->scalarType() : std::nullopt;
+
+    // We skip the 'condition' input (i.e., the first input) in case of
+    // onnx:Where operator.
+    if (IsSelectorOp(n->kind()) && input_idx == 0) {
+      input_idx++;
+      continue;
+    }
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
-        // NOTE: Keep only the else branch once constant_folding is enabled by
+        // TODO: Keep only the else branch once constant_folding is enabled by
         // default.
         at::Tensor val = input->node()->t(attr::value);
         at::Tensor new_val = val.to(scalar_type);
@@ -265,6 +333,7 @@ static void UpdateScalarTypeForInputs(
         const_node->t_(attr::value, new_val);
         const_node->insertBefore(n);
         const_node->output()->setType(TensorType::create(new_val));
+        const_node->copyMetadata(n);
         n->replaceInputWith(input, const_node->output());
       } else {
         Node* cast_node = n->owningGraph()->create(onnx::Cast);
@@ -273,18 +342,22 @@ static void UpdateScalarTypeForInputs(
         cast_node->insertBefore(n);
         cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
             input_tensor_type, scalar_type));
+        cast_node->copyMetadata(n);
         n->replaceInputWith(input, cast_node->output());
       }
     }
+
+    input_idx++;
   }
 }
 
 static void UpdateScalarTypeForOutput(
     Node* n,
     const c10::ScalarType& scalar_type) {
-  auto output_tensor_type = n->output()->type()->cast<TensorType>();
-  n->output()->setType(
-      CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
+  if (auto output_tensor_type = n->output()->type()->cast<TensorType>()) {
+    n->output()->setType(CreateProfiledTensorTypeWithScalarType(
+        output_tensor_type, scalar_type));
+  }
 }
 
 static void RecoverScalarTypeForOutput(
@@ -297,13 +370,29 @@ static void RecoverScalarTypeForOutput(
   cast_node->addInput(out);
   cast_node->i_(attr::to, onnx_type);
   cast_node->insertAfter(n);
+  cast_node->copyMetadata(n);
   out->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
 }
 
+// This example error found when exports transfo_xl model using add op in uint8
+// type, as below:
+// if self.same_length:
+//     all_ones = word_emb.new_ones((qlen, klen), dtype=torch.uint8)
+//     mask_len = klen - self.mem_len
+//     if mask_len > 0:
+//         mask_shift_len = qlen - mask_len
+//     else:
+//         mask_shift_len = qlen
+//     dec_attn_mask = (torch.triu(all_ones, 1 + mlen) + torch.tril(all_ones,
+//     -mask_shift_len))[:, :, None]  # -1
+//
+// `all_ones is` an uint8 tensor, But the calculation of `dec_attn_mask` using
+// add(+) op to get the uint8 result. Reference Link:
+// https://github.com/huggingface/transformers/blob/b020a736c374460af1b34267283f957988350630/src/transformers/models/transfo_xl/modeling_transfo_xl.py#L936
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
   if (n->output()->type()->cast<TensorType>() == nullptr ||
-      n->output()->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+      n->output()->type()->cast<TensorType>()->scalarType() == std::nullopt) {
     // skip LowPrecisionCast if op output type is null.
     return;
   }
@@ -311,7 +400,7 @@ static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
       n->output()->type()->cast<TensorType>()->scalarType().value();
   for (size_t i = 0; i < n->inputs().size(); ++i) {
     if (n->input(i)->type()->cast<TensorType>() == nullptr ||
-        n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+        n->input(i)->type()->cast<TensorType>()->scalarType() == std::nullopt) {
       // skip LowPrecisionCast if any op input type node is null.
       return;
     }
@@ -377,15 +466,16 @@ void ScalarTypeAnalysisForONNX(
     const std::shared_ptr<Graph>& graph,
     bool lowprecision_cast,
     int opset_version) {
+  GRAPH_DUMP("Before ScalarTypeAnalysisForONNX: ", graph);
   ImplicitCastForONNX(graph->block());
   if (lowprecision_cast) {
     LowPrecisionCastForStandardOpsONNX(graph->block(), opset_version);
   }
+  GRAPH_DUMP("After ScalarTypeAnalysisForONNX: ", graph);
 }
 
 void ScalarTypeAnalysisNodeForONNX(Node* n) {
   ImplicitCastNodeForONNX(n);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

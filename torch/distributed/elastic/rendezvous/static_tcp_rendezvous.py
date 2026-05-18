@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,14 +9,21 @@
 
 import datetime
 import logging
-from typing import Tuple, cast, Optional
+from typing import cast
 
-# pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
-from torch.distributed import Store, TCPStore, PrefixStore
-from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
+from torch.distributed import PrefixStore, Store, TCPStore
+from torch.distributed.elastic.rendezvous import (
+    RendezvousHandler,
+    RendezvousInfo,
+    RendezvousParameters,
+    RendezvousStoreInfo,
+)
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 
-log = logging.getLogger(__name__)
+
+__all__ = ["StaticTCPRendezvous", "create_rdzv_handler"]
+
+logger = logging.getLogger(__name__)
 
 _default_timeout_seconds = 600
 
@@ -24,6 +31,7 @@ _default_timeout_seconds = 600
 class StaticTCPRendezvous(RendezvousHandler):
     """
     Static rendezvous that is a wrapper around the TCPStore.
+
     Creates TCPStore based on the input parameters with the
     listener on the agent with group_rank=0
     """
@@ -43,24 +51,36 @@ class StaticTCPRendezvous(RendezvousHandler):
         self.world_size = world_size
         self.run_id = run_id
         self.timeout = datetime.timedelta(seconds=timeout)
-        self._store: Optional[Store] = None
+        self._store: Store | None = None
 
     def get_backend(self) -> str:
         return "static"
 
-    def next_rendezvous(self) -> Tuple[Store, int, int]:
-        log.info("Creating TCPStore as the c10d::Store implementation")
+    @property
+    def use_agent_store(self) -> bool:
+        return True
+
+    def next_rendezvous(self) -> RendezvousInfo:
+        logger.info("Creating TCPStore as the c10d::Store implementation")
+        is_master = self.rank == 0
         if not self._store:
-            is_master = self.rank == 0
-            self._store = TCPStore(
+            self._store = TCPStore(  # type: ignore[call-arg]
                 self.master_addr,
                 self.master_port,
                 self.world_size,
                 is_master,
                 self.timeout,
+                multi_tenant=True,
             )
         store = PrefixStore(self.run_id, self._store)
-        return store, self.rank, self.world_size
+        # TCPStore server instance is used by trainer code
+        bootstrap_store_info = RendezvousStoreInfo(self.master_addr, self.master_port)
+        return RendezvousInfo(
+            store,
+            self.rank,
+            self.world_size,
+            bootstrap_store_info,
+        )
 
     def is_closed(self):
         return False
@@ -82,18 +102,18 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
     if "rank" not in params.config:
         raise ValueError(
             "rank is absent in RendezvousParameters."
-            "Try add --node_rank to the cmd request"
+            "Try add --node-rank to the cmd request"
         )
     endpoint = params.endpoint.strip()
     if not endpoint:
         raise ValueError(
             "endpoint is absent in RendezvousParameters"
-            "Try add --master_port and --master_addr to the cmd request"
+            "Try add --master-port and --master-addr to the cmd request"
         )
     master_addr, master_port = parse_rendezvous_endpoint(endpoint, -1)
     if master_port == -1:
         raise ValueError(
-            f"Port is absent in endpoint: {endpoint}. Try launching with --master_port"
+            f"Port is absent in endpoint: {endpoint}. Try launching with --master-port"
         )
     world_size = params.max_nodes
     rank = cast(int, params.config.get("rank"))
@@ -102,6 +122,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         timeout = int(params.config["timeout"])
     else:
         timeout = _default_timeout_seconds
+
     return StaticTCPRendezvous(
         master_addr, master_port, rank, world_size, run_id, timeout
     )

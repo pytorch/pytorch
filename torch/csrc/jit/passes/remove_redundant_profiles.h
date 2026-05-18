@@ -2,10 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void RemoveRedundantProfiles(std::shared_ptr<Graph>& graph);
-
-} // namespace jit
-} // namespace torch
+TORCH_API void RemoveRedundantProfiles(Block* block, AliasDb& db);
+} // namespace torch::jit

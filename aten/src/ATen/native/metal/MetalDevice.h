@@ -1,13 +1,15 @@
 #ifndef PYTORCH_MOBILE_METAL_DEVICE_H_
 #define PYTORCH_MOBILE_METAL_DEVICE_H_
 
+#include <c10/macros/Macros.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 
 #include <string>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 struct MetalDeviceInfo {
   std::string name;
@@ -16,7 +18,12 @@ struct MetalDeviceInfo {
 
 static inline MetalDeviceInfo createDeviceInfo(id<MTLDevice> device) {
   MetalDeviceInfo device_info;
-  device_info.name = device.name.UTF8String;
+  if (device.name != nil) {
+    const char* utf8_name = device.name.UTF8String;
+    if (utf8_name != nullptr) {
+      device_info.name = utf8_name;
+    }
+  }
   if (@available(macOS 11.0, iOS 14.0, *)) {
     device_info.languageVersion = MTLLanguageVersion2_3;
   } else if (@available(macOS 10.15, iOS 13.0, *)) {
@@ -40,8 +47,6 @@ static inline MetalDeviceInfo createDeviceInfo(id<MTLDevice> device) {
   return device_info;
 }
 
-}
-}
-}
+} // namespace at::native::metal
 
 #endif

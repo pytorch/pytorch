@@ -1,4 +1,5 @@
-r""""Signal handling for multiprocessing data loading.
+# mypy: allow-untyped-defs
+r"""Signal handling for multiprocessing data loading.
 
 NOTE [ Signal handling in multiprocessing data loading ]
 
@@ -32,19 +33,25 @@ multiprocessing data loading robust to errors.
 
 import signal
 import threading
-from . import IS_WINDOWS
 
 # Some of the following imported functions are not used in this file, but are to
 # be used `_utils.signal_handling.XXXXX`.
-from torch._C import _set_worker_pids, _remove_worker_pids  # noqa: F401
-from torch._C import _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
+from torch._C import (  # noqa: F401
+    _error_if_any_worker_fails,
+    _remove_worker_pids,
+    _set_worker_pids,
+    _set_worker_signal_handlers,
+)
+
+from . import IS_WINDOWS
+
 
 _SIGCHLD_handler_set = False
 r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
-def _set_SIGCHLD_handler():
+def _set_SIGCHLD_handler() -> None:
     # Windows doesn't support SIGCHLD handler
     if IS_WINDOWS:
         return
@@ -60,12 +67,13 @@ def _set_SIGCHLD_handler():
         # no-op.
         previous_handler = None
 
-    def handler(signum, frame):
+    def handler(signum, frame) -> None:
         # This following call uses `waitid` with WNOHANG from C side. Therefore,
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
         if previous_handler is not None:
-            assert callable(previous_handler)
+            if not callable(previous_handler):
+                raise AssertionError("previous_handler is not callable")
             previous_handler(signum, frame)
 
     signal.signal(signal.SIGCHLD, handler)

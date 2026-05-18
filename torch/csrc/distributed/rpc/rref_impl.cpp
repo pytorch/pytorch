@@ -1,18 +1,18 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 
 #include <ATen/record_function.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <utility>
+
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
@@ -27,21 +27,11 @@ std::string getTypeStr(const c10::TypePtr& type) {
       return type->annotation_str();
   }
 }
-
-void blockCurrentStreams(const std::vector<c10::Event>& events) {
-  for (const c10::Event& event : events) {
-    c10::Device device{event.device_type(), event.device_index()};
-    c10::Stream stream =
-        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
-    event.block(stream);
-  }
-}
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
@@ -62,10 +52,7 @@ RRefForkData::RRefForkData(
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-    : RRefInterface(),
-      ownerId_(ownerId),
-      rrefId_(rrefId),
-      type_(std::move(type)) {}
+    : ownerId_(ownerId), rrefId_(rrefId), type_(std::move(type)) {}
 
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
@@ -127,6 +114,10 @@ void UserRRef::tryDel() {
   }
 }
 
+UserRRef::~UserRRef() {
+  tryDel();
+}
+
 void UserRRef::release_resources() {
   tryDel();
 }
@@ -169,7 +160,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
-  Message msgToSend;
+  c10::intrusive_ptr<Message> msgToSend;
 
   if (isPyObj()) {
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
@@ -247,17 +238,21 @@ OwnerRRef::OwnerRRef(
     const RRefId& rrefId,
     TypePtr type,
     std::vector<c10::Device> devices)
-    : OwnerRRef(ownerId, rrefId, type, /* value */ {}, std::move(devices)) {}
+    : OwnerRRef(
+          ownerId,
+          rrefId,
+          std::move(type),
+          /* value */ {},
+          std::move(devices)) {}
 
 OwnerRRef::OwnerRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     TypePtr type,
-    c10::optional<IValue> value,
+    std::optional<IValue> value,
     std::vector<c10::Device> devices)
-    : RRef(ownerId, rrefId, type) {
-  future_ = c10::make_intrusive<JitFuture>(
-      at::AnyClassType::get(), std::move(devices));
+    : RRef(ownerId, rrefId, std::move(type)) {
+  future_ = c10::make_intrusive<JitFuture>(type_, std::move(devices));
 
   if (value.has_value()) {
     future_->markCompleted(value.value());
@@ -269,13 +264,7 @@ const IValue& OwnerRRef::getValue() const {
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
-  future_->wait();
-  if (future_->hasError()) {
-    (void)future_->value(); // Throws the error.
-  }
-  // Before accessing the value in this RRef, current CUDA streams must wait
-  // for pending CUDA operations that create the value.
-  blockCurrentStreams(events_);
+  future_->waitAndThrow();
   return future_->constValue();
 }
 
@@ -288,44 +277,23 @@ c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  future_->markCompleted(value);
+  future_->markCompleted(std::move(value));
 }
 
 void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
 
-void OwnerRRef::recordAllStreams(
-    const std::shared_ptr<LazyStreamContext>& ctx) {
-  if (ctx) {
-    for (auto stream : ctx->getReservedStreams()) {
-      c10::Event event{ctx->deviceType()};
-      event.record(stream);
-      events_.push_back(std::move(event));
-    }
-  }
-}
-
-void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
-  if (ctx) {
-    for (c10::Event& event : events_) {
-      event.block(ctx->getStream(event.device()));
-    }
-  }
-}
-
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {
     return os << "OwnerRRef("
-              << "rref_id=" << rref.rrefId() << ")";
+              << "rref_id=" << rref.rrefId() << ')';
   } else {
     return os << "UserRRef("
               << "rref_id=" << rref.rrefId()
               << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
-              << ")";
+              << ')';
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

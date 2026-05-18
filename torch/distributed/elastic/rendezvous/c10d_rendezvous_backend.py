@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -7,17 +8,28 @@
 import binascii
 import logging
 import os
+import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast
 
-from torch.distributed import Store, TCPStore
+from torch.distributed import FileStore, Store, TCPStore
+from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
-from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
+from .api import (
+    RendezvousConnectionError,
+    RendezvousError,
+    RendezvousParameters,
+    RendezvousStateError,
+)
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
-log = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
+
+# default port for the TCP store
+DEFAULT_PORT = 29400
 
 
 class C10dRendezvousBackend(RendezvousBackend):
@@ -58,15 +70,15 @@ class C10dRendezvousBackend(RendezvousBackend):
         """See base class."""
         return "c10d"
 
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> tuple[bytes, Token] | None:
         """See base class."""
         base64_state: bytes = self._call_store("get", self._key)
 
         return self._decode_state(base64_state)
 
     def set_state(
-        self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+        self, state: bytes, token: Token | None = None
+    ) -> tuple[bytes, Token, bool] | None:
         """See base class."""
         base64_state_str: str = b64encode(state).decode()
 
@@ -75,17 +87,16 @@ class C10dRendezvousBackend(RendezvousBackend):
             if not isinstance(token, bytes):
                 result = self.get_state()
                 if result is not None:
-                    tmp = *result, False
-                    # Python 3.6 does not support tuple unpacking in return
-                    # statements.
-                    return tmp
+                    return *result, False
                 return None
 
             token = token.decode()
         else:
             token = self._NULL_SENTINEL
 
-        base64_state: bytes = self._call_store("compare_set", self._key, token, base64_state_str)
+        base64_state: bytes = self._call_store(
+            "compare_set", self._key, token, base64_state_str
+        )
 
         state_token_pair = self._decode_state(base64_state)
         if state_token_pair is None:
@@ -101,12 +112,12 @@ class C10dRendezvousBackend(RendezvousBackend):
     def _call_store(self, store_op: str, *args, **kwargs) -> Any:
         try:
             return getattr(self._store, store_op)(*args, **kwargs)
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, TimeoutError) as exc:
             raise RendezvousConnectionError(
                 "The connection to the C10d store has failed. See inner exception for details."
             ) from exc
 
-    def _decode_state(self, base64_state: bytes) -> Optional[Tuple[bytes, Token]]:
+    def _decode_state(self, base64_state: bytes) -> tuple[bytes, Token] | None:
         if base64_state == self._NULL_SENTINEL.encode():
             return None
 
@@ -121,7 +132,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29500)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=DEFAULT_PORT)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the
@@ -142,17 +153,23 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     # see the explanation in the except clause below.
     for is_server in [is_host, False]:
         try:
-            store = TCPStore(  # type: ignore[call-arg]
-                host, port, is_master=is_server, timeout=timedelta(seconds=read_timeout)
+            store = TCPStore(
+                host,
+                port,
+                is_master=is_server,
+                multi_tenant=True,
+                timeout=timedelta(seconds=read_timeout),
             )
 
             if is_server:
-                log.info(
-                    f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                msg = f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                construct_and_record_rdzv_event(
+                    run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
+                logger.info(msg)
 
             break
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, TimeoutError) as exc:
             # If we heuristically inferred the value of is_host as True and our
             # first attempt to instantiate the TCP store has failed, try it one
             # more time with is_host set to False. As an edge case there can be
@@ -164,22 +181,52 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                     "The connection to the C10d store has failed. See inner exception for details."
                 ) from exc
 
+    return store  # type: ignore[possibly-undefined]
+
+
+def _create_file_store(params: RendezvousParameters) -> FileStore:
+    # If a user specifies an endpoint, we treat it as a path to a file.
+    if params.endpoint:
+        path = params.endpoint
+    else:
+        try:
+            # The temporary file is readable and writable only by the user of
+            # this process.
+            _, path = tempfile.mkstemp()
+        except OSError as exc:
+            raise RendezvousError(
+                "The file creation for C10d store has failed. See inner exception for details."
+            ) from exc
+
+    try:
+        store = FileStore(path)
+    except (ValueError, RuntimeError) as exc:
+        raise RendezvousConnectionError(
+            "The connection to the C10d store has failed. See inner exception for details."
+        ) from exc
+
     return store
 
 
-def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
-    """Creates a new :py:class:`C10dRendezvousBackend` from the specified
-    parameters.
+def create_backend(params: RendezvousParameters) -> tuple[C10dRendezvousBackend, Store]:
+    """Create a new :py:class:`C10dRendezvousBackend` from the specified parameters.
 
     +--------------+-----------------------------------------------------------+
     | Parameter    | Description                                               |
     +==============+===========================================================+
-    | store_type   | The type of the C10d store. As of today the only          |
-    |              | supported type is "tcp" which corresponds to              |
-    |              | :py:class:`torch.distributed.TCPStore`. Defaults to "tcp".|
+    | store_type   | The type of the C10d store. The currently supported types |
+    |              | are "tcp" and "file" which correspond to                  |
+    |              | :py:class:`torch.distributed.TCPStore` and                |
+    |              | :py:class:`torch.distributed.FileStore`, respectively.    |
+    |              | Defaults to "tcp".                                        |
     +--------------+-----------------------------------------------------------+
     | read_timeout | The read timeout, in seconds, for store operations.       |
     |              | Defaults to 60 seconds.                                   |
+    |              |                                                           |
+    |              | Note this only applies to                                 |
+    |              | :py:class:`torch.distributed.TCPStore`. It is not relevant|
+    |              | to :py:class:`torch.distributed.FileStore` which does not |
+    |              | take in timeout as a parameter.                           |
     +--------------+-----------------------------------------------------------+
     | is_host      | A boolean value indicating whether this backend instance  |
     |              | will host the C10d store. If not specified it will be     |
@@ -195,12 +242,29 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
     |              | the hostname or does not match the FQDN of the machine).  |
     +--------------+-----------------------------------------------------------+
     """
-    # As of today we only support TCPStore. Other store types do not have the
-    # required functionality (e.g. compare_set) yet.
+    # As of today we only support TCPStore and FileStore. Other store types do
+    # not have the required functionality (e.g. compare_set) yet.
     store_type = params.get("store_type", "tcp").strip().lower()
-    if store_type != "tcp":
-        raise ValueError("The store type must be 'tcp'. Other store types are not supported yet.")
+    store: Store
 
-    store = _create_tcp_store(params)
+    try:
+        if store_type == "file":
+            store = _create_file_store(params)
+        elif store_type == "tcp":
+            store = _create_tcp_store(params)
+        else:
+            raise ValueError(
+                "Invalid store type given. Currently only supports file and tcp."
+            )
 
-    return C10dRendezvousBackend(store, params.run_id), store
+        backend = C10dRendezvousBackend(store, params.run_id)
+
+    except Exception as e:
+        construct_and_record_rdzv_event(
+            message=f"{type(e).__name__}: {str(e)}",
+            run_id=params.run_id,
+            node_state=NodeState.FAILED,
+        )
+        raise
+
+    return backend, store

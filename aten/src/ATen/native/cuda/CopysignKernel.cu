@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -17,7 +18,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void copysign_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cuda", [&]() {
@@ -27,6 +28,6 @@ void copysign_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(copysign_stub, &copysign_kernel_cuda);
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel_cuda)
 
-}} // namespace at::native
+} // namespace at::native

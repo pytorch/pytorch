@@ -1,11 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#include <ATen/CollapseDims.h>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 #define MAX_TENSORINFO_DIMS 25
 
@@ -51,7 +48,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
-  AT_ASSERT(dims < MAX_TENSORINFO_DIMS);
+  TORCH_CHECK(dims < MAX_TENSORINFO_DIMS, "CUDA Tensors cannot have more than 25 dimensions");
 
   for (int i = 0; i < dim; ++i) {
     sizes[i] = sz[i];
@@ -96,7 +93,7 @@ struct IndexToOffset {
   }
 };
 
-// Uses dynamic (runtime) instead of static (compiletime) dims
+// Uses dynamic (runtime) instead of static (compile time) dims
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
   static inline __host__ __device__ IndexType get(
@@ -116,6 +113,4 @@ struct IndexToOffset<T, IndexType, -1> {
   }
 };
 
-} // detail
-} // cuda
-} // at
+} // namespace at::cuda::detail

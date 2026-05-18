@@ -3,8 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Simple data structure for containing a type T in nested control blocks
 // Should only be used after initial compilation where type checking and
@@ -41,6 +40,7 @@ struct MiniEnvironment {
 
   std::vector<std::string> definedVariables() {
     std::vector<std::string> result;
+    result.reserve(table.size());
     for (auto& kv : table) {
       result.push_back(kv.first);
     }
@@ -52,5 +52,4 @@ struct MiniEnvironment {
   std::unordered_map<std::string, T> table;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

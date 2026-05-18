@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
 #include "torch/jit.h"
@@ -9,7 +11,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -27,13 +28,11 @@ TEST(GraphExecutorTest, Basic_CUDA) {
   auto stack = createStack({input, hx, cx, w_ih, w_hh});
   executor.run(stack);
   ASSERT_EQ(stack.size(), 2);
-  at::Tensor r0, r1;
-  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
+  auto [r0, r1] = lstm(input, hx, cx, w_ih, w_hh);
   ASSERT_TRUE(almostEqual(stack[0].toTensor(), r0));
   ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(GraphExecutorTest, runAsync_executor) {
   /*
   TODO: there are some problem with C++ parsing script program involving
@@ -48,9 +47,16 @@ TEST(GraphExecutorTest, runAsync_executor) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_interpreter_async.pt");
+  auto testModelFile = []() -> std::string {
+    std::string dir(__FILE__);
+    dir = dir.substr(0, dir.find_last_of("/\\") + 1);
+    auto candidate = dir + "test_interpreter_async.pt";
+    if (std::filesystem::exists(candidate))
+      return candidate;
+    // Installed binary: .pt is next to the executable.
+    auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
+    return (exeDir / "test_interpreter_async.pt").string();
+  }();
   auto module = load(testModelFile);
   auto graph = module.get_method("forward").graph();
   GraphExecutor graphExecutor(graph, "");
@@ -61,7 +67,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
     mtx.lock();
     ++asyncCounter;
     mtx.unlock();
-    at::launch(move(f));
+    at::launch(std::move(f));
   };
   std::vector<IValue> stack;
   // NOLINTNEXTLINE(modernize-use-emplace)

@@ -3,12 +3,10 @@
 
 #include <c10/util/ArrayRef.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 struct Conv2DParams final {
-  Conv2DParams() {}
+  Conv2DParams() = default;
   Conv2DParams(
       c10::IntArrayRef inputSizes,
       c10::IntArrayRef weightSizes,
@@ -22,7 +20,7 @@ struct Conv2DParams final {
   }
 
   bool isDepthwise() const {
-    // Currently, only channel multipler of 1 is supported
+    // Currently, only channel multiplier of 1 is supported
     // i.e. inputFeatureChannels == outputFeatureChannels
     return G > 1 && IC == 1 && OC == G && OC == C;
   }
@@ -46,8 +44,6 @@ struct Conv2DParams final {
   int64_t OH; // output height
 };
 
-} // namespace metal
-} // namespace native
-} // namespace at
+} // namespace at::native::metal
 
 #endif /* MetalConvParams_h */

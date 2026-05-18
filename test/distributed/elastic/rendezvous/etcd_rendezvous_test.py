@@ -1,9 +1,12 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import sys
 import unittest
 import uuid
 
@@ -12,7 +15,11 @@ from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_han
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
 
-@unittest.skipIf(os.getenv("CIRCLECI"), "T85992919 temporarily disabling in circle ci")
+if os.getenv("CIRCLECI"):
+    print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
+    sys.exit(0)
+
+
 class EtcdRendezvousTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

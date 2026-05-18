@@ -4,6 +4,7 @@ __import__("subpackage_2", globals=globals(), locals=locals(), fromlist=["*"], l
 
 result = "package_b"
 
+
 class PackageBObject:
     __slots__ = ["obj"]
 

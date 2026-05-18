@@ -1,11 +1,12 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
-rpc::Message PropagateGradientsResp::toMessageImpl() && {
-  return rpc::Message({}, {}, rpc::MessageType::BACKWARD_AUTOGRAD_RESP);
+c10::intrusive_ptr<rpc::Message> PropagateGradientsResp::toMessageImpl() && {
+  return c10::make_intrusive<rpc::Message>(
+      std::vector<char>{},
+      std::vector<torch::Tensor>{},
+      rpc::MessageType::BACKWARD_AUTOGRAD_RESP);
 }
 
 std::unique_ptr<PropagateGradientsResp> PropagateGradientsResp::fromMessage(
@@ -13,6 +14,4 @@ std::unique_ptr<PropagateGradientsResp> PropagateGradientsResp::fromMessage(
   return std::unique_ptr<PropagateGradientsResp>();
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

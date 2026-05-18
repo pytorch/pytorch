@@ -1,3 +1,0 @@
-build --copt=--std=c++14
-build --copt=-I.
-build --copt=-isystem --copt bazel-out/k8-fastbuild/bin

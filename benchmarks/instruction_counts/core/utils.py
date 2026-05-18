@@ -1,45 +1,53 @@
+# mypy: ignore-errors
 import atexit
-import shutil
 import re
-import tempfile
+import shutil
 import textwrap
-from typing import List, Optional, Tuple
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
 
+from torch.utils.benchmark.utils.common import _make_temp_dir
 
-_TEMPDIR: Optional[str] = None
+
+_TEMPDIR: str | None = None
+
+
 def get_temp_dir() -> str:
     global _TEMPDIR
     if _TEMPDIR is None:
-        temp_dir = tempfile.mkdtemp()
-        atexit.register(shutil.rmtree, path=temp_dir)
-        _TEMPDIR = temp_dir
+        _TEMPDIR = _make_temp_dir(
+            prefix="instruction_count_microbenchmarks", gc_dev_shm=True
+        )
+        atexit.register(shutil.rmtree, path=_TEMPDIR)
     return _TEMPDIR
 
 
 def _flatten(
-    key_prefix: Label,
-    sub_schema: Definition,
-    result: FlatIntermediateDefinition
+    key_prefix: Label, sub_schema: Definition, result: FlatIntermediateDefinition
 ) -> None:
     for k, value in sub_schema.items():
         if isinstance(k, tuple):
-            assert all(isinstance(ki, str) for ki in k)
+            if not all(isinstance(ki, str) for ki in k):
+                raise AssertionError(
+                    f"expected all elements of key tuple to be str, got {k}"
+                )
             key_suffix: Label = k
         elif k is None:
             key_suffix = ()
         else:
-            assert isinstance(k, str)
+            if not isinstance(k, str):
+                raise AssertionError(f"expected key to be str, got {type(k)}")
             key_suffix = (k,)
 
         key: Label = key_prefix + key_suffix
         if isinstance(value, (TimerArgs, GroupedBenchmark)):
-            assert key not in result, f"duplicate key: {key}"
+            if key in result:
+                raise AssertionError(f"duplicate key: {key}")
             result[key] = value
         else:
-            assert isinstance(value, dict)
+            if not isinstance(value, dict):
+                raise AssertionError(f"expected value to be dict, got {type(value)}")
             _flatten(key_prefix=key, sub_schema=value, result=result)
 
 
@@ -50,13 +58,20 @@ def flatten(schema: Definition) -> FlatIntermediateDefinition:
 
     # Ensure that we produced a valid flat definition.
     for k, v in result.items():
-        assert isinstance(k, tuple)
-        assert all(isinstance(ki, str) for ki in k)
-        assert isinstance(v, (TimerArgs, GroupedBenchmark))
+        if not isinstance(k, tuple):
+            raise AssertionError(f"expected key to be tuple, got {type(k)}")
+        if not all(isinstance(ki, str) for ki in k):
+            raise AssertionError(
+                f"expected all elements of key tuple to be str, got {k}"
+            )
+        if not isinstance(v, (TimerArgs, GroupedBenchmark)):
+            raise AssertionError(
+                f"expected value to be TimerArgs or GroupedBenchmark, got {type(v)}"
+            )
     return result
 
 
-def parse_stmts(stmts: str) -> Tuple[str, str]:
+def parse_stmts(stmts: str) -> tuple[str, str]:
     """Helper function for side-by-side Python and C++ stmts.
 
     For more complex statements, it can be useful to see Python and C++ code
@@ -67,11 +82,12 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
       - The column separator is " | ", not "|". Whitespace matters.
     """
     stmts = textwrap.dedent(stmts).strip()
-    lines: List[str] = stmts.splitlines(keepends=False)
-    assert len(lines) >= 3, f"Invalid string:\n{stmts}"
+    lines: list[str] = stmts.splitlines(keepends=False)
+    if len(lines) < 3:
+        raise AssertionError(f"Invalid string (expected at least 3 lines):\n{stmts}")
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
-    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"
+    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"  # noqa: F841
     separation_pattern = r"^[-]{40} | [-]{40}$"
     code_pattern = r"^(.{40}) \|($| (.*)$)"
 
@@ -79,12 +95,16 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
     if column_match is None:
         raise ValueError(
             f"Column header `{lines[0]}` "
-            f"does not match pattern `{column_header_pattern}`")
+            f"does not match pattern `{column_header_pattern}`"
+        )
 
-    assert re.search(separation_pattern, lines[1])
+    if not re.search(separation_pattern, lines[1]):
+        raise AssertionError(
+            f"Separation line `{lines[1]}` does not match pattern `{separation_pattern}`"
+        )
 
-    py_lines: List[str] = []
-    cpp_lines: List[str] = []
+    py_lines: list[str] = []
+    cpp_lines: list[str] = []
     for l in lines[2:]:
         l_match = re.search(code_pattern, l)
         if l_match is None:
@@ -94,6 +114,7 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
 
         # Make sure we can round trip for correctness.
         l_from_stmts = f"{py_lines[-1]:<40} | {cpp_lines[-1]:<40}".rstrip()
-        assert l_from_stmts == l.rstrip(), f"Failed to round trip `{l}`"
+        if l_from_stmts != l.rstrip():
+            raise AssertionError(f"Failed to round trip `{l}`")
 
     return "\n".join(py_lines), "\n".join(cpp_lines)

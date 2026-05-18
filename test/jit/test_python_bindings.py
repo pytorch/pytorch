@@ -1,12 +1,9 @@
-import torch
-from torch.testing._internal.jit_utils import JitTestCase
+# Owner(s): ["oncall: jit"]
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TestPythonBindings\n\n"
-        "instead."
-    )
+import torch
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestPythonBindings(JitTestCase):
@@ -75,3 +72,43 @@ class TestPythonBindings(JitTestCase):
         alias_db = gr.alias_db()
         self.assertTrue("WILDCARD" in str(alias_db))
         self.assertTrue("digraph alias_db" in alias_db.to_graphviz_str())
+
+    def test_graph_create(self):
+        gr = torch._C.Graph()
+        with self.assertRaises(ValueError):
+            gr.create("prim::Constant", [None])
+
+    def test_add_input(self):
+        gr = torch._C.Graph()
+        foo_value = gr.addInput("foo")
+        if foo_value not in gr.inputs():
+            raise AssertionError("foo_value not found in graph inputs")
+
+    def test_canonicalize(self):
+        ir = """
+graph(%p207 : Tensor,
+      %1 : Tensor,
+      %p407 : int):
+  %11 : Tensor = aten::view_expand_placeholder(%1)
+  %12 : Tensor = aten::pointwise_placeholder(%11, %p207, %p407)
+  %13 : Tensor = aten::view_expand_placeholder(%12)
+  %14 : Tensor = aten::pointwise_placeholder(%13)
+  return (%14)
+        """
+
+        graph1 = torch._C.parse_ir(ir)
+        graph1 = torch._C._jit_pass_canonicalize(graph1, True)
+
+        graph2 = torch._C.parse_ir(ir)
+        graph2 = torch._C._jit_pass_canonicalize(graph2)
+
+        self.assertEqual(str(graph1), str(graph2))
+        FileCheck().check("%p207").check_not("%14").run(graph1)
+
+        graph3 = torch._C.parse_ir(ir)
+        graph3 = torch._C._jit_pass_canonicalize(graph3, False)
+        FileCheck().check_not("%p207").run(graph3)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

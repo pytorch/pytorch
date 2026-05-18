@@ -1,4 +1,7 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
+
+# mypy: ignore-errors
+
 import dataclasses
 import json
 import os
@@ -6,13 +9,20 @@ import pickle
 import signal
 import subprocess
 import time
-from typing import List, Optional, Union, TYPE_CHECKING
 import uuid
+from typing import TYPE_CHECKING
 
 from core.api import AutoLabels
 from core.types import Label
 from core.utils import get_temp_dir
-from worker.main import WORKER_PATH, WorkerFailure, WorkerOutput, WorkerTimerArgs, WorkerUnpickler
+from worker.main import (
+    WORKER_PATH,
+    WorkerFailure,
+    WorkerOutput,
+    WorkerTimerArgs,
+    WorkerUnpickler,
+)
+
 
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]
@@ -32,38 +42,42 @@ SHELL = "/bin/bash"
 @dataclasses.dataclass(frozen=True)
 class WorkOrder:
     """Spec to schedule work with the benchmark runner."""
+
     label: Label
     autolabels: AutoLabels
     timer_args: WorkerTimerArgs
-    source_cmd: Optional[str] = None
-    timeout: Optional[float] = None
+    source_cmd: str | None = None
+    timeout: float | None = None
     retries: int = 0
 
     def __hash__(self) -> int:
         return id(self)
 
     def __str__(self) -> str:
-        return json.dumps({
-            "label": self.label,
-            "autolabels": self.autolabels.as_dict,
-            "num_threads": self.timer_args.num_threads,
-        })
+        return json.dumps(
+            {
+                "label": self.label,
+                "autolabels": self.autolabels.as_dict,
+                "num_threads": self.timer_args.num_threads,
+            }
+        )
 
 
 class _BenchmarkProcess:
     """Wraps subprocess.Popen for a given WorkOrder."""
+
     _work_order: WorkOrder
-    _cpu_list: Optional[str]
+    _cpu_list: str | None
     _proc: PopenType
 
     # Internal bookkeeping
     _communication_file: str
     _start_time: float
-    _end_time: Optional[float] = None
-    _retcode: Optional[int]
-    _result: Optional[Union[WorkerOutput, WorkerFailure]] = None
+    _end_time: float | None = None
+    _retcode: int | None
+    _result: WorkerOutput | WorkerFailure | None = None
 
-    def __init__(self, work_order: WorkOrder, cpu_list: Optional[str]) -> None:
+    def __init__(self, work_order: WorkOrder, cpu_list: str | None) -> None:
         self._work_order = work_order
         self._cpu_list = cpu_list
         self._start_time = time.time()
@@ -84,24 +98,30 @@ class _BenchmarkProcess:
 
     @property
     def cmd(self) -> str:
-        cmd: List[str] = []
+        cmd: list[str] = []
         if self._work_order.source_cmd is not None:
             cmd.extend([self._work_order.source_cmd, "&&"])
 
         cmd.append(_ENV)
 
         if self._cpu_list is not None:
-            cmd.extend([
-                f"GOMP_CPU_AFFINITY={self._cpu_list}",
-                "taskset",
-                "--cpu-list",
-                self._cpu_list
-            ])
+            cmd.extend(
+                [
+                    f"GOMP_CPU_AFFINITY={self._cpu_list}",
+                    "taskset",
+                    "--cpu-list",
+                    self._cpu_list,
+                ]
+            )
 
-        cmd.extend([
-            _PYTHON, WORKER_PATH,
-            "--communication_file", self._communication_file,
-        ])
+        cmd.extend(
+            [
+                _PYTHON,
+                WORKER_PATH,
+                "--communication-file",
+                self._communication_file,
+            ]
+        )
         return " ".join(cmd)
 
     @property
@@ -109,12 +129,13 @@ class _BenchmarkProcess:
         return (self._end_time or time.time()) - self._start_time
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         self._maybe_collect()
-        assert self._result is not None
+        if self._result is None:
+            raise AssertionError("result is None after collection")
         return self._result
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         self._maybe_collect()
         return self._retcode
 
@@ -149,9 +170,9 @@ class _BenchmarkProcess:
             # original TimerArgs. Grabbing all of stdout and stderr isn't
             # ideal, but we don't have a better way to determine what to keep.
             proc_stdout = self._proc.stdout
-            assert proc_stdout is not None
-            result = WorkerFailure(
-                failure_trace=proc_stdout.read().decode("utf-8"))
+            if proc_stdout is None:
+                raise AssertionError("proc_stdout is None")
+            result = WorkerFailure(failure_trace=proc_stdout.read().decode("utf-8"))
 
         self._result = result
         self._end_time = time.time()
@@ -164,10 +185,11 @@ class InProgress:
     """Used by the benchmark runner to track outstanding jobs.
     This class handles bookkeeping and timeout + retry logic.
     """
+
     _proc: _BenchmarkProcess
     _timeouts: int = 0
 
-    def __init__(self, work_order: WorkOrder, cpu_list: Optional[str]):
+    def __init__(self, work_order: WorkOrder, cpu_list: str | None):
         self._work_order = work_order
         self._proc = _BenchmarkProcess(work_order, cpu_list)
 
@@ -176,7 +198,7 @@ class InProgress:
         return self._proc._work_order
 
     @property
-    def cpu_list(self) -> Optional[str]:
+    def cpu_list(self) -> str | None:
         return self._proc._cpu_list
 
     @property
@@ -201,7 +223,8 @@ class InProgress:
         if self._timeouts < max_attempts:
             print(
                 f"\nTimeout: {self._work_order.label}, {self._work_order.autolabels} "
-                f"(Attempt {self._timeouts} / {max_attempts})")
+                f"(Attempt {self._timeouts} / {max_attempts})"
+            )
             self._proc.interrupt()
             self._proc = self._proc.clone()
             return False
@@ -209,7 +232,7 @@ class InProgress:
         raise subprocess.TimeoutExpired(cmd=self._proc.cmd, timeout=timeout)
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         return self._proc.result
 
     def __hash__(self) -> int:

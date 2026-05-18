@@ -2,15 +2,13 @@
 #include <ATen/ATen.h>
 #include <ATen/core/functional.h> // fmap
 #include <c10/util/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 
 #include <cstdint>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Describes the (runtime) arguments to a kernel.
 // ArgSpecs are also used as keys to lookup instantiated kernels, so
@@ -54,6 +52,4 @@ struct TORCH_API ArgSpec {
   int device_;
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

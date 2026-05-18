@@ -47,9 +47,57 @@ INSTANTIATE_FOR_CONTAINER(set)
 
 #endif
 
+#include <c10/util/logging_common.h>
 #include <glog/logging.h>
 
-// Additional macros on top of glog
+namespace c10 {
+
+[[noreturn]] void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller);
+
+template <typename T>
+T& CheckNotNullCommon(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
+  if (t == nullptr) {
+    MessageLogger(
+        SourceLocation::current(file, nullptr, line),
+        ::google::GLOG_FATAL,
+        fatal)
+            .stream()
+        << "Check failed: '" << names << "' must be non NULL. ";
+  }
+  return t;
+}
+
+template <typename T>
+T* CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T* t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
+}
+
+template <typename T>
+T& CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
+}
+
+} // namespace c10
 
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)

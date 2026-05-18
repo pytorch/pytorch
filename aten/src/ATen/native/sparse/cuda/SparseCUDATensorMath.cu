@@ -1,24 +1,46 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
+
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
+#include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/macros/Macros.h>
 
-#include <THC/THCTensorMathPointwise.cuh>
-#include <THC/THCThrustAllocator.cuh>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
+#include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
-#include <thrust/binary_search.h>
-#include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 
 #include <bitset>
@@ -29,7 +51,7 @@
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 using at::cuda::detail::TensorInfo;
@@ -44,7 +66,7 @@ namespace {
     Tensor csr = at::empty({dim+1}, CUDA(kInt));
     Tensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
     rowIndicesInt.copy_(rowIndices);
-    sparse::cuda::Xcoo2csr(rowIndicesInt.data_ptr<int32_t>(), nnz, dim, csr.data_ptr<int32_t>());
+    sparse::cuda::Xcoo2csr(rowIndicesInt.mutable_data_ptr<int32_t>(), nnz, dim, csr.mutable_data_ptr<int32_t>());
     return csr;
   }
 }
@@ -52,65 +74,13 @@ namespace {
 // NB: Deleted spaddcmul (aka addcmul_, but not actually wired up), spaddcdiv (not
 // wired at all)
 
-template <typename scalar_t>
 void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int64_t k, Tensor& r_, const Scalar& beta, const Tensor& t, const Scalar& alpha, Tensor& indices, Tensor& values, const Tensor& dense) {
-  scalar_t cast_beta = beta.to<scalar_t>();
-  scalar_t cast_alpha = alpha.to<scalar_t>();
   Tensor rowIndices = indices.select(0, 0);
   Tensor colIndices = indices.select(0, 1);
-  Tensor csr = _to_csr_int(rowIndices, m, nnz);
-  Tensor colIndicesInt = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
-  colIndicesInt.copy_(colIndices);
-
-  Tensor r__;
-  if (cast_beta == scalar_t(0)) {
-    r_.zero_();
-  } else if (!is_same_tensor(t, r_)) {
-    r_.copy_(t);
-  }
-
-  if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
-    r__ = r_;
-  } else {
-    // TODO: how... strange
-    r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
-    r__.transpose_(0, 1);
-  }
-
-  if (nnz > 0) {
-    Tensor dense_;
-    char transpose_dense;
-    if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
-      transpose_dense = 'n';
-      dense_ = dense;
-    } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
-      transpose_dense = 't';
-      dense_ = dense;
-    } else {
-      transpose_dense = 't';
-      dense_ = dense.contiguous();
-    }
-
-    sparse::cuda::csrmm2(
-      'n',
-      transpose_dense,
-      m,
-      n,
-      k,
-      nnz,
-      cast_alpha,
-      values.data_ptr<scalar_t>(),
-      csr.data_ptr<int32_t>(),
-      colIndicesInt.data_ptr<int32_t>(),
-      dense_.data_ptr<scalar_t>(),
-      (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
-      cast_beta,
-      r__.data_ptr<scalar_t>(),
-      r__.stride(1));
-  }
-  if (!is_same_tensor(r__, r_)) {
-    r_.copy_(r__);
-  }
+  Tensor crow_indices = _to_csr_int(rowIndices, m, nnz);
+  Tensor col_indices = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
+  col_indices.copy_(colIndices);
+  s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r_, beta, t, alpha, crow_indices, col_indices, values, dense);
 }
 
 // --------------------------------------------------------------------
@@ -118,10 +88,10 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
 // --------------------------------------------------------------------
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(t.is_cuda(), "addmm: expected 'self' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
-  TORCH_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
-  TORCH_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
+  TORCH_CHECK(t.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'self' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(sparse_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat1' to be CUDA, but got CPU");
+  TORCH_CHECK(dense.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat2' to be CUDA, but got CPU");
 
   TORCH_CHECK(cuda::check_device({sparse_, r_, t, dense}));
 
@@ -148,15 +118,11 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   int64_t nnz = sparse._nnz();
   Tensor indices = sparse._indices();
   Tensor values = sparse._values();
-
-
-  // No half support, so we don't have to use CUDATypeConversion
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-    values.scalar_type(), "addmm_sparse_cuda", [&] {
-      s_addmm_out_sparse_dense_cuda_worker<scalar_t>(nnz, m, n, k, r_, beta, t, alpha, indices, values, dense);
-    }
-  );
-
+  if (nnz == 0) {
+    at::mul_out(r_, t, at::scalar_tensor(beta, r_.options()));
+    return r_;
+  }
+  s_addmm_out_sparse_dense_cuda_worker(nnz, m, n, k, r_, beta, t, alpha, indices, values, dense);
   return r_;
 }
 
@@ -241,7 +207,7 @@ SparseTensor& hspmm_out_sparse_cuda(
   get_sparse_impl(r_)->resize_and_clear_(1, 1, {m, n});
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   SparseTensor sparse = sparse_.coalesce();
@@ -262,7 +228,7 @@ SparseTensor& hspmm_out_sparse_cuda(
   indices.copy_(dstIndices);
   // Replace destination indices with 0, 1, 2, 3, ... and compute output values
   // tensor with sparse * dense multiplication
-  thrust::device_ptr<int64_t> indicesIter(dstIndices.data_ptr<int64_t>());
+  thrust::device_ptr<int64_t> indicesIter(dstIndices.mutable_data_ptr<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
 
   std::vector<int64_t> new_size = get_sparse_impl(newSparse)->sizes().vec();
@@ -285,6 +251,22 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 // add(Tensor, SparseTensor, Scalar)
 //    formerly known as spcadd
 // --------------------------------------------------------------------
+
+
+template <typename T>
+struct TensorCAddOp {
+  TensorCAddOp(T v) : val(v) {}
+
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out += val * *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = *in1 + val * *in2;
+  }
+
+  T val;
+};
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, const at::Scalar& value) {
   TORCH_CHECK(dense.is_cuda(), "add: expected 'self' to be a CUDA tensor, but got a CPU tensor");
@@ -314,9 +296,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  if (is_same_tensor(r, dense_buffer)) {
-    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-  } else {
+  if (!is_same_tensor(r, dense_buffer)) {
     r.resize_as_(dense);
     r.copy_(dense_buffer);
   }
@@ -333,16 +313,16 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     // TODO benchmark to decide whether to remove this special case
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
-    int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    c10::DeviceIndex curDevice = -1;
+    c10::cuda::GetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
-          apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
-            <<<grid, block, 0, stream>>>(
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
+        commonDtype, "add_out_dense_sparse_cuda", [&] {
+          apply::sparseElementwiseKernelScalar<<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
               V_INFO(r), I_INFO(indices), V_INFO(values),
               static_cast<uint64_t>(nnz));
@@ -354,8 +334,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -381,7 +361,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     values = values.reshape({nnz, view_columns});
     r_view.index_add_(0, indices1D, values, value);
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   r_.copy_(r);
   return r_;
@@ -468,78 +448,51 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
-  if (src_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, t_, src_);
-  } else if (t_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, src_, t_);
+template <typename T>
+struct TensorMulOp {
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out *= *in;
+  }
+
+  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
+    *out = *in1 * *in2;
+  }
+};
+
+SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
+  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+
+  // case mul(sparse, dense)
+  if (!src_.is_sparse()) {
+    return _mul_dense_sparse_out(src_, t_, r_);
+  }
+  // case mul(dense, sparse)
+  if (!t_.is_sparse()) {
+    return _mul_dense_sparse_out(t_, src_, r_);
+  }
+
+  // case mul(sparse, sparse) with a 0-dim input.
+  if (!src_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(src_, t_, r_);
+  }
+  if (!t_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(t_, src_, r_);
   }
 
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
-  SparseTensor t = t_.coalesce();
-  SparseTensor src = src_.coalesce();
+  // mul(sparse, sparse)
 
-  if (src_._nnz() == 0 || t_._nnz() == 0) {
-    r_.resize_as_(src_);
+  // Short circuit when there is zero nnz.
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
+  if (t_.sizes().equals(src_.sizes()) && (!t_._nnz() || !src_._nnz())) {
+    r_.resize_as_(t_);
     return r_.zero_();
   }
-
-  // saving those because they can be overwritten when doing in-place operations
-  int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
-  int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
-  int64_t sparse_dim = src.sparse_dim();
-  auto commonDtype = at::result_type(t, src);
-  TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
-  Tensor t_indices_ = t._indices().contiguous();
-  Tensor t_values_ = t._values().to(commonDtype);
-  Tensor s_indices_ = src._indices().contiguous();
-  Tensor s_values_ = src._values().to(commonDtype);
-  Tensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
-  r_.resize_as_(src);
-
-  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
-
-  int64_t valueSize = t_values_.stride(0);
-  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
-  dim3 grid;
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-  TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
-
-  Tensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, commonDtype, "mul_out_sparse_cuda", [&] {
-        apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
-          <<<grid, block, 0, stream>>>(
-            TensorMulOp<scalar_t>(),
-            I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-            V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-            static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz));
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-        apply::indexSparseIntersectionKernel<uint64_t, scalar_t>
-          <<<1, 1, 0, stream>>>(
-            I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-            // reinterpret_cast shenanigans, because we don't actually have
-            // unsigned tensors...
-            static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz), reinterpret_cast<uint64_t*>(resultNnz.data_ptr()));
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
-  r_values_ = r_values_.to(r_.scalar_type());
-  get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
-
-  // sync!  (surely there is a more idiomatic way to do this...)
-  Tensor cpu_resultNnz = at::empty({1}, CPU(kLong));
-  cpu_resultNnz.copy_(resultNnz);
-  get_sparse_impl(r_)->set_nnz_and_narrow(cpu_resultNnz.accessor<int64_t, 1>()[0]);
-
-  return r_._coalesced_(true);
+  return _mul_sparse_sparse_out(t_, src_, r_);
 }
 
 // --------------------------------------------------------------------
@@ -548,9 +501,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void _sparse_sum_backward_cuda_kernel(
     int64_t total_threads,
     const TensorInfo<int64_t, int64_t> grad_indices_ti,
@@ -558,7 +509,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
     const TensorInfo<int64_t, int64_t> input_indices_pos_ti,
     const TensorInfo<scalar_t, int64_t> grad_values_expand_ti,
     TensorInfo<scalar_t, int64_t> grad_input_values_ti) {
-  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t i = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = input_indices_pos_ti.data[i];
 
@@ -588,6 +539,11 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   TORCH_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   TORCH_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
+  // Short circuit if grad is either zero or empty
+  if (((grad_.is_sparse() || at::sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
+    return at::zeros_like(input_);
+  }
+
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -615,7 +571,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = !dense_dims_to_sum_v.empty();
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
@@ -652,10 +608,10 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       grad_input_values = grad_values_expand;
     }
     else {
-      int curDevice = -1;
-      cudaGetDevice(&curDevice);
+      c10::DeviceIndex curDevice = -1;
+      c10::cuda::GetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+      at::cuda::ThrustAllocator allocator;
       auto policy = thrust::cuda::par(allocator).on(stream);
       typedef thrust::device_ptr<int64_t> thrust_ptr;
 
@@ -668,12 +624,12 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
-      thrust_ptr grad_indices_iter(grad_indices_1D.data_ptr<int64_t>());
-      thrust_ptr input_indices_iter(input_indices_1D.data_ptr<int64_t>());
+      thrust_ptr grad_indices_iter(grad_indices_1D.mutable_data_ptr<int64_t>());
+      thrust_ptr input_indices_iter(input_indices_1D.mutable_data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
       Tensor input_indices_pos = at::empty_like(input_indices_1D, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      thrust_ptr input_indices_pos_iter(input_indices_pos.data_ptr<int64_t>());
+      thrust_ptr input_indices_pos_iter(input_indices_pos.mutable_data_ptr<int64_t>());
       thrust::lower_bound(policy,
                           grad_indices_iter, grad_indices_iter + grad_nnz,
                           input_indices_iter, input_indices_iter + input_nnz,
@@ -711,75 +667,46 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(self, mat2, false, result);
+  return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
-  Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(self, mat2, deterministic, result);
-}
-
-#if !(defined(__HIP_PLATFORM_HCC__) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
 __global__ void search_end_matrix_indices_cuda_kernel(
-  int64_t* mat_el_end_indices,
+  int64_t* __restrict__ mat_el_end_indices,
   int64_t num_matrices,
-  const TensorInfo<int64_t, int64_t> indices_1D_ti,
+  const int64_t* __restrict__ indices_1D,
   const int64_t num_elements
 ){
-  const int64_t target_mat_num = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t target_mat_num = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (target_mat_num >= num_matrices) return;
 
-  const int64_t* indices_1D = indices_1D_ti.data;
-  const int64_t indices_1D_stride = indices_1D_ti.strides[0];
-  int64_t start_idx = 0;
-  int64_t end_idx = num_elements - 1;
-  int64_t mid_idx = (start_idx + end_idx) >> 1;
-  int64_t mid_val = indices_1D[mid_idx*indices_1D_stride];
-  bool found;
-
-  while (
-    start_idx <= end_idx
-  ) {
-    bool trim_right = mid_val > target_mat_num;
-    int64_t mid_idx_minus_1 = mid_idx - 1;
-    int64_t mid_idx_plus_1 = mid_idx + 1;
-
-    end_idx = trim_right ? mid_idx_minus_1 : end_idx;
-    start_idx = trim_right ? start_idx : mid_idx_plus_1;
-    mid_idx = (start_idx + end_idx) >> 1;
-    mid_val = indices_1D[mid_idx*indices_1D_stride];
-  }
-
-  found = (mid_val == target_mat_num)
-    && (
-      (mid_idx == (num_elements-1))
-      || (indices_1D[(mid_idx+1)*indices_1D_stride] != target_mat_num)
-    );
-
-  mat_el_end_indices[target_mat_num] = found ? mid_idx : -1;
+  // Points to the upper-bound of `target_mat_num`
+  const auto target_mat_num_ub = at::cuda::detail::find_bound(
+    indices_1D,
+    indices_1D + num_elements,
+    target_mat_num + 1
+  );
+  // Store the "end" offset of each matrix into the "batch" dim
+  mat_el_end_indices[target_mat_num] = target_mat_num_ub - indices_1D;
 }
 
 // Search through a 1D tensor of sorted sparse matrix
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  c10::DeviceIndex curDevice = -1;
+  c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
-  auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);
-  int64_t grid_size = (num_matrices / 64)+1;
   int64_t block_size = 64;
+  int64_t grid_size = (num_matrices + block_size - 1) / block_size;
   int64_t num_elements = indices_1D.size(0);
 
   search_end_matrix_indices_cuda_kernel<<<grid_size, block_size, 0, stream>>>(
     mat_el_end_indices,
     num_matrices,
-    indices_1D_ti,
+    indices_1D.data_ptr<int64_t>(),
     num_elements
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  cudaDeviceSynchronize();
 }
 
 cudaDataType getTensorCudaDataType(Tensor self) {
@@ -797,19 +724,14 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   }
   return cuda_data_type;
 }
+
+// cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned.
+// See https://github.com/pytorch/pytorch/issues/167901
+#if defined(USE_CUDA) && CUDA_VERSION < 13010
+#define CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
 #endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
-  return _bmm_out_sparse_cuda(self, mat2, false, result);
-}
-
-Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic, Tensor& result) {
-#if defined __HIP_PLATFORM_HCC__
-  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
-#elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
-  TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
-#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)  // linux cuda >= 10.1 or windows cuda >= 11.0
-
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
@@ -822,10 +744,10 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   int64_t dim_j = self.size(2);
   int64_t dim_k = mat2.size(2);
 
-  result.resize_({num_matrices, dim_k, dim_i});
+  result.resize_({num_matrices, dim_i, dim_k});
 
   if ((self._nnz() == 0) || (dim_j == 0) || (dim_k == 0)) {
-    result.zero_().transpose_(1, 2);
+    result.zero_();
     return result;
   }
 
@@ -838,7 +760,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
     tmp_result = result;
     need_copy_result = false;
   } else {
-    tmp_result = at::empty({num_matrices, dim_k, dim_i}, result.options(), at::MemoryFormat::Contiguous);
+    tmp_result = at::empty({num_matrices, dim_i, dim_k}, result.options(), at::MemoryFormat::Contiguous);
     need_copy_result = true;
   }
 
@@ -855,29 +777,56 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   Tensor values =      self_coalesced._values();
 
   Tensor indices_dim0 = indices[0];
+  Tensor indices_dim1 = indices[1];
+  Tensor indices_dim2 = indices[2];
 
-  // Need to convert dim1 and dim2 indices to 32-bit since cusparseSpMM
-  // only supports 32-bit indices
-  Tensor indices_dim1 = indices[1].to(ScalarType::Int);
-  Tensor indices_dim2 = indices[2].to(ScalarType::Int);
+  auto mat_el_end_indices_host = at::empty({num_matrices}, indices.options().device(at::kCPU).pinned_memory(true));
+  search_end_matrix_indices(mat_el_end_indices_host.data_ptr<int64_t>(), num_matrices, indices_dim0);
+  cudaDeviceSynchronize();
+  auto* mat_el_end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
 
-  std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
+  // cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned,
+  // so we use a buffer for misaglined sub-arrays to copy into.
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+  auto aligned_row_indices_buffer = [&]() -> Tensor {
+    if (dim_k == 1) { // implies cusparseSpMV
+      const auto* row_indices_start_ptr = indices_dim1.const_data_ptr<int64_t>();
+      const auto* mat_end_offsets_ptr = mat_el_end_indices_host.const_data_ptr<int64_t>();
+      int64_t max_nnz = 0;
+      int64_t start_offset = 0;
+      for (const auto i : c10::irange(num_matrices)) {
+        const auto* row_indices_ptr = row_indices_start_ptr + start_offset;
+        const int64_t row_indices_ptr_not_aligned = (
+            (reinterpret_cast<uintptr_t>(row_indices_ptr) % 16) / 8
+        );
+        const auto end_offset = mat_end_offsets_ptr[i];
+        const auto nnz = end_offset - start_offset;
+        max_nnz = std::max(row_indices_ptr_not_aligned * nnz, max_nnz);
+        start_offset = end_offset;
+      }
+      return max_nnz ? at::empty({max_nnz}, indices.options()) : Tensor{};
+    }
+    return Tensor{};
+  }();
+#endif
 
-  {
-    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-    auto dataPtr = allocator.allocate(num_matrices*sizeof(int64_t));
-    int64_t* mat_el_end_indices_device = static_cast<int64_t*>(dataPtr.get());
-
-    search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
-    AT_CUDA_CHECK(cudaMemcpy(
-      mat_el_end_indices_host.get(),
-      mat_el_end_indices_device,
-      num_matrices*sizeof(int64_t),
-      cudaMemcpyDeviceToHost
-    ));
-  }
-  // Need a pointer to an array to access within a lambda
-  int64_t* mat_el_end_indices = &mat_el_end_indices_host[0];
+  // MSVC is not happy with having macros in AT_DISPATCH,
+  // so we are using a lambda which we try to force-inline
+  const auto maybe_provide_aligned_buffer_idx_ptr
+    = [&](int64_t* idx_ptr, int64_t start_offset, int64_t len) C10_ALWAYS_INLINE_ATTRIBUTE -> int64_t* {
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+      auto* start = idx_ptr + start_offset;
+      const auto is_misaligned_start = (reinterpret_cast<uintptr_t>(start) % 16) != 0;
+      if (is_misaligned_start && aligned_row_indices_buffer.defined()) {
+        aligned_row_indices_buffer.narrow(0, 0, len)
+          .copy_(indices_dim1.narrow(0, start_offset, len));
+        return aligned_row_indices_buffer.data_ptr<int64_t>();
+      }
+      return start;
+#else
+      return idx_ptr + start_offset;
+#endif
+  };
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -889,8 +838,8 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
   ::c10::DataPtr dataPtr;
 
   // See Note [Enabling Deterministic Operations]
-  deterministic = deterministic || globalContext().deterministicAlgorithms();
-  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
+  bool deterministic =  globalContext().deterministicAlgorithms();
+  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_SPMM_COO_ALG2 : CUSPARSE_SPMM_COO_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
@@ -898,118 +847,108 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
-      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
-      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
-      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
-      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
+      auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
+      auto* col_indices_start_ptr = indices_dim2.data_ptr<int64_t>();
+      auto* values_start_ptr = values.data_ptr<scalar_t>();
+      auto* mat2_start_ptr = mat2_contig.data_ptr<scalar_t>();
+      auto* result_start_ptr = tmp_result.data_ptr<scalar_t>();
       for (
         int64_t cur_mat_num = 0;
-        (cur_mat_num < num_matrices);
-        cur_mat_num++
+        cur_mat_num < num_matrices;
+        ++cur_mat_num
       ) {
         int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
 
-        if (mat_el_end_idx != -1) {
-          mat_el_end_idx++;
+        // Create variables to view just the current set of matrices
+        int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+        cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
+        auto* row_indices_ptr = maybe_provide_aligned_buffer_idx_ptr(
+          row_indices_start_ptr,
+          mat_el_begin_idx,
+          sparse_nnz
+        );
+        auto* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
+        scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
-          // Create tensors to view just the current set of matrices
-          int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
-
-          cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-          uint32_t* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
-          uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
-          scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
-
-          cusparseSpMatDescr_t sparse_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
-            &sparse_descr,
-            dim_i,
-            dim_j,
-            sparse_nnz,
-            reinterpret_cast<void*>(row_indices_ptr),
-            reinterpret_cast<void*>(col_indices_ptr),
-            reinterpret_cast<void*>(values_ptr),
-            CUSPARSE_INDEX_32I,
-            CUSPARSE_INDEX_BASE_ZERO,
-            cuda_data_type
-          ));
-          scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
-          cusparseDnMatDescr_t dense_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &dense_descr,
-            dim_k,
-            dim_j,
-            dim_k,
-            reinterpret_cast<void*>(mat2_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
-          scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
-          cusparseDnMatDescr_t result_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &result_descr,
-            dim_i,
-            dim_k,
-            dim_i,
-            reinterpret_cast<void*>(result_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
-          size_t required_workspace_buffer_size = 0;
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
-            cuda_data_type,
-            mm_alg,
-            &required_workspace_buffer_size
-          ));
-          if (required_workspace_buffer_size > workspace_buffer_size) {
-            workspace_buffer_size = required_workspace_buffer_size;
-            dataPtr = allocator.allocate(workspace_buffer_size);
-            workspace_buffer = dataPtr.get();
-          }
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
-            cuda_data_type,
-            mm_alg,
-            workspace_buffer
-          ));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
-          mat_el_begin_idx = mat_el_end_idx;
-        } else {
-          tmp_result[cur_mat_num].zero_();
+        cusparseSpMatDescr_t sparse_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+          &sparse_descr,
+          dim_i,
+          dim_j,
+          sparse_nnz,
+          row_indices_ptr,
+          col_indices_ptr,
+          values_ptr,
+          CUSPARSE_INDEX_64I,
+          CUSPARSE_INDEX_BASE_ZERO,
+          cuda_data_type
+        ));
+        scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
+        cusparseDnMatDescr_t dense_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+          &dense_descr,
+          dim_j,
+          dim_k,
+          dim_k,
+          mat2_ptr,
+          cuda_data_type,
+          CUSPARSE_ORDER_ROW
+        ));
+        scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
+        cusparseDnMatDescr_t result_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+          &result_descr,
+          dim_i,
+          dim_k,
+          dim_k,
+          result_ptr,
+          cuda_data_type,
+          CUSPARSE_ORDER_ROW
+        ));
+        size_t required_workspace_buffer_size = 0;
+        TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
+          cusparse_handle,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          &alpha_val,
+          sparse_descr,
+          dense_descr,
+          &beta_val,
+          result_descr,
+          cuda_data_type,
+          mm_alg,
+          &required_workspace_buffer_size
+        ));
+        if (required_workspace_buffer_size > workspace_buffer_size) {
+          workspace_buffer_size = required_workspace_buffer_size;
+          dataPtr = allocator.allocate(workspace_buffer_size);
+          workspace_buffer = dataPtr.get();
         }
+        TORCH_CUDASPARSE_CHECK(cusparseSpMM(
+          cusparse_handle,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          &alpha_val,
+          sparse_descr,
+          dense_descr,
+          &beta_val,
+          result_descr,
+          cuda_data_type,
+          mm_alg,
+          workspace_buffer
+        ));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
+        mat_el_begin_idx = mat_el_end_idx;
       }
     }
   );
   if (need_copy_result) {
     result.copy_(tmp_result);
   }
-  // Need to transpose the result matrices since cusparse stores
-  // them in column-major order in memory
-  result.transpose_(1,2);
-
-#else
-  TORCH_CHECK(false, "bmm sparse-dense requires CUDA 10.1 or greater");
-#endif
 
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

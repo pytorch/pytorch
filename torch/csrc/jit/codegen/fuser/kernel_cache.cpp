@@ -6,9 +6,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 struct KernelCacheImpl {
   // Note: std::unordered_map does not invalidate references even if rehashing
@@ -55,38 +53,36 @@ int64_t store(std::shared_ptr<Graph> graph) {
       std::piecewise_construct,
       std::forward_as_tuple(key),
       std::forward_as_tuple(key, graph));
-  cache.graphToKey_.emplace(std::make_pair(std::move(repr), key));
+  cache.graphToKey_.emplace(std::move(repr), key);
   return key;
 }
 
 // XXX: Does not grab mutex
-static at::optional<KernelSpec*> nolock_retrieve(
+static std::optional<KernelSpec*> nolock_retrieve(
     KernelCacheImpl& cache,
     const int64_t key) {
   auto it = cache.specMap_.find(key);
   if (it == cache.specMap_.end())
-    return at::nullopt;
+    return std::nullopt;
   return &(it->second);
 }
 
-at::optional<KernelSpec*> retrieve(const int64_t key) {
+std::optional<KernelSpec*> retrieve(const int64_t key) {
   auto& cache = getKernelCache();
   std::lock_guard<std::mutex> guard{cache.mutex_};
   return nolock_retrieve(cache, key);
 }
 
 // precondition: graph has been normalized via normalizeGraphForCache
-at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
+std::optional<KernelSpec*> lookupGraph(const std::shared_ptr<Graph>& graph) {
   auto& cache = getKernelCache();
   std::string repr = graph->toString(false);
 
   std::lock_guard<std::mutex> guard{cache.mutex_};
   auto it = cache.graphToKey_.find(repr);
   if (it == cache.graphToKey_.end())
-    return at::nullopt;
+    return std::nullopt;
   return nolock_retrieve(cache, it->second);
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

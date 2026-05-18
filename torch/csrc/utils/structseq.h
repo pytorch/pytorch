@@ -2,8 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch { namespace utils {
+namespace torch::utils {
 
-PyObject *returned_structseq_repr(PyStructSequence *obj);
+PyObject* returned_structseq_repr(PyStructSequence* obj);
 
-}}
+}

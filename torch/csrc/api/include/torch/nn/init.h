@@ -1,40 +1,36 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/enum.h>
 #include <torch/types.h>
 
 namespace torch {
-namespace nn {
-namespace init {
 
-using NonlinearityType = c10::variant<
-  enumtype::kLinear,
-  enumtype::kConv1D,
-  enumtype::kConv2D,
-  enumtype::kConv3D,
-  enumtype::kConvTranspose1D,
-  enumtype::kConvTranspose2D,
-  enumtype::kConvTranspose3D,
-  enumtype::kSigmoid,
-  enumtype::kTanh,
-  enumtype::kReLU,
-  enumtype::kLeakyReLU
->;
+namespace nn::init {
 
-using FanModeType = c10::variant<
-  enumtype::kFanIn,
-  enumtype::kFanOut
->;
+using NonlinearityType = std::variant<
+    enumtype::kLinear,
+    enumtype::kConv1D,
+    enumtype::kConv2D,
+    enumtype::kConv3D,
+    enumtype::kConvTranspose1D,
+    enumtype::kConvTranspose2D,
+    enumtype::kConvTranspose3D,
+    enumtype::kSigmoid,
+    enumtype::kTanh,
+    enumtype::kReLU,
+    enumtype::kLeakyReLU>;
 
-} // namespace init
-} // nn
+using FanModeType = std::variant<enumtype::kFanIn, enumtype::kFanOut>;
 
-namespace nn {
-namespace init {
+} // namespace nn::init
+
+namespace nn::init {
 
 /// Return the recommended gain value for the given nonlinearity function.
-TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.01);
+TORCH_API double calculate_gain(
+    NonlinearityType nonlinearity,
+    double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
@@ -118,8 +114,9 @@ TORCH_API Tensor xavier_uniform_(Tensor tensor, double gain = 1.0);
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor zeros_(Tensor tensor);
 
-TORCH_API std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor);
+TORCH_API std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
+    const Tensor& tensor);
 
-} // namespace init
-} // namespace nn
+} // namespace nn::init
+
 } // namespace torch

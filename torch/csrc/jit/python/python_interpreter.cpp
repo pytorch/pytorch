@@ -1,29 +1,14 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator.h>
-
-#include <typeinfo>
-
-#include <pybind11/pybind11.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/python_engine.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/python/pybind.h>
 
 namespace py = pybind11;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -43,7 +28,7 @@ Operation createPythonOperation(const Node* op_) {
 
   AT_ASSERT(op->outputs().size() == 1);
 
-  return [=](Stack* stack) {
+  return [=](Stack& stack) {
     pybind11::gil_scoped_acquire gil;
     py::tuple py_inputs(op->cconv.size());
     size_t i = 0;
@@ -66,7 +51,7 @@ Operation createPythonOperation(const Node* op_) {
     drop(stack, num_inputs);
     try {
       py::object py_output(func(*py_inputs));
-      stack->push_back(returnToIValue(op->output()->type(), py_output));
+      stack.push_back(returnToIValue(op->output()->type(), py_output));
     } catch (py::error_already_set& e) {
       throw std::runtime_error(e.what());
     }
@@ -77,12 +62,10 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
   return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({Operator(
     prim::PythonOp,
     createPythonOperation,
     aliasAnalysisIsSpecialCase())});
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

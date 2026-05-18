@@ -10,7 +10,7 @@ namespace c10 {
 // be handled specially.  Its semantics is that it redispatches to the
 // *next* dispatch key that would have been processed, skipping the current
 // one.
-void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*) {
+void fallthrough_kernel(OperatorKernel* /*unused*/, const OperatorHandle& /*unused*/, DispatchKeySet /*unused*/, Stack* /*unused*/) {
   TORCH_INTERNAL_ASSERT(0,
     "fallthrough_kernel was executed but it should have been short-circuited by the dispatcher. "
     "This could occur if you registered a fallthrough kernel as a override for a specific operator "
@@ -19,19 +19,20 @@ void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, 
     "let us know in the bug tracker.");
 }
 
-void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, DispatchKeySet, Stack*) {
+void ambiguous_autogradother_kernel(OperatorKernel* /*unused*/, const OperatorHandle& op, DispatchKeySet /*unused*/, Stack* /*unused*/) {
   TORCH_INTERNAL_ASSERT(0,
     op.operator_name(), " has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering "
     "(see Note [Ambiguity in AutogradOther kernel]). "
     "If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated "
     "Autograd dispatch key for the backend.\n",
-    "If you only want to run inference instead of training, add `c10::InferenceMode mode;` "
-    "before model.forward(). Note this guard is only available in C++ but not Python at present.",
+    "If you only want to run inference instead of training, in C++, add `c10::InferenceMode mode;` "
+    "before model.forward(); in Python, use `torch.inference_mode()` as a context manager (see "
+    "https://pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html).",
     "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
-void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, DispatchKeySet, Stack*) {
+void named_not_supported_kernel(OperatorKernel* /*unused*/, const OperatorHandle& op, DispatchKeySet /*unused*/, Stack* /*unused*/) {
   // DO NOT LOOK AT STACK, YOU HAVE SHORT CIRCUITED BOXING
   // See Note [named_not_supported_kernel]
   TORCH_CHECK(0,
@@ -44,10 +45,11 @@ void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Dispa
 // single line summary of state
 std::string KernelFunction::dumpState() const {
   std::ostringstream oss;
-  if (boxed_kernel_func_ == fallthrough_kernel) {
+  auto boxed_kernel_fn = boxed_kernel_func_.getFnPtr();
+  if (boxed_kernel_fn == fallthrough_kernel) {
     oss << "fallthrough ";
   }
-  if (boxed_kernel_func_) {
+  if (boxed_kernel_fn) {
     oss << "boxed ";
   }
   if (unboxed_kernel_func_) {
@@ -57,7 +59,7 @@ std::string KernelFunction::dumpState() const {
 }
 
 bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
-  return boxed_kernel_func_ == other.boxed_kernel_func_ &&
+  return boxed_kernel_func_.getFnPtr() == other.boxed_kernel_func_.getFnPtr() &&
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 

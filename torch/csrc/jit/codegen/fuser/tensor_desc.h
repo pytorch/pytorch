@@ -4,28 +4,24 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
 // contiguity.back() == true means strides.back() == 1.
 struct TORCH_API TensorDesc {
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::ScalarType scalar_type;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> contiguity;
 
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
       : scalar_type{type}, contiguity{contiguity} {
-    if (contiguity.size() == 0) {
+    if (contiguity.empty()) {
       nDim_ = 0;
     } else {
       nDim_ = std::count(contiguity.begin(), contiguity.end(), false) +
@@ -56,7 +52,7 @@ struct TORCH_API TensorDesc {
 
   // True iff innermost stride is 1
   bool lastIsContiguous() const {
-    return (contiguity.size() == 0 || contiguity.back());
+    return (contiguity.empty() || contiguity.back());
   }
 
   static std::vector<bool> findContiguous(
@@ -92,13 +88,11 @@ struct TORCH_API TensorDesc {
 };
 
 inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
-  out << d.scalar_type << "[";
+  out << d.scalar_type << '[';
   for (const auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
+    out << b << ';';
+  out << ']';
   return out;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

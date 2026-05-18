@@ -6,13 +6,11 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
-#include <limits>
+#include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -68,7 +66,7 @@ struct InplaceConverter {
     // Map from aliases to root value.
     // A single value can have multiple aliases throughout the graph,
     // created by inplace operators, and preserved through loop carried
-    // input/output. For each such value, its first occurance will be set as
+    // input/output. For each such value, its first occurrence will be set as
     // root value.
     std::unordered_map<Value*, Value*> alias_to_value_;
 
@@ -134,6 +132,21 @@ Node* addDummyClone(
       orig_data->type()->kind() == TypeKind::BoolType) {
     auto* noneNode = graph->create(prim::Constant);
     noneNode->output()->setType(NoneType::get());
+    // For scripting mode, aten::clone requires input to be a TensorType
+    // Hence if we encounter an IntType, FloatType, or BoolType,
+    // we set the input to the appropriate TensorType
+    if (orig_data->type()->kind() == TypeKind::IntType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromNumberType(*IntType::get()));
+    } else if (
+        orig_data->type()->kind() == TypeKind::FloatType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromNumberType(*FloatType::get()));
+    } else if (
+        orig_data->type()->kind() == TypeKind::BoolType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromBoolType());
+    }
     newNode = graph->create(aten::clone, /*num_outputs =*/1);
     newNode->addInput(orig_data);
     newNode->addInput(noneNode->output());
@@ -175,17 +188,29 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
       graph->insert(aten::expand_as, {node->input(1), node->input(0)});
   expanded_value->node()->setSourceRange(node->sourceRange());
   expanded_value->copyMetadata(node->input(1));
+  expanded_value->node()->copyMetadata(node);
 
   auto index_put = graph->insert(
-      aten::index_put_,
-      {node->input(0), dummy_list, expanded_value, node->input(2)});
-  index_put->node()->setSourceRange(node->sourceRange());
+      aten::index_put_, {node->input(0), dummy_list, expanded_value});
+  index_put->node()->copyMetadata(node);
   index_put->copyMetadata(node->output());
   node->output()->replaceAllUsesWith(index_put);
 
   node->destroy();
 
   return PrepareIndexPutForONNX(index_put->node());
+}
+
+auto PrepareSetForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::set_);
+  auto clone_n = addDummyClone(n->owningGraph(), n->input(1), true, n);
+  TORCH_INTERNAL_ASSERT(nullptr != clone_n);
+  clone_n->copyMetadata(n);
+
+  auto orig_input = n->input(0);
+  n->output()->replaceAllUsesWith(clone_n->output());
+  n->destroy();
+  return std::make_pair(orig_input, clone_n->output());
 }
 
 std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
@@ -208,7 +233,7 @@ std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
   }
   new_node->output()->setType(node->output()->type());
   new_node->insertBefore(node);
-  new_node->setSourceRange(node->sourceRange());
+  new_node->copyMetadata(node);
   node->replaceAllUsesWith(new_node);
   node->destroy();
 
@@ -222,7 +247,7 @@ std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
     new_copy->addInput(new_node->output());
     new_copy->addInput(false_val_);
     new_copy->insertAfter(new_node);
-    new_copy->setSourceRange(new_node->sourceRange());
+    new_copy->copyMetadata(new_node);
 
     return PrepareCopyForONNX(new_copy);
   } else {
@@ -247,6 +272,7 @@ static std::pair<Value*, Value*> PrepareListPopForONNX(Node* n) {
       n->owningGraph()->create(aten::__getitem__, {n->inputs()});
   getitem_node->output()->setType(n->output()->type());
   getitem_node->insertBefore(n);
+  getitem_node->copyMetadata(n);
   n->output()->replaceAllUsesWith(getitem_node->output());
   n->output()->setType(n->inputs().at(0)->type());
 
@@ -263,15 +289,22 @@ static std::pair<Value*, Value*> PrepareListDeleteForONNX(Node* n) {
 
 static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::insert || n->kind() == aten::append);
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
   return std::make_pair(n->input(0), n->output());
 }
 
-static std::pair<Value*, Value*> PrepareListSetItemForONNX(Node* n) {
+static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::_set_item);
+  // It seems the JIT does not always produce an output for _set_item.
+  // In particular it seems to for list but not for dict.
+  // So we add one if needed.
+  if (n->outputs().empty()) {
+    n->addOutput();
+    n->output()->setType(n->inputs().at(0)->type());
+  }
   return std::make_pair(n->input(0), n->output());
 }
 
@@ -297,32 +330,43 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 
   for (auto input : b->inputs()) {
-    for (auto use : input->uses()) {
-      Node* node = use.user;
-      if (!mr.inplaceOpVariant(node)) {
-        continue;
-      }
-      auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
-      if (it != node->inputs().end()) {
-        int index = std::distance(node->inputs().begin(), it);
-        std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
-                  << node->kind().toQualString() << " on block input: '"
-                  << (*it)->debugName() << "'. This changes graph semantics."
-                  << std::endl;
+    bool needsRestart = false;
+    do {
+      needsRestart = false;
+      for (auto use : input->uses()) {
+        Node* node = use.user;
+        if (!mr.inplaceOpVariant(node)) {
+          continue;
+        }
+        auto it =
+            std::find(node->inputs().begin(), node->inputs().end(), input);
+        if (it != node->inputs().end()) {
+          auto index = std::distance(node->inputs().begin(), it);
+          TORCH_WARN(
+              "ONNX Preprocess - Removing mutation from node ",
+              node->kind().toQualString(),
+              " on block input: '",
+              (*it)->debugName(),
+              "'. This changes graph semantics.");
 
-        Node* newNode =
-            addDummyClone(b->owningGraph(), input, false, b->return_node());
-        TORCH_INTERNAL_ASSERT(nullptr != newNode);
-        node->replaceInput(index, newNode->output());
-        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          Node* newNode =
+              addDummyClone(b->owningGraph(), input, false, b->return_node());
+          TORCH_INTERNAL_ASSERT(nullptr != newNode);
+          newNode->copyMetadata(node);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          needsRestart = true;
+          break;
+        }
       }
-    }
+    } while (needsRestart);
   }
 }
 
-static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
+static void PrepareForRemoveMutations(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
+  GRAPH_DUMP("After PrepareForRemoveMutations: ", graph);
 }
 
 // findSubModuleAttr function chases getAttr chains backwards to locate the
@@ -389,23 +433,23 @@ std::string InplaceConverter::ValueTracker::toString() const {
 
   // ss << "Current graph: " << graph_->toString() << std::endl;
   ss << "Tracking " << value_to_sorted_aliases_.size() << " individual values."
-     << std::endl;
-  ss << "value_to_sorted_aliases_: " << std::endl;
+     << '\n';
+  ss << "value_to_sorted_aliases_: " << '\n';
   size_t idx = 0;
   for (const auto& it : value_to_sorted_aliases_) {
-    ss << "Value[" << idx << "]: " << it.first->debugName() << std::endl;
+    ss << "Value[" << idx << "]: " << it.first->debugName() << '\n';
     ss << "  Mapping to ";
     for (auto v : it.second) {
-      ss << v->debugName() << " ";
+      ss << v->debugName() << ' ';
     }
-    ss << std::endl;
+    ss << '\n';
     idx++;
   }
 
-  ss << "alias_to_value_: " << std::endl;
+  ss << "alias_to_value_: " << '\n';
   for (auto it : alias_to_value_) {
     ss << "  Alias " << it.first->debugName();
-    ss << " map to " << it.second->debugName() << std::endl;
+    ss << " map to " << it.second->debugName() << '\n';
   }
 
   return ss.str();
@@ -466,7 +510,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
   // then the update must be reflected back to outside.
   // Thus it needs to be registered as a subblock output.
   // This step can be skipped if other alias of this value has already been
-  // registered as sublock output.
+  // registered as subblock output.
   if (!registered && from_outer_alias) {
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);
@@ -607,7 +651,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
     auto moduleNames =
         findSubModuleAttr(n->inputs().at(0), name, attrModule, graph_);
 
-    std::string fullName("");
+    std::string fullName;
     for (auto& name : moduleNames) {
       fullName += name + '.';
     }
@@ -691,9 +735,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 //    %1 : __torch__.___torch_mangle_1.M = prim::CreateObject()
 //    ...
 //    %10 : Tensor = aten::arange(%6, %7, %7, %7, %7)
-//    %26 : bool = prim::Constant[value=0]()
-//    %27 : Tensor?[] = prim::ListConstruct()
-//    %28 : Tensor = aten::index_put_(%19, %27, %10, %26)
+//    %28 : Tensor = aten::set_(%19, %10)
 //     = prim::Loop(%5, %8)
 //      block0(%i.1 : int):
 //        %12 : bool = aten::eq(%i.1, %4)
@@ -702,16 +744,12 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 //             = prim::Loop(%3, %8)
 //              block0(%j : int):
 //                %15 : Tensor = aten::add_(%19, %2, %9)
-//                %23 : bool = prim::Constant[value=0]()
-//                %24 : Tensor?[] = prim::ListConstruct()
-//                %25 : Tensor = aten::index_put_(%19, %24, %15, %23)
+//                %25 : Tensor = aten::set_(%19, %15)
 //                -> (%8)
 //            -> ()
 //          block1():
 //            %16 : Tensor = aten::arange(%6, %7, %7, %7, %7)
-//            %20 : bool = prim::Constant[value=0]()
-//            %21 : Tensor?[] = prim::ListConstruct()
-//            %22 : Tensor = aten::index_put_(%19, %21, %16, %20)
+//            %22 : Tensor = aten::set_(%19, %16)
 //            -> ()
 //        -> (%8)
 //    %18 : Tensor = aten::add(%19, %x.1, %9)
@@ -730,22 +768,13 @@ void InplaceConverter::replaceAttrWithInplaceOps(
     TORCH_INTERNAL_ASSERT(
         n->kind() == prim::GetAttr || n->kind() == prim::SetAttr);
     if (n->kind() == prim::SetAttr) {
-      // Convert SetAttr to inplace op.
-      // Directly convert to index_put_ instead of copy_, since we know expand
-      // is not required for value.
+      // Convert SetAttr to inplace op aten::set_.
       WithInsertPoint guard(n);
-      auto false_val_ = graph_->insertConstant(false);
-      auto dummy_list =
-          graph_->insertNode(graph_->createList(OptionalType::ofTensor(), {}))
-              ->output();
-
-      auto* index_put_node = graph_->create(aten::index_put_, 1);
-      index_put_node->addInput(find_init_val->second);
-      index_put_node->addInput(dummy_list);
-      index_put_node->addInput(n->input(1));
-      index_put_node->addInput(false_val_);
-      index_put_node->setSourceRange(n->sourceRange());
-      index_put_node->insertBefore(n);
+      auto* set_node = graph_->create(aten::set_, 1);
+      set_node->addInput(find_init_val->second);
+      set_node->addInput(n->input(1));
+      set_node->copyMetadata(n);
+      set_node->insertBefore(n);
     } else if (n->kind() == prim::GetAttr) {
       // Replace use of GetAttr with first seen alias (usually initial value) of
       // that particular value. Correct alias at point of this node will be
@@ -760,10 +789,10 @@ void InplaceConverter::replaceAttrWithInplaceOps(
 void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   std::unordered_map<std::string, Value*> attr_name_value_map = {};
   std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
-  // First pass over graph, to gather all attribute names, and their intial
+  // First pass over graph, to gather all attribute names, and their initial
   // values. Create dummy initial values for attributes if necessary. By the end
   // of this pass, these dummy initial values should have zero uses, and can be
-  // safely removed. Otherwise it will imply error in model for using
+  // safely removed. Otherwise it will imply an error in the model for using
   // uninitialized values.
   gatherAttrNameInitialValueMap(
       block, attr_name_value_map, attr_node_fullname_map);
@@ -800,6 +829,8 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
         }
       } else if (nkind == aten::insert || nkind == aten::append) {
         std::tie(orig_data, new_out) = PrepareListAppendAndInsertForONNX(n);
+      } else if (nkind == aten::set_) {
+        std::tie(orig_data, new_out) = PrepareSetForONNX(n);
       } else if (mr_->inplaceOpVariant(n)) {
         std::tie(orig_data, new_out) = PrepareInplaceOpsInBlocksForONNX(n);
       } else if (nkind == aten::pop) {
@@ -807,7 +838,7 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
       } else if (nkind == aten::Delete) {
         std::tie(orig_data, new_out) = PrepareListDeleteForONNX(n);
       } else if (nkind == aten::_set_item) {
-        std::tie(orig_data, new_out) = PrepareListSetItemForONNX(n);
+        std::tie(orig_data, new_out) = PrepareSetItemForONNX(n);
       } else {
         // Not inplace op.
         continue;
@@ -854,5 +885,4 @@ void RemoveInplaceOpsForONNX(
   ic.convertMutationForONNX();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

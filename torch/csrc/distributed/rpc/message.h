@@ -3,27 +3,28 @@
 #include <torch/types.h>
 #include <vector>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // An enum denoting common RPC errors to allow specific error handling for them.
+// NOLINTNEXTLINE(performance-enum-size)
 enum RPCErrorType {
   UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
   TIMEOUT = 1, /* Indicates that the RPC has timed out */
   INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
-                             FaultyProcessGroupAgent for testing */
+                             FaultyAgent for testing */
 };
 
 // The enum values are bitwise ORed with MessageType
 // They are bit flags starting from 0x100 and should have
 // value such as 0x100, 0x200, 0x400, 0x800, 0xF00, etc.
+// NOLINTNEXTLINE(performance-enum-size)
 enum MessageTypeFlags {
   REQUEST_TYPE = 0x100,
   RESPONSE_TYPE = 0x200,
 };
 
 // Message types must have values between 0x00 to 0xff
+// NOLINTNEXTLINE(performance-enum-size)
 enum MessageType {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0x00 | MessageTypeFlags::REQUEST_TYPE,
@@ -98,18 +99,20 @@ enum MessageType {
 //        to determine how to serialize them. This design is helpful for
 //        communicating super large tensors where serializing all the data at
 //        once leads to excessively large memory footprint. An implementation
-//        can then serialize and send tensors chunck-by-chunk, in the streaming
+//        can then serialize and send tensors chunk-by-chunk, in the streaming
 //        fashion.
 //    type (MessageType): type of the message.
-//    id (int64_t): message id, this is used by ProcessGroupAgent to match
-//                  request and response. Other implementation can ignore it
-//                  if they have their own ways to do matching.
+//    id (int64_t): message id, this is used to match request and response.
+//               Other implementation can ignore it if they have their own
+//               ways to do matching.
 //
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final : public torch::CustomClassHolder {
- public:
+ private:
+  // Keep these private in order to force users to go through make_intrusive and
+  // thus prevent creating a Message that's not held by an intrusive_ptr.
   Message();
 
   Message(
@@ -123,11 +126,14 @@ class TORCH_API Message final : public torch::CustomClassHolder {
       MessageType type,
       int64_t id);
 
-  Message(const Message& other);
-  Message(Message&& other) noexcept;
-  Message& operator=(Message const& rhs) &;
-  Message& operator=(Message&& rhs) &;
-  void swap(Message& rhs) noexcept;
+  friend c10::intrusive_ptr<Message>;
+
+ public:
+  Message(const Message& other) = delete;
+  Message(Message&& other) = delete;
+  Message& operator=(Message const& rhs) = delete;
+  Message& operator=(Message&& rhs) = delete;
+  ~Message() override = default;
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
@@ -149,6 +155,8 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   int64_t id() const;
   void setId(int64_t id);
 
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
+
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
@@ -160,17 +168,26 @@ class TORCH_API Message final : public torch::CustomClassHolder {
 // The exception string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
+TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::exception& e,
+    int64_t id);
 
 // Create a response Message of type Exception.
 // The passed in string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API Message
-createExceptionResponse(const std::string& exceptionStr, int64_t id);
+TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::string& exceptionStr,
+    int64_t id);
+
+inline std::tuple<
+    c10::intrusive_ptr<Message>,
+    std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>>>
+withStorages(c10::intrusive_ptr<Message> message) {
+  auto storages = message->getStorages();
+  return std::make_tuple(std::move(message), std::move(storages));
+}
 
 using JitFuture = c10::ivalue::Future;
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

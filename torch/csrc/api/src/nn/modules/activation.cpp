@@ -1,16 +1,17 @@
-#include <torch/nn/modules/activation.h>
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/init.h>
+#include <torch/nn/modules/activation.h>
+
+#include <utility>
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
 Tensor ELUImpl::forward(Tensor input) {
-  return F::detail::elu(input, options.alpha(), options.inplace());
+  return F::detail::elu(std::move(input), options.alpha(), options.inplace());
 }
 
 void ELUImpl::reset() {}
@@ -18,9 +19,9 @@ void ELUImpl::reset() {}
 void ELUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ELU(alpha=" << options.alpha();
   if (options.inplace()) {
-    stream << std::boolalpha  << ", inplace=" << options.inplace();
+    stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -28,7 +29,7 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
 
 Tensor SELUImpl::forward(Tensor input) {
-  return F::detail::selu(input, options.inplace());
+  return F::detail::selu(std::move(input), options.inplace());
 }
 
 void SELUImpl::reset() {}
@@ -38,7 +39,7 @@ void SELUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -53,25 +54,29 @@ Tensor HardshrinkImpl::forward(const Tensor& input) {
 void HardshrinkImpl::reset() {}
 
 void HardshrinkImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::Hardshrink(" << options.lambda() << ")";
+  stream << std::boolalpha << "torch::nn::Hardshrink(" << options.lambda()
+         << ')';
 }
 
 // ============================================================================
 
 HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
     : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  HardtanhImpl::reset();
 }
 
 Tensor HardtanhImpl::forward(Tensor input) {
-  return F::detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
+  return F::detail::hardtanh(
+      std::move(input),
+      options.min_val(),
+      options.max_val(),
+      options.inplace());
 }
 
 void HardtanhImpl::reset() {
-  TORCH_CHECK(options.max_val() > options.min_val(),
-              "max_val must be greater than min_val");
+  TORCH_CHECK(
+      options.max_val() > options.min_val(),
+      "max_val must be greater than min_val");
 }
 
 void HardtanhImpl::pretty_print(std::ostream& stream) const {
@@ -79,9 +84,9 @@ void HardtanhImpl::pretty_print(std::ostream& stream) const {
          << "torch::nn::Hardtanh(min_val=" << options.min_val()
          << ", max_val=" << options.max_val();
   if (options.inplace()) {
-    stream << std::boolalpha  << ", inplace=" << options.inplace();
+    stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -90,7 +95,8 @@ LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
     : options(options_) {}
 
 Tensor LeakyReLUImpl::forward(Tensor input) {
-  return F::detail::leaky_relu(input, options.negative_slope(), options.inplace());
+  return F::detail::leaky_relu(
+      std::move(input), options.negative_slope(), options.inplace());
 }
 
 void LeakyReLUImpl::reset() {}
@@ -99,9 +105,9 @@ void LeakyReLUImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::LeakyReLU(negative_slope=" << options.negative_slope();
   if (options.inplace()) {
-    stream << std::boolalpha  << ", inplace=" << options.inplace();
+    stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -118,32 +124,30 @@ void LogSigmoidImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-SoftmaxImpl::SoftmaxImpl(const SoftmaxOptions& options_)
-    : options(options_) {}
+SoftmaxImpl::SoftmaxImpl(const SoftmaxOptions& options_) : options(options_) {}
 
 void SoftmaxImpl::reset() {}
 
 void SoftmaxImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softmax(dim=" << options.dim() << ")";
+  stream << "torch::nn::Softmax(dim=" << options.dim() << ')';
 }
 
 Tensor SoftmaxImpl::forward(const Tensor& input) {
-  return F::detail::softmax(input, options.dim(), c10::nullopt);
+  return F::detail::softmax(input, options.dim(), std::nullopt);
 }
 
 // ============================================================================
 
-SoftminImpl::SoftminImpl(const SoftminOptions& options_)
-    : options(options_) {}
+SoftminImpl::SoftminImpl(const SoftminOptions& options_) : options(options_) {}
 
 void SoftminImpl::reset() {}
 
 void SoftminImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softmin(dim=" << options.dim() << ")";
+  stream << "torch::nn::Softmin(dim=" << options.dim() << ')';
 }
 
 Tensor SoftminImpl::forward(const Tensor& input) {
-  return F::detail::softmin(input, options.dim(), c10::nullopt);
+  return F::detail::softmin(input, options.dim(), std::nullopt);
 }
 
 // ============================================================================
@@ -154,11 +158,11 @@ LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
 void LogSoftmaxImpl::reset() {}
 
 void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ")";
+  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ')';
 }
 
 Tensor LogSoftmaxImpl::forward(const Tensor& input) {
-  return F::detail::log_softmax(input, options.dim(), c10::nullopt);
+  return F::detail::log_softmax(input, options.dim(), std::nullopt);
 }
 
 // ============================================================================
@@ -170,15 +174,16 @@ void Softmax2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor Softmax2dImpl::forward(const Tensor& input) {
-  TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
-  return F::detail::softmax(input, /*dim=*/1, c10::nullopt);
+  TORCH_CHECK(
+      input.dim() == 4 || input.dim() == 3,
+      "Softmax2d requires a 3D or 4D tensor as input");
+  return F::detail::softmax(input, /*dim=*/-3, std::nullopt);
 }
 
 // ============================================================================
 
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  PReLUImpl::reset();
 }
 
 Tensor PReLUImpl::forward(const Tensor& input) {
@@ -186,13 +191,13 @@ Tensor PReLUImpl::forward(const Tensor& input) {
 }
 
 void PReLUImpl::reset() {
-  weight = register_parameter("weight",
-    torch::full(options.num_parameters(), options.init()));
+  weight = register_parameter(
+      "weight", torch::full(options.num_parameters(), options.init()));
 }
 
 void PReLUImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::PReLU(num_parameters="
-         << options.num_parameters() << ")";
+  stream << "torch::nn::PReLU(num_parameters=" << options.num_parameters()
+         << ')';
 }
 
 // ============================================================================
@@ -200,7 +205,7 @@ void PReLUImpl::pretty_print(std::ostream& stream) const {
 ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
 
 Tensor ReLUImpl::forward(Tensor input) {
-  return F::detail::relu(input, options.inplace());
+  return F::detail::relu(std::move(input), options.inplace());
 }
 
 void ReLUImpl::reset() {}
@@ -210,7 +215,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -218,7 +223,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
 ReLU6Impl::ReLU6Impl(const ReLU6Options& options_) : options(options_) {}
 
 Tensor ReLU6Impl::forward(Tensor input) {
-  return F::detail::relu6(input, options.inplace());
+  return F::detail::relu6(std::move(input), options.inplace());
 }
 
 void ReLU6Impl::reset() {}
@@ -228,7 +233,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -236,7 +241,12 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
 RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
 Tensor RReLUImpl::forward(Tensor input) {
-  return F::detail::rrelu(input, options.lower(), options.upper(), is_training(), options.inplace());
+  return F::detail::rrelu(
+      std::move(input),
+      options.lower(),
+      options.upper(),
+      is_training(),
+      options.inplace());
 }
 
 void RReLUImpl::reset() {}
@@ -247,7 +257,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -255,7 +265,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
 CELUImpl::CELUImpl(const CELUOptions& options_) : options(options_) {}
 
 Tensor CELUImpl::forward(Tensor input) {
-  return F::detail::celu(input, options.alpha(), options.inplace());
+  return F::detail::celu(std::move(input), options.alpha(), options.inplace());
 }
 
 void CELUImpl::reset() {}
@@ -265,7 +275,7 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -279,13 +289,15 @@ Tensor GLUImpl::forward(const Tensor& input) {
 void GLUImpl::reset() {}
 
 void GLUImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::GLU(dim=" << options.dim() << ")";
+  stream << "torch::nn::GLU(dim=" << options.dim() << ')';
 }
 
 // ============================================================================
 
+GELUImpl::GELUImpl(GELUOptions options_) : options(std::move(options_)) {}
+
 Tensor GELUImpl::forward(const Tensor& input) {
-  return F::gelu(input);
+  return F::detail::gelu(input, options.approximate());
 }
 
 void GELUImpl::reset() {}
@@ -308,6 +320,18 @@ void SiLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor MishImpl::forward(const Tensor& input) {
+  return F::mish(input);
+}
+
+void MishImpl::reset() {}
+
+void MishImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Mish()";
+}
+
+// ============================================================================
+
 Tensor SigmoidImpl::forward(const Tensor& input) {
   return torch::sigmoid(input);
 }
@@ -321,7 +345,7 @@ void SigmoidImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 SoftplusImpl::SoftplusImpl(const SoftplusOptions& options_)
-  : options(options_) {}
+    : options(options_) {}
 
 Tensor SoftplusImpl::forward(const Tensor& input) {
   return F::detail::softplus(input, options.beta(), options.threshold());
@@ -331,7 +355,7 @@ void SoftplusImpl::reset() {}
 
 void SoftplusImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softplus(beta=" << options.beta()
-         << ", threshold=" << options.threshold() << ")";
+         << ", threshold=" << options.threshold() << ')';
 }
 
 // ============================================================================
@@ -346,7 +370,7 @@ Tensor SoftshrinkImpl::forward(const Tensor& input) {
 void SoftshrinkImpl::reset() {}
 
 void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softshrink(" << options.lambda() << ")";
+  stream << "torch::nn::Softshrink(" << options.lambda() << ')';
 }
 
 // ============================================================================
@@ -391,7 +415,11 @@ ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
     : options(options_) {}
 
 Tensor ThresholdImpl::forward(Tensor input) {
-  return F::detail::threshold(input, options.threshold(), options.value(), options.inplace());
+  return F::detail::threshold(
+      std::move(input),
+      options.threshold(),
+      options.value(),
+      options.inplace());
 }
 
 void ThresholdImpl::reset() {}
@@ -402,105 +430,116 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& options_)
-    : Module("torch::nn::MultiheadAttention"), options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+MultiheadAttentionImpl::MultiheadAttentionImpl(
+    const MultiheadAttentionOptions& options_)
+    : Cloneable("torch::nn::MultiheadAttention"), options(options_) {
+  MultiheadAttentionImpl::reset();
 }
 
 std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
-  const Tensor& query, const Tensor& key,
-  const Tensor& value, const Tensor& key_padding_mask,
-  bool need_weights, const Tensor& attn_mask) {
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& key_padding_mask,
+    bool need_weights,
+    const Tensor& attn_mask,
+    bool average_attn_weights) {
   if (!_qkv_same_embed_dim) {
     return F::multi_head_attention_forward(
-      query, key, value,
-      F::MultiheadAttentionForwardFuncOptions(
-        /*embed_dim_to_check=*/options.embed_dim(),
-        /*num_heads=*/options.num_heads(),
-        /*in_proj_weight=*/in_proj_weight,
-        /*in_proj_bias=*/in_proj_bias,
-        /*bias_k=*/bias_k,
-        /*bias_v=*/bias_v,
-        /*add_zero_attn=*/options.add_zero_attn(),
-        /*dropout_p=*/options.dropout(),
-        /*out_proj_weight=*/out_proj->weight,
-        /*out_proj_bias=*/out_proj->bias
-      ).training(is_training())
-       .key_padding_mask(key_padding_mask)
-       .need_weights(need_weights)
-       .attn_mask(attn_mask)
-       .use_separate_proj_weight(true)
-       .q_proj_weight(q_proj_weight)
-       .k_proj_weight(k_proj_weight)
-       .v_proj_weight(v_proj_weight)
-    );
+        query,
+        key,
+        value,
+        F::MultiheadAttentionForwardFuncOptions(
+            /*embed_dim_to_check=*/options.embed_dim(),
+            /*num_heads=*/options.num_heads(),
+            /*in_proj_weight=*/in_proj_weight,
+            /*in_proj_bias=*/in_proj_bias,
+            /*bias_k=*/bias_k,
+            /*bias_v=*/bias_v,
+            /*add_zero_attn=*/options.add_zero_attn(),
+            /*dropout_p=*/options.dropout(),
+            /*out_proj_weight=*/out_proj->weight,
+            /*out_proj_bias=*/out_proj->bias)
+            .training(is_training())
+            .key_padding_mask(key_padding_mask)
+            .need_weights(need_weights)
+            .attn_mask(attn_mask)
+            .use_separate_proj_weight(true)
+            .q_proj_weight(q_proj_weight)
+            .k_proj_weight(k_proj_weight)
+            .v_proj_weight(v_proj_weight)
+            .average_attn_weights(average_attn_weights));
   } else {
     return F::multi_head_attention_forward(
-      query, key, value,
-      F::MultiheadAttentionForwardFuncOptions(
-        /*embed_dim_to_check=*/options.embed_dim(),
-        /*num_heads=*/options.num_heads(),
-        /*in_proj_weight=*/in_proj_weight,
-        /*in_proj_bias=*/in_proj_bias,
-        /*bias_k=*/bias_k,
-        /*bias_v=*/bias_v,
-        /*add_zero_attn=*/options.add_zero_attn(),
-        /*dropout_p=*/options.dropout(),
-        /*out_proj_weight=*/out_proj->weight,
-        /*out_proj_bias=*/out_proj->bias
-      ).training(is_training())
-       .key_padding_mask(key_padding_mask)
-       .need_weights(need_weights)
-       .attn_mask(attn_mask)
-    );
+        query,
+        key,
+        value,
+        F::MultiheadAttentionForwardFuncOptions(
+            /*embed_dim_to_check=*/options.embed_dim(),
+            /*num_heads=*/options.num_heads(),
+            /*in_proj_weight=*/in_proj_weight,
+            /*in_proj_bias=*/in_proj_bias,
+            /*bias_k=*/bias_k,
+            /*bias_v=*/bias_v,
+            /*add_zero_attn=*/options.add_zero_attn(),
+            /*dropout_p=*/options.dropout(),
+            /*out_proj_weight=*/out_proj->weight,
+            /*out_proj_bias=*/out_proj->bias)
+            .training(is_training())
+            .key_padding_mask(key_padding_mask)
+            .need_weights(need_weights)
+            .attn_mask(attn_mask)
+            .average_attn_weights(average_attn_weights));
   }
 }
 
 void MultiheadAttentionImpl::reset() {
   _qkv_same_embed_dim = options.kdim() == options.embed_dim() &&
-                        options.vdim() == options.embed_dim();
+      options.vdim() == options.embed_dim();
   head_dim = options.embed_dim() / options.num_heads();
-  TORCH_CHECK(head_dim * options.num_heads() == options.embed_dim(),
-              "embed_dim must be divisible by num_heads");
+  TORCH_CHECK(
+      head_dim * options.num_heads() == options.embed_dim(),
+      "embed_dim must be divisible by num_heads");
   if (!_qkv_same_embed_dim) {
     q_proj_weight = register_parameter(
-      "q_proj_weight", torch::empty({options.embed_dim(), options.embed_dim()}));
+        "q_proj_weight",
+        torch::empty({options.embed_dim(), options.embed_dim()}));
     k_proj_weight = register_parameter(
-      "k_proj_weight", torch::empty({options.embed_dim(), options.kdim()}));
+        "k_proj_weight", torch::empty({options.embed_dim(), options.kdim()}));
     v_proj_weight = register_parameter(
-      "v_proj_weight", torch::empty({options.embed_dim(), options.vdim()}));
+        "v_proj_weight", torch::empty({options.embed_dim(), options.vdim()}));
     register_parameter("in_proj_weight", {}, /*requires_grad=*/false);
   } else {
     in_proj_weight = register_parameter(
-      "in_proj_weight", torch::empty({3 * options.embed_dim(), options.embed_dim()}));
+        "in_proj_weight",
+        torch::empty({3 * options.embed_dim(), options.embed_dim()}));
     register_parameter("q_proj_weight", {}, /*requires_grad=*/false);
     register_parameter("k_proj_weight", {}, /*requires_grad=*/false);
     register_parameter("v_proj_weight", {}, /*requires_grad=*/false);
   }
   if (options.bias()) {
     in_proj_bias = register_parameter(
-      "in_proj_bias", torch::empty(3 * options.embed_dim()));
+        "in_proj_bias", torch::empty(3 * options.embed_dim()));
   } else {
     register_parameter("in_proj_bias", {}, /*requires_grad=*/false);
   }
   out_proj = register_module(
-    "out_proj",
-    Linear(LinearOptions(options.embed_dim(),
-      options.embed_dim()).bias(options.bias()))
-  );
+      "out_proj",
+      Linear(LinearOptions(options.embed_dim(), options.embed_dim())
+                 .bias(options.bias())));
   if (options.add_bias_kv()) {
-    bias_k = register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
-    bias_v = register_parameter("bias_v", torch::empty({1, 1, options.embed_dim()}));
+    bias_k =
+        register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
+    bias_v =
+        register_parameter("bias_v", torch::empty({1, 1, options.embed_dim()}));
   } else {
-    bias_k = {};
-    bias_v = {};
+    bias_k.reset();
+    bias_v.reset();
   }
   _reset_parameters();
 }
@@ -526,5 +565,4 @@ void MultiheadAttentionImpl::_reset_parameters() {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

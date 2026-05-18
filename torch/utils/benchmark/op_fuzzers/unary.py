@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import numpy as np
 import torch
 
@@ -13,7 +14,7 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 
 
 class UnaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False):
+    def __init__(self, seed, dtype=torch.float32, cuda=False) -> None:
         super().__init__(
             parameters=[
                 # Dimensionality of x. (e.g. 1D, 2D, or 3D.)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 /**
  * Android versions with libgnustl incorrectly handle thread_local C++
  * qualifier with composite types. NDK up to r17 version is affected.
@@ -33,6 +35,7 @@
 
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 #include <c10/util/Exception.h>
+#include <errno.h>
 #include <pthread.h>
 #include <memory>
 namespace c10 {
@@ -112,7 +115,10 @@ class ThreadLocal {
   explicit ThreadLocal(Accessor accessor) : accessor_(accessor) {}
 
   ThreadLocal(const ThreadLocal&) = delete;
+  ThreadLocal(ThreadLocal&&) noexcept = default;
   ThreadLocal& operator=(const ThreadLocal&) = delete;
+  ThreadLocal& operator=(ThreadLocal&&) noexcept = default;
+  ~ThreadLocal() = default;
 
   Type& get() {
     return *accessor_();

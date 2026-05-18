@@ -1,6 +1,4 @@
 r'''
-**This feature is under a Beta release and its API may change.**
-
 FX is a toolkit for developers to use to transform ``nn.Module``
 instances. FX consists of three main components: a **symbolic tracer,**
 an **intermediate representation**, and **Python code generation**. A
@@ -9,9 +7,11 @@ demonstration of these components in action:
 ::
 
     import torch
+
+
     # Simple module for demonstration
     class MyModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.param = torch.nn.Parameter(torch.rand(3, 4))
             self.linear = torch.nn.Linear(4, 5)
@@ -19,21 +19,24 @@ demonstration of these components in action:
         def forward(self, x):
             return self.linear(x + self.param).clamp(min=0.0, max=1.0)
 
+
     module = MyModule()
 
     from torch.fx import symbolic_trace
+
     # Symbolic tracing frontend - captures the semantics of the module
-    symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
+    symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
 
     # High-level intermediate representation (IR) - Graph representation
     print(symbolic_traced.graph)
     """
-    graph(x):
-        %param : [#users=1] = self.param
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %param), kwargs = {})
-        %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-        %clamp_1 : [#users=1] = call_method[target=clamp](args = (%linear_1,), kwargs = {min: 0.0, max: 1.0})
-        return clamp_1
+    graph():
+        %x : [num_users=1] = placeholder[target=x]
+        %param : [num_users=1] = get_attr[target=param]
+        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %param), kwargs = {})
+        %linear : [num_users=1] = call_module[target=linear](args = (%add,), kwargs = {})
+        %clamp : [num_users=1] = call_method[target=clamp](args = (%linear,), kwargs = {min: 0.0, max: 1.0})
+        return clamp
     """
 
     # Code generation - valid Python code
@@ -41,15 +44,15 @@ demonstration of these components in action:
     """
     def forward(self, x):
         param = self.param
-        add_1 = x + param;  x = param = None
-        linear_1 = self.linear(add_1);  add_1 = None
-        clamp_1 = linear_1.clamp(min = 0.0, max = 1.0);  linear_1 = None
-        return clamp_1
+        add = x + param;  x = param = None
+        linear = self.linear(add);  add = None
+        clamp = linear.clamp(min = 0.0, max = 1.0);  linear = None
+        return clamp
     """
 
 The **symbolic tracer** performs "symbolic execution" of the Python
 code. It feeds fake values, called Proxies, through the code. Operations
-on theses Proxies are recorded. More information about symbolic tracing
+on these Proxies are recorded. More information about symbolic tracing
 can be found in the :func:`symbolic_trace` and :class:`Tracer`
 documentation.
 
@@ -81,10 +84,33 @@ Several example transformations can be found at the
 repository.
 '''
 
-from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, Tracer, wrap, PH
-from .graph import Graph
-from .node import Node, map_arg
-from .proxy import Proxy
-from .interpreter import Interpreter as Interpreter, Transformer as Transformer
-from .subgraph_rewriter import replace_pattern
+from torch.fx import immutable_collections
+from torch.fx._symbolic_trace import (
+    PH,
+    ProxyableClassMeta,
+    symbolic_trace,
+    Tracer,
+    wrap,
+)
+from torch.fx.graph import CodeGen, Graph
+from torch.fx.graph_module import GraphModule
+from torch.fx.interpreter import Interpreter, Transformer
+from torch.fx.node import has_side_effect, map_arg, Node
+from torch.fx.proxy import Proxy
+from torch.fx.subgraph_rewriter import replace_pattern
+
+
+__all__ = [
+    "symbolic_trace",
+    "Tracer",
+    "wrap",
+    "Graph",
+    "GraphModule",
+    "Interpreter",
+    "Transformer",
+    "Node",
+    "Proxy",
+    "replace_pattern",
+    "has_side_effect",
+    "map_arg",
+]

@@ -1,10 +1,19 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_rowwise_prune_native.h>
+#include <ATen/ops/empty.h>
+#endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -14,9 +23,9 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
       ScalarType compressed_indices_dtype) {
   int num_non_masked_rows = 0;
   auto mask_contig = mask.contiguous();
-  auto mask_data = mask_contig.data_ptr<bool>();
-  for (int i = 0; i < mask.numel(); ++i) {
-    num_non_masked_rows += (((mask_data[i] == true)) ? 1 : 0);
+  auto mask_data = mask_contig.const_data_ptr<bool>();
+  for (const auto i : c10::irange(mask.numel())) {
+    num_non_masked_rows += ((mask_data[i] == true) ? 1 : 0);
   }
   int num_cols = weights.size(1);
   auto pruned_2d_tensor = at::empty({num_non_masked_rows, num_cols},
@@ -30,9 +39,9 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
     auto* pruned_2d_tensor_data = pruned_2d_tensor.data_ptr<scalar_t>();
     auto compressed_indices_mapping_data =
         compressed_indices_mapping.data_ptr<input_t>();
-    auto weights_data = weights.data_ptr<scalar_t>();
+    auto weights_data = weights.const_data_ptr<scalar_t>();
     int last_row_kept = 0;
-    for (int i = 0; i < mask.numel(); i++) {
+    for (const auto i : c10::irange(mask.numel())) {
       if (mask_data[i]) {
         memcpy(pruned_2d_tensor_data + last_row_kept * num_cols,
               weights_data + i * num_cols,
@@ -44,8 +53,8 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
       }
     }
   });
-  return std::tuple<Tensor, Tensor>(pruned_2d_tensor,
-      compressed_indices_mapping);
+  return std::tuple<Tensor, Tensor>(std::move(pruned_2d_tensor),
+      std::move(compressed_indices_mapping));
 }
 
 } // namespace
@@ -103,4 +112,4 @@ std::tuple<Tensor, Tensor> _rowwise_prune(const Tensor& weights,
                                         compressed_indices_dtype);
 }
 
-}} // namesapce at::native
+} // namespace at::native

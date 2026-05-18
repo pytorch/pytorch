@@ -1,12 +1,10 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 
 struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  MetalGuardImpl() {}
+  MetalGuardImpl() = default;
 
   explicit MetalGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::Metal);
@@ -59,8 +57,6 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       noexcept override {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);
+C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl)
 
-} // namespace detail
 } // namespace at

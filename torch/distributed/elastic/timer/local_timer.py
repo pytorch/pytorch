@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -9,9 +10,14 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
+
+
+__all__ = ["LocalTimerClient", "MultiprocessingRequestQueue", "LocalTimerServer"]
+
+logger = logging.getLogger(__name__)
 
 
 class LocalTimerClient(TimerClient):
@@ -50,10 +56,10 @@ class MultiprocessingRequestQueue(RequestQueue):
     def size(self) -> int:
         return self._mp_queue.qsize()
 
-    def get(self, size, timeout: float) -> List[TimerRequest]:
+    def get(self, size, timeout: float) -> list[TimerRequest]:
         requests = []
         wait = timeout
-        for _ in range(0, size):
+        for _ in range(size):
             start = time.time()
 
             try:
@@ -82,9 +88,9 @@ class LocalTimerServer(TimerServer):
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
     ):
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
-        self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
+        self._timers: dict[tuple[Any, str], TimerRequest] = {}
 
-    def register_timers(self, timer_requests: List[TimerRequest]) -> None:
+    def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         for request in timer_requests:
             pid = request.worker_id
             scope_id = request.scope_id
@@ -96,14 +102,14 @@ class LocalTimerServer(TimerServer):
             else:
                 self._timers[(pid, scope_id)] = request
 
-    def clear_timers(self, worker_ids: Set[int]) -> None:
-        for (pid, scope_id) in list(self._timers.keys()):
+    def clear_timers(self, worker_ids: set[int]) -> None:
+        for pid, scope_id in list(self._timers.keys()):
             if pid in worker_ids:
                 self._timers.pop((pid, scope_id))
 
-    def get_expired_timers(self, deadline: float) -> Dict[Any, List[TimerRequest]]:
+    def get_expired_timers(self, deadline: float) -> dict[Any, list[TimerRequest]]:
         # pid -> [timer_requests...]
-        expired_timers: Dict[Any, List[TimerRequest]] = {}
+        expired_timers: dict[Any, list[TimerRequest]] = {}
         for request in self._timers.values():
             if request.expiration_time <= deadline:
                 expired_scopes = expired_timers.setdefault(request.worker_id, [])
@@ -115,8 +121,8 @@ class LocalTimerServer(TimerServer):
             os.kill(worker_id, signal.SIGKILL)
             return True
         except ProcessLookupError:
-            logging.info(f"Process with pid={worker_id} does not exist. Skipping")
+            logger.info("Process with pid=%s does not exist. Skipping", worker_id)
             return True
-        except Exception as e:
-            logging.error(f"Error terminating pid={worker_id}", exc_info=e)
+        except Exception:
+            logger.exception("Error terminating pid=%s", worker_id)
         return False

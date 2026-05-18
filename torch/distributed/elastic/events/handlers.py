@@ -7,13 +7,15 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import Dict
 
 
-_log_handlers: Dict[str, logging.Handler] = {
+_log_handlers: dict[str, logging.Handler] = {
     "console": logging.StreamHandler(),
+    "dynamic_rendezvous": logging.NullHandler(),
+    "null": logging.NullHandler(),
 }
 
 
-def get_logging_handler(destination: str = "console") -> logging.Handler:
+def get_logging_handler(destination: str = "null") -> logging.Handler:
+    global _log_handlers
     return _log_handlers[destination]

@@ -1,10 +1,14 @@
-""" Constants for annotations in the mapping.
+"""Constants for annotations in the mapping.
+
 The constants defined here are used to annotate the mapping tuples in cuda_to_hip_mappings.py.
 They are based on
-https://github.com/ROCm-Developer-Tools/HIP/blob/master/hipify-clang/src/Statistics.h
+https://github.com/ROCm/HIPIFY/blob/master/src/Statistics.h
 and fall in three categories: 1) type of mapping, 2) API of mapping, 3) unsupported
 mapping.
 """
+
+import warnings
+warnings.warn("hipify's constants.py is no longer used as of version 2.0.0", FutureWarning)
 
 CONV_VERSION = 0,
 CONV_INIT = 1
@@ -47,14 +51,16 @@ CONV_LAST = 36
 API_DRIVER = 37
 API_RUNTIME = 38
 API_BLAS = 39
-API_SPARSE = 40
+API_SPECIAL = 40
 API_RAND = 41
 API_LAST = 42
 API_FFT = 43
 API_RTC = 44
 API_ROCTX = 45
+API_PYT_EXT = 46
 
-HIP_UNSUPPORTED = 46
+HIP_UNSUPPORTED = 47
 API_PYTORCH = 1337
 API_CAFFE2 = 1338
 API_C10 = 1339
+API_ROCMSMI = 1340

@@ -1,11 +1,13 @@
 #pragma once
 
+#include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/TensorUtils.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/core/TensorBase.h>
+#include <ATen/ceil_div.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/native/Copy.h>
 
 #include <math.h>
 
@@ -87,8 +89,7 @@
   );
 */
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 // TODO: combine with TensorArg?  So far that's been for debugging, and this is functional...
 enum class TensorArgType { ReadWrite, ReadOnly };
@@ -198,11 +199,6 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
   }
 }
 
-// Threads per block for our apply kernel
-// FIXME: use occupancy calculator instead
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
-constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
-
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
 //  1. Initialize `remaining_steps = step`, where `step` is the template arg of
@@ -213,10 +209,10 @@ constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 //     bound), and recursively call `ApplyOpN` with `remaining_steps - 1`.
 //  3. At `remaining_steps = 0`,
 //       if `step = 1`, call `op(tensor1_val, tensor2_val, ...)`;
-//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tesor1_valstep,
-//                                  tensor2_val1, tensor2_val2, ..., tesor2_valstep,
+//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tensor1_valstep,
+//                                  tensor2_val1, tensor2_val2, ..., tensor2_valstep,
 //                                       ...
-//                                  tensorN_val1, tensorN_val2, ..., tesorN_valstep);`
+//                                  tensorN_val1, tensorN_val2, ..., tensorN_valstep);`
 //
 // See NOTE [ CUDA_tensor_applyN helpers ] above for how Op may look like.
 
@@ -273,9 +269,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
-#endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
                                       IndexType totalElements, const Op op) {
   for (IndexType linearIndex = (blockIdx.x * blockDim.x + threadIdx.x) * step;
@@ -299,14 +293,14 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int64_t n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
+  const IndexType aOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset = sizeof...(Offsets) < n ?
+  const IndexType bOffset = static_cast<int64_t>(sizeof...(Offsets)) < n ?
     detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, remaining_steps - 1, const IndexType, Offsets...>::apply(
@@ -328,7 +322,7 @@ struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offset> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int /*n*/, IndexType /*linearIndex*/,
                   Offset aOffset, Offset bOffset) {
   op(a.data[aOffset], b.data[bOffset]);
 }
@@ -359,9 +353,7 @@ template <typename Op,
           int step,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
-#endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,
@@ -376,49 +368,19 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
   }
 }
 
-} // namespace
-
-/**
-   Computes ceil(a / b)
-*/
-template <typename T>
-__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
-  return (a + b - 1) / b;
-}
-
-template <int step = 1>
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
-  if (curDevice == -1) return false;
-  uint64_t numel_per_thread = static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK) * static_cast<uint64_t>(step);
-  uint64_t numBlocks = ATenCeilDiv(totalElements, numel_per_thread);
-  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
-  if (numBlocks > maxGridX)
-      numBlocks = maxGridX;
-  grid = dim3(numBlocks);
-  return true;
-}
-
-constexpr int getApplyBlocksPerSM() {
-  return AT_APPLY_BLOCKS_PER_SM;
-}
-
-constexpr int getApplyBlockSize() {
-  return AT_APPLY_THREADS_PER_BLOCK;
-}
-
-inline dim3 getApplyBlock() {
-  return dim3(AT_APPLY_THREADS_PER_BLOCK);
-}
+} // anonymous namespace
 
 template <typename scalar1, typename scalar2, int step, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+inline bool CUDA_tensor_apply2(at::TensorBase a,
+                               at::TensorBase b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
+  TORCH_CHECK(a.device().is_cuda() && b.device().is_cuda(),
+              "CUDA_tensor_apply2: Expected tensors to have CUDA DeviceType, but got "
+              "tensors with type ", a.device().type(), " and ", b.device().type());
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {
@@ -434,12 +396,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Empty tensor; do nothing
     return true;
   }
-  const dim3 block = getApplyBlock();
+  const dim3 block = getApplyBlock(max_threads_per_block);
 
   dim3 grid;
-  int64_t curDevice = current_device();
+  auto curDevice = current_device();
   if (curDevice == -1) return false;
-  if (!getApplyGrid<step>(totalElements, grid, curDevice)) {
+  if (!getApplyGrid<step>(totalElements, grid, curDevice, max_threads_per_block)) {
     return false;
   }
 
@@ -448,18 +410,16 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   This ensures that each element of the tensor is operated on once and only
   once.
   */
-  Tensor oldA;
-  Tensor oldB;
+  TensorBase oldA;
+  TensorBase oldB;
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
-    oldA = a;
-    a = a.contiguous();
+    oldA = std::exchange(a, a.contiguous());
   }
   if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
-    oldB = b;
-    b = b.contiguous();
+    oldB = std::exchange(b, b.contiguous());
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -547,17 +507,11 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 #undef HANDLE_A_CASE
 
   if (oldA.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldA contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::copy_ignoring_overlaps(oldA, a);
   }
 
   if (oldB.defined()) {
-    // Ignore overlaps when copying back; if we use copy
-    // instead, it will recursively try and invoke ourselves to make
-    // oldB contiguous.
-    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::copy_ignoring_overlaps(oldB, b);
   }
 
   return true;
@@ -567,8 +521,8 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
 template <typename scalar1, typename scalar2, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(at::Tensor a,
-                               at::Tensor b,
+inline bool CUDA_tensor_apply2(const at::TensorBase &a,
+                               const at::TensorBase &b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
@@ -576,5 +530,4 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
                             max_threads_per_block, min_blocks_per_sm>(a, b, op, aType, bType);
 }
 
-} // cuda
-} // at
+} // namespace at::cuda

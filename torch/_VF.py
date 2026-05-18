@@ -10,20 +10,22 @@ See https://github.com/pytorch/pytorch/issues/21478 for the reason for
 introducing torch._VF
 
 """
-import torch
+
 import sys
 import types
+
+import torch
 
 
 class VFModule(types.ModuleType):
     vf: types.ModuleType
 
-    def __init__(self, name):
-        super(VFModule, self).__init__(name)
+    def __init__(self, name: str):
+        super().__init__(name)
         self.vf = torch._C._VariableFunctions
 
-    def __getattr__(self, attr):
-        return getattr(self.vf, attr)
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.vf, name)
 
 
 sys.modules[__name__] = VFModule(__name__)

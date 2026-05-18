@@ -12,7 +12,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, TorchbindIValueAPI) {
   script::Module m("m");
 
@@ -46,6 +45,20 @@ TEST(CustomClassTest, TorchbindIValueAPI) {
   test_with_obj(new_stack_ivalue, "boo");
 }
 
+TEST(CustomClassTest, ScalarTypeClass) {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto cc = make_custom_class<ScalarTypeClass>(at::kFloat);
+  m.register_attribute("s", cc.type(), cc, false);
+
+  std::ostringstream oss;
+  m.save(oss);
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  auto loaded_module = torch::jit::load(iss, torch::kCPU);
+}
+
 class TorchBindTestClass : public torch::jit::CustomClassHolder {
  public:
   std::string get() {
@@ -67,7 +80,6 @@ constexpr char method_doc_string[] =
     "I am docstring for TorchBindTestClass get_with_docstring method";
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg =
     torch::class_<TorchBindTestClass>(
         "_TorchBindTest",
@@ -79,7 +91,6 @@ static auto reg =
 } // namespace
 
 // Tests DocString is properly propagated when defining CustomClasses.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, TestDocString) {
   auto class_type = getCustomClass(
       "__torch__.torch.classes._TorchBindTest._TorchBindTestClass");
@@ -92,7 +103,6 @@ TEST(CustomClassTest, TestDocString) {
       method_doc_string);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomClassTest, Serialization) {
   script::Module m("m");
 

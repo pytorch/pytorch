@@ -1,12 +1,9 @@
 #include <torch/nn/modules/container/functional.h>
 
-#include <torch/types.h>
-
 #include <functional>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 FunctionalImpl::FunctionalImpl(Function function)
     : function_(std::move(function)) {}
 
@@ -27,5 +24,4 @@ Tensor FunctionalImpl::operator()(Tensor input) {
 bool FunctionalImpl::is_serializable() const {
   return false;
 }
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <c10/core/DeviceGuard.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h> // TensorList whyyyyy
 
 namespace at {
@@ -14,26 +15,26 @@ namespace at {
 //    OptionalDeviceGuard guard(device_of(tensor));
 
 /// Return the Device of a Tensor, if the Tensor is defined.
-inline optional<Device> device_of(const Tensor& t) {
+inline std::optional<Device> device_of(const Tensor& t) {
   if (t.defined()) {
-    return make_optional(t.device());
+    return t.device();
   } else {
-    return nullopt;
+    return std::nullopt;
   }
 }
 
-inline optional<Device> device_of(const optional<Tensor>& t) {
-  return t.has_value() ? device_of(t.value()) : nullopt;
+inline std::optional<Device> device_of(const std::optional<Tensor>& t) {
+  return t.has_value() ? device_of(t.value()) : std::nullopt;
 }
 
 /// Return the Device of a TensorList, if the list is non-empty and
 /// the first Tensor is defined.  (This function implicitly assumes
 /// that all tensors in the list have the same device.)
-inline optional<Device> device_of(TensorList t) {
+inline std::optional<Device> device_of(ITensorListRef t) {
   if (!t.empty()) {
     return device_of(t.front());
   } else {
-    return nullopt;
+    return std::nullopt;
   }
 }
 

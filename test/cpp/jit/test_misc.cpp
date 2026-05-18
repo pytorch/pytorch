@@ -1,19 +1,24 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
-
+#include <ATen/core/jit_type_base.h>
+#include <c10/macros/Macros.h>
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -38,15 +43,20 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
@@ -57,6 +67,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -66,11 +78,10 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-using namespace torch::autograd::profiler;
 
 namespace torch {
 namespace jit {
@@ -91,7 +102,6 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   return out;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(prim::Param, Symbol::prim("Param"));
   ASSERT_EQ(prim::Return, Symbol::prim("Return"));
@@ -108,7 +118,6 @@ TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(Symbol(symstart + 2).toUnqualString(), std::string("What2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FromQualStringTest, Basic) {
   ASSERT_EQ(Symbol::fromQualString("prim::Param"), Symbol::prim("Param"));
   ASSERT_EQ(Symbol::fromQualString("aten::mm"), Symbol::aten("mm"));
@@ -134,12 +143,11 @@ TEST(FromQualStringTest, Basic) {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (const std::exception& c) {
+    } catch (const std::exception&) {
     }
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(THNNConvTest, Basic) {
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
   std::vector<int64_t> kernel_size = {3, 5};
@@ -154,29 +162,21 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput, fgradinput;
-  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(
+  at::Tensor output = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
   at::Tensor grad_output =
       torch::randn_like(output, at::MemoryFormat::Preserve);
-  at::Tensor grad_finput =
-      torch::zeros_like(finput, at::MemoryFormat::Preserve);
-  at::Tensor grad_fgradinput =
-      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
       kernel_size,
       stride,
       padding,
-      finput,
-      fgradinput,
       {true, true, true});
 
   // make JIT graph
@@ -190,7 +190,7 @@ TEST(THNNConvTest, Basic) {
   auto biasg = graph->addInput("bias");
 
   Value* conv = graph->insert(
-      aten::thnn_conv2d_forward,
+      aten::_slow_conv2d_forward,
       {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
   auto outputs = conv->node()->outputs();
   for (auto output : outputs) {
@@ -213,19 +213,14 @@ TEST(THNNConvTest, Basic) {
 
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
-  tensor_grads_in.push_back(grad_finput);
-  tensor_grads_in.push_back(grad_fgradinput);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
-  expected_tensors_out.push_back(finput);
-  expected_tensors_out.push_back(fgradinput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
@@ -235,7 +230,6 @@ TEST(THNNConvTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATenNativeBatchNormTest, Basic) {
   // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
   // running_mean, Tensor running_var, bool training, float momentum, float eps)
@@ -259,8 +253,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   at::Tensor running_var_jit = running_var.clone();
 
   // run forward eagerly
-  at::Tensor output, savemean, saveinvstd;
-  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(
+  auto [output, savemean, saveinvstd] = at::native_batch_norm(
       input,
       weight,
       bias,
@@ -279,12 +272,11 @@ TEST(ATenNativeBatchNormTest, Basic) {
       torch::zeros_like(saveinvstd, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
   // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor
   // weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor
   // save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor,
   // Tensor, Tensor)
-  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::native_batch_norm_backward(
       grad_output,
       input,
       weight,
@@ -345,8 +337,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   tensor_grads_in.push_back(grad_saveinvstd);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
@@ -368,7 +359,6 @@ TEST(ATenNativeBatchNormTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, Basic) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -407,7 +397,6 @@ TEST(CustomFusionTest, Basic) {
   AT_ASSERT(hits == 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, NestedBlocks) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -475,12 +464,11 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = toGraphFunction(cu->get_function(name)).graph();
     Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
@@ -499,33 +487,56 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#if !(C10_ASAN_ENABLED || C10_UBSAN_ENABLED)
+// This test fails vptr UBSAN checks
+
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
+#endif
 
 // test a few features that are not directly used in schemas yet
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expectRef<ListType>()
-                                              .getElementType()
-                                              ->expectRef<ListType>()
-                                              .getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s2.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expectRef<ListType>()
+                                               .getElementType()
+                                               ->expectRef<ListType>()
+                                               .getElementType()));
+}
+
+TEST(SchemaParserTest, OutVariant) {
+  auto schema_with_out = parseSchema(
+      "at::foo(Tensor self, *, Tensor(a!) f, Tensor(b!) l) -> (Tensor(a!) f, Tensor(b!) l)");
+  ASSERT_TRUE(schema_with_out.arguments().at(1).is_out());
+  ASSERT_TRUE(schema_with_out.arguments().at(2).is_out());
+
+  auto schema_without_out =
+      parseSchema("at::foo(Tensor self, *, int scalar) -> (int)");
+
+  for (const auto& arg : schema_without_out.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
+
+  auto schema_with_is_write = parseSchema(
+      "aten::ne_.Scalar(Tensor(a!) self, Scalar other) -> (Tensor(a!))");
+
+  for (const auto& arg : schema_with_is_write.arguments()) {
+    ASSERT_TRUE(!arg.is_out());
+  }
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -538,36 +549,65 @@ TEST(SchemaParserTest, NamedReturns) {
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
+      *s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(a!) self, Tensor(b!)[] out)"
+      " -> ()");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  const AliasInfo* outAliasInfo = s.arguments().at(1).alias_info();
+  ASSERT_TRUE(
+      selfAliasInfo->beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_TRUE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->beforeSets().empty());
+  ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
+
+  auto containedType = outAliasInfo->containedTypes()[0];
+
+  ASSERT_TRUE(containedType.isWrite());
+  ASSERT_TRUE(
+      containedType.beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
+}
+
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
+}
+
 TEST(SchemaParserTest, BeforeAfterSets) {
   const auto s = parseSchema(
       "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_TRUE(
-      aliasInfo.beforeSets() ==
+      aliasInfo->beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
+  ASSERT_TRUE(aliasInfo->isWrite());
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expected = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
       Symbol::fromQualString("alias::c"),
@@ -577,26 +617,26 @@ TEST(SchemaParserTest, BeforeAfterSets) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, BeforeAfterSets2) {
   const auto s = parseSchema(
       "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
       " -> (Tensor(b|c)[](a!))");
 
   // The list itself is annotated with `a`
-  const auto& aliasInfo = *s.arguments().at(0).alias_info();
+  const AliasInfo* aliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_NE(aliasInfo, nullptr);
   ASSERT_EQ(
-      aliasInfo.beforeSets(),
+      aliasInfo->beforeSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_EQ(
-      aliasInfo.afterSets(),
+      aliasInfo->afterSets(),
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
-  ASSERT_TRUE(aliasInfo.isWrite());
-  ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+  ASSERT_TRUE(aliasInfo->isWrite());
+  ASSERT_EQ(aliasInfo->containedTypes().size(), 1);
 
   // Check the contained types
-  ASSERT_TRUE(!aliasInfo.containedTypes().empty());
-  const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+  ASSERT_TRUE(!aliasInfo->containedTypes().empty());
+  const auto& containedAliasInfo = aliasInfo->containedTypes()[0];
   const auto expectedBefore = std::unordered_set<Symbol>{
       Symbol::fromQualString("alias::b"),
   };
@@ -607,7 +647,6 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Basic) {
   Graph graph;
   auto node1 = graph.create(prim::AutogradZero);
@@ -659,7 +698,6 @@ TEST(TopologicalIndexTest, Basic) {
   ASSERT_TRUE(node2p->isBefore(node3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Reindex) {
   // Induce reindexing to test that path
   Graph graph;
@@ -764,7 +802,6 @@ void checkTracedOutputs(const TracedTestValues& outputs) {
   TORCH_CHECK(found_mul);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool bad_scope = false;
 template <RecordScope scope, size_t* cnt>
 std::unique_ptr<at::ObserverContext> checkScopeCallback(
@@ -786,11 +823,8 @@ void pushScopedCallback() {
 
 // These cannot be function-local because that would prohibit them
 // from being used as template arguments prior to C++17.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t fun_cnt;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t ts_fun_cnt;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t user_scope_cnt;
 
 void checkScopeCallbacks() {
@@ -803,15 +837,15 @@ void checkScopeCallbacks() {
   at::addGlobalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         if (fn.scope() == at::RecordScope::FUNCTION &&
-            std::string(fn.name().str()) == "test_function") {
+            std::string(fn.name()) == "test_function") {
           found_function_scope = true;
         }
         if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
-            std::string(fn.name().str()) == "test_method") {
+            std::string(fn.name()) == "test_method") {
           found_method_scope = true;
         }
         if (fn.scope() == at::RecordScope::USER_SCOPE &&
-            std::string(fn.name().str()) == "test_user_scope") {
+            std::string(fn.name()) == "test_user_scope") {
           found_user_scope = true;
         }
         return nullptr;
@@ -829,8 +863,12 @@ void checkScopeCallbacks() {
 
   {
     RECORD_TORCHSCRIPT_FUNCTION("test_method", {});
-    { RECORD_FUNCTION("test_function", {}); }
-    { RECORD_USER_SCOPE("test_user_scope"); }
+    {
+      RECORD_FUNCTION("test_function", {});
+    }
+    {
+      RECORD_USER_SCOPE("test_user_scope");
+    }
   }
 
   TORCH_CHECK(!bad_scope);
@@ -843,20 +881,9 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static bool should_run = false;
-
-static bool shouldRunCallback(const RecordFunctionCallback&) {
-  return should_run;
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_inputs;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_outputs;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_set<std::string> ts_input_names;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_set<std::string> ts_output_names;
 
 std::unique_ptr<at::ObserverContext> tracedInputsCallback(
@@ -872,9 +899,9 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
         sizes.push_back(std::vector<int64_t>());
       }
     }
-    traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_inputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_input_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name());
   }
   return nullptr;
 }
@@ -890,13 +917,12 @@ void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         sizes.emplace_back();
       }
     }
-    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_outputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_output_names.insert(fn.name().str());
+    ts_output_names.insert(fn.name());
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -943,25 +969,22 @@ TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   at::clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++sampled_cb_ctr;
   }
   return nullptr;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int non_sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++non_sampled_cb_ctr;
   }
   return nullptr;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, SampledCallbacks) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1011,7 +1034,6 @@ TEST(RecordFunctionTest, SampledCallbacks) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, RecordFunctionGuard) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1024,7 +1046,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
         // NOLINTNEXTLINE(modernize-use-emplace)
-        fn_names.push_back(fn.name().str());
+        fn_names.push_back(fn.name());
         return nullptr;
       }));
   {
@@ -1039,7 +1061,9 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
           RECORD_USER_SCOPE("C");
         }
       }
-      { RECORD_USER_SCOPE("D"); }
+      {
+        RECORD_USER_SCOPE("D");
+      }
     }
   }
   TORCH_CHECK(fn_names.size() == 1);
@@ -1047,7 +1071,6 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<size_t> ids;
 
 template <size_t id>
@@ -1059,17 +1082,17 @@ auto add_remove_test_add_cb() {
       }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, Callbacks) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   auto h1 = add_remove_test_add_cb<1>();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto h2 = add_remove_test_add_cb<2>();
+  add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 3);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
@@ -1079,7 +1102,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h1);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 2);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1088,7 +1113,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h3);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1100,7 +1127,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   add_remove_test_add_cb<1>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1113,7 +1142,9 @@ TEST(RecordFunctionTest, Callbacks) {
           return nullptr;
         }));
 
-    { RECORD_USER_SCOPE("test_thread"); }
+    {
+      RECORD_USER_SCOPE("test_thread");
+    }
   });
   th.join();
   TORCH_CHECK(ids.size() == 2);
@@ -1121,7 +1152,9 @@ TEST(RecordFunctionTest, Callbacks) {
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
   ids.clear();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1147,12 +1180,14 @@ TEST(RecordFunctionTest, Callbacks) {
         },
         [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx != nullptr);
           TORCH_CHECK(ctx->a == 123);
           TORCH_CHECK(ctx->b == "test_str");
         }));
 
-    { RECORD_USER_SCOPE("test"); }
+    {
+      RECORD_USER_SCOPE("test");
+    }
 
     TORCH_CHECK(ids.size() == 1);
     TORCH_CHECK(ids[0] == 1);
@@ -1160,7 +1195,6 @@ TEST(RecordFunctionTest, Callbacks) {
   } // END: global test
   { // START: thread local test
     auto ctx_th = std::thread([]() {
-      const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
           [](const RecordFunction&
@@ -1179,7 +1213,9 @@ TEST(RecordFunctionTest, Callbacks) {
           }));
 
       // Will call both global and thread local callbacks.
-      { RECORD_USER_SCOPE("test_thread"); }
+      {
+        RECORD_USER_SCOPE("test_thread");
+      }
     });
     ctx_th.join();
     TORCH_CHECK(ids.size() == 2);
@@ -1191,35 +1227,45 @@ TEST(RecordFunctionTest, Callbacks) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
-  should_run = false;
   static bool ran = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-            ran = true;
-            return nullptr;
-          })
-          .setShouldRun(shouldRunCallback));
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ran = true;
+        return nullptr;
+      }));
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
-  TORCH_CHECK(!ran);
+  EXPECT_TRUE(ran) << "first run didn't happen";
+  ran = false;
 
-  should_run = true;
+  disableCallback(handle);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
-  TORCH_CHECK(ran);
+  EXPECT_FALSE(ran) << "second run happened but shouldn't have";
+  ran = false;
+
+  reenableCallback(handle);
+
+  {
+    RECORD_USER_SCOPE("test");
+  }
+
+  EXPECT_TRUE(ran) << "run after re-enable didn't happen";
+  ran = false;
 
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1232,7 +1278,7 @@ TEST(RecordFunctionTest, Basic) {
     RecordFunctionGuard enable_rec_fn;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-          recorded_op = fn.name().str();
+          recorded_op = fn.name();
           return nullptr;
         }));
     ThreadLocalState state;
@@ -1255,7 +1301,9 @@ TEST(RecordFunctionTest, Basic) {
             return nullptr;
           })
           .needsIds(true));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
@@ -1264,18 +1312,19 @@ TEST(RecordFunctionTest, Basic) {
         has_ids = fn.handle() > 0;
         return nullptr;
       }));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, OperatorNameOverload) {
   static std::set<std::string> operator_names;
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn)
                                 -> std::unique_ptr<at::ObserverContext> {
-                              c10::optional<c10::OperatorName> op_name =
+                              std::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
                                 operator_names.insert(c10::toString(*op_name));
@@ -1308,8 +1357,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
@@ -1323,7 +1372,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ThreadLocalDebugInfoTest, Basic) {
   static std::atomic<bool> done{false};
 
@@ -1397,24 +1445,40 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(FallbackGraphsTest, Basic) {
-  static const auto nestGraphIntoFallbackGraph =
-      [](const std::shared_ptr<Graph>& graph) {
-        ProfilingRecord::removeProfileCounter(graph->block());
-        auto fallback =
-            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
-        for (size_t i = 0; i < graph->outputs().size(); i++) {
-          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
-          fallback->output(i)->copyMetadata(graph->outputs()[i]);
-        }
-        for (auto it = graph->block()->nodes().rbegin();
-             it != fallback->iterator();
-             it++) {
-          it.destroyCurrent();
-        }
-      };
+TEST(TestSymIntArrayRef, BasicConversion) {
+  const size_t X = 2, Y = 4, Z = 5;
+  std::vector<int64_t> tgt_size_v{2, 4, 5};
+  std::vector<c10::SymInt> tgt_size({SymInt(X), SymInt(Y), SymInt(Z)});
+  auto a = at::randn({1, 4, 1}, at::kCPU);
+  auto b = a.expand_symint(tgt_size);
+  auto c = a.expand(tgt_size_v);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
 
+TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  c10::SymInt si(LENGTH);
+  auto b = a.narrow_copy_symint(0, 0, si);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, NarrowCopy) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  auto b = a.narrow_copy(0, 0, LENGTH);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, AddSymbolicInt) {
+  c10::SymInt a(5);
+  c10::SymInt b(3);
+  ASSERT_TRUE((a + b).expect_int() == 8);
+}
+
+TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
   auto stack = createStack({x.clone(), y.clone()});
@@ -1503,16 +1567,15 @@ TEST(FallbackGraphsTest, Basic) {
 //   ASSERT_EQ((count, 200);
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack* stack) { push(stack, IValue()); },
+          [](Stack& stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack* stack) {
+          [](Stack& stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
@@ -1539,17 +1602,14 @@ TEST(NoneSchemaMatchTest, Basic) {
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
   return;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterPass p(fakePass);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PassManagementTest, Basic) {
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   parseIR(
@@ -1615,7 +1675,6 @@ bool is_loop(Node* n) {
   return n->kind() == prim::Loop;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, NoInductionVariableUse) {
   // do not use an induction variable explicitly
   static const auto str_func_def = R"JIT(
@@ -1627,7 +1686,7 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1658,7 +1717,6 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, YesInductionVariableUse) {
   // uses the induction variable
   static const auto str_func_def = R"JIT(
@@ -1670,7 +1728,7 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_peel_n_times");
+  auto& f = toGraphFunction(cu->get_function("test_peel_n_times"));
   auto stack = createStack({});
   // peeling loop once
   {
@@ -1701,7 +1759,6 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // tests with explicit termination conditions
   static const auto str_func_def = R"JIT(
@@ -1717,7 +1774,7 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // the peel changes the termination condition to false
   // so the original loop doesn't run
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_with_cond_times");
+  auto& f = toGraphFunction(cu->get_function("test_with_cond_times"));
   auto stack = createStack({});
   // peeling 5 iterations should update the termination
   // condition to false
@@ -1750,7 +1807,6 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
 }
 
 // tests simple nested loops
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1763,7 +1819,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
 
   {
@@ -1789,7 +1845,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops2) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1804,7 +1859,7 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     )JIT";
 
   auto cu = compile(str_func_def);
-  auto& f = cu->get_function("test_nested_loops");
+  auto& f = toGraphFunction(cu->get_function("test_nested_loops"));
   auto stack = createStack({});
   {
     LoopsPeeler peeler(true_pred, 1);
@@ -1826,6 +1881,54 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
     InterpreterState interpreter{code};
     interpreter.run(stack);
     ASSERT_EQ(stack.back().toInt(), 3);
+  }
+}
+
+TEST(JitTracing, Basic) {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto graph = build_lstm();
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
+  auto traced = TraceGraph(graph, stack);
+
+  // Check that the inputs of traced graph have the same type as the inputs
+  // specified here.
+  ASSERT_EQ(*traced->inputs().at(0)->type(), *TensorType::create(input));
+  ASSERT_EQ(*traced->inputs().at(1)->type(), *TensorType::create(hx));
+  ASSERT_EQ(*traced->inputs().at(2)->type(), *TensorType::create(cx));
+  ASSERT_EQ(*traced->inputs().at(3)->type(), *TensorType::create(w_ih));
+  ASSERT_EQ(*traced->inputs().at(4)->type(), *TensorType::create(w_hh));
+
+  Tensor prof_out;
+  pop(stack, prof_out);
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(traced, "traced");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor traced_out;
+    pop(stack, traced_out);
+    torch::allclose(prof_out, traced_out);
+  }
+
+  {
+    stack = createStack({input, hx, cx, w_ih, w_hh});
+    Code cd(graph, "graph");
+    InterpreterState is{cd};
+    is.run(stack);
+    Tensor scripted_out;
+    pop(stack, scripted_out);
+    torch::allclose(prof_out, scripted_out);
   }
 }
 
@@ -1842,7 +1945,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = toGraphFunction(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1861,7 +1964,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
       guard->input()->type()->expectRef<TensorType>().sizes().size(),
-      c10::nullopt);
+      std::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -1873,7 +1976,6 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_EQ(num_guards, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertBailOutsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic_loop(x, y):
@@ -1894,7 +1996,7 @@ TEST(InsertBailOutsTest, Basic) {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = toGraphFunction(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1923,7 +2025,6 @@ TEST(InsertBailOutsTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerTest, Basic) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -1974,7 +2075,66 @@ TEST(ProfilerTest, Basic) {
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ProfilerTest, OptionalProfiling) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%inp : Tensor,
+      %weight : Tensor,
+      %bias : Tensor?):
+  %1 : Tensor = aten::linear(%inp, %weight, %bias)
+  return (%1))IR",
+      &*graph,
+      vmap);
+
+  auto pr = ProfilingRecord::instrumentGraph(graph);
+  pr->profiling_count_ = 2;
+
+  auto input = torch::randn({1, 2});
+  auto weight = torch::randn({2, 2});
+  auto bias = torch::randn({1, 2});
+
+  auto stack = createStack({input, weight, bias});
+  Code cd(pr->profiled_graph_, "");
+  InterpreterState is{cd};
+  is.run(stack);
+
+  testing::FileCheck()
+      .check_count("Tensor? = prim::profile[profiled_type", 1, true)
+      ->run(*pr->profiled_graph_);
+
+  // make sure we recorded the shape
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  std::vector<int64_t> bias_expected_shape = {1, 2};
+  auto profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(0, profiled_bias->i(attr::seen_none));
+
+  auto none_bias = c10::IValue();
+
+  stack.clear();
+  stack.emplace_back(input);
+  stack.emplace_back(weight);
+  stack.emplace_back(none_bias);
+  is = InterpreterState{cd};
+  is.run(stack);
+
+  // make sure we recorded that "None" was seen.
+  begin = pr->profiled_graph_->block()->nodes().begin();
+  end = pr->profiled_graph_->block()->nodes().end();
+  linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(1, profiled_bias->i(attr::seen_none));
+}
+
 TEST(CallStackTest, Basic) {
   const auto text = R"(
 def ham(x):
@@ -1990,7 +2150,7 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const auto& foo = toGraphFunction(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2031,7 +2191,7 @@ def foo(x):
   }
 
   // Check that inlining doesn't corrupt callstack of the callee's nodes.
-  const Function& baz = cu->get_function("baz");
+  const auto& baz = toGraphFunction(cu->get_function("baz"));
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -2051,7 +2211,6 @@ def foo(x):
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CallStackTest, Caching) {
   const auto text = R"(
 
@@ -2073,7 +2232,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const auto& baz = toGraphFunction(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
@@ -2096,7 +2255,6 @@ def c(x):
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlinedCallStackTest, BlockAnnotation) {
   Module a("A");
   a.define(R"(
@@ -2119,20 +2277,21 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       return self.A0.forward(x, y, z) + self.B0.forward(x)
   )");
 
-  auto graph = c.get_method("forward").function().optimized_graph();
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
   std::stringstream add_ss, mul_ss;
   for (Node* n : graph->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* block : n->blocks()) {
         for (Node* if_node : block->nodes()) {
           if (if_node->kind() == aten::add) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               add_ss << std::get<1>(e);
             }
             add_ss << if_node->sourceRange();
           }
           if (if_node->kind() == aten::mul) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               mul_ss << std::get<1>(e);
             }
             mul_ss << if_node->sourceRange();
@@ -2154,6 +2313,49 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InlinedCallStackTest, SelfCallMethods) {
+  Module a("A");
+  a.define(R"(
+    def my_new_method(self, x):
+      return x * 3
+    def forward_impl_(self, x, y):
+      return self.my_new_method(x) + y
+    def forward(self, x, y):
+      y = y + 2
+      return self.forward_impl_(x, y)
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def call_b(self, x):
+      return self.B0.forward(x)
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.call_b(x)
+  )");
+
+  auto graph =
+      toGraphFunction(c.get_method("forward").function()).optimized_graph();
+  std::unordered_map<std::string, size_t> module_hierarchies;
+  for (Node* n : graph->nodes()) {
+    auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
+    if (module_hierarchies.count(hierarchy) == 0) {
+      module_hierarchies[hierarchy] = 0;
+    }
+    module_hierarchies[hierarchy] += 1;
+  }
+  ASSERT_EQ(module_hierarchies["A0(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A).SELF(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C).B0(B)"], 1);
+}
+
 TEST(AutogradSymbolsTest, Basic) {
   Symbol sym = Symbol::fromQualString("aten::test_symbol");
   Graph graph;
@@ -2173,7 +2375,6 @@ TEST(AutogradSymbolsTest, Basic) {
   TORCH_CHECK(!canRunWithAutograd(node));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultArgTypeHintingTest, Basic) {
   const auto text_non_hinted = R"(
 
@@ -2194,14 +2395,13 @@ def a(x, y:int=1):
   try {
     compile(text_non_hinted);
     ASSERT_TRUE(0);
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
 
   auto cu = compile(text_hinted);
 }
 
 // Basic set case.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Basic) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
@@ -2221,8 +2421,29 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat2, 1);
 }
 
+// Sparse CUDA tensor test
+TEST(FutureTest, SparseTensor) {
+  // Skip test if CUDA is not available.
+  bool has_cuda = at::globalContext().hasCUDA();
+  if (!has_cuda) {
+    LOG(INFO) << "CUDA not available, skipping test";
+  }
+  for (int i = 0; i < 2; ++i) {
+    auto f = c10::make_intrusive<Future>(TensorType::get());
+    at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
+    auto sparse_tensor = i == 0 ? at::ones(10).to_sparse()
+                                : at::sparse_coo_tensor(
+                                      at::arange(10).unsqueeze(0).to(at::kLong),
+                                      at::ones({10, 10}),
+                                      opts);
+    // Runs storage extraction for sparse CUDA tensors
+    f->markCompleted(sparse_tensor);
+    ASSERT_TRUE(f->completed());
+    ASSERT_FALSE(f->hasError());
+  }
+}
+
 // Basic error cases.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
@@ -2248,10 +2469,16 @@ TEST(FuturesTest, Error) {
   ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
+  try {
+    (void)f1->constValue();
+    ASSERT_TRUE(false); // Supposed to throw.
+  } catch (const std::exception& e) {
+    // Original error should be logged.
+    ASSERT_TRUE(std::string(e.what()).find("Failed") != std::string::npos);
+  }
 }
 
 // then
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
@@ -2271,7 +2498,6 @@ TEST(FuturesTest, Then) {
 }
 
 // collectAll()
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAll) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
   auto s2 = c10::make_intrusive<Future>(IntType::get());
@@ -2339,7 +2565,6 @@ TEST(FuturesTest, CollectAll) {
 }
 
 // collectAny()
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAny) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
 
@@ -2379,7 +2604,6 @@ TEST(FuturesTest, CollectAny) {
   ASSERT_EQ(c4->value().toInt(), 7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = [](Future& /* unused */) {
@@ -2419,7 +2643,6 @@ TEST(TLSFutureCallbacksTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerDisableInCallbackTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = []() {
@@ -2485,7 +2708,114 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(RecordDebugHandles, Basic) {
+  GTEST_SKIP() << "Test is flaky and sometimes hangs on CI. ";
+  // Enable the profiler in this thread
+  const std::set<torch::autograd::profiler::ActivityType> activities(
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      activities);
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+    (void)z;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+    (void)z;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  size_t my_events{0};
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+      my_events++;
+    } else if (e.name() == "not_my_function") {
+      ASSERT_EQ(e.debugHandle(), -1);
+      my_events++;
+    }
+  }
+  ASSERT_EQ(my_events, 2);
+}
+
+TEST(RecordDebugHandles, ScopedCallbacks) {
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() > 0);
+
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 0);
+
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::LITE_INTERPRETER});
+  {
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+    }
+  }
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 1);
+}
+
 TEST(IValueKWargsTest, Basic) {
   const auto text = R"(
     def foo(a : int, b : int, c : int = 4):
@@ -2496,13 +2826,13 @@ TEST(IValueKWargsTest, Basic) {
   ASSERT_EQ(result.toInt(), 19);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ComputeFlopsTest, Basic) {
   uint64_t flops = 0;
 
   // Test unknown operator
   std::unordered_map<std::string, c10::IValue> extra_args;
-  flops = computeFlops(std::string("aten::unknown"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::unknown"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d
@@ -2518,7 +2848,8 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
   extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
@@ -2526,7 +2857,8 @@ TEST(ComputeFlopsTest, Basic) {
   weight_size = {4, 5, 6};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
@@ -2534,14 +2866,16 @@ TEST(ComputeFlopsTest, Basic) {
   stride = {0, 0};
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 3
   extra_args.clear();
   input_size = {4, 5, 6, 7};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::mm
@@ -2550,30 +2884,60 @@ TEST(ComputeFlopsTest, Basic) {
   std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
+
+  // Test aten::addmm
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::addmm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
+  // Test aten::bmm
+  extra_args.clear();
+  mat1_sizes = {7, 5, 6};
+  mat2_sizes = {7, 6, 3};
+  extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
+  extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::bmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
+
+  // Test aten::baddbmm
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::baddbmm"), extra_args);
+  ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::add.Tensor
   extra_args.clear();
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::add"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::add"), extra_args);
   ASSERT_EQ(flops, 360);
 
   // Test aten::mul.Tensor
   extra_args.clear();
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::mul"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TestConstant, TensorGrad) {
+  auto graph = std::make_shared<Graph>();
+  IValue ten = torch::randn({3, 5}).requires_grad_(true);
+  auto con = tryInsertConstant(*graph, ten);
+  ASSERT_TRUE(con == std::nullopt);
+}
+
 TEST(TestMutation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2592,6 +2956,234 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::add_")->run(*graph);
   RemoveTensorMutation(graph, [](Node*) { return true; });
   testing::FileCheck().check_not("aten::add_")->run(*graph);
+}
+
+TEST(TestInplaceToFunctionalActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu_(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  InplaceToFunctionalActivation(graph);
+  testing::FileCheck().check("aten::relu")->run(*graph);
+  testing::FileCheck().check_not("aten::relu_")->run(*graph);
+}
+
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  const FunctionSchema& schema = g2->nodes().begin()->schema();
+  torch::jit::RegisterShapeComputeGraphForSchema(schema, graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
+}
+
+TEST(TestFunctionalToInplaceActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  FunctionalToInplaceActivation(graph);
+  testing::FileCheck().check("aten::relu_")->run(*graph);
+  testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+TEST(TestFunctionExecutor, SimpleExecutorTest) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph);
+  {
+    auto func = std::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+  {
+    auto func = std::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = func->getDebugState().graph;
+    testing::FileCheck()
+        .check_not("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+}
+
+TEST(TestFunctionExecutor, RunDecompositionTest) {
+  static auto* func = torch::jit::GetDecompositionExecutor(
+      "aten::var(Tensor self, bool unbiased=True) -> Tensor");
+  for (bool unbiased : {true, false}) {
+    auto input = at::rand({4, 4});
+    Stack stack = {input, unbiased};
+    func->run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
+  }
+}
+
+TEST(TestShapeGraphLinting, Basic) {
+  auto schemas = RegisteredShapeComputeSchemas();
+  for (const auto& schema : schemas) {
+    // arange does not actually support complex, leave as
+    // union[int, float] for now
+    if (schema->name() == "aten::arange") {
+      continue;
+    }
+    auto g = shapeComputeGraphForSchema(*schema);
+    TORCH_INTERNAL_ASSERT(g);
+    LintShapeComputeGraph(schema, *g);
+  }
+}
+
+// TODO: move to test_kernel when global settings are explicit
+// fusion parameters
+class Composed : public ::testing::Test {
+ public:
+  void SetUp() override {
+    torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  }
+};
+
+TEST_F(Composed, ComposedOp) {
+  struct WithCPUFuser {
+    WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+      overrideCanFuseOnCPU(val);
+    }
+
+    ~WithCPUFuser() {
+      overrideCanFuseOnCPU(cpuFuserEnabled);
+    }
+
+    bool cpuFuserEnabled;
+  };
+
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %2)
+        %4 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %3)
+        return (%3, %4))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // wrong input sizes so we hit the fallback path
+  auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat))
+               .transpose(0, 1);
+  auto ref1 = a * (a * b);
+  auto ref2 = a * ref1;
+  WithCPUFuser g(true);
+  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  FuseTensorExprs(
+      graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  std::vector<IValue> stack = {a, b};
+  interpreter.run(stack);
+  at::Tensor out2 = pop(stack).toTensor();
+  at::Tensor out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+
+  auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto inp_2 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  stack = {inp_1, inp_2, a, b};
+  InterpreterState interpreter2{code};
+  interpreter2.run(stack);
+  out2 = pop(stack).toTensor();
+  out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+  // inp_1 is on the bottom of the stack, and corresponds
+  // to the second output. inp_2 is on the top corresponds to first output
+  ASSERT_TRUE(at::allclose(inp_1, ref2));
+  ASSERT_TRUE(at::allclose(inp_2, ref1));
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
+#endif
+}
+
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP()
+      << "Skipping ConstantPropagation.CustomClassesCanBePropagated on AArch64.";
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
+#endif
 }
 
 } // namespace jit

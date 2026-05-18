@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 PythonRemoteCall::PythonRemoteCall(
     SerializedPyObj&& serializedPyObj,
@@ -16,7 +14,7 @@ PythonRemoteCall::PythonRemoteCall(
       retForkId_(std::move(retForkId)),
       isAsyncExecution_(isAsyncExecution) {}
 
-Message PythonRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> PythonRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
@@ -26,7 +24,7 @@ Message PythonRemoteCall::toMessageImpl() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
       MessageType::PYTHON_REMOTE_CALL);
@@ -34,7 +32,7 @@ Message PythonRemoteCall::toMessageImpl() && {
 
 std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
     const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
 
   auto value = jit::unpickle(
@@ -42,12 +40,12 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  auto values = value.toTuple()->elements();
+  auto values = value.toTupleRef().elements().vec();
 
   // remove the last elements from values and convert it back to an RRef
   TORCH_INTERNAL_ASSERT(
-      values.size() >= 3,
-      "Expect at least 3 elements in the unpickled values, but got ",
+      values.size() > 3,
+      "Expect at least 4 elements in the unpickled values, but got ",
       values.size());
   bool isAsyncExecution = values.back().toBool();
   values.pop_back();
@@ -64,6 +62,4 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       isAsyncExecution);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

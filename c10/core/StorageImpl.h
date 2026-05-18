@@ -1,11 +1,33 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
-
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/StorageMaterializer.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/impl/PyObjectSlot.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
+#include <cstddef>
+#include <utility>
 
 namespace c10 {
+
+[[noreturn]] C10_API void throwNullDataPtrError();
+C10_API void warnDeprecatedDataPtr();
+
+// Used in StorageImpl to store extra metadata.
+// Currently used only for storing a custom error message
+// used when throwing an exception when data_ptr is accessed.
+struct C10_API StorageExtraMeta {
+  std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+};
+
+namespace impl::cow {
+C10_API void materialize_cow(StorageImpl* storage);
+} // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -30,18 +52,19 @@ namespace c10 {
 // - Version counts won't work correctly, because we do all VC tracking at the
 //   level of storages (unless you explicitly disconnect the VC with detach);
 //   mutation because data pointers are the same are totally untracked
-struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
+struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
-        size_bytes_(size_bytes),
+        size_bytes_(std::move(size_bytes)),
+        size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -49,84 +72,155 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
+    refresh_has_data_ptr_check();
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      const SymInt& size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            allocator->allocate(size_bytes),
+            size_bytes.is_heap_allocated()
+                ? allocator->allocate(0)
+                : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() = default;
+  ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
+    size_bytes_is_heap_allocated_ = false;
   }
 
-  template <typename T>
-  inline T* data() const {
-    return unsafe_data<T>();
-  }
-
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(this->data_ptr_.get());
-  }
-
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
   }
 
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
   size_t nbytes() const {
+    // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
+    TORCH_CHECK(!size_bytes_is_heap_allocated_);
+    return size_bytes_.as_int_unchecked();
+  }
+
+  SymInt sym_nbytes() const {
     return size_bytes_;
   }
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
+    size_bytes_is_heap_allocated_ = false;
+  }
+
+  void unsafe_set_nbytes(size_t size_bytes) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!size_bytes_is_heap_allocated_);
+    size_bytes_.unsafe_set_data(size_bytes);
+  }
+
+  void set_nbytes(c10::SymInt size_bytes) {
+    size_bytes_ = std::move(size_bytes);
   }
 
   bool resizable() const {
     return resizable_;
-  };
-
-  at::DataPtr& data_ptr() {
-    return data_ptr_;
-  };
+  }
 
   const at::DataPtr& data_ptr() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     return data_ptr_;
-  };
+  }
+
+  at::DataPtr& mutable_data_ptr() {
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
+      }
+      maybe_materialize();
+    }
+    return data_ptr_;
+  }
+
+  // Returns the data_ptr. Bypasses all checks.
+  at::DataPtr& _mutable_data_ptr_no_checks() {
+    return data_ptr_;
+  }
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    std::swap(data_ptr_, data_ptr);
-    return std::move(data_ptr);
-  };
+    // We need to materialize the old data because it is
+    // being returned as mutable.
+    maybe_materialize();
+    return set_data_ptr_no_materialize(std::move(data_ptr));
+  }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
+    refresh_has_data_ptr_check();
   }
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  void swap_data_ptr(StorageImpl& other) {
+    maybe_materialize();
+    other.maybe_materialize();
+    std::swap(data_ptr_, other.data_ptr_);
+    std::swap(size_bytes_, other.size_bytes_);
+    std::swap(
+        size_bytes_is_heap_allocated_, other.size_bytes_is_heap_allocated_);
+    std::swap(resizable_, other.resizable_);
+    std::swap(allocator_, other.allocator_);
+    std::swap(throw_on_immutable_data_ptr_, other.throw_on_immutable_data_ptr_);
+    std::swap(throw_on_mutable_data_ptr_, other.throw_on_mutable_data_ptr_);
+    std::swap(
+        warn_deprecated_on_mutable_data_ptr_,
+        other.warn_deprecated_on_mutable_data_ptr_);
+    refresh_has_data_ptr_check();
+    other.refresh_has_data_ptr_check();
+  }
+
+  const void* data() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     return data_ptr_.get();
   }
 
-  void* data() const {
-    return data_ptr_.get();
+  void* mutable_data() {
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
+      }
+      maybe_materialize();
+    }
+    return data_ptr_.mutable_get();
   }
 
   at::DeviceType device_type() const {
@@ -139,7 +233,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   const at::Allocator* allocator() const {
     return allocator_;
-  };
+  }
 
   // You generally shouldn't use this method, but it is occasionally
   // useful if you want to override how a tensor will be reallocated,
@@ -179,7 +273,8 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
+    size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -194,13 +289,148 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  StorageExtraMeta& get_extra_meta() {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<StorageExtraMeta>();
+    }
+    return *extra_meta_;
+  }
+
+  [[noreturn]] void throw_data_ptr_access_error() const;
+
+  void release_data_and_set_meta_custom_data_ptr_error_msg_(
+      std::optional<std::string> s) {
+    throw_on_immutable_data_ptr_ = true;
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    refresh_has_data_ptr_check();
+  }
+
+  void clear_data_ptr_access_error_msg_() {
+    throw_on_immutable_data_ptr_ = false;
+    if (extra_meta_) {
+      extra_meta_->custom_data_ptr_error_msg_ = std::nullopt;
+    }
+    refresh_has_data_ptr_check();
+  }
+
+  void set_throw_on_mutable_data_ptr() {
+    throw_on_mutable_data_ptr_ = true;
+    refresh_has_data_ptr_check();
+  }
+
+  void set_warn_deprecated_on_mutable_data_ptr() {
+    warn_deprecated_on_mutable_data_ptr_ = true;
+    refresh_has_data_ptr_check();
+  }
+
+  // One materializer at a time.
+  void set_materializer(MaterializeFn fn) {
+    TORCH_INTERNAL_ASSERT(
+        materialize_fn_ == nullptr,
+        "Cannot set materializer: a materializer is already active on this storage.");
+    materialize_fn_ = fn;
+    refresh_has_data_ptr_check();
+  }
+
+  void clear_materializer() {
+    materialize_fn_ = nullptr;
+    refresh_has_data_ptr_check();
+  }
+
+  bool has_materializer() const {
+    return materialize_fn_ != nullptr;
+  }
+
+ protected:
+  friend void c10::impl::cow::materialize_cow(StorageImpl*);
+
+  // Returns the previous data_ptr. Bypasses materialization —
+  // only for use by materializer implementations.
+  at::DataPtr set_data_ptr_no_materialize(at::DataPtr&& data_ptr) {
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    refresh_has_data_ptr_check();
+    return old_data_ptr;
+  }
+
  private:
+  void refresh_has_data_ptr_check() {
+    has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
+        throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
+        throw_on_immutable_data_ptr_;
+  }
+
+  void maybe_materialize() {
+    if (materialize_fn_) {
+      materialize_fn_(this);
+      clear_materializer();
+    }
+  }
+
   DataPtr data_ptr_;
-  size_t size_bytes_;
+  SymInt size_bytes_;
+  bool size_bytes_is_heap_allocated_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+  // All special checks in data/data_ptr calls are guarded behind this single
+  // boolean. This is for performance: .data/.data_ptr calls are commonly in the
+  // hot-path.
+  bool has_mutable_data_ptr_check_ = false;
+  // If we should throw when mutable_data_ptr() or mutable_data() is called.
+  bool throw_on_mutable_data_ptr_ = false;
+  // If we should throw when data_ptr() or data() is called.
+  bool throw_on_immutable_data_ptr_ = false;
+  // If we warn when mutable_data_ptr() or mutable_data() is called.
+  bool warn_deprecated_on_mutable_data_ptr_ = false;
+  // Pluggable materialization hook. See MaterializeFn in StorageMaterializer.h.
+  MaterializeFn materialize_fn_ = nullptr;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
+  std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
 };
+
+// Declare StorageImpl create function pointer types.
+using StorageImplCreateHelper = intrusive_ptr<StorageImpl> (*)(
+    StorageImpl::use_byte_size_t,
+    SymInt size_bytes,
+    DataPtr data_ptr,
+    Allocator* allocator,
+    bool resizable);
+
+C10_API void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr);
+
+C10_API StorageImplCreateHelper GetStorageImplCreate(DeviceType t);
+
+C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::DataPtr data_ptr,
+    c10::Allocator* allocator,
+    bool resizable,
+    std::optional<at::Device> device_opt);
+
+namespace detail {
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
+
 } // namespace c10

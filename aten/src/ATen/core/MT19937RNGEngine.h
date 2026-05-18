@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/irange.h>
+
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -8,9 +10,9 @@
 #include <math.h>
 #endif
 
-#include <stdint.h>
-#include <cmath>
 #include <array>
+#include <cmath>
+#include <cstdint>
 
 namespace at {
 
@@ -108,6 +110,7 @@ struct mt19937_data_pod {
 class mt19937_engine {
 public:
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   inline explicit mt19937_engine(uint64_t seed = 5489) {
     init_with_uint32(seed);
   }
@@ -116,7 +119,7 @@ public:
     return data_;
   }
 
-  inline void set_data(mt19937_data_pod data) {
+  inline void set_data(const mt19937_data_pod& data) {
     data_ = data;
   }
 
@@ -134,12 +137,10 @@ public:
   }
 
   inline uint32_t operator()() {
-    uint32_t y;
-
     if (--(data_.left_) == 0) {
         next_state();
     }
-    y = *(data_.state_.data() + data_.next_++);
+    uint32_t y = *(data_.state_.data() + data_.next_++);
     y ^= (y >> 11);
     y ^= (y << 7) & 0x9d2c5680;
     y ^= (y << 15) & 0xefc60000;
@@ -155,9 +156,8 @@ private:
     data_.seed_ = seed;
     data_.seeded_ = true;
     data_.state_[0] = seed & 0xffffffff;
-    for(int j = 1; j < MERSENNE_STATE_N; j++) {
+    for (const auto j : c10::irange(1, MERSENNE_STATE_N)) {
       data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
-      data_.state_[j] &= 0xffffffff;
     }
     data_.left_ = 1;
     data_.next_ = 0;

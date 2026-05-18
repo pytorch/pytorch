@@ -1,40 +1,40 @@
-from typing import Any, Dict, List, Set
+from __future__ import annotations
+
+from typing import Any
 
 from .coverage_record import CoverageRecord
 
 
 class GcovCoverageParser:
     """
-        Accepts a parsed json produced by gcov --json-format -- typically,
-        representing a single C++ test and produces a list
-        of CoverageRecord(s).
+    Accepts a parsed json produced by gcov --json-format -- typically,
+    representing a single C++ test and produces a list
+    of CoverageRecord(s).
     """
 
-    def __init__(self, llvm_coverage: Dict[str, Any]) -> None:
+    def __init__(self, llvm_coverage: dict[str, Any]) -> None:
         self._llvm_coverage = llvm_coverage
 
     @staticmethod
     def _skip_coverage(path: str) -> bool:
         """
-            Returns True if file path should not be processed.
-            This is repo-specific and only makes sense for the current state of
-            ovrsource.
+        Returns True if file path should not be processed.
+        This is repo-specific and only makes sense for the current state of
+        ovrsource.
         """
-        if "third-party" in path:
-            return True
-        return False
+        return "third-party" in path
 
-    def parse(self) -> List[CoverageRecord]:
+    def parse(self) -> list[CoverageRecord]:
         # The JSON format is described in the gcov source code
         # https://gcc.gnu.org/onlinedocs/gcc/Invoking-Gcov.html
-        records: List[CoverageRecord] = []
+        records: list[CoverageRecord] = []
         for file_info in self._llvm_coverage["files"]:
             filepath = file_info["file"]
             if self._skip_coverage(filepath):
                 continue
             # parse json file
-            covered_lines: Set[int] = set()
-            uncovered_lines: Set[int] = set()
+            covered_lines: set[int] = set()
+            uncovered_lines: set[int] = set()
             for line in file_info["lines"]:
                 line_number = line["line_number"]
                 count = line["count"]

@@ -4,13 +4,11 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -45,6 +43,8 @@ class SubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
     buildupSubgraphs();
+    GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
+    unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
     // Run CSE globally onceto eliminate duplicates that may have occurred
     // while inlining subgraphs.
@@ -101,9 +101,8 @@ class SubgraphSlicer {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool changed;
-          std::tie(it, changed) = scanNode(*it);
+          auto [tmp_it, changed] = scanNode(*it);
+          it = tmp_it;
           any_changed |= changed;
         }
       }
@@ -120,6 +119,37 @@ class SubgraphSlicer {
   }
 
  private:
+  void unfuseAliasedOutputs(Block* b) {
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      // we walk in the reverse order, so we can skip
+      // nodes that might get unfused after the current
+      // prim::DifferentiableGraph
+      for (auto n : b->nodes().reverse()) {
+        if (n->kind() == prim::DifferentiableGraph) {
+          // aliased outputs in DifferentiableGraphs must be unfused
+          // since autodiff doesn't know how to handle them correctly
+          // N.B. Note, |= since we don't want `unfuseAliasedOutputs`
+          // to short-circuit
+          any_changed |= SubgraphUtils::unmergeAliasedOutputs(n);
+          any_changed |= SubgraphUtils::unmergeOutputsAlisingInputs(n);
+          GRAPH_DEBUG(
+              "any_changed on ",
+              any_changed,
+              " ",
+              n->g(attr::Subgraph)->toString(false));
+        }
+      }
+    }
+
+    for (Node* n : b->nodes()) {
+      for (Block* ib : n->blocks()) {
+        unfuseAliasedOutputs(ib);
+      }
+    }
+  }
+
   std::vector<WorkBlock> buildWorkBlocks() {
     // [workblocks]
     // the IR has many nodes which can never be reordered around, such as a
@@ -216,11 +246,13 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
+
     // view ops as outputs of differentiable subgraphs can cause incorrect
     // differentiation for now, do not include them in the subgraph
     if (isViewOp(node)) {
       return false;
     }
+
     return isDifferentiable(node);
   }
 
@@ -245,13 +277,13 @@ class SubgraphSlicer {
 
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
+  std::optional<Node*> tryMerge(Node* consumer, Node* producer) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
@@ -265,6 +297,164 @@ class SubgraphSlicer {
   AliasDb& aliasDb_;
   std::vector<Node*>& diff_nodes_;
 };
+
+std::optional<bool> getProfileNodeRequiresGrad(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return std::nullopt;
+  }
+  auto& type = n->ty(attr::profiled_type);
+  if (type->castRaw<TensorType>() == nullptr) {
+    return std::nullopt;
+  }
+  return type->expectRef<TensorType>().requiresGrad();
+}
+
+struct ContextMapping {
+  std::vector<const Node*> ctx_stack_;
+  std::unordered_map<const Node*, const Node*> node_to_ctx_;
+
+  void processNode(Node* n) {
+    node_to_ctx_[n] = ctx_stack_.back();
+
+    if (n->kind() == prim::Enter) {
+      ctx_stack_.push_back(n);
+    } else if (n->kind() == prim::Exit) {
+      ctx_stack_.pop_back();
+    }
+  }
+
+  void processBlock(Block* block) {
+    for (Node* n : block->nodes()) {
+      processNode(n);
+      for (Block* b : n->blocks()) {
+        processBlock(b);
+      }
+      if (n->kind() == prim::DifferentiableGraph) {
+        const auto& subgraph = n->g(attr::Subgraph);
+        processBlock(subgraph->block());
+      }
+    }
+  }
+
+  ContextMapping(const std::shared_ptr<Graph>& graph) {
+    ctx_stack_.push_back(nullptr);
+    processBlock(graph->block());
+  }
+
+  const Node* get(const Node* n) const {
+    auto it = node_to_ctx_.find(n);
+    TORCH_INTERNAL_ASSERT(
+        it != node_to_ctx_.end(),
+        "Cannot find node in node-to-context mapping.");
+    return it->second;
+  }
+
+  bool has(const Node* n) const {
+    return node_to_ctx_.find(n) != node_to_ctx_.end();
+  }
+};
+
+std::optional<bool> findRequiresGradForOutput(
+    Node* diff_graph,
+    Value* output,
+    const ContextMapping& ctx_mapping) {
+  for (auto& use : output->uses()) {
+    // [Only consider profiles in the same context]
+    // Ignore profiled uses if the use is within a different context.
+    // For example, a profile node within a no_grad() context will record the
+    // wrong requires_grad information.
+    if (ctx_mapping.has(use.user) &&
+        ctx_mapping.get(use.user) != ctx_mapping.get(diff_graph)) {
+      continue;
+    }
+
+    if (use.user->kind() == prim::profile) {
+      auto req_grad_use = getProfileNodeRequiresGrad(use.user);
+      if (req_grad_use.has_value()) {
+        return req_grad_use;
+      }
+    }
+
+    // maybe the profile node got absorbed into a differentiable graph
+    if (use.user->kind() == prim::DifferentiableGraph) {
+      const auto& dg = use.user->g(attr::Subgraph);
+      // check all the uses of this graph input to look for profile nodes.
+      Value* dg_value = dg->inputs()[use.offset];
+      for (auto& dg_use : dg_value->uses()) {
+        // See [Only consider profiles in the same context]
+        if (ctx_mapping.has(dg_use.user) &&
+            ctx_mapping.get(dg_use.user) != ctx_mapping.get(diff_graph)) {
+          continue;
+        }
+
+        if (dg_use.user->kind() == prim::profile) {
+          auto req_grad_use = getProfileNodeRequiresGrad(dg_use.user);
+          if (req_grad_use.has_value()) {
+            return req_grad_use;
+          }
+        }
+      }
+    }
+  }
+
+  return std::nullopt;
+}
+
+void AddRequiresGradToDifferentiableGraph(
+    Node* diff_graph,
+    const ContextMapping& ctx_mapping) {
+  TORCH_INTERNAL_ASSERT(diff_graph->kind() == prim::DifferentiableGraph);
+  const auto& subgraph = diff_graph->g(attr::Subgraph);
+  for (auto i : c10::irange(subgraph->outputs().size())) {
+    Value* output = subgraph->outputs()[i];
+    if (output->node()->kind() == prim::profile) {
+      // already have requires_grad info from this profile node
+      continue;
+    }
+    if (output->type()->castRaw<TensorType>() == nullptr) {
+      // non-tensors don't get profiled.
+      continue;
+    }
+    if (output->type()->expectRef<TensorType>().requiresGrad().has_value()) {
+      continue;
+    }
+
+    // this node doesn't have any requires_grad info.
+    // look at its uses to try to find a profile node.
+    auto requires_grad = findRequiresGradForOutput(
+        diff_graph, diff_graph->output(i), ctx_mapping);
+
+    output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
+        requires_grad));
+  }
+}
+
+void AddRequiresGradOnOutputNodes(
+    Block* block,
+    const ContextMapping& ctx_mapping) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::DifferentiableGraph) {
+      AddRequiresGradToDifferentiableGraph(n, ctx_mapping);
+    }
+    for (Block* b : n->blocks()) {
+      AddRequiresGradOnOutputNodes(b, ctx_mapping);
+    }
+  }
+}
+
+// autodiff.cpp needs to know, for each output, whether or not it requires
+// grad. Sometimes a profile node will be present on the output, but sometimes
+// it won't be present. This might happen if there's a node with side effects
+// in between the definition of the output node and the profile node; in this
+// case the profile node and output node would be in different workblocks and
+// couldn't be merged into the same DifferentiableGraph. (see [workblocks])
+// Or it could happen if the output is profiled twice and the profile nodes get
+// removed by unfusedAliasedOutputs.
+void AddRequiresGradOnOutputNodes(const std::shared_ptr<Graph>& graph) {
+  ContextMapping ctx_mapping(graph);
+  AddRequiresGradOnOutputNodes(graph->block(), ctx_mapping);
+}
 } // anonymous namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
@@ -275,7 +465,8 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
+  AddRequiresGradOnOutputNodes(graph);
+  GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,7 +1,13 @@
 #pragma once
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
+
+// We have not yet modified the AMD HIP build to generate this file so
+// we add an extra option to specifically ignore it.
+#ifndef C10_CUDA_NO_CMAKE_CONFIGURE_FILE
 #include <c10/cuda/impl/cuda_cmake_macros.h>
+#endif // C10_CUDA_NO_CMAKE_CONFIGURE_FILE
+
 #endif
 
 // See c10/macros/Export.h for a detailed explanation of what the function
@@ -33,6 +39,13 @@
 #endif
 
 /**
- * The maximum number of GPUs that we recognizes.
- */
+ * The maximum number of GPUs that we recognizes. Increasing this beyond the
+ * initial limit of 16 broke Caffe2 testing, hence the ifdef guards.
+ * This value cannot be more than 128 because our DeviceIndex is a uint8_t.
+o */
+#ifdef FBCODE_CAFFE2
+// fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
+#else
+#define C10_COMPILE_TIME_MAX_GPUS 120
+#endif

@@ -1,8 +1,6 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Thread local flag to enforce rref JIT pickling to be allowed only
 // in the scope of an rpc call. For other scopes like when model is
@@ -22,6 +20,7 @@ void disableJitRRefPickle() {
 }
 
 static_assert(
+    // NOLINTNEXTLINE(misc-redundant-expression)
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
     "The max value of local_id_t must be within the range of int64_t");
@@ -60,7 +59,7 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
   TORCH_INTERNAL_ASSERT(
       ivalue.isTuple(),
       "GloballyUniqueId::fromIValue expected ivalue to be a tuple.");
-  auto ivalues = ivalue.toTuple()->elements();
+  const auto& ivalues = ivalue.toTupleRef().elements();
   TORCH_CHECK(
       ivalues.size() == 2,
       "Constructing GloballyUniqueId from ivalue "
@@ -71,7 +70,7 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
       ivalues[0].toInt() <= std::numeric_limits<worker_id_t>::max(),
       "GloballyUniqueId createdOn out of range, got ",
       ivalues[0].toInt());
-  worker_id_t createdOn = ivalues[0].toInt();
+  worker_id_t createdOn = static_cast<worker_id_t>(ivalues[0].toInt());
 
   TORCH_CHECK(
       ivalues[1].toInt() <= std::numeric_limits<local_id_t>::max(),
@@ -84,7 +83,7 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
 
 std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
   return os << "GloballyUniqueId(created_on=" << globalId.createdOn_
-            << ", local_id=" << globalId.localId_ << ")";
+            << ", local_id=" << globalId.localId_ << ')';
 }
 
 ///////////////////////////  SerializedPyObj   ///////////////////////////
@@ -105,11 +104,9 @@ SerializedPyObj SerializedPyObj::fromIValues(std::vector<at::IValue> values) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(values.size());
   for (auto& value : values) {
-    tensors.emplace_back(value.toTensor());
+    tensors.emplace_back(std::move(value).toTensor());
   }
   return SerializedPyObj(std::move(payload), std::move(tensors));
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

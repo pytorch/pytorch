@@ -1,10 +1,10 @@
 #pragma once
 
+#include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/Export.h>
 #include <string>
-#include <memory>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // forward declaration of Node from function.h
 struct Node;
@@ -13,20 +13,24 @@ struct TORCH_API AnomalyMode {
   static bool is_enabled() {
     return _enabled;
   }
-  static void set_enabled(bool enabled) {
+  static bool should_check_nan() {
+    return _check_nan;
+  }
+  static void set_enabled(bool enabled, bool check_nan = true) {
     _enabled = enabled;
+    _check_nan = check_nan;
   }
 
-private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+ private:
   static bool _enabled;
+  static bool _check_nan;
 };
 
 /// A RAII guard that enables Anomaly Detection Mode.
 ///
 /// Anomaly detection mode is useful for debugging problems happening
 /// in the backward, such as unexpectedly modified tensors or NaNs
-/// occuring in the backward.
+/// occurring in the backward.
 ///
 /// The enabling of anomaly mode is global - as soon as there is one
 /// such guard, it is enabled for all computation and threads. It also
@@ -46,19 +50,22 @@ private:
 /// @endcode
 class TORCH_API DetectAnomalyGuard {
  public:
-  DetectAnomalyGuard();
+  DetectAnomalyGuard(bool check_nan = true);
   ~DetectAnomalyGuard();
+
+ private:
+  bool prev_check_nan_;
 };
 
 struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack();
   virtual void print_stack(const std::string& current_node_name);
-  virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
+  virtual void assign_parent(const c10::intrusive_ptr<Node>& parent_node);
 
  private:
   std::string traceback_;
-  std::shared_ptr<Node> parent_;
+  c10::intrusive_ptr<Node> parent_;
 };
 
-}}
+} // namespace torch::autograd

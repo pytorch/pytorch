@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import unittest
@@ -5,37 +7,38 @@ from typing import Tuple
 
 import torch
 from jit.test_hooks_modules import (
-    ModuleDirectFowardSubmodCall, ModuleForwardSingleInput,
-    ModuleForwardTupleInput, create_forward_tuple_input,
-    create_module_forward_multiple_inputs, create_module_forward_single_input,
+    create_forward_tuple_input,
+    create_module_forward_multiple_inputs,
+    create_module_forward_single_input,
     create_module_hook_return_nothing,
     create_module_multiple_hooks_multiple_inputs,
-    create_module_multiple_hooks_single_input, create_module_no_forward_input,
-    create_module_same_hook_repeated, create_submodule_forward_multiple_inputs,
+    create_module_multiple_hooks_single_input,
+    create_module_no_forward_input,
+    create_module_same_hook_repeated,
+    create_submodule_forward_multiple_inputs,
     create_submodule_forward_single_input,
     create_submodule_forward_single_input_return_not_tupled,
     create_submodule_hook_return_nothing,
     create_submodule_multiple_hooks_multiple_inputs,
     create_submodule_multiple_hooks_single_input,
-    create_submodule_no_forward_input, create_submodule_same_hook_repeated,
-    create_submodule_to_call_directly_with_hooks)
+    create_submodule_no_forward_input,
+    create_submodule_same_hook_repeated,
+    create_submodule_to_call_directly_with_hooks,
+    ModuleDirectforwardSubmodCall,
+    ModuleForwardSingleInput,
+    ModuleForwardTupleInput,
+)
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 # Tests for JIT forward hooks and pre-hooks
 class TestHooks(JitTestCase):
-
     def test_module_no_forward_input(self):
         self.checkModule(create_module_no_forward_input(), ())
 
@@ -71,7 +74,8 @@ class TestHooks(JitTestCase):
 
     def test_submodule_multiple_hooks_multiple_inputs(self):
         self.checkModule(
-            create_submodule_multiple_hooks_multiple_inputs(), (["a"], "no_pre_hook"),
+            create_submodule_multiple_hooks_multiple_inputs(),
+            (["a"], "no_pre_hook"),
         )
 
     def test_submodule_forward_single_input(self):
@@ -108,8 +112,8 @@ class TestHooks(JitTestCase):
         m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
         def foo(self, input: Tuple[str]) -> Tuple[str]:
-            assert self.name == "inner_mod_name"
-            assert input[0] == "a_outermod"
+            assert self.name == "inner_mod_name"  # noqa: S101
+            assert input[0] == "a_outermod"  # noqa: S101
             return ("pre_hook_override_name",)
 
         m.submodule.register_forward_pre_hook(foo)
@@ -170,8 +174,8 @@ class TestHooks(JitTestCase):
             return ("pre_hook_override_name",)
 
         def forward_hook(self, input: Tuple[str], output: str):
-            assert self.name == "outer_mod_name"
-            assert input == ("pre_hook_override_name",)
+            assert self.name == "outer_mod_name"  # noqa: S101
+            assert input == ("pre_hook_override_name",)  # noqa: S101
             output = output + "_fh"
             return output
 
@@ -184,7 +188,7 @@ class TestHooks(JitTestCase):
         self.assertNotEqual(m_scripted("a"), m_scripted.forward("a"))
 
     def test_submodule_direct_forward_invocation(self):
-        m_submod_forward_call = ModuleDirectFowardSubmodCall(
+        m_submod_forward_call = ModuleDirectforwardSubmodCall(
             "outer_mod_name", "inner_mod_name"
         )
         m_submod_call = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
@@ -193,7 +197,7 @@ class TestHooks(JitTestCase):
             return ("pre_hook_override_name",)
 
         def forward_hook(self, input: Tuple[str], output: str):
-            assert input == ("pre_hook_override_name",)
+            assert input == ("pre_hook_override_name",)  # noqa: S101
             return output + "_fh"
 
         m_submod_forward_call.submodule.register_forward_pre_hook(pre_hook)
@@ -219,15 +223,15 @@ class TestHooks(JitTestCase):
         m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
         def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
-            assert self.name == "outer_mod_name"
-            assert input[4] == "a"  # out of bounds tuple range
+            assert self.name == "outer_mod_name"  # noqa: S101
+            assert input[4] == "a"  # noqa: S101 out of bounds tuple range
             return ("pre_hook_override_name",)
 
         m.register_forward_pre_hook(pre_hook)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "This error occured while scripting the forward pre-hook 'pre_hook'",
+            "This error occurred while scripting the forward pre-hook 'pre_hook'",
         ):
             torch.jit.script(m)
 
@@ -240,7 +244,8 @@ class TestHooks(JitTestCase):
         m.register_forward_pre_hook(pre_hook_wrong_input1)
 
         with self.assertRaisesRegex(
-            RuntimeError, "has the wrong inner types for the input tuple argument",
+            RuntimeError,
+            "has the wrong inner types for the input tuple argument",
         ):
             torch.jit.script(m)
 
@@ -276,7 +281,8 @@ class TestHooks(JitTestCase):
         m.register_forward_pre_hook(pre_hook_wrong_output)
 
         with self.assertRaisesRegex(
-            RuntimeError, "returned the wrong type of: 'int'",
+            RuntimeError,
+            "returned the wrong type of: 'int'",
         ):
             torch.jit.script(m)
 
@@ -380,3 +386,7 @@ class TestHooks(JitTestCase):
             r"Received type: 'str'. Expected type: 'Tuple\[str\]'",
         ):
             torch.jit.script(m)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

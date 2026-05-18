@@ -1,15 +1,17 @@
-
+# mypy: allow-untyped-defs
 import ast
 import inspect
 import sys
 import textwrap
-import torch
 import warnings
 
+import torch
+
+
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
-    """
-    Checks the ``__init__`` method of a given ``nn.Module`` to ensure
-    that all instance-level attributes can be properly initialized.
+    """Check the ``__init__`` method of a given ``nn.Module``.
+
+    It ensures that all instance-level attributes can be properly initialized.
 
     Specifically, we do type inference based on attribute values...even
     if the attribute in question has already been typed using
@@ -32,14 +34,13 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     won't catch it.
 
     Example:
-
         .. code-block:: python
 
             class M(torch.nn.Module):
                 def fn(self):
                     return []
 
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.x: List[int] = []
 
@@ -59,16 +60,31 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
 
     def check(self, nn_module: torch.nn.Module) -> None:
-        # Check if we have a Python version <3.8
-        self.using_deprecated_ast: bool = sys.version_info < (3, 8)
+        source_lines = inspect.getsource(nn_module.__class__.__init__)
 
-        source_lines = textwrap.dedent(inspect.getsource(nn_module.__class__.__init__))
+        # Ignore comments no matter the indentation
+        def is_useless_comment(line):
+            line = line.strip()
+            return line.startswith("#") and not line.startswith("# type:")
+
+        source_lines = "\n".join(
+            [l for l in source_lines.split("\n") if not is_useless_comment(l)]
+        )
 
         # This AST only contains the `__init__` method of the nn.Module
-        init_ast = ast.parse(source_lines)
+        init_ast = ast.parse(textwrap.dedent(source_lines))
 
         # Get items annotated in the class body
-        self.class_level_annotations = list(nn_module.__annotations__.keys())
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            self.class_level_annotations = list(
+                annotationlib.get_annotations(
+                    nn_module, format=annotationlib.Format.FORWARDREF
+                ).keys()
+            )
+        else:
+            self.class_level_annotations = list(nn_module.__annotations__.keys())
 
         # Flag for later
         self.visiting_class_level_ann = False
@@ -93,20 +109,16 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         elif ann_type == "Optional":
             # Assigning `None` to an `Optional` type gives you a
             # Node where value=Constant(value=None, kind=None)
-            # or, in Python <3.8, value=NameConstant(value=None)
-            if (not self.using_deprecated_ast
-                    and not isinstance(node, ast.Constant)):
-                return False
-            if (self.using_deprecated_ast
-                    and not isinstance(node, ast.NameConstant)):
+            if not isinstance(node, ast.Constant):
                 return False
             if node.value:  # type: ignore[attr-defined]
                 return False
 
         return True
 
-    def visit_Assign(self, node):
-        """
+    def visit_Assign(self, node) -> None:
+        """Store assignment state when assigning to a Call Node.
+
         If we're visiting a Call Node (the right-hand side of an
         assignment statement), we won't be able to check the variable
         that we're assigning to (the left-hand side of an assignment).
@@ -117,19 +129,20 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         target built in.)
         """
         try:
-            if (isinstance(node.value, ast.Call)
-                    and node.targets[0].attr in self.class_level_annotations):
+            if (
+                isinstance(node.value, ast.Call)
+                and node.targets[0].attr in self.class_level_annotations
+            ):
                 self.visiting_class_level_ann = True
         except AttributeError:
             return
         self.generic_visit(node)
         self.visiting_class_level_ann = False
 
-    def visit_AnnAssign(self, node):
-        """
-        Visit an AnnAssign node in an ``nn.Module``'s ``__init__``
-        method and see if it conforms to our attribute annotation rules.
-        """
+    def visit_AnnAssign(self, node) -> None:
+        """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method.
+
+        It checks if it conforms to our attribute annotation rules."""
         # If we have a local variable
         try:
             if node.target.value.id != "self":
@@ -154,7 +167,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # cannot be reassigned later to a non-empty tuple. Same
         # deal with `NamedTuple`
 
-        containers = {"List", "Dict", "Optional"}
+        containers = {"List", "list", "Dict", "dict", "Optional"}
 
         # If we're not evaluating one of the specified problem types
         try:
@@ -172,14 +185,18 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.value, ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support "
-                      "instance-level annotations on empty non-base "
-                      "types in `__init__`. Instead, either 1) use a "
-                      "type annotation in the class body, or 2) wrap "
-                      "the type in `torch.jit.Attribute`.")
+        warnings.warn(
+            "The TorchScript type system doesn't support "
+            "instance-level annotations on empty non-base "
+            "types in `__init__`. Instead, either 1) use a "
+            "type annotation in the class body, or 2) wrap "
+            "the type in `torch.jit.Attribute`.",
+            stacklevel=2,
+        )
 
-    def visit_Call(self, node):
-        """
+    def visit_Call(self, node) -> None:
+        """Determine if a Call node is 'torch.jit.annotate' in __init__.
+
         Visit a Call node in an ``nn.Module``'s ``__init__``
         method and determine if it's ``torch.jit.annotate``. If so,
         see if it conforms to our attribute annotation rules.
@@ -191,12 +208,15 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
 
         # If this isn't a call to `torch.jit.annotate`
         try:
-            if (node.func.value.value.id != "torch"
-                    or node.func.value.attr != "jit"
-                    or node.func.attr != "annotate"):
+            if (
+                node.func.value.value.id != "torch"
+                or node.func.value.attr != "jit"
+                or node.func.attr != "annotate"
+            ):
                 self.generic_visit(node)
-            elif (node.func.value.value.id != "jit"
-                    or node.func.value.attr != "annotate"):
+            elif (
+                node.func.value.value.id != "jit" or node.func.value.attr != "annotate"
+            ):
                 self.generic_visit(node)
         except AttributeError:
             # Looks like we didn't even have the right node structure
@@ -220,7 +240,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         containers = {"List", "Dict", "Optional"}
 
         try:
-            ann_type = node.args[0].value.id    # type: ignore[attr-defined]
+            ann_type = node.args[0].value.id  # type: ignore[attr-defined]
         except AttributeError:
             return
 
@@ -231,8 +251,11 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         if not self._is_empty_container(node.args[1], ann_type):
             return
 
-        warnings.warn("The TorchScript type system doesn't support "
-                      "instance-level annotations on empty non-base "
-                      "types in `__init__`. Instead, either 1) use a "
-                      "type annotation in the class body, or 2) wrap "
-                      "the type in `torch.jit.Attribute`.")
+        warnings.warn(
+            "The TorchScript type system doesn't support "
+            "instance-level annotations on empty non-base "
+            "types in `__init__`. Instead, either 1) use a "
+            "type annotation in the class body, or 2) wrap "
+            "the type in `torch.jit.Attribute`.",
+            stacklevel=2,
+        )

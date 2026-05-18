@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 
 #include <iosfwd>
@@ -19,12 +19,13 @@ struct Module;
 } // namespace jit
 } // namespace torch
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class TORCH_API OutputArchive final {
  public:
   explicit OutputArchive(std::shared_ptr<jit::CompilationUnit> cu);
-  explicit OutputArchive() : cu_(std::make_shared<jit::CompilationUnit>()), module_("__torch__.Module", cu_) {}
+  explicit OutputArchive()
+      : cu_(std::make_shared<jit::CompilationUnit>()),
+        module_("__torch__.Module", cu_) {}
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;
@@ -65,7 +66,7 @@ class TORCH_API OutputArchive final {
   void save_to(const std::function<size_t(const void*, size_t)>& func);
 
   /// Forwards all arguments to `write()`.
-  /// Useful for generic code that can be re-used for both `OutputArchive` and
+  /// Useful for generic code that can be reused for both `OutputArchive` and
   /// `InputArchive` (where `operator()` forwards to `read()`).
   template <typename... Ts>
   void operator()(Ts&&... ts) {
@@ -76,5 +77,4 @@ class TORCH_API OutputArchive final {
   std::shared_ptr<jit::CompilationUnit> cu_;
   jit::Module module_;
 };
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize

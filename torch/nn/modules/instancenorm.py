@@ -1,7 +1,21 @@
-from .batchnorm import _NormBase
-from .. import functional as F
+# mypy: allow-untyped-defs
 
+import warnings
+
+import torch.nn.functional as F
 from torch import Tensor
+
+from .batchnorm import _LazyNormBase, _NormBase
+
+
+__all__ = [
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LazyInstanceNorm1d",
+    "LazyInstanceNorm2d",
+    "LazyInstanceNorm3d",
+]
 
 
 class _InstanceNorm(_NormBase):
@@ -13,58 +27,117 @@ class _InstanceNorm(_NormBase):
         affine: bool = False,
         track_running_stats: bool = False,
         device=None,
-        dtype=None
+        dtype=None,
+        *,
+        bias: bool = True,  # for backward compatibility
     ) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__(
+            num_features,
+            eps,
+            momentum,
+            affine,
+            track_running_stats,
+            **factory_kwargs,
+            bias=bias,
+        )
 
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
+    def _get_no_batch_dim(self):
+        raise NotImplementedError
+
+    def _handle_no_batch_input(self, input):
+        return self._apply_instance_norm(input.unsqueeze(0)).squeeze(0)
+
+    def _apply_instance_norm(self, input):
+        return F.instance_norm(
+            input,
+            self.running_mean,
+            self.running_var,
+            self.weight,
+            self.bias,
+            self.training or not self.track_running_stats,
+            self.momentum if self.momentum is not None else 0.0,
+            self.eps,
+        )
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ) -> None:
+        version = local_metadata.get("version", None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
             running_stats_keys = []
-            for name in ('running_mean', 'running_var'):
+            for name in ("running_mean", "running_var"):
                 key = prefix + name
                 if key in state_dict:
                     running_stats_keys.append(key)
             if len(running_stats_keys) > 0:
                 error_msgs.append(
-                    'Unexpected running stats buffer(s) {names} for {klass} '
-                    'with track_running_stats=False. If state_dict is a '
-                    'checkpoint saved before 0.4.0, this may be expected '
-                    'because {klass} does not track running stats by default '
-                    'since 0.4.0. Please remove these keys from state_dict. If '
-                    'the running stats are actually needed, instead set '
-                    'track_running_stats=True in {klass} to enable them. See '
-                    'the documentation of {klass} for details.'
-                    .format(names=" and ".join('"{}"'.format(k) for k in running_stats_keys),
-                            klass=self.__class__.__name__))
+                    "Unexpected running stats buffer(s) {names} for {klass} "
+                    "with track_running_stats=False. If state_dict is a "
+                    "checkpoint saved before 0.4.0, this may be expected "
+                    "because {klass} does not track running stats by default "
+                    "since 0.4.0. Please remove these keys from state_dict. If "
+                    "the running stats are actually needed, instead set "
+                    "track_running_stats=True in {klass} to enable them. See "
+                    "the documentation of {klass} for details.".format(
+                        names=" and ".join(f'"{k}"' for k in running_stats_keys),
+                        klass=self.__class__.__name__,
+                    )
+                )
                 for key in running_stats_keys:
                     state_dict.pop(key)
 
-        super(_InstanceNorm, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
-        assert self.running_mean is None or isinstance(self.running_mean, Tensor)
-        assert self.running_var is None or isinstance(self.running_var, Tensor)
-        return F.instance_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
+        feature_dim = input.dim() - self._get_no_batch_dim()
+        if input.size(feature_dim) != self.num_features:
+            if self.affine:
+                raise ValueError(
+                    f"expected input's size at dim={feature_dim} to match num_features"
+                    f" ({self.num_features}), but got: {input.size(feature_dim)}."
+                )
+            else:
+                warnings.warn(
+                    f"input's size at dim={feature_dim} does not match num_features. "
+                    "You can silence this warning by not passing in num_features, "
+                    "which is not used because affine=False",
+                    stacklevel=2,
+                )
+
+        if input.dim() == self._get_no_batch_dim():
+            return self._handle_no_batch_input(input)
+
+        return self._apply_instance_norm(input)
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
-    inputs with optional additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 2D (unbatched) or 3D (batched) input as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -74,9 +147,9 @@ class InstanceNorm1d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
+    The variance is calculated via the biased estimator, equivalent to
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -104,21 +177,22 @@ class InstanceNorm1d(_InstanceNorm):
         transform.
 
     Args:
-        num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+        num_features: number of features or channels :math:`C` of the input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``.
+            Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C, L)`
-        - Output: :math:`(N, C, L)` (same shape as input)
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
 
     Examples::
 
@@ -130,21 +204,58 @@ class InstanceNorm1d(_InstanceNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
-        if input.dim() == 2:
-            raise ValueError(
-                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
-                'This is because InstanceNorm1d reshapes inputs to'
-                '(1, N * C, ...) from (N, C,...) and this makes'
-                'variances 0.'
-            )
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
-                             .format(input.dim()))
+    def _get_no_batch_dim(self) -> int:
+        return 2
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (2, 3):
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
+
+
+class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm1d` is inferred from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`, `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`(C, L)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, C, L)` or :math:`(C, L)`
+        - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
+    """
+
+    cls_to_become = InstanceNorm1d  # type: ignore[assignment]
+
+    def _get_no_batch_dim(self) -> int:
+        return 2
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (2, 3):
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
@@ -157,7 +268,7 @@ class InstanceNorm2d(_InstanceNorm):
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -186,20 +297,22 @@ class InstanceNorm2d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, H, W)`
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``.
+            Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
 
     Examples::
 
@@ -211,15 +324,59 @@ class InstanceNorm2d(_InstanceNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError('expected 4D input (got {}D input)'
-                             .format(input.dim()))
+    def _get_no_batch_dim(self) -> int:
+        return 3
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (3, 4):
+            raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
+
+
+class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm2d` is inferred from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
+    """
+
+    cls_to_become = InstanceNorm2d  # type: ignore[assignment]
+
+    def _get_no_batch_dim(self) -> int:
+        return 3
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (3, 4):
+            raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 5D input (a mini-batch of 3D inputs with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -231,7 +388,7 @@ class InstanceNorm3d(_InstanceNorm):
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -260,20 +417,22 @@ class InstanceNorm3d(_InstanceNorm):
 
     Args:
         num_features: :math:`C` from an expected input of size
-            :math:`(N, C, D, H, W)`
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``.
+            Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
 
     Examples::
 
@@ -285,7 +444,49 @@ class InstanceNorm3d(_InstanceNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError('expected 5D input (got {}D input)'
-                             .format(input.dim()))
+    def _get_no_batch_dim(self) -> int:
+        return 4
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (4, 5):
+            raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
+
+
+class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
+    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm3d` is inferred from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`,
+    `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
+    """
+
+    cls_to_become = InstanceNorm3d  # type: ignore[assignment]
+
+    def _get_no_batch_dim(self) -> int:
+        return 4
+
+    def _check_input_dim(self, input) -> None:
+        if input.dim() not in (4, 5):
+            raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")

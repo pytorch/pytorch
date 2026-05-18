@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Example use of Timer and op fuzzers to measure kernel performance.
 
 $ python -m examples.op_benchmark
@@ -9,26 +10,31 @@ import torch
 from torch.utils.benchmark import Timer
 from torch.utils.benchmark.op_fuzzers.binary import BinaryOpFuzzer
 from torch.utils.benchmark.op_fuzzers.unary import UnaryOpFuzzer
+import operator
 
 
 _MEASURE_TIME = 1.0
 
 
-def assert_dicts_equal(dict_0, dict_1):
+def assert_dicts_equal(dict_0, dict_1) -> None:
     """Builtin dict comparison will not compare numpy arrays.
-    e.g.
+
+    e.g.::
+
         x = {"a": np.ones((2, 1))}
         x == x  # Raises ValueError
     """
-    assert set(dict_0.keys()) == set(dict_0.keys())
-    assert all(np.all(v == dict_1[k]) for k, v in dict_0.items() if k != "dtype")
+    if set(dict_0.keys()) != set(dict_0.keys()):
+        raise AssertionError("dicts must have the same keys")
+    if all(np.all(v != dict_1[k]) for k, v in dict_0.items() if k != "dtype"):
+        raise AssertionError("dict values differ for keys other than 'dtype'")
 
 
-def run(n, stmt, fuzzer_cls):
+def run(n, stmt, fuzzer_cls) -> None:
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)
     int_iter = fuzzer_cls(seed=0, dtype=torch.int32).take(n)
     raw_results = []
-    for i, (float_values, int_values) in enumerate(zip(float_iter, int_iter)):
+    for i, (float_values, int_values) in enumerate(zip(float_iter, int_iter, strict=True)):
         float_tensors, float_tensor_params, float_params = float_values
         int_tensors, int_tensor_params, int_params = int_values
 
@@ -37,13 +43,13 @@ def run(n, stmt, fuzzer_cls):
         assert_dicts_equal(float_params, int_params)
         assert_dicts_equal(float_tensor_params["x"], int_tensor_params["x"])
 
-        float_measurement, int_measurement = [
+        float_measurement, int_measurement = (
             Timer(
                 stmt,
                 globals=tensors,
             ).blocked_autorange(min_run_time=_MEASURE_TIME)
             for tensors in (float_tensors, int_tensors)
-        ]
+        )
 
         descriptions = []
         for name in float_tensors:
@@ -75,7 +81,7 @@ def run(n, stmt, fuzzer_cls):
             order_len = max(order_len, len(order))
             steps_len = max(steps_len, len(steps))
 
-    parsed_results.sort(key=lambda x: x[2])
+    parsed_results.sort(key=operator.itemgetter(2))
 
     print(f"stmt: {stmt}")
     print(f" diff    faster{'':>17}{' ' * name_len} ", end="")
@@ -85,7 +91,7 @@ def run(n, stmt, fuzzer_cls):
         for t_float, t_int, rel_diff, descriptions in results:
             time_str = [f"{rel_diff * 100:>4.1f}%    {'int' if t_int < t_float else 'float':<20}"]
             time_str.extend(["".ljust(len(time_str[0])) for _ in descriptions[:-1]])
-            for t_str, (name, shape, order, steps) in zip(time_str, descriptions):
+            for t_str, (name, shape, order, steps) in zip(time_str, descriptions, strict=True):
                 name = f"{name}:".ljust(name_len + 1)
                 shape = shape.ljust(shape_len + 10)
                 order = order.ljust(order_len)
@@ -93,7 +99,7 @@ def run(n, stmt, fuzzer_cls):
         print(spacer)
 
 
-def main():
+def main() -> None:
     run(n=100, stmt="torch.median(x, dim=0)", fuzzer_cls=UnaryOpFuzzer)
     run(n=100, stmt="torch.square(x)", fuzzer_cls=UnaryOpFuzzer)
     run(n=100, stmt="x + y", fuzzer_cls=BinaryOpFuzzer)

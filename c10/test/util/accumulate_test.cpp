@@ -9,8 +9,7 @@
 
 using namespace ::testing;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(accumulate_test, vector_test) {
+TEST(accumulateTest, vector_test) {
   std::vector<int> ints = {1, 2, 3, 4, 5};
 
   EXPECT_EQ(c10::sum_integers(ints), 1 + 2 + 3 + 4 + 5);
@@ -30,8 +29,7 @@ TEST(accumulate_test, vector_test) {
   EXPECT_EQ(c10::numelements_between_dim(4, 2, ints), 3 * 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(accumulate_test, list_test) {
+TEST(accumulateTest, list_test) {
   std::list<int> ints = {1, 2, 3, 4, 5};
 
   EXPECT_EQ(c10::sum_integers(ints), 1 + 2 + 3 + 4 + 5);
@@ -47,16 +45,14 @@ TEST(accumulate_test, list_test) {
   EXPECT_EQ(c10::numelements_between_dim(4, 2, ints), 3 * 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(accumulate_test, base_cases) {
+TEST(accumulateTest, base_cases) {
   std::vector<int> ints = {};
 
   EXPECT_EQ(c10::sum_integers(ints), 0);
   EXPECT_EQ(c10::multiply_integers(ints), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(accumulate_test, errors) {
+TEST(accumulateTest, errors) {
   std::vector<int> ints = {1, 2, 3, 4, 5};
 
 #ifndef NDEBUG

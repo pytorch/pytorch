@@ -1,27 +1,33 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
-#include <algorithm>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/tanh_native.h>
+#endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qtanh_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
 // This ALWAYS outputs scale=2.0/256, zp=128, dtype=quint8
-Tensor qnnpack_tanh(Tensor input) {
+static Tensor qnnpack_tanh(Tensor input) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_tanh(): Got empty input tensor");
-
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_tanh(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
   Tensor qy;
   constexpr float output_scale = 2.0f / 256.0f;
   constexpr int32_t output_zero_point = 128;
@@ -30,7 +36,7 @@ Tensor qnnpack_tanh(Tensor input) {
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
   const auto zero_point = input_contig.q_zero_point();
@@ -63,7 +69,7 @@ Tensor qnnpack_tanh(Tensor input) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
     tanh_op,
     input_contig.size(0) /* batch size */,
-    (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+    (uint8_t*)input_contig.const_data_ptr<c10::quint8>() /* input data */,
     num_elems /* input stride */,
     (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
     num_elems /* output stride */);
@@ -93,4 +99,4 @@ Tensor tanh_quantized_cpu(const Tensor& qx) {
   qtanh_stub(qx.device().type(), qx, qy);
   return qy;
 }
-}}  // namespace at::native
+}  // namespace at::native

@@ -1,11 +1,10 @@
+// @allow-raw-throw
 #pragma once
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <string>
 #include <stdexcept>
 #include <sstream>
-
-struct THCState;
 
 namespace at { namespace native {
 

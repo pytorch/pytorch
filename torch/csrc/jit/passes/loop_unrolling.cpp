@@ -1,15 +1,15 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -18,7 +18,7 @@ static constexpr int64_t kMaxBodySize = 32;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value* val) {
-  c10::optional<bool> maybe_value = constant_as<bool>(val);
+  std::optional<bool> maybe_value = constant_as<bool>(val);
   return maybe_value && *maybe_value;
 }
 
@@ -91,7 +91,7 @@ void inlineBody(Node* loop) {
 }
 
 // inserts a copy of body, passing inputs to the inputs of the block
-// it returns the a list of the Values for the output of the block
+// it returns a list of the Values for the output of the block
 std::vector<Value*> insertBlockCopy(
     Graph& graph,
     Block* body,
@@ -128,7 +128,7 @@ void repeatBody(Block* body, size_t times, Block* dest) {
   std::vector<Value*> io = dest->inputs().vec();
   TORCH_INTERNAL_ASSERT(
       !body->inputs().at(0)->hasUses(), "loop counter should be unused");
-  for (size_t i = 0; i < times; ++i) {
+  for ([[maybe_unused]] const auto i : c10::irange(times)) {
     io[0] = body->inputs().at(0);
     io = insertBlockCopy(*graph, body, io);
   }
@@ -162,29 +162,27 @@ void replaceLoopCounter(Node* loop) {
   body->insertOutput(1, result);
 }
 
-bool unroll(Node* loop) {
+void unroll(Node* loop) {
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
-  if (!isSmallBlock(body))
-    return false;
 
   // We will be using a "mutable" counter outside of the loop instead of the
   // default one, because this will allow us to share it between the unrolled
   // loop and its epilogue. This is necessary only if the loop counter is
   // actually used in the body.
-  if (body->inputs()[0]->uses().size() > 0)
+  if (!body->inputs()[0]->uses().empty())
     replaceLoopCounter(loop);
 
   // Some optimization for constant-length loops. If we know they won't run too
   // many times, then we can unroll them entirely.
   Value* trip_count = loop->inputs().at(0);
-  c10::optional<int64_t> const_len = constant_as<int64_t>(trip_count);
+  std::optional<int64_t> const_len = constant_as<int64_t>(trip_count);
   if (const_len && *const_len < kMaxBodyRepeats) {
     Block* dest = loop->addBlock();
     repeatBody(body, *const_len, dest);
     loop->eraseBlock(0);
     inlineBody(loop);
-    return true;
+    return;
   }
 
   WithInsertPoint insert_point_guard{loop};
@@ -212,11 +210,9 @@ bool unroll(Node* loop) {
           aten::sub,
           {iter_count,
            graph->insert(aten::mul, {unrolled_iter_count, kUnrollFactor})}));
-
-  return true;
 }
 
-bool UnrollLoops(Block* block) {
+bool UnrollLoops(Block* block, bool constant_only) {
   bool changed = false;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     // XXX: unroll might destroy the current node, so we need to pre-increment
@@ -224,11 +220,21 @@ bool UnrollLoops(Block* block) {
     Node* node = *it;
     ++it;
     for (Block* subblock : node->blocks()) {
-      changed |= UnrollLoops(subblock);
+      changed |= UnrollLoops(subblock, constant_only);
     }
-    if (isForLoop(node)) {
-      changed |= unroll(node);
+    if (!isForLoop(node)) {
+      continue;
     }
+    if (constant_only) {
+      if (node->inputs().at(0)->node()->kind() != prim::Constant) {
+        continue;
+      }
+    } else if (!isSmallBlock(node->blocks().at(0))) {
+      continue;
+    }
+
+    unroll(node);
+    changed = true;
   }
   return changed;
 }
@@ -296,7 +302,7 @@ void LoopsPeeler::peelLoops() {
 bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph) {
   auto peel_predicate = [](Node* n) {
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get())) {
+      if (i->type()->isSubtypeOf(*TensorType::get())) {
         return true;
       }
     }
@@ -331,7 +337,7 @@ Node* PeelLoop(Node* n, size_t times) {
   // only run until the peeled count
   new_lv.replaceMaxTripCount(min_trip_count);
 
-  // substract `maxTripCount` of the original loop by the number iterations
+  // subtract `maxTripCount` of the original loop by the number iterations
   // the peeled loop runs
   auto new_max_trip_count =
       graph->insert(aten::sub, {orig_loop.maxTripCount(), min_trip_count});
@@ -366,12 +372,19 @@ Node* PeelLoop(Node* n, size_t times) {
 }
 
 bool UnrollLoops(std::shared_ptr<Graph>& graph) {
-  bool changed = UnrollLoops(graph->block());
+  bool changed = UnrollLoops(graph->block(), false);
   if (changed) {
     EliminateDeadCode(graph);
   }
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+bool UnrollConstantLoops(std::shared_ptr<Graph>& graph) {
+  bool changed = UnrollLoops(graph->block(), true);
+  if (changed) {
+    EliminateDeadCode(graph);
+  }
+  return changed;
+}
+
+} // namespace torch::jit

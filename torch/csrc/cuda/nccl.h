@@ -2,60 +2,86 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THC.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/Optional.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
-namespace torch {
-namespace cuda {
-namespace nccl {
+// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
+// HIP 3.1+
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+#define HAS_NCCL_BF16_DATATYPE \
+  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
+#define HAS_NCCL_BF16_DATATYPE 1
+#else
+#define HAS_NCCL_BF16_DATATYPE 0
+#endif
 
-/* The following are copied from <nccl.h> and redefined in torch::cuda::nccl namespace */
+namespace torch::cuda::nccl {
+
+/* The following are copied from <nccl.h> and redefined in torch::cuda::nccl
+ * namespace */
 /* pytorch should only use the following definition within pytorch scope */
 
-/* Opaque handle to communicator to ncclComm*, this will reinterpret as ncclComm in nccl.cpp */
+/* Opaque handle to communicator to ncclComm*, this will reinterpret as ncclComm
+ * in nccl.cpp */
 typedef void* ncclComm_t;
 
-/** redefine nccl unique ID in torch scope. this should be identical to native nccl impp. */
+/** redefine nccl unique ID in torch scope. this should be identical to native
+ * nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
+typedef struct {
+  // NOLINTNEXTLINE(*array*)
+  char internal[NCCL_UNIQUE_ID_BYTES];
+} ncclUniqueId;
 
 /* Error type */
 enum class ncclResult {
-    Success                 =  0,
-    UnhandledCudaError      =  1,
-    SystemError             =  2,
-    InternalError           =  3,
-    InvalidArgument         =  4,
-    InvalidUsage            =  5,
-    NumResults              =  6 };
+  Success = 0,
+  UnhandledCudaError = 1,
+  SystemError = 2,
+  InternalError = 3,
+  InvalidArgument = 4,
+  InvalidUsage = 5,
+  RemoteError = 6,
+  InProgress = 7,
+  NumResults = 8
+};
 
 /* Reduction operation selector */
-enum class ncclRedOp {
-    Sum        = 0,
-    Prod       = 1,
-    Max        = 2,
-    Min        = 3,
-    NumOps     = 4 };
+enum class ncclRedOp { Sum = 0, Prod = 1, Max = 2, Min = 3, NumOps = 4 };
 
 /* Data types */
 enum class ncclDataType {
-    Int8       = 0, Char       = 0,
-    Uint8      = 1,
-    Int32      = 2, Int        = 2,
-    Uint32     = 3,
-    Int64      = 4,
-    Uint64     = 5,
-    Float16    = 6, Half       = 6,
-    Float32    = 7, Float      = 7,
-    Float64    = 8, Double     = 8,
-    numTypes   = 9 };
+  Int8 = 0,
+  Char = 0,
+  Uint8 = 1,
+  Int32 = 2,
+  Int = 2,
+  Uint32 = 3,
+  Int64 = 4,
+  Uint64 = 5,
+  Float16 = 6,
+  Half = 6,
+  Float32 = 7,
+  Float = 7,
+  Float64 = 8,
+  Double = 8,
+  Bfloat16 = 9,
+  NumTypes = 10
+};
 
-
+// RAII helper class to manage NCCL group API and CUDA free mutex.
+// The destructor is allowed to throw since this helper class only
+// manages group and lock lifetimes.
+struct TORCH_CUDA_CPP_API AutoNcclGroup {
+  AutoNcclGroup();
+  AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
+  ~AutoNcclGroup() noexcept(false);
+  ncclComm_t comm_;
+  bool comm_nonblocking_;
+};
 
 // NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
 // Don't use them outside of these files.
@@ -63,7 +89,7 @@ namespace detail {
 
 TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
-static inline void NCCL_CHECK(ncclResult status) {
+inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
     throw_nccl_error(status);
   }
@@ -74,21 +100,22 @@ TORCH_CUDA_CPP_API at::ArrayRef<ncclComm_t> get_communicators(
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     const at::Tensor& output,
     int root,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
-using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
+using stream_list = std::vector<std::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
+TORCH_CUDA_CPP_API const char* version_suffix();
 
 bool is_available(at::TensorList tensors);
 
@@ -133,11 +160,25 @@ TORCH_CUDA_CPP_API void reduce_scatter(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
+TORCH_CUDA_CPP_API void scatter(
+    const std::vector<at::Tensor>& inputs,
+    at::Tensor& outputs,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root = 0);
+
 TORCH_CUDA_CPP_API void all_gather(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
+
+TORCH_CUDA_CPP_API void gather(
+    const at::Tensor& inputs,
+    std::vector<at::Tensor>& outputs,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root = 0);
 
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,
@@ -175,6 +216,4 @@ TORCH_CUDA_CPP_API void recv(
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src);
-} // namespace nccl
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::nccl

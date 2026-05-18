@@ -1,79 +1,57 @@
 #ifndef THP_STORAGE_INC
 #define THP_STORAGE_INC
 
-#define THPStorageStr TH_CONCAT_STRING_3(torch.,Real,Storage)
-#define THPStorageClass TH_CONCAT_3(THP,Real,StorageClass)
-#define THPStorage_(NAME) TH_CONCAT_4(THP,Real,Storage_,NAME)
+#include <Python.h>
+#include <c10/core/Storage.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/Types.h>
 
-#define THPDoubleStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPDoubleStorageClass)
-#define THPFloatStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPFloatStorageClass)
-#define THPHalfStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPFloatStorageClass)
-#define THPLongStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPLongStorageClass)
-#define THPIntStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPIntStorageClass)
-#define THPShortStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPShortStorageClass)
-#define THPCharStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPCharStorageClass)
-#define THPByteStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPByteStorageClass)
-#define THPBoolStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPBoolStorageClass)
-#define THPQUInt8Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQUInt8StorageClass)
-#define THPQInt8Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQInt8StorageClass)
-#define THPQInt32Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQInt32StorageClass)
-#define THPBFloat16Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPBFloat16StorageClass)
-#define THPComplexDoubleStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPComplexDoubleStorageClass)
-#define THPComplexFloatStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPComplexFloatStorageClass)
-#define THPQUInt4x2Storage_Check(obj) \
-    PyObject_IsInstance(obj, THPQUInt8StorageClass)
+#define THPStorageStr "torch.UntypedStorage"
 
-#define THPDoubleStorage_CData(obj)         (obj)->cdata
-#define THPFloatStorage_CData(obj)          (obj)->cdata
-#define THPHalfStorage_CData(obj)           (obj)->cdata
-#define THPLongStorage_CData(obj)           (obj)->cdata
-#define THPIntStorage_CData(obj)            (obj)->cdata
-#define THPShortStorage_CData(obj)          (obj)->cdata
-#define THPCharStorage_CData(obj)           (obj)->cdata
-#define THPByteStorage_CData(obj)           (obj)->cdata
-#define THPBoolStorage_CData(obj)           (obj)->cdata
-#define THPQUInt8Storage_CData(obj)         (obj)->cdata
-#define THPQInt8Storage_CData(obj)          (obj)->cdata
-#define THPQInt32Storage_CData(obj)         (obj)->cdata
-#define THPBFloat16Storage_CData(obj)       (obj)->cdata
-#define THPComplexDoubleStorage_CData(obj)  (obj)->cdata
-#define THPComplexFloatStorage_CData(obj)   (obj)->cdata
-#define THPQUInt4x2Storage_CData(obj)       (obj)->cdata
+struct THPStorage {
+  PyObject_HEAD
+  c10::Storage cdata;
+};
 
-#define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
-#define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
+TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
+TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
+    PyTypeObject* type,
+    c10::Storage _storage);
+TORCH_PYTHON_API extern PyTypeObject* THPStorageClass;
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateAllTypes.h>
+inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
+  return tp == THPStorageClass;
+}
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateComplexTypes.h>
+inline bool THPStorage_CheckExact(PyObject* obj) {
+  return THPStorage_CheckTypeExact(Py_TYPE(obj));
+}
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateHalfType.h>
+inline bool THPStorage_Check(PyObject* obj) {
+  if (!THPStorageClass)
+    return false;
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBoolType.h>
+  const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
+  if (result == -1)
+    throw python_error();
+  return result;
+}
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateBFloat16Type.h>
+bool THPStorage_init(PyObject* module);
+void THPStorage_postInit(PyObject* module);
 
-#include <torch/csrc/generic/Storage.h>
-#include <TH/THGenerateQTypes.h>
+void THPStorage_assertNotNull(THPStorage* storage);
+TORCH_PYTHON_API void THPStorage_assertNotNull(PyObject* obj);
+
+TORCH_PYTHON_API extern PyTypeObject THPStorageType;
+
+inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {
+  return storage->cdata;
+}
+
+inline const c10::Storage& THPStorage_Unpack(PyObject* obj) {
+  return THPStorage_Unpack(reinterpret_cast<THPStorage*>(obj));
+}
 
 #endif

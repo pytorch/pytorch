@@ -1,39 +1,102 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
+# mypy: allow-untyped-defs
+from collections.abc import Callable, Iterator
+from typing import TypeVar
 
-from .callable import MapIterDataPipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.utils.common import (
+    _check_unpickable_fn,
+    StreamWrapper,
+    validate_input_col,
+)
 
-T_co = TypeVar('T_co', covariant=True)
+
+__all__ = ["FilterIterDataPipe"]
 
 
-@functional_datapipe('filter')
-class FilterIterDataPipe(MapIterDataPipe):
-    r""" :class:`FilterIterDataPipe`.
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
 
-    Iterable DataPipe to filter elements from datapipe according to filter_fn.
-    args:
-        datapipe: Iterable DataPipe being filterd
+
+@functional_datapipe("filter")
+class FilterIterDataPipe(IterDataPipe[_T_co]):
+    r"""
+    Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
+
+    Args:
+        datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        fn_args: Positional arguments for `filter_fn`
-        fn_kwargs: Keyword arguments for `filter_fn`
+        input_col: Index or indices of data which ``filter_fn`` is applied, such as:
+
+            - ``None`` as default to apply ``filter_fn`` to the data directly.
+            - Integer(s) is used for list/tuple.
+            - Key(s) is used for dict.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def is_even(n):
+        ...     return n % 2 == 0
+        >>> dp = IterableWrapper(range(5))
+        >>> filter_dp = dp.filter(filter_fn=is_even)
+        >>> list(filter_dp)
+        [0, 2, 4]
     """
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 filter_fn: Callable[..., bool],
-                 fn_args: Optional[Tuple] = None,
-                 fn_kwargs: Optional[Dict] = None,
-                 ) -> None:
-        super().__init__(datapipe, fn=filter_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
-    def __iter__(self) -> Iterator[T_co]:
-        res: bool
+    datapipe: IterDataPipe[_T_co]
+    filter_fn: Callable
+
+    def __init__(
+        self,
+        datapipe: IterDataPipe[_T_co],
+        filter_fn: Callable,
+        input_col=None,
+    ) -> None:
+        super().__init__()
+        self.datapipe = datapipe
+
+        _check_unpickable_fn(filter_fn)
+        self.filter_fn = filter_fn  # type: ignore[assignment]
+
+        self.input_col = input_col
+        validate_input_col(filter_fn, input_col)
+
+    def _apply_filter_fn(self, data) -> bool:
+        if self.input_col is None:
+            return self.filter_fn(data)
+        elif isinstance(self.input_col, (list, tuple)):
+            args = tuple(data[col] for col in self.input_col)
+            return self.filter_fn(*args)
+        else:
+            return self.filter_fn(data[self.input_col])
+
+    def __iter__(self) -> Iterator[_T_co]:
         for data in self.datapipe:
-            res = self.fn(data, *self.args, **self.kwargs)
-            if not isinstance(res, bool):
-                raise ValueError("Boolean output is required for "
-                                 "`filter_fn` of FilterIterDataPipe")
-            if res:
-                yield data
+            condition, filtered = self._returnIfTrue(data)
+            if condition:
+                yield filtered
+            else:
+                StreamWrapper.close_streams(data)
 
-    def __len__(self):
-        raise NotImplementedError
+    def _returnIfTrue(self, data: _T) -> tuple[bool, _T]:
+        condition = self._apply_filter_fn(data)
+
+        if df_wrapper.is_column(condition):
+            # We are operating on DataFrames filter here
+            result = []
+            for idx, mask in enumerate(df_wrapper.iterate(condition)):
+                if mask:
+                    result.append(df_wrapper.get_item(data, idx))
+            if result:
+                return True, df_wrapper.concat(result)
+            else:
+                return False, None  # type: ignore[return-value]
+
+        if not isinstance(condition, bool):
+            raise ValueError(
+                "Boolean output is required for `filter_fn` of FilterIterDataPipe, got",
+                type(condition),
+            )
+
+        return condition, data

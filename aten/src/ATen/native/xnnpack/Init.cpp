@@ -1,14 +1,12 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <c10/util/Exception.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 namespace internal {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool is_initialized_ = false;
 
 bool initialize() {
@@ -33,8 +31,7 @@ bool initialize() {
   return is_initialized_;
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-bool deinitialize() {
+[[maybe_unused]] bool deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.
@@ -51,15 +48,13 @@ bool deinitialize() {
 }
 
 } // namespace
+} // namespace internal
 
 bool available() {
   // Add extra conditions here that should disable mobile CPU impl at runtime in its totality.
   return internal::initialize();
 }
 
-} // namespace internal
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

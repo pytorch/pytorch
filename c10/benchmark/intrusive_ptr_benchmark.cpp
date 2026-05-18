@@ -7,7 +7,6 @@
 using c10::intrusive_ptr;
 using c10::intrusive_ptr_target;
 using c10::make_intrusive;
-using c10::weak_intrusive_ptr;
 
 namespace {
 
@@ -31,7 +30,6 @@ static void BM_IntrusivePtrCtorDtor(benchmark::State& state) {
     volatile intrusive_ptr<Foo> var2 = var;
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_IntrusivePtrCtorDtor);
 
 static void BM_SharedPtrCtorDtor(benchmark::State& state) {
@@ -41,7 +39,6 @@ static void BM_SharedPtrCtorDtor(benchmark::State& state) {
     volatile std::shared_ptr<Bar> var2 = var;
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_SharedPtrCtorDtor);
 
 static void BM_IntrusivePtrArray(benchmark::State& state) {
@@ -75,6 +72,21 @@ static void BM_SharedPtrArray(benchmark::State& state) {
 }
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 BENCHMARK(BM_SharedPtrArray)->RangeMultiplier(2)->Range(16, 4096);
+
+static void BM_IntrusivePtrExclusiveOwnership(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    volatile auto var = make_intrusive<Foo>(0);
+  }
+}
+BENCHMARK(BM_IntrusivePtrExclusiveOwnership);
+
+static void BM_SharedPtrExclusiveOwnership(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    volatile auto var = std::make_shared<Foo>(0);
+  }
+}
+BENCHMARK(BM_SharedPtrExclusiveOwnership);
+
 } // namespace
 
 BENCHMARK_MAIN();

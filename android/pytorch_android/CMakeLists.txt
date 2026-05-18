@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.4.1)
-option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" OFF)
+cmake_minimum_required(VERSION 3.10)
+option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" ON)
 message(
   STATUS
   "BUILD_LITE_INTERPRETER (pytorch_jni_lite): ${BUILD_LITE_INTERPRETER}")
@@ -14,7 +14,7 @@ endif()
 
 include(GNUInstallDirs)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 message(STATUS "ANDROID_STL:${ANDROID_STL}")
 
@@ -112,6 +112,7 @@ if(ANDROID_ABI)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
   import_static_lib(libXNNPACK)
+  import_static_lib(libmicrokernels-prod)
   import_static_lib(libpytorch_qnnpack)
   import_static_lib(libpthreadpool)
   import_static_lib(libeigen_blas)
@@ -129,6 +130,7 @@ if(ANDROID_ABI)
       libc10
       libnnpack
       libXNNPACK
+      libmicrokernels-prod
       libpytorch_qnnpack
       libpthreadpool
       libeigen_blas
@@ -143,7 +145,6 @@ else()
       torch_cpu
       c10
       cpuinfo
-      clog
   )
 
   if(USE_NNPACK)
@@ -152,6 +153,7 @@ else()
 
   if(USE_XNNPACK)
     list(APPEND pytorch_jni_LIBS XNNPACK)
+    list(APPEND pytorch_jni_LIBS microkernels-prod)
   endif()
 
   if(USE_SYSTEM_PTHREADPOOL)
@@ -160,6 +162,7 @@ else()
 
   if(USE_PYTORCH_QNNPACK)
     list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+    list(APPEND pytorch_jni_LIBS clog)
   endif()
 
 endif()

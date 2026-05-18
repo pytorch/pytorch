@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/MaybeOwned.h>
 
@@ -11,6 +13,7 @@
 namespace {
 
 using at::Tensor;
+using c10::IValue;
 
 struct MyString : public c10::intrusive_ptr_target, public std::string {
   using std::string::string;
@@ -52,9 +55,6 @@ template <typename T>
 T getSampleValue2();
 
 template <typename T>
-bool equal(const T&, const T&);
-
-template <typename T>
 void assertBorrow(const c10::MaybeOwned<T>&, const T&);
 
 template <typename T>
@@ -71,8 +71,7 @@ c10::intrusive_ptr<MyString> getSampleValue2() {
   return c10::make_intrusive<MyString>("goodbye");
 }
 
-template<>
-bool equal(const c10::intrusive_ptr<MyString>& lhs, const c10::intrusive_ptr<MyString>& rhs) {
+bool are_equal(const c10::intrusive_ptr<MyString>& lhs, const c10::intrusive_ptr<MyString>& rhs) {
   if (!lhs || !rhs) {
     return !lhs && !rhs;
   }
@@ -103,7 +102,7 @@ void assertOwn(
 
 template<>
 Tensor getSampleValue() {
-  return at::native::zeros({2, 2}).to(at::kCPU);
+  return at::zeros({2, 2}).to(at::kCPU);
 }
 
 template<>
@@ -111,8 +110,7 @@ Tensor getSampleValue2() {
   return at::native::ones({2, 2}).to(at::kCPU);
 }
 
-template<>
-bool equal(const Tensor& lhs, const Tensor& rhs) {
+bool are_equal(const Tensor& lhs, const Tensor& rhs) {
   if (!lhs.defined() || !rhs.defined()) {
     return !lhs.defined() && !rhs.defined();
   }
@@ -136,44 +134,89 @@ void assertOwn(
   EXPECT_EQ(original.use_count(), useCount);
 }
 
+//////////////////// Helper implementations for IValue. ////////////////////
+
+template<>
+IValue getSampleValue() {
+  return IValue(getSampleValue<Tensor>());
+}
+
+template<>
+IValue getSampleValue2() {
+  return IValue("hello");
+}
+
+bool are_equal(const IValue& lhs, const IValue& rhs) {
+  if (lhs.isTensor() != rhs.isTensor()) {
+    return false;
+  }
+  if (lhs.isTensor() && rhs.isTensor()) {
+    return lhs.toTensor().equal(rhs.toTensor());
+  }
+  return lhs == rhs;
+}
+
+template <>
+void assertBorrow(
+    const c10::MaybeOwned<IValue>& mo,
+    const IValue& borrowedFrom) {
+  if (!borrowedFrom.isPtrType()) {
+    EXPECT_EQ(*mo, borrowedFrom);
+  } else {
+    EXPECT_EQ(mo->internalToPointer(), borrowedFrom.internalToPointer());
+    EXPECT_EQ(borrowedFrom.use_count(), 1);
+  }
+}
+
+template <>
+void assertOwn(
+    const c10::MaybeOwned<IValue>& mo,
+    const IValue& original,
+    size_t useCount) {
+  if (!original.isPtrType()) {
+    EXPECT_EQ(*mo, original);
+  } else {
+    EXPECT_EQ(mo->internalToPointer(), original.internalToPointer());
+    EXPECT_EQ(original.use_count(), useCount);
+  }
+}
+
 template <typename T>
 void MaybeOwnedTest<T>::SetUp() {
   borrowFrom = getSampleValue<T>();
   ownCopy = getSampleValue<T>();
   ownCopy2 = getSampleValue<T>();
   borrowed = c10::MaybeOwned<T>::borrowed(borrowFrom);
-  owned = c10::MaybeOwned<T>::owned(c10::in_place, ownCopy);
+  owned = c10::MaybeOwned<T>::owned(std::in_place, ownCopy);
   owned2 = c10::MaybeOwned<T>::owned(T(ownCopy2));
 }
 
 using MaybeOwnedTypes = ::testing::Types<
   c10::intrusive_ptr<MyString>,
-  at::Tensor
+  at::Tensor,
+  c10::IValue
   >;
 
-TYPED_TEST_CASE(MaybeOwnedTest, MaybeOwnedTypes);
+TYPED_TEST_SUITE(MaybeOwnedTest, MaybeOwnedTypes);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, SimpleDereferencingString) {
   assertBorrow(this->borrowed, this->borrowFrom);
   assertOwn(this->owned, this->ownCopy);
   assertOwn(this->owned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, DefaultCtor) {
   c10::MaybeOwned<TypeParam> borrowed, owned;
   // Don't leave the fixture versions around messing up reference counts.
   this->borrowed = c10::MaybeOwned<TypeParam>();
   this->owned = c10::MaybeOwned<TypeParam>();
   borrowed = c10::MaybeOwned<TypeParam>::borrowed(this->borrowFrom);
-  owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, this->ownCopy);
+  owned = c10::MaybeOwned<TypeParam>::owned(std::in_place, this->ownCopy);
 
   assertBorrow(borrowed, this->borrowFrom);
   assertOwn(owned, this->ownCopy);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
 
   auto copiedBorrowed(this->borrowed);
@@ -189,22 +232,20 @@ TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
   assertOwn(copiedOwned2, this->ownCopy2, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveDereferencing) {
   // Need a different value.
-  this->owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, getSampleValue2<TypeParam>());
+  this->owned = c10::MaybeOwned<TypeParam>::owned(std::in_place, getSampleValue2<TypeParam>());
 
-  EXPECT_TRUE(equal(*std::move(this->borrowed), getSampleValue<TypeParam>()));
-  EXPECT_TRUE(equal(*std::move(this->owned), getSampleValue2<TypeParam>()));
+  EXPECT_TRUE(are_equal(*std::move(this->borrowed), getSampleValue<TypeParam>()));
+  EXPECT_TRUE(are_equal(*std::move(this->owned), getSampleValue2<TypeParam>()));
 
   // Borrowed is unaffected.
   assertBorrow(this->borrowed, this->borrowFrom);
 
   // Owned is a null c10::intrusive_ptr / empty Tensor.
-  EXPECT_TRUE(equal(*this->owned, TypeParam()));
+  EXPECT_TRUE(are_equal(*this->owned, TypeParam()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
   auto movedBorrowed(std::move(this->borrowed));
   auto movedOwned(std::move(this->owned));
@@ -215,11 +256,10 @@ TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
   assertOwn(movedOwned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
-  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::owned(std::in_place);
 
   copiedBorrowed = this->borrowed;
   copiedOwned = this->owned;
@@ -233,7 +273,6 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
   assertOwn(copiedOwned2, this->ownCopy2, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
   auto otherBorrowFrom = getSampleValue2<TypeParam>();
   auto otherOwnCopy = getSampleValue2<TypeParam>();
@@ -255,12 +294,11 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
-  auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto movedOwned = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto movedOwned2 = c10::MaybeOwned<TypeParam>::owned(std::in_place);
 
   movedBorrowed = std::move(this->borrowed);
   movedOwned = std::move(this->owned);
@@ -272,7 +310,6 @@ TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
   auto y = getSampleValue2<TypeParam>();
   auto movedBorrowed = c10::MaybeOwned<TypeParam>::borrowed(y);
@@ -288,7 +325,6 @@ TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
   assertOwn(movedOwned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, SelfAssignment) {
   this->borrowed = this->borrowed;
   this->owned = this->owned;

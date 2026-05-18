@@ -4,9 +4,20 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from .api import RendezvousHandler, RendezvousParameters
-from .api import rendezvous_handler_registry as handler_registry
+import logging
+from importlib.metadata import entry_points
+
+from .api import (
+    rendezvous_handler_registry as handler_registry,
+    RendezvousHandler,
+    RendezvousParameters,
+)
 from .dynamic_rendezvous import create_handler
+
+
+log = logging.getLogger(__name__)
+
+__all__ = ["get_rendezvous_handler"]
 
 
 def _create_static_handler(params: RendezvousParameters) -> RendezvousHandler:
@@ -44,21 +55,42 @@ def _register_default_handlers() -> None:
     handler_registry.register("static", _create_static_handler)
 
 
+def _register_out_of_tree_handlers() -> None:
+    discovered_handler_generators = entry_points(group="torchrun.handlers")
+
+    for handler_generator in discovered_handler_generators:
+        try:
+            # pyrefly: ignore [bad-index]
+            get_handler = discovered_handler_generators[handler_generator.name].load()
+            handler_registry.register(handler_generator.name, get_handler())
+        except Exception:
+            log.warning(
+                "Exception while registering out of tree plugin %s: ",
+                handler_generator.name,
+                exc_info=True,
+            )
+
+
 def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
     """
-    This method is used to obtain a reference to a :py:class`RendezvousHandler`.
+    Obtain a reference to a :py:class`RendezvousHandler`.
+
     Custom rendezvous handlers can be registered by
 
     ::
 
-      from torch.distributed.elastid.rendezvous import rendezvous_handler_registry
+      from torch.distributed.elastic.rendezvous import rendezvous_handler_registry
       from torch.distributed.elastic.rendezvous.registry import get_rendezvous_handler
 
+
       def create_my_rdzv(params: RendezvousParameters):
-        return MyCustomRdzv(params)
+          return MyCustomRdzv(params)
+
 
       rendezvous_handler_registry.register("my_rdzv_backend_name", create_my_rdzv)
 
-      my_rdzv_handler = get_rendezvous_handler("my_rdzv_backend_name", RendezvousParameters)
+      my_rdzv_handler = get_rendezvous_handler(
+          "my_rdzv_backend_name", RendezvousParameters
+      )
     """
     return handler_registry.create_handler(params)

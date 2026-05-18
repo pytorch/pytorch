@@ -11,9 +11,6 @@ class ModuleInterface(torch.nn.Module):
 class OrigModule(torch.nn.Module):
     """A module that implements ModuleInterface."""
 
-    def __init__(self):
-        super(OrigModule, self).__init__()
-
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         return inp1 + inp2 + 1
 
@@ -27,9 +24,6 @@ class OrigModule(torch.nn.Module):
 class NewModule(torch.nn.Module):
     """A *different* module that implements ModuleInterface."""
 
-    def __init__(self):
-        super(NewModule, self).__init__()
-
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         return inp1 * inp2 + 1
 
@@ -40,7 +34,7 @@ class NewModule(torch.nn.Module):
 class UsesInterface(torch.nn.Module):
     proxy_mod: ModuleInterface
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.proxy_mod = OrigModule()
 

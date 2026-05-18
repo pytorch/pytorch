@@ -4,10 +4,8 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::vector<int64_t>> sizes = {{1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {3, 1, 2}, {3, 2, 1}, {2, 3, 1}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, TensorExpanded) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -17,7 +15,6 @@ TEST(MemoryOverlapTest, TensorExpanded) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, ScalarExpanded) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -27,7 +24,6 @@ TEST(MemoryOverlapTest, ScalarExpanded) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, NonContiguousTensor) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -38,7 +34,6 @@ TEST(MemoryOverlapTest, NonContiguousTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, NonContiguousExpandedTensor) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -60,7 +55,6 @@ TEST(MemoryOverlapTest, NonContiguousExpandedTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, ContiguousTensor) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -70,7 +64,6 @@ TEST(MemoryOverlapTest, ContiguousTensor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryOverlapTest, ContiguousExpandedTensor) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {

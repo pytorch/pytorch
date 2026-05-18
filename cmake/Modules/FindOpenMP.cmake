@@ -79,12 +79,25 @@ cmake_policy(SET CMP0012 NEW) # if() recognizes numbers and booleans
 cmake_policy(SET CMP0054 NEW) # if() quoted variables not dereferenced
 cmake_policy(SET CMP0057 NEW) # if IN_LIST
 
+
+if(NOT "$ENV{OMP_PREFIX}" STREQUAL "")
+  set(OpenMP_PREFIX "$ENV{OMP_PREFIX}")
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" AND EXISTS /opt/homebrew/opt/libomp)
+  set(OpenMP_PREFIX "/opt/homebrew/opt/libomp")
+endif()
+
 function(_OPENMP_FLAG_CANDIDATES LANG)
   if(NOT OpenMP_${LANG}_FLAG)
     unset(OpenMP_FLAG_CANDIDATES)
 
     set(OMP_FLAG_GNU "-fopenmp")
-    set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    if(CMAKE_${LANG}_COMPILER_ID STREQUAL "Clang" AND CMAKE_${LANG}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      # clang-cl specific flags
+      set(OMP_FLAG_Clang "-Xclang -fopenmp=libomp" "-Xclang -fopenmp=libiomp5" "-Xclang -fopenmp")
+    else()
+      # regular clang flags
+      set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    endif()
 
     if(WIN32)
       # Prefer Intel OpenMP header which can be provided by CMAKE_INCLUDE_PATH.
@@ -93,7 +106,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     else()
       # AppleClang may need a header file, search for omp.h with hints to brew
       # default include dir
-      find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+      find_path(__header_dir "omp.h" HINTS "/usr/local/include" "${OpenMP_PREFIX}/include")
     endif()
     set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
 
@@ -227,53 +240,99 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     #   http://openmp.llvm.org/
     #
     # So here, before we test each flag combination, we first try directly
-    # linking against any `libomp` MKL has found (if any). This allows us to
-    # do sensible things in tricky (yet common) conditions like:
+    # linking against any `libomp` MKL has linked to (if any and when MKL is
+    # specified). This allows us to do sensible things in tricky (yet common)
+    # conditions like:
     #   - using `clang` (so no native GNU OpenMP), and
     #   - having `brew` `libomp` installed at `/usr/local/`, and
     #   - having `conda` `mkl` installed at `$HOME/conda/`, with includes a copy
     #     of `libiomp5`.
-    # Rather than blindly picking one, we pick what ever `FindMKL.cmake` choses
+    # Rather than blindly picking one, we pick what ever `FindMKL.cmake` chooses
     # to avoid conflicts.
     #
-    # Crucially, we only do so for non-GNU compilers. For GNU ones,
     # `FindMKL.cmake` calls `FindOpenMP.cmake` when trying to find `gomp` and
-    # thus will cause infinite recursion if this is not taken care of. Moreover,
-    # for them, since the compiler provices the OpenMP library, it is most
-    # likely that only one viable gomp library can be found in search path by
-    # `FindOpenMP.cmake`, so the chance of having conflicts is slow.
-    #
-    # TODO: refactor to solve this weird dependency where
-    #         - for non-GNU, FindOpenMP.cmake replies on FindMKL.cmake to finish first, but
-    #         - for GNU,     FindMKL.cmake replies on FindOpenMP.cmake to finish first.
+    # thus will cause infinite recursion if this is not taken care of. Therefore,
+    # we record an internal flag to detect repeatedly inclusion.
 
-    if(NOT "${CMAKE_${LANG}_COMPILER_ID}" STREQUAL "GNU")
+    if(NOT MKL_OPENMP_LIBRARY AND NOT IN_FIND_OMP AND BLAS STREQUAL "MKL")
+      set(IN_FIND_OMP ON CACHE BOOL "" FORCE)
       find_package(MKL QUIET)
-      if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
-        # If we already link OpenMP via MKL, use that. Otherwise at run-time
-        # OpenMP will complain about being initialized twice (OMP: Error #15),
-        # can may cause incorrect behavior.
-        set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
-      else()
-        find_library(OpenMP_libomp_LIBRARY
-          NAMES omp gomp iomp5
-          HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-          DOC "libomp location for OpenMP"
-        )
-      endif()
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
+      unset(IN_FIND_OMP CACHE)
+    endif()
 
-      if (OpenMP_libomp_LIBRARY)
-        try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
-          CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
-          LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG} ${OpenMP_libomp_LIBRARY}
-          OUTPUT_VARIABLE OpenMP_TRY_COMPILE_OUTPUT
-        )
-        if(OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG})
-          set("${OPENMP_FLAG_VAR}" "${OPENMP_FLAG}" PARENT_SCOPE)
+    if(MKL_OPENMP_LIBRARY)
+      # If we already link OpenMP via MKL, use that. Otherwise at run-time
+      # OpenMP will complain about being initialized twice (OMP: Error #15),
+      # can may cause incorrect behavior.
+      set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
+    endif()
+
+    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+      # On MSVC ARM64, OpenMP is provided by vcomp, which is a part of the Visual Studio installation.
+      find_library(OpenMP_libomp_LIBRARY
+      NAMES vcomp
+      HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+      DOC "vcomp location for OpenMP on MSVC ARM64"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    # Check if we are using  OpenBLAS which is linked against libgomp
+    # we may end up with  multiple omp runtimes linked
+    # against libtorch_cpu.so
+    if(OpenBLAS_LIB AND OPENBLAS_USES_LIBGOMP)
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES gomp
+        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    if (NOT OpenMP_libomp_LIBRARY)
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES omp gomp iomp5
+        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    # Use OpenMP_PREFIX if defined
+    if (NOT OpenMP_libomp_LIBRARY AND NOT "${OpenMP_PREFIX}" STREQUAL "")
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES omp gomp iomp5
+        HINTS "${OpenMP_PREFIX}/lib"
+        DOC "libomp location for OpenMP"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    if(OpenMP_libomp_LIBRARY MATCHES "iomp5")
+      set(OpenMP_libiomp5_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libiomp5 location for OpenMP")
+      if("-fopenmp=libiomp5" IN_LIST OpenMP_${LANG}_FLAG_CANDIDATES)
+        get_filename_component(iomp5_dir "${OpenMP_libomp_LIBRARY}" DIRECTORY)
+        set(OPENMP_FLAGS_TEST "-fopenmp=libiomp5 -L${iomp5_dir}")
+      endif()
+    endif()
+
+    if(OpenMP_libomp_LIBRARY)
+      message(STATUS "Check OMP with lib ${OpenMP_libomp_LIBRARY} and flags ${OPENMP_FLAGS_TEST}")
+      try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
+        CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
+        LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG} ${OpenMP_libomp_LIBRARY}
+        OUTPUT_VARIABLE OpenMP_TRY_COMPILE_OUTPUT
+      )
+      if(OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG})
+        set("${OPENMP_FLAG_VAR}" "${OPENMP_FLAG}" PARENT_SCOPE)
+        if(OpenMP_libomp_LIBRARY MATCHES "iomp5")
+          set("${OPENMP_LIB_NAMES_VAR}" "libiomp5" PARENT_SCOPE)
+        else()
           set("${OPENMP_LIB_NAMES_VAR}" "libomp" PARENT_SCOPE)
-          break()
         endif()
+        break()
+      else()
+        message(WARNING "Detecting ${LANG} OpenMP compiler ABI info compiled with the following output:\n${OpenMP_TRY_COMPILE_OUTPUT}")
       endif()
     endif()
 
@@ -642,5 +701,6 @@ unset(OpenMP_Fortran_TEST_SOURCE)
 unset(OpenMP_C_CXX_CHECK_VERSION_SOURCE)
 unset(OpenMP_Fortran_CHECK_VERSION_SOURCE)
 unset(OpenMP_Fortran_INCLUDE_LINE)
+unset(OpenMP_PREFIX)
 
 cmake_policy(POP)

@@ -1,12 +1,15 @@
-import torch
 import functools
-import random
 import operator
-import numpy as np
+import random
 import time
 
+import numpy as np
+
+import torch
+
+
 # shim for torch.cuda.Event when running on cpu
-class Event(object):
+class Event:
     def __init__(self, enable_timing):
         pass
 
@@ -14,8 +17,10 @@ class Event(object):
         self.time = time.perf_counter()
 
     def elapsed_time(self, end_event):
-        assert isinstance(end_event, Event)
+        if not isinstance(end_event, Event):
+            raise AssertionError(f"Expected Event, but got {type(end_event)}")
         return end_event.time - self.time
+
 
 def gen_sparse_csr(shape, nnz):
     fill_value = 0
@@ -29,6 +34,7 @@ def gen_sparse_csr(shape, nnz):
 
     return dense.to_sparse_csr()
 
+
 def gen_sparse_coo(shape, nnz):
     dense = np.random.randn(*shape)
     values = []
@@ -41,6 +47,7 @@ def gen_sparse_coo(shape, nnz):
         values.append(dense[row, col])
 
     return torch.sparse_coo_tensor(indices, values, size=shape)
+
 
 def gen_sparse_coo_and_csr(shape, nnz):
     total_values = functools.reduce(operator.mul, shape, 1)

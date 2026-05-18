@@ -1,6 +1,6 @@
 #pragma once
 
-namespace at { namespace native {
+namespace at::native {
 
 // (Const)StridedRandomAccessor is a
 // (const) random access iterator defined over
@@ -298,4 +298,4 @@ public:
   // }
 };
 
-}} // namespace at::native
+} // namespace at::native

@@ -39,7 +39,6 @@ static void checkRoundtrip(const std::string& s) {
   AT_ASSERT(original == parsed);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -84,7 +83,6 @@ graph(%0 : Tensor, %1 : Tensor):
   AT_ASSERT(add->outputs() == std::vector<Value*>({t2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, NestedBlock) {
   checkRoundtrip(R"IR(
 graph():
@@ -100,7 +98,6 @@ graph():
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, If) {
   checkRoundtrip(R"IR(
 graph(%0 : Tensor,
@@ -121,7 +118,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, If2) {
   checkRoundtrip(R"IR(
 graph(%0 : Tensor,
@@ -142,7 +138,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, InferredTypeIsTensor) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -150,10 +145,9 @@ TEST(IRParserTest, InferredTypeIsTensor) {
 graph(%a):
   return (%a))IR",
       &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, ValueReuse) {
   // Check that parser correctly handles values reusing the same name.
   auto graph = std::make_shared<Graph>();
@@ -175,7 +169,6 @@ graph(%x):
   AT_ASSERT(b->outputs() == std::vector<Value*>({x2}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, Attributes) {
   // Check that parser handles attributes and types.
   checkRoundtrip(
@@ -191,7 +184,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, OptionalTypes) {
   checkRoundtrip(
       R"IR(
@@ -203,7 +195,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, StarTensor) {
   checkRoundtrip(
       R"IR(
@@ -215,7 +206,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, UnshapedTensor) {
   checkRoundtrip(
       R"IR(
@@ -227,7 +217,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, ShapedTensor) {
   checkRoundtrip(
       R"IR(
@@ -239,7 +228,6 @@ graph(%0 : Tensor,
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, NestedContrainer) {
   checkRoundtrip(
       R"IR(
@@ -251,7 +239,6 @@ graph():
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, MalformedShapeAnnotation) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(checkRoundtrip(
@@ -264,7 +251,6 @@ graph(%0 : Tensor,
 )IR"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, FileCheck) {
   auto graph = std::make_shared<Graph>();
   const std::string& text =
@@ -274,11 +260,10 @@ TEST(IRParserTest, FileCheck) {
       return (%a))IR";
 
   parseIR(text, &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
   torch::jit::testing::FileCheck().run(text, *graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, Strides) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -299,7 +284,7 @@ graph(%a : Float(4, 5),
   auto a_sizes = *a_type->sizes().concrete_sizes();
   auto a_strides = a_type->strides().concrete_sizes();
   AT_ASSERT(a_sizes[0] == 4 && a_sizes[1] == 5);
-  AT_ASSERT(a_strides == c10::nullopt);
+  AT_ASSERT(a_strides == std::nullopt);
 
   auto b_type = b->type()->cast<TensorType>();
   auto b_sizes = *b_type->sizes().concrete_sizes();
@@ -309,15 +294,13 @@ graph(%a : Float(4, 5),
 
   auto c_type = c->type()->cast<TensorType>();
   AT_ASSERT(*c_type->sizes().size() == 2);
-  AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
-  AT_ASSERT(c_type->strides().concrete_sizes() == c10::nullopt);
+  AT_ASSERT(c_type->sizes().concrete_sizes() == std::nullopt);
+  AT_ASSERT(c_type->strides().concrete_sizes() == std::nullopt);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, MalformedStrides) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
-  bool error_thrown = false;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(parseIR(
       R"IR(
@@ -328,7 +311,6 @@ graph(%a : Float(4, strides=[5], 5)):
       vmap));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, TensorShapes) {
   checkRoundtrip(
       R"IR(
@@ -339,7 +321,6 @@ graph(%a : Float(4, 5),
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, DeviceAndRequiresGradTensors) {
   checkRoundtrip(
       R"IR(
@@ -357,7 +338,6 @@ graph(%a : Float(*, *, device=cpu),
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, ListConstant) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -380,7 +360,6 @@ graph():
   AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, PartialStarTensor) {
   checkRoundtrip(
       R"IR(
@@ -389,7 +368,6 @@ graph(%x : Float(10, *, 10)):
 )IR");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRParserTest, ComplexTensorAttributes) {
   checkRoundtrip(
       R"IR(

@@ -19,8 +19,6 @@
 #include <android/log.h>
 #endif
 
-using namespace torch::autograd::profiler;
-
 namespace pytorch_jni {
 
 namespace {
@@ -34,28 +32,6 @@ struct JITCallGuard {
 };
 
 } // namespace
-
-class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
- public:
-  explicit MemoryReadAdapter(const void* data, off_t size)
-      : data_(data), size_(size){};
-
-  size_t size() const override {
-    return size_;
-  }
-
-  size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
-      const override {
-    memcpy(buf, (int8_t*)(data_) + pos, n);
-    return n;
-  }
-
-  ~MemoryReadAdapter() {}
-
- private:
-  const void* data_;
-  off_t size_;
-};
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
@@ -143,7 +119,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     deviceType_ = deviceJniCodeToDeviceType(device);
     module_ = torch::jit::load(
-        std::move(modelPath->toStdString()), deviceType_, extra_files);
+        std::move(modelPath->toStdString()), std::nullopt, extra_files);
     if (has_extra) {
       static auto putMethod =
           facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::
@@ -191,7 +167,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
           assetName->toStdString().c_str());
     }
     JITCallGuard guard;
-    module_ = torch::jit::load(torch::make_unique<MemoryReadAdapter>(
+    module_ = torch::jit::load(std::make_unique<MemoryReadAdapter>(
         assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();
@@ -219,16 +195,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     auto output = [&]() {
       JITCallGuard guard;
@@ -247,16 +216,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {

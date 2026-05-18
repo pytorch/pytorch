@@ -1,13 +1,22 @@
 #pragma once
 
 #include <limits>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
+
+namespace at::native {
 
 // Maximum and minimum possible scalar values, including infinities
 template <typename scalar_t>
@@ -22,27 +31,7 @@ constexpr scalar_t lower_bound() {
   return lim::has_infinity ? -lim::infinity() : lim::lowest();
 }
 
-static inline int64_t ensure_nonempty_dim(int64_t dim) {
-  return std::max<int64_t>(dim, 1);
-}
-
-static inline int64_t ensure_nonempty_size(const Tensor& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.size(dim);
-}
-
-static inline int64_t ensure_nonempty_stride(const Tensor& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.stride(dim);
-}
-
-using IdxVec = std::vector<int64_t>;
-static inline IdxVec ensure_nonempty_vec(IdxVec vec) {
-  if (vec.size() == 0) {
-    vec.push_back(1);
-  }
-  return vec;
-}
-
-static inline Tensor restride_dim(
+inline Tensor restride_dim(
   const Tensor& src, int64_t dim,
   IntArrayRef replacement_shape
 ) {
@@ -51,17 +40,16 @@ static inline Tensor restride_dim(
   return src.as_strided(replacement_shape, strides);
 }
 
-inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
+inline void _dimreduce_setup(const Tensor &result, const Tensor &self,
                                 int64_t dim) {
   IntArrayRef self_sizes = self.sizes();
   std::vector<int64_t> result_sizes;
   result_sizes.insert(result_sizes.end(), self_sizes.begin(), self_sizes.end());
   result_sizes[dim] = 1;
   result.resize_(result_sizes);
-  return result;
 }
 
-inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
+inline bool _dimreduce_return_trivial(const Tensor &result, const Tensor &self,
                                       const Scalar& ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
@@ -79,7 +67,7 @@ inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
 }
 
 inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &self,
-                                               int64_t dim, bool keepdim, const char *fn_name) {
+                                               int64_t /*dim*/, bool /*keepdim*/, const char* /*fn_name*/) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -89,14 +77,14 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
   return false;
 }
 
-inline c10::optional<Tensor> _allreduce_return_trivial(
+inline std::optional<Tensor> _allreduce_return_trivial(
     const Tensor& self,
     const Scalar& ident) {
   // Return identity
   if (self.numel() == 0) {
     return at::scalar_tensor(ident, self.options());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
@@ -108,26 +96,42 @@ inline c10::optional<Tensor> _allreduce_return_trivial(
     " but found ", out.option())\
 }
 
-static inline void check_scalar_type_device_layout_equal(const Tensor& out, const Tensor& self) {
+inline void check_scalar_type_device_layout_equal(const Tensor& out, const Tensor& self) {
   OPTION_TYPE_EQUALITY_CHECK(scalar_type, out, self);
   OPTION_TYPE_EQUALITY_CHECK(device, out.options(), self.options());
   OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
 }
 
-static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
+inline Tensor integer_upcast(const Tensor& self, std::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
+  TORCH_CHECK(!isBarebonesUnsignedType(scalarType), "integer upcasting for uint16, uint32 and uint64 is not currently implemented");
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
 }
 
 using DimMask = TensorIterator::DimMask;
 
-static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
-  DimMask mask;
-  if (dims.empty()) {
-    mask = DimMask().flip();
+inline DimVector make_dim_vector(OptionalIntArrayRef opt_dims, int64_t ndim) {
+  if (opt_dims.has_value()) {
+    return DimVector(opt_dims.value());
   } else {
-    mask = at::dim_list_to_bitset(dims, ndim);
+    std::vector<int64_t> all_dims(ndim);
+    std::iota(all_dims.begin(), all_dims.end(), 0);
+    return DimVector(all_dims);
+  }
+}
+
+inline DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim, bool allow_empty_dims=false) {
+  DimMask mask;
+  if (opt_dims.has_value()) {
+    auto dims = opt_dims.value();
+    if (dims.empty() && !allow_empty_dims) {
+      mask = DimMask().flip();
+    } else {
+      mask = at::dim_list_to_bitset(dims, ndim);
+    }
+  } else {
+    mask = DimMask().flip();
   }
   return mask;
 }
@@ -146,9 +150,9 @@ inline DimVector shape_from_dim_mask(const Tensor& self, DimMask mask, bool keep
   return shape;
 }
 
-static void resize_reduction_result(
+inline void resize_reduction_result(
     Tensor& result, const Tensor& self, DimMask mask, bool keepdim,
-    ScalarType dtype)
+    ScalarType /*dtype*/)
 {
   auto shape = shape_from_dim_mask(self, mask, keepdim);
   TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
@@ -156,20 +160,20 @@ static void resize_reduction_result(
 }
 
 inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
+  const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   DimMask mask = make_dim_mask(dim, self.dim());
   auto shape = shape_from_dim_mask(self, mask, keepdim);
   return at::empty(shape, self.options().dtype(dtype));
 }
 
-static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
+inline Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
   if (keepdim) {
     return result;
   }
   auto shape = DimVector(result.sizes());
   auto stride = DimVector(result.strides());
-  for (int dim = 0; dim < ndim; dim++) {
+  for (const auto dim : c10::irange(ndim)) {
     if (mask[dim]) {
       shape.insert(shape.begin() + dim, 1);
       stride.insert(stride.begin() + dim, 0);
@@ -178,9 +182,9 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
   return result.as_strided(shape, stride);
 }
 
-static TensorIterator make_reduction(
+inline TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self,
-    c10::optional<IntArrayRef> dim_opt,
+    at::OptionalIntArrayRef dim_opt,
     bool keepdim, ScalarType in_dtype, ScalarType out_dtype) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -203,22 +207,28 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
 
-static TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self,
-    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType out_dtype) {
+[[maybe_unused]] inline TensorIterator make_reduction(
+    const char* name,
+    Tensor& result,
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  const bool gpu_f16_to_f32 = (
-    self.is_cuda() && self.scalar_type() == kHalf && out_dtype == kFloat);
-  auto in_dtype = gpu_f16_to_f32 ? self.scalar_type() : out_dtype;
+  const bool gpu_lowp_to_f32 = (
+        (self.is_cuda() || self.is_xpu()) && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
+                   : self.is_complex() ? c10::toComplexType(out_dtype)
+                                       : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 
-static TensorIterator make_reduction(
+inline TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
-    c10::optional<IntArrayRef> dim_opt, bool keepdim, ScalarType dtype1,
+    at::OptionalIntArrayRef dim_opt, bool keepdim, ScalarType dtype1,
     ScalarType dtype2) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -253,13 +263,18 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
-static TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
-    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType dtype) {
+[[maybe_unused]] inline TensorIterator make_reduction(
+    const char* name,
+    Tensor& result1,
+    Tensor& result2,
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 
-static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const char *fn_name) {
+inline void zero_numel_check_dims(const Tensor& self, const int64_t dim, const char *fn_name) {
   if (self.ndimension() == 0) {
     TORCH_CHECK_INDEX(dim == 0 || dim == -1, fn_name,
       ": Expected reduction dim -1 or 0 for scalar but got ", dim);
@@ -270,21 +285,22 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+inline void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+  TORCH_CHECK(
+    !dim.empty(),
+      fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
   for (const int64_t d : dim) {
     zero_numel_check_dims(self, d, fn_name);
   }
 }
 
-// Resize the result tensor and indices when result.numel() == 0 depending on values of
-// dim and keepdim for returning tensors containing reduction results.
-// This function should be called when you are reducing a zero-numel tensor and want to
-// resize the output and return it. This function exists for resizing zero-numel
-// tensors when the size of the reduction dimension is non-zero.
-static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
-                                     const Tensor& self, const int64_t dim,
-                                     const bool keepdim, const char *fn_name) {
-  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
+inline std::vector<int64_t> get_zero_numel_tensor_size(
+    const Tensor& self,
+    const int64_t dim,
+    const bool keepdim,
+    const char* fn_name) {
+  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() == 0.");
   zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
@@ -298,8 +314,155 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
       }
     }
   }
+  return sizes;
+}
+
+// Resize the result tensor and indices when result.numel() == 0 depending on values of
+// dim and keepdim for returning tensors containing reduction results.
+// This function should be called when you are reducing a zero-numel tensor and want to
+// resize the output and return it. This function exists for resizing zero-numel
+// tensors when the size of the reduction dimension is non-zero.
+[[maybe_unused]] inline void zero_numel_tensor_resize(
+    Tensor& result,
+    Tensor& result_indices,
+    const Tensor& self,
+    const int64_t dim,
+    const bool keepdim,
+    const char* fn_name) {
+  auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, fn_name);
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
 }
 
-}}  // at::native
+inline ScalarType get_dtype_from_self(
+    const Tensor& self,
+    const std::optional<ScalarType>& dtype,
+    bool promote_integers) {
+  if (dtype.has_value()) {
+    return dtype.value();
+  }
+  ScalarType src_type = self.scalar_type();
+  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
+    return kLong;
+  }
+  return src_type;
+}
+
+inline ScalarType get_dtype_from_result(Tensor& result, std::optional<ScalarType> dtype) {
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  if (dtype.has_value()) {
+    return dtype.value();
+  } else {
+    return result.scalar_type();
+  }
+}
+
+
+} // namespace at::native
+
+namespace at::meta {
+
+[[maybe_unused]] inline DimVector get_reduction_shape(
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    bool allow_empty_dims = false) {
+  auto mask = native::make_dim_mask(dims, self.dim(), allow_empty_dims);
+  return native::shape_from_dim_mask(self, mask, keepdim);
+}
+
+inline void resize_reduction(
+    impl::MetaBase& meta,
+    const Tensor& self,
+    OptionalIntArrayRef opt_dims,
+    bool keepdim,
+    ScalarType out_dtype,
+    bool allow_empty_dims=false) {
+  DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
+  if (self.layout() == kStrided) {
+    meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  } else if (shape.empty()) {
+    meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype).layout(kStrided));
+  } else {
+    TORCH_CHECK(false, "resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");
+  }
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(), self, dims_, keepdim);
+}
+
+inline void resize_reduction_with_indices(
+    impl::MetaBase& meta,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  DimVector dims_(dims);
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim);
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(1, shape, {}, self.options().dtype(kLong));
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(0), self, dims_, keepdim);
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(1), self, dims_, keepdim);
+}
+
+inline TensorIterator make_reduction(
+    const Tensor& self,
+    const Tensor& result,
+    OptionalIntArrayRef opt_dims,
+    bool keepdim,
+    ScalarType in_dtype) {
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(opt_dims, ndim);
+  auto viewed_result =
+      at::native::review_reduce_result(result, ndim, mask, keepdim);
+  if (self.scalar_type() == in_dtype) {
+    return TensorIterator::reduce_op(viewed_result, self);
+  }
+  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+}
+
+inline TensorIterator make_reduction(
+    const Tensor& self,
+    const Tensor& result1,
+    const Tensor& result2,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType dtype1,
+    ScalarType /*dtype2*/) {
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dims, ndim);
+  auto viewed_result1 = at::native::review_reduce_result(result1, ndim, mask, keepdim);
+  auto viewed_result2 = at::native::review_reduce_result(result2, ndim, mask, keepdim);
+  // special case for type promotion in mixed precision, improves computational efficiency.
+  // We don't generalize this to common mismatched input/output types to avoid cross product
+  // of templated kernel launches.
+  if (self.scalar_type() == dtype1 ||
+      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+  }
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
+}
+
+[[maybe_unused]] inline TensorIterator make_reduction_from_out_ty(
+    const Tensor& self,
+    const Tensor& result,
+    OptionalIntArrayRef opt_dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  const bool gpu_lowp_to_f32 =
+      (self.is_cuda() &&
+       (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
+       out_dtype == kFloat);
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  return make_reduction(self, result, opt_dims, keepdim, in_dtype);
+}
+
+} // namespace at::meta

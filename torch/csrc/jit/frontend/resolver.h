@@ -4,8 +4,7 @@
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -32,7 +31,7 @@ struct Resolver {
   // the graph to create a value.
   virtual std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) {
     return nullptr;
   }
@@ -47,7 +46,7 @@ struct Resolver {
 struct NativeResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -64,5 +63,4 @@ struct NativeResolver : public Resolver {
 inline std::shared_ptr<NativeResolver> nativeResolver() {
   return std::make_shared<NativeResolver>();
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

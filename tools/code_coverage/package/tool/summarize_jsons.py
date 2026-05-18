@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import json
 import os
 import time
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, TYPE_CHECKING
 
 from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
     CompilerType,
+    JSON_FOLDER_BASE_DIR,
     TestList,
     TestPlatform,
     TestStatusType,
@@ -16,7 +18,6 @@ from ..util.utils import (
     print_time,
     related_to_test_list,
 )
-from .parser.coverage_record import CoverageRecord
 from .parser.gcov_coverage_parser import GcovCoverageParser
 from .parser.llvm_coverage_parser import LlvmCoverageParser
 from .print_report import (
@@ -26,47 +27,53 @@ from .print_report import (
 )
 
 
-# coverage_records: Dict[str, LineInfo] = dict()
-covered_lines: Dict[str, Set[int]] = {}
-uncovered_lines: Dict[str, Set[int]] = {}
+if TYPE_CHECKING:
+    from .parser.coverage_record import CoverageRecord
+
+
+# coverage_records: dict[str, LineInfo] = {}
+covered_lines: dict[str, set[int]] = {}
+uncovered_lines: dict[str, set[int]] = {}
 tests_type: TestStatusType = {"success": set(), "partial": set(), "fail": set()}
 
 
 def transform_file_name(
-    file_path: str, interested_folders: List[str], platform: TestPlatform
+    file_path: str, interested_folders: list[str], platform: TestPlatform
 ) -> str:
-    remove_patterns: Set[str] = {".DEFAULT.cpp", ".AVX.cpp", ".AVX2.cpp"}
+    remove_patterns: set[str] = {".DEFAULT.cpp", ".AVX.cpp", ".AVX2.cpp"}
     for pattern in remove_patterns:
         file_path = file_path.replace(pattern, "")
-    # if user has specifiled interested folder
+    # if user has specified interested folder
     if interested_folders:
         for folder in interested_folders:
             if folder in file_path:
                 return file_path[file_path.find(folder) :]
     # remove pytorch base folder path
     if platform == TestPlatform.OSS:
-        from package.oss.utils import get_pytorch_folder
+        from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
-        assert file_path.startswith(pytorch_foler)
+        if not file_path.startswith(pytorch_foler):
+            raise AssertionError(f"file_path must start with {pytorch_foler}")
         file_path = file_path[len(pytorch_foler) + 1 :]
     return file_path
 
 
 def is_intrested_file(
-    file_path: str, interested_folders: List[str], platform: TestPlatform
-):
+    file_path: str, interested_folders: list[str], platform: TestPlatform
+) -> bool:
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
-    if any([pattern in file_path for pattern in ignored_patterns]):
+    if any(pattern in file_path for pattern in ignored_patterns):
         return False
 
     # ignore files that are not belong to pytorch
     if platform == TestPlatform.OSS:
+        # pyrefly: ignore [missing-import]
         from package.oss.utils import get_pytorch_folder
 
         if not file_path.startswith(get_pytorch_folder()):
             return False
-    # if user has specifiled interested folder
+    # if user has specified interested folder
     if interested_folders:
         for folder in interested_folders:
             intersted_folder_path = folder if folder.endswith("/") else f"{folder}/"
@@ -77,7 +84,7 @@ def is_intrested_file(
         return True
 
 
-def get_json_obj(json_file: str) -> Tuple[Any, int]:
+def get_json_obj(json_file: str) -> tuple[Any, int]:
     """
     Sometimes at the start of file llvm/gcov will complains "fail to find coverage data",
     then we need to skip these lines
@@ -102,7 +109,7 @@ def get_json_obj(json_file: str) -> Tuple[Any, int]:
     return None, 2
 
 
-def parse_json(json_file: str, platform: TestPlatform) -> List[CoverageRecord]:
+def parse_json(json_file: str, platform: TestPlatform) -> list[CoverageRecord]:
     print("start parse:", json_file)
     json_obj, read_status = get_json_obj(json_file)
     if read_status == 0:
@@ -117,7 +124,7 @@ def parse_json(json_file: str, platform: TestPlatform) -> List[CoverageRecord]:
 
     cov_type = detect_compiler_type(platform)
 
-    coverage_records: List[CoverageRecord] = []
+    coverage_records: list[CoverageRecord] = []
     if cov_type == CompilerType.CLANG:
         coverage_records = LlvmCoverageParser(json_obj).parse("fbcode")
         # print(coverage_records)
@@ -128,7 +135,7 @@ def parse_json(json_file: str, platform: TestPlatform) -> List[CoverageRecord]:
 
 
 def parse_jsons(
-    test_list: TestList, interested_folders: List[str], platform: TestPlatform
+    test_list: TestList, interested_folders: list[str], platform: TestPlatform
 ) -> None:
     g = os.walk(JSON_FOLDER_BASE_DIR)
 
@@ -152,8 +159,8 @@ def parse_jsons(
 
 
 def update_coverage(
-    coverage_records: List[CoverageRecord],
-    interested_folders: List[str],
+    coverage_records: list[CoverageRecord],
+    interested_folders: list[str],
     platform: TestPlatform,
 ) -> None:
     for item in coverage_records:
@@ -187,8 +194,8 @@ def update_set() -> None:
 
 def summarize_jsons(
     test_list: TestList,
-    interested_folders: List[str],
-    coverage_only: List[str],
+    interested_folders: list[str],
+    coverage_only: list[str],
     platform: TestPlatform,
 ) -> None:
     start_time = time.time()

@@ -1,7 +1,4 @@
 #include <torch/csrc/autograd/functions/utils.h>
-#include <aten/src/ATen/ThreadLocalState.h>
-#include <c10/util/ThreadLocalDebugInfo.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
@@ -10,9 +7,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::distributed::autograd::AutogradMetadata;
 using torch::distributed::autograd::RpcWithAutograd;
@@ -20,7 +15,6 @@ using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
-using torch::distributed::rpc::RpcCommandBase;
 using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(
@@ -36,7 +30,7 @@ void addSendRpcBackward(
       [](const torch::Tensor& t) { return t.requires_grad(); });
 
   // Attach the appropriate autograd edges.
-  auto grad_fn = std::make_shared<SendRpcBackward>();
+  auto grad_fn = c10::make_intrusive<SendRpcBackward>();
   grad_fn->set_next_edges(
       torch::autograd::collect_next_edges(tensors_with_grad));
 
@@ -53,7 +47,7 @@ ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   auto autogradContext =
@@ -61,7 +55,7 @@ ContextPtr addRecvRpcBackward(
 
   if (!tensors.empty() && torch::autograd::compute_requires_grad(tensors)) {
     // Attach the tensors as inputs to the autograd function.
-    auto grad_fn = std::make_shared<RecvRpcBackward>(
+    auto grad_fn = c10::make_intrusive<RecvRpcBackward>(
         autogradMetadata, autogradContext, fromWorkerId, deviceMap);
     for (auto& tensor : tensors) {
       if (tensor.requires_grad()) {
@@ -77,8 +71,8 @@ ContextPtr addRecvRpcBackward(
   return autogradContext;
 }
 
-Message getMessageWithProfiling(
-    torch::distributed::rpc::Message&& wrappedRpcMessage,
+static c10::intrusive_ptr<Message> getMessageWithProfiling(
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMessage,
     MessageType msgType,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
   auto& remoteProfilerManager =
@@ -93,29 +87,28 @@ Message getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
   return std::move(wrappedProfilingMsg).toMessage();
 }
 
-Message getMessageWithAutograd(
+c10::intrusive_ptr<Message> getMessageWithAutograd(
     const rpc::worker_id_t dstId,
-    torch::distributed::rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
   // rpc message. otherwise, attach grad info and grad functions and send
   // rpcWithAutograd message.
   auto tensorsRequireGrad =
-      torch::autograd::compute_requires_grad(wrappedRpcMsg.tensors());
+      torch::autograd::compute_requires_grad(wrappedRpcMsg->tensors());
   if (!autogradContainer.hasValidContext() ||
       (!forceGradRecording && !tensorsRequireGrad)) {
-    return std::move(wrappedRpcMsg);
+    return wrappedRpcMsg;
   }
 
   // Retrieve the appropriate context to modify.
@@ -145,7 +138,7 @@ Message getMessageWithAutograd(
 c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    torch::distributed::rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {
@@ -156,24 +149,30 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
       forceGradRecording,
       agent.getDeviceMap(dst));
 
-  c10::intrusive_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
-  if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
-    auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
-    auto msgWithProfiling = getMessageWithProfiling(
-        std::move(msg),
-        rpc::MessageType::RUN_WITH_PROFILING_REQ,
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
-  } else {
-    fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  if (!forceDisableProfiling) {
+    switch (torch::profiler::impl::profilerType()) {
+      case torch::profiler::impl::ActiveProfilerType::LEGACY: {
+        auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+        auto msgWithProfiling = getMessageWithProfiling(
+            std::move(msg),
+            rpc::MessageType::RUN_WITH_PROFILING_REQ,
+            std::move(profilerConfig));
+        return agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+      }
+      case torch::profiler::impl::ActiveProfilerType::KINETO:
+        TORCH_WARN_ONCE(
+            "Profiling a distributed call with the Kineto profiler will profile "
+            "the caller, but not the worker.");
+        break;
+      default:
+        break;
+    }
   }
 
-  return fut;
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  ;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

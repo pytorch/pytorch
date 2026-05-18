@@ -1,28 +1,31 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, Dict, SupportsInt, Tuple, cast
+from typing import Any, cast, SupportsInt
 from unittest import TestCase
 
-from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
     RendezvousHandlerRegistry,
+    RendezvousInfo,
     RendezvousParameters,
 )
 
 
 class RendezvousParametersTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._backend = "dummy_backend"
         self._endpoint = "dummy_endpoint"
         self._run_id = "dummy_run_id"
         self._min_nodes = 3
         self._max_nodes = 6
-        self._kwargs: Dict[str, Any] = {}
+        self._kwargs: dict[str, Any] = {}
 
     def _create_params(self) -> RendezvousParameters:
         return RendezvousParameters(
@@ -138,7 +141,17 @@ class RendezvousParametersTest(TestCase):
                 self.assertFalse(params.get_as_bool("dummy_param"))
 
     def test_get_as_bool_raises_error_if_value_is_invalid(self) -> None:
-        for value in ["01", "Flse", "Ture", "g", "4", "_", "truefalse", 2, -1]:
+        for value in [
+            "01",
+            "Flse",  # codespell:ignore
+            "Ture",  # codespell:ignore
+            "g",
+            "4",
+            "_",
+            "truefalse",
+            2,
+            -1,
+        ]:
             with self.subTest(value=value):
                 self._kwargs["dummy_param"] = value
 
@@ -168,7 +181,9 @@ class RendezvousParametersTest(TestCase):
 
                 params = self._create_params()
 
-                self.assertEqual(params.get_as_int("dummy_param"), int(cast(SupportsInt, value)))
+                self.assertEqual(
+                    params.get_as_int("dummy_param"), int(cast(SupportsInt, value))
+                )
 
     def test_get_as_int_raises_error_if_value_is_invalid(self) -> None:
         for value in ["a", "0a", "3b", "abc"]:
@@ -192,8 +207,8 @@ class _DummyRendezvousHandler(RendezvousHandler):
     def get_backend(self) -> str:
         return "dummy_backend"
 
-    def next_rendezvous(self) -> Tuple[Store, int, int]:
-        raise NotImplementedError()
+    def next_rendezvous(self) -> RendezvousInfo:
+        raise NotImplementedError
 
     def is_closed(self) -> bool:
         return False
@@ -213,6 +228,7 @@ class _DummyRendezvousHandler(RendezvousHandler):
 
 class RendezvousHandlerRegistryTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._params = RendezvousParameters(
             backend="dummy_backend",
             endpoint="dummy_endpoint",
@@ -231,7 +247,9 @@ class RendezvousHandlerRegistryTest(TestCase):
         self._registry.register("dummy_backend", self._create_handler)
         self._registry.register("dummy_backend", self._create_handler)
 
-    def test_register_raises_error_if_called_twice_with_different_creators(self) -> None:
+    def test_register_raises_error_if_called_twice_with_different_creators(
+        self,
+    ) -> None:
         self._registry.register("dummy_backend", self._create_handler)
 
         other_create_handler = lambda p: _DummyRendezvousHandler(p)  # noqa: E731

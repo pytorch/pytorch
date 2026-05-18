@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Example of the Timer and Sparse Fuzzer APIs:
 
 $ python -m examples.sparse.fuzzer
@@ -7,7 +8,7 @@ import sys
 
 import torch.utils.benchmark as benchmark_utils
 
-def main():
+def main() -> None:
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
             [
@@ -39,7 +40,7 @@ def main():
             [
                 benchmark_utils.FuzzedSparseTensor(
                     name=name,
-                    size=tuple([f"k{i}" for i in range(3)]),
+                    size=tuple(f"k{i}" for i in range(3)),
                     min_elements=64 * 1024,
                     max_elements=128 * 1024,
                     sparse_dim="sparse_dim",
@@ -57,7 +58,6 @@ def main():
 
     for i, (tensors, tensor_properties, _) in enumerate(add_fuzzer.take(n=n)):
         x = tensors["x"]
-        y = tensors["y"]
         shape = ", ".join(tuple(f'{i:>4}' for i in x.shape))
         x_tensor_properties = tensor_properties["x"]
         description = "".join([
@@ -80,7 +80,7 @@ def main():
     print()
 
     # More string munging to make pretty output.
-    print(f"Average attemts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
+    print(f"Average attempts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
 
     def time_fn(m):
         return m.mean / m.metadata["nnz"]

@@ -1,9 +1,11 @@
 #import <ATen/native/metal/MetalConvParams.h>
 #import <ATen/native/metal/MetalNeuronType.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOp.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <Foundation/Foundation.h>
+C10_DIAGNOSTIC_POP()
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNConvDataSource : NSObject<MPSCNNConvolutionDataSource>
 @property(nonatomic, assign) void* weights;
 @property(nonatomic, assign) float* bias;
@@ -14,11 +16,10 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 
 @end
 
-using namespace at::native::metal;
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNConvOp : NSObject<MPSCNNOp>
-+ (MPSCNNConvOp*)conv2d:(const Conv2DParams&)params
++ (MPSCNNConvOp*)conv2d:(const at::native::metal::Conv2DParams&)params
                 weights:(float*)w
                    bias:(float*)b
-           neuronFilter:(NeuronType)t;
+           neuronFilter:(at::native::metal::NeuronType)t;
 @end

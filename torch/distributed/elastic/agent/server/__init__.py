@@ -7,9 +7,10 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-The elastic agent is the control plane of torchelastic. It is a process
-that launches and manages underlying worker processes. The agent is
-responsible for:
+The elastic agent is the control plane of torchelastic.
+
+It is a process that launches and manages underlying worker processes.
+The agent is responsible for:
 
 1. Working with distributed torch: the workers are started with all the
    necessary information to successfully and trivially call
@@ -28,12 +29,13 @@ Or can be coordinated, communicating to other agents (that manage workers
 in the same job) to make a collective decision.
 """
 
-from .api import (  # noqa: F401
+from .api import (
     ElasticAgent,
+    RunResult,
     SimpleElasticAgent,
     Worker,
     WorkerGroup,
-    RunResult,
     WorkerSpec,
     WorkerState,
 )
+from .local_elastic_agent import TORCHELASTIC_ENABLE_FILE_TIMER, TORCHELASTIC_TIMER_FILE

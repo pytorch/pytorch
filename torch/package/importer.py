@@ -1,23 +1,28 @@
 import importlib
+import logging
+import sys
 from abc import ABC, abstractmethod
-from pickle import _getattribute, _Pickler  # type: ignore[attr-defined]
-from pickle import whichmodule as _pickle_whichmodule  # type: ignore[attr-defined]
+from pickle import (
+    _getattribute,  # pyrefly: ignore [missing-module-attribute]
+    _Pickler,
+    whichmodule as _pickle_whichmodule,  # pyrefly: ignore [missing-module-attribute]
+)
 from types import ModuleType
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
+
+
+__all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
+log = logging.getLogger(__name__)
 
 
 class ObjNotFoundError(Exception):
     """Raised when an importer cannot find an object by searching for its name."""
 
-    pass
-
 
 class ObjMismatchError(Exception):
     """Raised when an importer found a different object with the same name as the user-provided one."""
-
-    pass
 
 
 class Importer(ABC):
@@ -40,7 +45,8 @@ class Importer(ABC):
         obj2 = getattr(module, obj_name)
         assert obj1 is obj2
     """
-    modules: Dict[str, ModuleType]
+
+    modules: dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -48,14 +54,13 @@ class Importer(ABC):
 
         The contract is the same as for importlib.import_module.
         """
-        pass
 
-    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
+    def get_name(self, obj: Any, name: str | None = None) -> tuple[str, str]:
         """Given an object, return a name that can be used to retrieve the
         object from this environment.
 
         Args:
-            obj: An object to get the the module-environment-relative name for.
+            obj: An object to get the module-environment-relative name for.
             name: If set, use this name instead of looking up __name__ or __qualname__ on `obj`.
                 This is only here to match how Pickler handles __reduce__ functions that return a string,
                 don't use otherwise.
@@ -95,7 +100,12 @@ class Importer(ABC):
         # Check that this name will indeed return the correct object
         try:
             module = self.import_module(module_name)
-            obj2, _ = _getattribute(module, name)
+            if sys.version_info >= (3, 14):
+                # pickle._getatribute signature changes in 3.14
+                # to take iterable and return just one object
+                obj2 = _getattribute(module, name.split("."))
+            else:
+                obj2, _ = _getattribute(module, name)
         except (ImportError, KeyError, AttributeError):
             raise ObjNotFoundError(
                 f"{obj} was not found as {module_name}.{name}"
@@ -105,7 +115,8 @@ class Importer(ABC):
             return module_name, name
 
         def get_obj_info(obj):
-            assert name is not None
+            if name is None:
+                raise AssertionError("name must not be None")
             module_name = self.whichmodule(obj, name)
             is_mangled_ = is_mangled(module_name)
             location = (
@@ -168,6 +179,12 @@ class _SysImporter(Importer):
         return importlib.import_module(module_name)
 
     def whichmodule(self, obj: Any, name: str) -> str:
+        # In Python 3.14+, pickle.whichmodule tries to import the module,
+        # which fails for mangled package names like '<torch_package_0>'.
+        # Check __module__ first before calling pickle.whichmodule.
+        module_name = getattr(obj, "__module__", None)
+        if module_name is not None:
+            return module_name
         return _pickle_whichmodule(obj, name)
 
 
@@ -181,7 +198,39 @@ class OrderedImporter(Importer):
     """
 
     def __init__(self, *args):
-        self._importers: List[Importer] = list(args)
+        self._importers: list[Importer] = list(args)
+
+    def _is_torchpackage_dummy(self, module):
+        """Returns true iff this module is an empty PackageNode in a torch.package.
+
+        If you intern `a.b` but never use `a` in your code, then `a` will be an
+        empty module with no source. This can break cases where we are trying to
+        re-package an object after adding a real dependency on `a`, since
+        OrderedImportere will resolve `a` to the dummy package and stop there.
+
+        See: https://github.com/pytorch/pytorch/pull/71520#issuecomment-1029603769
+        """
+        if not getattr(module, "__torch_package__", False):
+            return False
+        if not hasattr(module, "__path__"):
+            return False
+        if not hasattr(module, "__file__"):
+            return True
+        return module.__file__ is None
+
+    def get_name(self, obj: Any, name: str | None = None) -> tuple[str, str]:
+        for importer in self._importers:
+            try:
+                return importer.get_name(obj, name)
+            except (ObjNotFoundError, ObjMismatchError) as e:
+                warning_message = (
+                    f"Tried to call get_name with obj {obj}, "
+                    f"and name {name} on {importer} and got {e}"
+                )
+                log.warning(warning_message)
+        raise ObjNotFoundError(
+            f"Could not find obj {obj} and name {name} in any of the importers {self._importers}"
+        )
 
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None
@@ -192,7 +241,10 @@ class OrderedImporter(Importer):
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:
-                return importer.import_module(module_name)
+                module = importer.import_module(module_name)
+                if self._is_torchpackage_dummy(module):
+                    continue
+                return module
             except ModuleNotFoundError as err:
                 last_err = err
 

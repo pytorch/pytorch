@@ -1,18 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <torch/library.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
-#include <algorithm>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
 
-namespace at {
-namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+namespace at::native {
+
 DEFINE_DISPATCH(qhardswish_stub);
 
 namespace {
@@ -20,6 +23,11 @@ namespace {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   TORCH_CHECK(qx.ndimension() > 0, "qnnpack_hardswish(): Got empty input tensor");
+  TORCH_CHECK(qx.scalar_type() == c10::kQUInt8,
+                "qnnpack_hardswish(): Expected input data type to be ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(qx.scalar_type()));
   initQNNPACK();
 
   size_t num_elems = qx.numel() / qx.size(0);
@@ -49,7 +57,7 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_hardswish_nc_q8(
     hardswish_op,
     qx.size(0), // batch size
-    (uint8_t*)qx.data_ptr<c10::quint8>(), // input data
+    reinterpret_cast<const uint8_t*>(qx.const_data_ptr<c10::quint8>()), // input data
     num_elems, // input stride
     (uint8_t*)qy.data_ptr<c10::quint8>(), // output data
     num_elems); // output stride
@@ -70,7 +78,7 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
 
 } // namespace
 
-Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output_zero_point) {
+static Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output_zero_point) {
   Tensor qy = at::_empty_affine_quantized(
       qx.sizes(),
       at::device(kCPU).dtype(qx.scalar_type()),
@@ -93,4 +101,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::hardswish"), TORCH_FN(quantized_hardswish));
 }
 
-}}  // namespace at::native
+}  // namespace at::native

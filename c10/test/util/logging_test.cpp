@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <optional>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
@@ -10,13 +11,11 @@ using std::set;
 using std::string;
 using std::vector;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceTrue) {
   // This should just work.
   CAFFE_ENFORCE(true, "Isn't it?");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceFalse) {
   bool kFalse = false;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
@@ -24,12 +23,12 @@ TEST(LoggingTest, TestEnforceFalse) {
     CAFFE_ENFORCE(false, "This throws.");
     // This should never be triggered.
     ADD_FAILURE();
+    // NOLINTNEXTLINE(*catch*)
   } catch (const ::c10::Error&) {
   }
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceEquals) {
   int x = 4;
   int y = 5;
@@ -59,7 +58,6 @@ struct EnforceEqWithCaller {
 };
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceMessageVariables) {
   const char* const x = "hello";
   CAFFE_ENFORCE_EQ(1, 1, "variable: ", x, " is a variable");
@@ -68,7 +66,6 @@ TEST(LoggingTest, TestEnforceMessageVariables) {
   e.test(x);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     LoggingTest,
     EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {
@@ -84,6 +81,7 @@ TEST(
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct Noncopyable {
   int x;
 
@@ -100,17 +98,15 @@ struct Noncopyable {
 };
 
 std::ostream& operator<<(std::ostream& out, const Noncopyable& nc) {
-  out << "Noncopyable(" << nc.x << ")";
+  out << "Noncopyable(" << nc.x << ')';
   return out;
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, DoesntCopyComparedObjects) {
   CAFFE_ENFORCE_EQ(Noncopyable(123), Noncopyable(123));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, EnforceShowcase) {
   // It's not really a test but rather a convenient thing that you can run and
   // see all messages
@@ -137,7 +133,6 @@ TEST(LoggingTest, EnforceShowcase) {
       std::equal_to<void>(), ==, one * two + three, three * two));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, Join) {
   auto s = c10::Join(", ", vector<int>({1, 2, 3}));
   EXPECT_EQ(s, "1, 2, 3");
@@ -147,16 +142,14 @@ TEST(LoggingTest, Join) {
   EXPECT_EQ(s, "1, 2, 3");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestDanglingElse) {
   if (true)
-    DCHECK_EQ(1, 1);
+    TORCH_DCHECK_EQ(1, 1);
   else
     GTEST_FAIL();
 }
 
 #if GTEST_HAS_DEATH_TEST
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
@@ -165,5 +158,69 @@ TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 #endif
+
+#ifdef FBCODE_CAFFE2
+static C10_NOINLINE void f1() {
+  CAFFE_THROW("message");
+}
+
+static C10_NOINLINE void f2() {
+  f1();
+}
+
+static C10_NOINLINE void f3() {
+  f2();
+}
+TEST(LoggingTest, ExceptionWhat) {
+  std::optional<::c10::Error> error;
+  try {
+    f3();
+  } catch (const ::c10::Error& e) {
+    error = e;
+  }
+
+  ASSERT_TRUE(error);
+  std::string what = error->what();
+
+  EXPECT_TRUE(what.find("c10_test::f1()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f2()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f3()") != std::string::npos) << what;
+
+  // what() should be recomputed.
+  error->add_context("NewContext");
+  what = error->what();
+  EXPECT_TRUE(what.find("c10_test::f1()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f2()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f3()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("NewContext") != std::string::npos) << what;
+}
+#endif
+
+TEST(LoggingTest, LazyBacktrace) {
+  struct CountingLazyString : ::c10::OptimisticLazyValue<std::string> {
+    mutable size_t invocations{0};
+
+    std::string compute() const override {
+      ++invocations;
+      return "A string";
+    }
+  };
+
+  auto backtrace = std::make_shared<CountingLazyString>();
+  ::c10::Error ex("", backtrace);
+  // The backtrace is not computed on construction, and then it is not computed
+  // more than once.
+  EXPECT_EQ(backtrace->invocations, 0);
+  const char* w1 = ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+  const char* w2 = ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+  // what() should not be recomputed.
+  EXPECT_EQ(w1, w2);
+
+  ex.add_context("");
+  ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+}
 
 } // namespace c10_test

@@ -9,22 +9,27 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DECLARE_bool(torch_jit_enable_new_executor);
+TORCH_DECLARE_bool(torch_jit_enable_new_executor);
 
-namespace torch {
-namespace jit {
+TORCH_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
+
+namespace torch::jit {
 struct GraphExecutorState;
 struct Code;
 
+enum ExecutorExecutionMode {
+  SIMPLE,
+  PROFILING,
+};
+
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(
-      std::shared_ptr<Graph> graph,
-      std::string function_name,
-      size_t remaining_bailout_depth = 0)
-      : code(graph, std::move(function_name), remaining_bailout_depth),
-        graph(std::move(graph)) {}
+  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
+      : code(graph, std::move(function_name)),
+        graph(
+            FLAGS_torch_jit_execution_plan_reuse_code_graph
+                ? code.graph()
+                : std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -35,8 +40,8 @@ struct ExecutionPlan {
 };
 
 // Notice that those structs don't manage lifetime of their members.
-// They is only valid only right after you call getDebugState() and should never
-// be used again once another GraphExecutor function is called.
+// They are only valid only right after you call getDebugState() and should
+// never be used again once another GraphExecutor function is called.
 
 struct GraphExecutorState {
   const Graph* graph = nullptr;
@@ -50,13 +55,18 @@ struct TORCH_API EnableProfilingGuard {
 
  private:
   bool old_executor_mode = false;
-  bool old_profiling_mode = false;
+  bool old_get_optimize = false;
 };
 
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
+
+  GraphExecutor(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      ExecutorExecutionMode executor_mode);
 
   void run(Stack& inputs);
   c10::intrusive_ptr<Future> runAsync(
@@ -72,21 +82,21 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
+  // If no bailout depth is passed, the depth will be initialized from the
+  // current global fusion strategy settings.
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
-      size_t remaining_bailout_depth);
-  explicit operator bool() const {
-    return pImpl != nullptr;
-  }
-  void reset() {
-    pImpl.reset();
-  }
-  std::shared_ptr<Graph> graph() const;
+      std::optional<size_t> remaining_bailout_depth = std::nullopt);
+  // Returns an optimized execution plan without requiring input arguments.
+  // Runs input-independent optimization passes (e.g. inlining, constant
+  // propagation, peephole, CSE) but skips profiling-based specializations
+  // that require runtime type/shape information.
+  const ExecutionPlan& getInputIndependentPlan();
   GraphExecutorState getDebugState();
 
-  static size_t getDefaultNumBailOuts();
-
   void debugFlushCompilationCache();
+
+  bool isOptimized() const;
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
@@ -109,7 +119,7 @@ TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();
-TORCH_API std::atomic<size_t>& getBailoutDepth();
+TORCH_API size_t getBailoutDepth();
 TORCH_API bool IsNewExecutorEnabled();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
@@ -139,5 +149,4 @@ GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
 // with less plumbing.
 } // namespace detail
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

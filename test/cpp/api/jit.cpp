@@ -6,7 +6,6 @@
 
 #include <string>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto module = torch::jit::compile(R"JIT(
       def test_mul(a, b):
@@ -26,18 +25,17 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
 
   ASSERT_EQ(1, module->run_method("test_mul", a, b).toTensor().item<int64_t>());
 
-  ASSERT_EQ(2, module->run_method("test_relu", a, b).toTensor().item<int64_t>());
+  ASSERT_EQ(
+      2, module->run_method("test_relu", a, b).toTensor().item<int64_t>());
 
   ASSERT_TRUE(
-      0x200 == module->run_method("test_while", a, b).toTensor().item<int64_t>());
+      0x200 ==
+      module->run_method("test_while", a, b).toTensor().item<int64_t>());
 
   at::IValue list = c10::List<int64_t>({3, 4});
   ASSERT_EQ(2, module->run_method("test_len", list).toInt());
-
 }
 
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def nested_loop(a: List[List[Tensor]], b: int):
@@ -53,11 +51,13 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   module->run_method("nested_loop", list_of_lists, b);
 
   auto generic_list = c10::impl::GenericList(at::TensorType::get());
-  auto empty_generic_list = c10::impl::GenericList(at::ListType::create(at::TensorType::get()));
+  auto empty_generic_list =
+      c10::impl::GenericList(at::ListType::create(at::TensorType::get()));
   empty_generic_list.push_back(generic_list);
   module->run_method("nested_loop", empty_generic_list, b);
 
-  auto too_many_lists = c10::impl::GenericList(at::ListType::create(at::ListType::create(at::TensorType::get())));
+  auto too_many_lists = c10::impl::GenericList(
+      at::ListType::create(at::ListType::create(at::TensorType::get())));
   too_many_lists.push_back(empty_generic_list);
   try {
     module->run_method("nested_loop", too_many_lists, b);
@@ -71,8 +71,6 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   };
 }
 
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestDictArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def dict_op(a: Dict[str, Tensor], b: str):
@@ -84,7 +82,6 @@ TEST(TorchScriptTest, TestDictArgMatching) {
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestTupleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def tuple_op(a: Tuple[List[int]]):
@@ -92,14 +89,12 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
     )JIT");
 
   c10::List<int64_t> int_list({1});
-  auto tuple_generic_list = c10::ivalue::Tuple::create({ int_list });
+  auto tuple_generic_list = c10::ivalue::Tuple::create({int_list});
 
   // doesn't fail on arg matching
   module->run_method("tuple_op", tuple_generic_list);
-
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestOptionalArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def optional_tuple_op(a: Optional[Tuple[int, str]]):
@@ -114,10 +109,8 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
   ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple).toInt());
   ASSERT_EQ(
       0, module->run_method("optional_tuple_op", torch::jit::IValue()).toInt());
-
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchScriptTest, TestPickle) {
   torch::IValue float_value(2.3);
 

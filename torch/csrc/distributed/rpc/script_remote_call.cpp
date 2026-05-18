@@ -1,12 +1,9 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
-#include <c10/util/C++17.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
@@ -50,7 +47,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
   }
 }
 
-Message ScriptRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());
@@ -60,7 +57,7 @@ Message ScriptRemoteCall::toMessageImpl() && {
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
       MessageType::SCRIPT_REMOTE_CALL);
@@ -68,7 +65,7 @@ Message ScriptRemoteCall::toMessageImpl() && {
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
     const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
 
   auto value = jit::unpickle(
@@ -76,10 +73,9 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  auto values = value.toTuple()->elements();
+  auto values = value.toTupleRef().elements().vec();
+  TORCH_CHECK(!values.empty(), "Malformed message: empty values unpickled");
   return fromIValues(values);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

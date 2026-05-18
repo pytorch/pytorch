@@ -1,20 +1,25 @@
+from __future__ import annotations
+
 import os
 import subprocess
-from typing import IO, Dict, List, Set
+from typing import IO
 
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
 
 
-def key_by_percentage(x):
+CoverageItem = tuple[str, float, int, int]
+
+
+def key_by_percentage(x: CoverageItem) -> float:
     return x[1]
 
 
-def key_by_name(x):
+def key_by_name(x: CoverageItem) -> str:
     return x[0]
 
 
-def is_intrested_file(file_path: str, interested_folders: List[str]):
+def is_intrested_file(file_path: str, interested_folders: list[str]) -> bool:
     if "cuda" in file_path:
         return False
     if "aten/gen_aten" in file_path or "aten/aten_" in file_path:
@@ -25,7 +30,7 @@ def is_intrested_file(file_path: str, interested_folders: List[str]):
     return False
 
 
-def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
+def is_this_type_of_tests(target_name: str, test_set_by_type: set[str]) -> bool:
     # tests are divided into three types: success / partial success / fail to collect coverage
     for test in test_set_by_type:
         if target_name in test:
@@ -34,9 +39,8 @@ def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
 
 
 def print_test_by_type(
-    tests: TestList, test_set_by_type: Set[str], type_name: str, summary_file: IO
+    tests: TestList, test_set_by_type: set[str], type_name: str, summary_file: IO[str]
 ) -> None:
-
     print("Tests " + type_name + " to collect coverage:", file=summary_file)
     for test in tests:
         if is_this_type_of_tests(test.name, test_set_by_type):
@@ -47,9 +51,9 @@ def print_test_by_type(
 def print_test_condition(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
-    summary_file: IO,
+    interested_folders: list[str],
+    coverage_only: list[str],
+    summary_file: IO[str],
     summary_type: str,
 ) -> None:
     print_test_by_type(tests, tests_type["success"], "fully success", summary_file)
@@ -76,10 +80,10 @@ def print_test_condition(
 def line_oriented_report(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
-    covered_lines: Dict[str, Set[int]],
-    uncovered_lines: Dict[str, Set[int]],
+    interested_folders: list[str],
+    coverage_only: list[str],
+    covered_lines: dict[str, set[int]],
+    uncovered_lines: dict[str, set[int]],
 ) -> None:
     with open(os.path.join(SUMMARY_FOLDER_DIR, "line_summary"), "w+") as report_file:
         print_test_condition(
@@ -91,14 +95,8 @@ def line_oriented_report(
             "LINE SUMMARY",
         )
         for file_name in covered_lines:
-            if len(covered_lines[file_name]) == 0:
-                covered = {}
-            else:
-                covered = covered_lines[file_name]
-            if len(uncovered_lines[file_name]) == 0:
-                uncovered = {}
-            else:
-                uncovered = uncovered_lines[file_name]
+            covered = covered_lines[file_name]
+            uncovered = uncovered_lines[file_name]
             print(
                 f"{file_name}\n  covered lines: {sorted(covered)}\n  unconvered lines:{sorted(uncovered)}",
                 file=report_file,
@@ -106,7 +104,7 @@ def line_oriented_report(
 
 
 def print_file_summary(
-    covered_summary: int, total_summary: int, summary_file: IO
+    covered_summary: int, total_summary: int, summary_file: IO[str]
 ) -> float:
     # print summary first
     try:
@@ -124,18 +122,18 @@ def print_file_summary(
 
 def print_file_oriented_report(
     tests_type: TestStatusType,
-    coverage,
+    coverage: list[CoverageItem],
     covered_summary: int,
     total_summary: int,
-    summary_file: IO,
+    summary_file: IO[str],
     tests: TestList,
-    interested_folders: List[str],
-    coverage_only: List[str],
+    interested_folders: list[str],
+    coverage_only: list[str],
 ) -> None:
     coverage_percentage = print_file_summary(
         covered_summary, total_summary, summary_file
     )
-    # print test condition (interested folder / tests that are successsful or failed)
+    # print test condition (interested folder / tests that are successful or failed)
     print_test_condition(
         tests,
         tests_type,
@@ -160,10 +158,10 @@ def print_file_oriented_report(
 def file_oriented_report(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
-    covered_lines: Dict[str, Set[int]],
-    uncovered_lines: Dict[str, Set[int]],
+    interested_folders: list[str],
+    coverage_only: list[str],
+    covered_lines: dict[str, set[int]],
+    uncovered_lines: dict[str, set[int]],
 ) -> None:
     with open(os.path.join(SUMMARY_FOLDER_DIR, "file_summary"), "w+") as summary_file:
         covered_summary = 0
@@ -178,7 +176,7 @@ def file_oriented_report(
             except ZeroDivisionError:
                 percentage = 0
             # store information in a list to be sorted
-            coverage.append([file_name, percentage, covered_count, total_count])
+            coverage.append((file_name, percentage, covered_count, total_count))
             # update summary
             covered_summary = covered_summary + covered_count
             total_summary = total_summary + total_count
@@ -198,15 +196,15 @@ def file_oriented_report(
         )
 
 
-def get_html_ignored_pattern() -> List[str]:
+def get_html_ignored_pattern() -> list[str]:
     return ["/usr/*", "*anaconda3/*", "*third_party/*"]
 
 
-def html_oriented_report():
+def html_oriented_report() -> None:
     # use lcov to generate the coverage report
     build_folder = os.path.join(get_pytorch_folder(), "build")
     coverage_info_file = os.path.join(SUMMARY_FOLDER_DIR, "coverage.info")
-    # generage coverage report -- coverage.info in build folder
+    # generate coverage report -- coverage.info in build folder
     subprocess.check_call(
         [
             "lcov",

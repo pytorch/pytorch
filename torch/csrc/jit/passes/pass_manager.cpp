@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/passes/pass_manager.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
+
+// Start UUID at 1
+static GraphPassNameType graphPassID = 1;
 
 std::vector<GraphPassEntry>& getCustomPostPasses() {
   static std::vector<GraphPassEntry> passes;
@@ -14,16 +16,16 @@ std::vector<GraphPassEntry>& getCustomPrePasses() {
 }
 
 GraphPassNameType registerPostPass(GraphPass p) {
-  getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPostPasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 
-GraphPassNameType registerPass(GraphPass p) {
+static GraphPassNameType registerPass(GraphPass p) {
   return registerPostPass(std::move(p));
 }
 
 GraphPassNameType registerPrePass(GraphPass p) {
-  getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPrePasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 
@@ -64,5 +66,4 @@ RegisterPostPass::RegisterPostPass(GraphPass p) {
   registerPass(std::move(p));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

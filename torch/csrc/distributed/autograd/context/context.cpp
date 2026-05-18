@@ -1,14 +1,10 @@
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-#include <functional>
-
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 
@@ -25,7 +21,7 @@ std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
     const {
   std::lock_guard<std::mutex> guard(lock_);
   return knownWorkerIds_;
-};
+}
 
 void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
   std::lock_guard<std::mutex> guard(lock_);
@@ -33,7 +29,7 @@ void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
 }
 
 void DistAutogradContext::addSendFunction(
-    const std::shared_ptr<SendRpcBackward>& func,
+    const c10::intrusive_ptr<SendRpcBackward>& func,
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
@@ -45,7 +41,7 @@ void DistAutogradContext::addSendFunction(
 }
 
 void DistAutogradContext::addRecvFunction(
-    std::shared_ptr<RecvRpcBackward>& func,
+    c10::intrusive_ptr<RecvRpcBackward>& func,
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
@@ -56,13 +52,13 @@ void DistAutogradContext::addRecvFunction(
   recvAutogradFunctions_.emplace(autograd_message_id, func);
 }
 
-std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
+std::unordered_map<int64_t, c10::intrusive_ptr<SendRpcBackward>>
 DistAutogradContext::sendFunctions() const {
   std::lock_guard<std::mutex> guard(lock_);
   return sendAutogradFunctions_;
 }
 
-std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
+std::unordered_map<int64_t, c10::intrusive_ptr<RecvRpcBackward>>
 DistAutogradContext::recvFunctions() const {
   std::lock_guard<std::mutex> guard(lock_);
   return recvAutogradFunctions_;
@@ -90,14 +86,11 @@ void DistAutogradContext::accumulateGrad(
   // CUDA stream restoration from autograd function. Hence, we manually
   // call it here to get the streams correct.
   auto forward_stream =
-      torch::autograd::impl::grad_accumulator(variable)->stream(
-          grad.device().type());
+      torch::autograd::impl::grad_accumulator(variable)->stream();
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
   AutoGradMode grad_mode(false);
-
-  at::Tensor new_grad = AccumulateGrad::callHooks(variable, grad);
 
   // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
   // distributed autograd as part of
@@ -105,11 +98,8 @@ void DistAutogradContext::accumulateGrad(
   AccumulateGrad::accumulateGrad(
       variable,
       old_grad,
-      new_grad,
-      // Add +1 here since we can't std::move(grad) when call
-      // AccumulateGrad::callHooks, since it is a const ref, and that incurs a
-      // refcount bump for the new_grad.
-      num_expected_refs + 1,
+      grad,
+      num_expected_refs,
       [this, &variable](at::Tensor&& grad_update) {
         auto device = grad_update.device();
         accumulatedGrads_.insert(variable, std::move(grad_update));
@@ -228,7 +218,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistAutogradContext::
   return state->future;
 }
 
-std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
+c10::intrusive_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
     int64_t autograd_message_id) {
   std::lock_guard<std::mutex> guard(lock_);
   auto it = sendAutogradFunctions_.find(autograd_message_id);
@@ -253,7 +243,7 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
 
 void DistAutogradContext::runGradCallbackForVariable(
     const torch::autograd::Variable& variable,
-    GradCallback&& cb) {
+    const GradCallback& cb) {
   torch::Tensor grad;
   {
     std::lock_guard<std::mutex> guard(lock_);
@@ -291,6 +281,4 @@ ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
   return tl_context_ptr;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -2,11 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
-
-struct LazyStreamContext;
+namespace torch::distributed::rpc {
 
 // Functor which is invoked to process an RPC message. This is an abstract class
 // with some common functionality across all request handlers. Users need to
@@ -16,10 +12,9 @@ class TORCH_API RequestCallback {
   // Invoke the callback.
   c10::intrusive_ptr<JitFuture> operator()(
       Message& request,
-      std::shared_ptr<LazyStreamContext> ctx) const;
+      std::vector<c10::Stream> streams) const;
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~RequestCallback() {}
+  virtual ~RequestCallback() = default;
 
  protected:
   // RpcAgent implementation should invoke ``RequestCallback`` to process
@@ -31,9 +26,7 @@ class TORCH_API RequestCallback {
   // implementation specific mechanisms.
   virtual c10::intrusive_ptr<JitFuture> processMessage(
       Message& request,
-      std::shared_ptr<LazyStreamContext> ctx) const = 0;
+      std::vector<c10::Stream> streams) const = 0;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

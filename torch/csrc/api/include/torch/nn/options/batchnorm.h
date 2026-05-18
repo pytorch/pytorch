@@ -1,11 +1,10 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `BatchNorm` module.
 struct TORCH_API BatchNormOptions {
@@ -21,7 +20,7 @@ struct TORCH_API BatchNormOptions {
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(c10::optional<double>, momentum) = 0.1;
+  TORCH_ARG(std::optional<double>, momentum) = 0.1;
 
   /// Whether to learn a scale and bias that are applied in an affine
   /// transformation on the input.
@@ -38,7 +37,8 @@ struct TORCH_API BatchNormOptions {
 ///
 /// Example:
 /// ```
-/// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm1d
+/// model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using BatchNorm1dOptions = BatchNormOptions;
 
@@ -46,7 +46,8 @@ using BatchNorm1dOptions = BatchNormOptions;
 ///
 /// Example:
 /// ```
-/// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm2d
+/// model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using BatchNorm2dOptions = BatchNormOptions;
 
@@ -54,7 +55,8 @@ using BatchNorm2dOptions = BatchNormOptions;
 ///
 /// Example:
 /// ```
-/// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm3d
+/// model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 using BatchNorm3dOptions = BatchNormOptions;
 
@@ -67,18 +69,19 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::batch_norm(input, mean, variance, F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(0.1).eps(1e-05).training(false));
+/// F::batch_norm(input, mean, variance,
+/// F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(0.1).eps(1e-05).training(false));
 /// ```
 struct TORCH_API BatchNormFuncOptions {
-  TORCH_ARG(Tensor, weight) = Tensor();
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = Tensor();
+  TORCH_ARG(Tensor, bias);
 
   TORCH_ARG(bool, training) = false;
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(c10::optional<double>, momentum) = 0.1;
+  TORCH_ARG(double, momentum) = 0.1;
 
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.
@@ -87,5 +90,4 @@ struct TORCH_API BatchNormFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

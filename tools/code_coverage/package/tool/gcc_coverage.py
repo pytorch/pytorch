@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import time
-from typing import Dict
 
 # gcc is only used in oss
 from ..oss.utils import get_gcda_files, run_oss_python_test
@@ -10,7 +11,7 @@ from ..util.utils import print_log, print_time
 from .utils import run_cpp_test
 
 
-def update_gzip_dict(gzip_dict: Dict[str, int], file_name: str) -> str:
+def update_gzip_dict(gzip_dict: dict[str, int], file_name: str) -> str:
     file_name = file_name.lower()
     gzip_dict[file_name] = gzip_dict.get(file_name, 0) + 1
     num = gzip_dict[file_name]
@@ -20,7 +21,8 @@ def update_gzip_dict(gzip_dict: Dict[str, int], file_name: str) -> str:
 def run_target(binary_file: str, test_type: TestType) -> None:
     print_log("start run", test_type.value, "test: ", binary_file)
     start_time = time.time()
-    assert test_type in {TestType.CPP, TestType.PY}
+    if test_type not in {TestType.CPP, TestType.PY}:
+        raise AssertionError(f"Invalid test_type: {test_type}")
     if test_type == TestType.CPP:
         run_cpp_test(binary_file)
     else:
@@ -34,7 +36,7 @@ def export() -> None:
     # collect .gcda files
     gcda_files = get_gcda_files()
     # file name like utils.cpp may have same name in different folder
-    gzip_dict: Dict[str, int] = {}
+    gzip_dict: dict[str, int] = {}
     for gcda_item in gcda_files:
         # generate json.gz
         subprocess.check_call(["gcov", "-i", gcda_item])

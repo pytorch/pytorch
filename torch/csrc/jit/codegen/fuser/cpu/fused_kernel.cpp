@@ -1,23 +1,18 @@
 #include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 
 #include <ATen/DynamicLibrary.h>
+#include <ATen/code_template.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
-#include <torch/csrc/jit/frontend/code_template.h>
-#include <torch/csrc/utils/memory.h>
+#include <optional>
 
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
@@ -34,40 +29,26 @@ static const std::string getTempPath() {
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string =
-    "where \"${program}\" > nul 2> nul";
+static const std::string check_exists_string = "where ${program} > nul 2> nul";
 static std::vector<std::wstring> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
 #else
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string = "which '${program}' > /dev/null";
+static const std::string check_exists_string = "which ${program} > /dev/null";
 constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
-intptr_t run(const std::string& cmd);
-
-static bool programExists(const std::string& program) {
-  TemplateEnv env;
-  env.s("program", program);
-  std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
-  return (run(cmd.c_str()) == 0);
-#else
-  return (system(cmd.c_str()) == 0);
-#endif
-}
-
-#ifdef _MSC_VER
-c10::optional<std::wstring> exec(const std::wstring& cmd) {
+static std::optional<std::wstring> exec(const std::wstring& cmd) {
   std::array<wchar_t, 128> buffer;
   std::wstring result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
       _wpopen(cmd.c_str(), L"r"), _pclose);
   if (!pipe) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   while (fgetws(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
          nullptr) {
@@ -81,10 +62,10 @@ inline std::wstring& rtrim(std::wstring& s, const wchar_t* t = L" \t\n\r\f\v") {
   return s;
 }
 
-void activate() {
+static void activate() {
   wchar_t* root = nullptr;
   std::wstring cmd;
-  c10::optional<std::wstring> exec_out;
+  std::optional<std::wstring> exec_out;
   std::wstring path;
   std::wstring vcruntime_plat;
   std::wstring envvars;
@@ -148,9 +129,9 @@ void activate() {
   }
 }
 
-intptr_t run(const std::string& cmd) {
+static intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  wchar_t* comspec = _wgetenv(L"COMSPEC");
+  const wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
     comspec = L"C:\\Windows\\System32\\cmd.exe";
   }
@@ -173,14 +154,27 @@ intptr_t run(const std::string& cmd) {
 }
 #endif
 
+static bool programExists(const std::string& program) {
+  std::stringstream ss;
+  c10::printQuotedString(ss, program);
+  at::jit::TemplateEnv env;
+  env.s("program", ss.str());
+  std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
+  return (system(cmd.c_str()) == 0);
+#endif
+}
+
 // A single compiler config is accessed through getConfig() (below)
 // Controls compilation options and may be updated based on the result
 // of compilation attempts.
 struct CompilerConfig {
   CompilerConfig() {
-    const char* cxx_env = getenv("CXX");
-    if (cxx_env != nullptr) {
-      cxx = cxx_env;
+    const auto cxx_env = c10::utils::get_env("CXX");
+    if (cxx_env) {
+      cxx = cxx_env.value();
     }
 
 #ifdef _MSC_VER
@@ -188,6 +182,7 @@ struct CompilerConfig {
 #endif
 
     if (!programExists(cxx)) {
+      TORCH_WARN("Compiler passed via CXX envvar does not exist!");
       cxx = "";
     }
   }
@@ -205,7 +200,7 @@ struct CompilerConfig {
   const std::string openmp_flags = "-fopenmp";
 #endif
 // Set openmp to true only if PyTorch is compiled with OpenMP support
-// OpenMP is typically not availabel on MacOS platform
+// OpenMP is typically not available on MacOS platform
 #if defined(_OPENMP)
   bool openmp = true;
 #else
@@ -228,7 +223,7 @@ static CompilerConfig& getConfig() {
 // understand for AVX512. When we need better CPU performance this
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
-#ifdef _MSC_VER
+#if (defined(_MSC_VER) && !defined(_M_ARM64))
 // According to https://stackoverflow.com/a/29178079, we are able to
 // detect which arch level is supported by the vectorizer using
 // the macro __isa_available. It is added during runtime.
@@ -261,13 +256,16 @@ static const std::string compile_string =
 #ifndef __PPC64__
 //  "-march=native "
 #endif
-    "-std=c++14 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
+    "-std=c++20 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 #endif
 static void runCompiler(
     const std::string& cpp_file,
     const std::string& so_file) {
   auto& config = getConfig();
-  TemplateEnv env;
+  TORCH_CHECK(
+      !config.cxx.empty(),
+      "Failed to compile a fused CPU kernel: Compiler not found");
+  at::jit::TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? config.openmp_flags : "");
   env.s("cpp_file", cpp_file);
@@ -294,7 +292,7 @@ static const std::string disas_string =
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
 static void disas(const std::string& so_file) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
   int r = system(cmd.c_str());
@@ -328,7 +326,7 @@ FusedKernelCPU::FusedKernelCPU(
   runCompiler(cpp_file.name(), so_file.name());
   if (debugFuser() >= 2)
     disas(so_file.name());
-  so_lib = make_unique<at::DynamicLibrary>(so_file.name().c_str());
+  so_lib = std::make_unique<at::DynamicLibrary>(so_file.name().c_str());
 #pragma GCC diagnostic ignored "-Wpedantic"
   kernel =
       reinterpret_cast<void (*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));
@@ -354,9 +352,5 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+static RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
+} // namespace torch::jit::fuser::cpu

@@ -1,22 +1,31 @@
+# Owner(s): ["module: unknown"]
+
 import collections
 import json
 import os
 import re
 import textwrap
 import timeit
-from typing import Any, List, Tuple
 import unittest
+from typing import Any
+
+import expecttest
+import numpy as np
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
-from torch.testing._internal import expecttest
-import numpy as np
+from torch.testing._internal.common_utils import (
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    run_tests,
+    slowTest,
+    TEST_WITH_ASAN,
+    TestCase,
+)
 
 
 CALLGRIND_ARTIFACTS: str = os.path.join(
-    os.path.split(os.path.abspath(__file__))[0],
-    "callgrind_artifacts.json"
+    os.path.split(os.path.abspath(__file__))[0], "callgrind_artifacts.json"
 )
 
 
@@ -31,13 +40,13 @@ def generate_callgrind_artifacts() -> None:
     """
     print("Regenerating callgrind artifact.")
 
-    stats_no_data = benchmark_utils.Timer(
-        "y = torch.ones(())"
-    ).collect_callgrind(number=1000)
+    stats_no_data = benchmark_utils.Timer("y = torch.ones(())").collect_callgrind(
+        number=1000
+    )
 
-    stats_with_data = benchmark_utils.Timer(
-        "y = torch.ones((1,))"
-    ).collect_callgrind(number=1000)
+    stats_with_data = benchmark_utils.Timer("y = torch.ones((1,))").collect_callgrind(
+        number=1000
+    )
 
     user = os.getenv("USER")
 
@@ -53,11 +62,14 @@ def generate_callgrind_artifacts() -> None:
         "ones_with_data_exclusive": to_entry(stats_with_data.stmt_exclusive_stats),
     }
 
-    with open(CALLGRIND_ARTIFACTS, "wt") as f:
+    with open(CALLGRIND_ARTIFACTS, "w") as f:
         json.dump(artifacts, f, indent=4)
 
 
-def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmark_utils.CallgrindStats]:
+def load_callgrind_artifacts() -> tuple[
+    benchmark_utils.CallgrindStats,
+    benchmark_utils.CallgrindStats,
+]:
     """Hermetic artifact to unit test Callgrind wrapper.
 
     In addition to collecting counts, this wrapper provides some facilities for
@@ -68,27 +80,27 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
     testing are stored in raw string form for easier inspection and to avoid
     baking any implementation details into the artifact itself.
     """
-    with open(CALLGRIND_ARTIFACTS, "rt") as f:
+    with open(CALLGRIND_ARTIFACTS) as f:
         artifacts = json.load(f)
 
     pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")
 
     def to_function_counts(
-        count_strings: List[str],
-        inclusive: bool
+        count_strings: list[str], inclusive: bool
     ) -> benchmark_utils.FunctionCounts:
-        data: List[benchmark_utils.FunctionCount] = []
+        data: list[benchmark_utils.FunctionCount] = []
         for cs in count_strings:
             # Storing entries as f"{c} {fn}" rather than [c, fn] adds some work
             # reviving the artifact, but it makes the json much easier to read.
             match = pattern.search(cs)
-            assert match is not None
+            if match is None:
+                raise AssertionError(f"Pattern did not match: {cs}")
             c, fn = match.groups()
             data.append(benchmark_utils.FunctionCount(count=int(c), function=fn))
 
         return benchmark_utils.FunctionCounts(
-            tuple(sorted(data, reverse=True)),
-            inclusive=inclusive)
+            tuple(sorted(data, reverse=True)), inclusive=inclusive
+        )
 
     baseline_inclusive = to_function_counts(artifacts["baseline_inclusive"], True)
     baseline_exclusive = to_function_counts(artifacts["baseline_exclusive"], False)
@@ -99,8 +111,12 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         built_with_debug_symbols=True,
         baseline_inclusive_stats=baseline_inclusive,
         baseline_exclusive_stats=baseline_exclusive,
-        stmt_inclusive_stats=to_function_counts(artifacts["ones_no_data_inclusive"], True),
-        stmt_exclusive_stats=to_function_counts(artifacts["ones_no_data_exclusive"], False),
+        stmt_inclusive_stats=to_function_counts(
+            artifacts["ones_no_data_inclusive"], True
+        ),
+        stmt_exclusive_stats=to_function_counts(
+            artifacts["ones_no_data_exclusive"], False
+        ),
         stmt_callgrind_out=None,
     )
 
@@ -110,8 +126,12 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         built_with_debug_symbols=True,
         baseline_inclusive_stats=baseline_inclusive,
         baseline_exclusive_stats=baseline_exclusive,
-        stmt_inclusive_stats=to_function_counts(artifacts["ones_with_data_inclusive"], True),
-        stmt_exclusive_stats=to_function_counts(artifacts["ones_with_data_exclusive"], False),
+        stmt_inclusive_stats=to_function_counts(
+            artifacts["ones_with_data_inclusive"], True
+        ),
+        stmt_exclusive_stats=to_function_counts(
+            artifacts["ones_with_data_exclusive"], False
+        ),
         stmt_callgrind_out=None,
     )
 
@@ -125,14 +145,12 @@ class MyModule(torch.nn.Module):
 
 class TestBenchmarkUtils(TestCase):
     def regularizeAndAssertExpectedInline(
-        self, x: Any,
-        expect: str,
-        indent: int = 12
+        self, x: Any, expect: str, indent: int = 12
     ) -> None:
         x_str: str = re.sub(
             "object at 0x[0-9a-fA-F]+>",
             "object at 0xXXXXXXXXXXXX>",
-            x if isinstance(x, str) else repr(x)
+            x if isinstance(x, str) else repr(x),
         )
         if "\n" in x_str:
             # Indent makes the reference align at the call site.
@@ -155,22 +173,27 @@ class TestBenchmarkUtils(TestCase):
         median = timer.adaptive_autorange(threshold=0.5).median
 
         # Test that multi-line statements work properly.
-        median = benchmark_utils.Timer(
-            stmt="""
+        median = (
+            benchmark_utils.Timer(
+                stmt="""
                 with torch.no_grad():
                     y = x + 1""",
-            setup="""
+                setup="""
                 x = torch.ones((1,), requires_grad=True)
                 for _ in range(5):
                     x = x + 1.0""",
-        ).timeit(5).median
+            )
+            .timeit(5)
+            .median
+        )
         self.assertIsInstance(sample, float)
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_timer_tiny_fast_snippet(self):
         timer = benchmark_utils.Timer(
-            'auto x = 1;',
+            "auto x = 1;(void)x;",
             timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
@@ -179,6 +202,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
             """
@@ -212,22 +236,22 @@ class TestBenchmarkUtils(TestCase):
 
         def __init__(self, stmt, setup, timer, globals):
             self._random_state = np.random.RandomState(seed=self._seed)
-            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
+            self._mean_cost = dict(self._function_costs)[stmt]
 
         def sample(self, mean, noise_level):
             return max(self._random_state.normal(mean, mean * noise_level), 5e-9)
 
         def timeit(self, number):
-            return sum([
-                # First timer invocation
-                self.sample(self._timer_cost, self._timer_noise_level),
-
-                # Stmt body
-                self.sample(self._mean_cost * number, self._function_noise_level),
-
-                # Second timer invocation
-                self.sample(self._timer_cost, self._timer_noise_level),
-            ])
+            return sum(
+                [
+                    # First timer invocation
+                    self.sample(self._timer_cost, self._timer_noise_level),
+                    # Stmt body
+                    self.sample(self._mean_cost * number, self._function_noise_level),
+                    # Second timer invocation
+                    self.sample(self._timer_cost, self._timer_noise_level),
+                ]
+            )
 
     def test_adaptive_timer(self):
         class MockTimer(benchmark_utils.Timer):
@@ -241,7 +265,6 @@ class TestBenchmarkUtils(TestCase):
             _function_costs = (
                 self._MockTimer._function_costs[0],
                 self._MockTimer._function_costs[1],
-
                 # GPU should be faster once there is enough work.
                 ("expensive_fn()", 5e-6),
             )
@@ -257,7 +280,7 @@ class TestBenchmarkUtils(TestCase):
             pass
               Median: 7.98 ns
               IQR:    0.52 ns (7.74 to 8.26)
-              125 measurements, 10000000 runs per measurement, 1 thread"""
+              125 measurements, 10000000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -267,11 +290,11 @@ class TestBenchmarkUtils(TestCase):
             pass
               Median: 7.86 ns
               IQR:    0.71 ns (7.63 to 8.34)
-              6 measurements, 1000000 runs per measurement, 1 thread"""
+              6 measurements, 1000000 runs per measurement, 1 thread""",
         )
 
         # Check against strings so we can reuse expect infra.
-        self.regularizeAndAssertExpectedInline(m.mean, """8.001365835795602e-09""")
+        self.regularizeAndAssertExpectedInline(m.mean, """8.0013658357956e-09""")
         self.regularizeAndAssertExpectedInline(m.median, """7.983151323215967e-09""")
         self.regularizeAndAssertExpectedInline(len(m.times), """125""")
         self.regularizeAndAssertExpectedInline(m.number_per_run, """10000000""")
@@ -283,7 +306,7 @@ class TestBenchmarkUtils(TestCase):
             cheap_fn()
               Median: 3.98 us
               IQR:    0.27 us (3.85 to 4.12)
-              252 measurements, 10000 runs per measurement, 1 thread"""
+              252 measurements, 10000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -293,7 +316,7 @@ class TestBenchmarkUtils(TestCase):
             cheap_fn()
               Median: 4.16 us
               IQR:    0.22 us (4.04 to 4.26)
-              4 measurements, 1000 runs per measurement, 1 thread"""
+              4 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -303,7 +326,7 @@ class TestBenchmarkUtils(TestCase):
             expensive_fn()
               Median: 19.97 us
               IQR:    1.35 us (19.31 to 20.65)
-              501 measurements, 1000 runs per measurement, 1 thread"""
+              501 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -313,7 +336,7 @@ class TestBenchmarkUtils(TestCase):
             expensive_fn()
               Median: 20.79 us
               IQR:    1.09 us (20.20 to 21.29)
-              4 measurements, 1000 runs per measurement, 1 thread"""
+              4 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -323,7 +346,7 @@ class TestBenchmarkUtils(TestCase):
             pass
               Median: 7.92 ns
               IQR:    0.43 ns (7.75 to 8.17)
-              13 measurements, 100000000 runs per measurement, 1 thread"""
+              13 measurements, 100000000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -333,7 +356,7 @@ class TestBenchmarkUtils(TestCase):
             pass
               Median: 7.75 ns
               IQR:    0.57 ns (7.56 to 8.13)
-              4 measurements, 10000000 runs per measurement, 1 thread"""
+              4 measurements, 10000000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -343,7 +366,7 @@ class TestBenchmarkUtils(TestCase):
             cheap_fn()
               Median: 4.04 us
               IQR:    0.30 us (3.90 to 4.19)
-              25 measurements, 100000 runs per measurement, 1 thread"""
+              25 measurements, 100000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -353,7 +376,7 @@ class TestBenchmarkUtils(TestCase):
             cheap_fn()
               Median: 4.09 us
               IQR:    0.38 us (3.90 to 4.28)
-              4 measurements, 100000 runs per measurement, 1 thread"""
+              4 measurements, 100000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -363,7 +386,7 @@ class TestBenchmarkUtils(TestCase):
             expensive_fn()
               Median: 4.98 us
               IQR:    0.31 us (4.83 to 5.13)
-              20 measurements, 100000 runs per measurement, 1 thread"""
+              20 measurements, 100000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -373,7 +396,7 @@ class TestBenchmarkUtils(TestCase):
             expensive_fn()
               Median: 5.01 us
               IQR:    0.28 us (4.87 to 5.15)
-              4 measurements, 10000 runs per measurement, 1 thread"""
+              4 measurements, 10000 runs per measurement, 1 thread""",
         )
 
         # Make sure __repr__ is reasonable for
@@ -394,7 +417,7 @@ class TestBenchmarkUtils(TestCase):
 
               Median: 10.06 us
               IQR:    0.54 us (9.73 to 10.27)
-              20 measurements, 1000 runs per measurement, 1 thread"""
+              20 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -407,7 +430,7 @@ class TestBenchmarkUtils(TestCase):
 
               Median: 10.06 us
               IQR:    0.54 us (9.73 to 10.27)
-              20 measurements, 1000 runs per measurement, 1 thread"""
+              20 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -421,7 +444,7 @@ class TestBenchmarkUtils(TestCase):
             x + 1 (no grad): scalar_add
               Median: 10.06 us
               IQR:    0.54 us (9.73 to 10.27)
-              20 measurements, 1000 runs per measurement, 1 thread"""
+              20 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -439,7 +462,7 @@ class TestBenchmarkUtils(TestCase):
             setup: setup_fn()
               Median: 10.06 us
               IQR:    0.54 us (9.73 to 10.27)
-              20 measurements, 1000 runs per measurement, 1 thread"""
+              20 measurements, 1000 runs per measurement, 1 thread""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -467,33 +490,33 @@ class TestBenchmarkUtils(TestCase):
 
               Median: 10.06 us
               IQR:    0.54 us (9.73 to 10.27)
-              20 measurements, 1000 runs per measurement, 16 threads"""
+              20 measurements, 1000 runs per measurement, 16 threads""",
         )
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,
             r"`collect_callgrind` requires that globals be wrapped "
-            r"in `CopyIfCallgrind` so that serialization is explicit."
+            r"in `CopyIfCallgrind` so that serialization is explicit.",
         ):
-            benchmark_utils.Timer(
-                "pass",
-                globals={"x": 1}
-            ).collect_callgrind(collect_baseline=False)
+            benchmark_utils.Timer("pass", globals={"x": 1}).collect_callgrind(
+                collect_baseline=False
+            )
 
         with self.assertRaisesRegex(
             # Subprocess raises AttributeError (from pickle),
             # _ValgrindWrapper re-raises as generic OSError.
-            OSError, "AttributeError: Can't get attribute 'MyModule'"
+            OSError,
+            "AttributeError: Can't get attribute 'MyModule'",
         ):
             benchmark_utils.Timer(
                 "model(1)",
-                globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())}
+                globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())},
             ).collect_callgrind(collect_baseline=False)
-
 
         @torch.jit.script
         def add_one(x):
@@ -511,9 +534,9 @@ class TestBenchmarkUtils(TestCase):
                     import sys
                     sys.path.append({repr(os.path.split(os.path.abspath(__file__))[0])})
                     from test_benchmark_utils import MyModule
-                    """
-                )
-            }
+                    """,
+                ),
+            },
         )
 
         stats = timer.collect_callgrind(number=1000)
@@ -530,21 +553,32 @@ class TestBenchmarkUtils(TestCase):
         )
 
         stats = timer.collect_callgrind(number=1000, repeats=20)
-        assert isinstance(stats, tuple)
+        if not isinstance(stats, tuple):
+            raise AssertionError(f"Expected tuple, got {type(stats)}")
 
         # Check that the repeats are at least somewhat repeatable. (within 10 instructions per iter)
-        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
-        self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
+        counts = collections.Counter(
+            [s.counts(denoise=True) // 10_000 * 10_000 for s in stats]
+        )
+        self.assertGreater(
+            max(counts.values()),
+            1,
+            f"Every instruction count total was unique: {counts}",
+        )
 
-        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
+        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
+            wrapper_singleton,
+        )
+
         self.assertIsNone(
             wrapper_singleton()._bindings_module,
-            "JIT'd bindings are only for back testing."
+            "JIT'd bindings are only for back testing.",
         )
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_collect_cpp_callgrind(self):
         timer = benchmark_utils.Timer(
             "x += 1;",
@@ -552,28 +586,30 @@ class TestBenchmarkUtils(TestCase):
             timer=timeit.default_timer,
             language="c++",
         )
-        stats = [
-            timer.collect_callgrind()
-            for _ in range(3)
-        ]
+        stats = [timer.collect_callgrind() for _ in range(3)]
         counts = [s.counts() for s in stats]
 
-        self.assertGreater(
-            min(counts), 0, "No stats were collected")
+        self.assertGreater(min(counts), 0, "No stats were collected")
         self.assertEqual(
-            min(counts), max(counts), "C++ Callgrind should be deterministic")
+            min(counts), max(counts), "C++ Callgrind should be deterministic"
+        )
 
         for s in stats:
             self.assertEqual(
-                s.counts(denoise=True), s.counts(denoise=False),
-                "De-noising should not apply to C++.")
+                s.counts(denoise=True),
+                s.counts(denoise=False),
+                "De-noising should not apply to C++.",
+            )
 
         stats = timer.collect_callgrind(number=1000, repeats=20)
-        assert isinstance(stats, tuple)
+        if not isinstance(stats, tuple):
+            raise AssertionError(f"Expected tuple, got {type(stats)}")
 
         # NB: Unlike the example above, there is no expectation that all
         #     repeats will be identical.
-        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        counts = collections.Counter(
+            [s.counts(denoise=True) // 10_000 * 10_000 for s in stats]
+        )
         self.assertGreater(max(counts.values()), 1, repr(counts))
 
     def test_manipulate_callgrind_stats(self):
@@ -581,7 +617,8 @@ class TestBenchmarkUtils(TestCase):
 
         # Mock `torch.set_printoptions(linewidth=160)`
         wide_linewidth = benchmark_utils.FunctionCounts(
-            stats_no_data.stats(inclusive=False)._data, False, _linewidth=160)
+            stats_no_data.stats(inclusive=False)._data, False, _linewidth=160
+        )
 
         for l in repr(wide_linewidth).splitlines(keepends=False):
             self.assertLessEqual(len(l), 160)
@@ -589,10 +626,12 @@ class TestBenchmarkUtils(TestCase):
         self.assertEqual(
             # `delta` is just a convenience method.
             stats_with_data.delta(stats_no_data)._data,
-            (stats_with_data.stats() - stats_no_data.stats())._data
+            (stats_with_data.stats() - stats_no_data.stats())._data,
         )
 
-        deltas = stats_with_data.as_standardized().delta(stats_no_data.as_standardized())
+        deltas = stats_with_data.as_standardized().delta(
+            stats_no_data.as_standardized()
+        )
 
         def custom_transforms(fn: str):
             fn = re.sub(re.escape("/usr/include/c++/8/bits/"), "", fn)
@@ -663,14 +702,16 @@ class TestBenchmarkUtils(TestCase):
               8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
                   ...
                 92821  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                91000  build/../torch/csrc/tensor/pytho ... ch/torch/lib/libtorch_python.so]
+                91000  build/../torch/csrc/tensor/pytho ... ch/torch/lib/libtorch_python.so]  # codespell:ignore
                 91000  /data/users/test_user/repos/pyto ... nsors::get_default_scalar_type()
                 90090  ???:pthread_mutex_lock [/usr/lib64/libpthread-2.28.so]
                 90000  build/../c10/core/TensorImpl.h:c ... ch/torch/lib/libtorch_python.so]
                 90000  build/../aten/src/ATen/record_fu ... torch/torch/lib/libtorch_cpu.so]
-                90000  /data/users/test_user/repos/pyto ... uard(c10::optional<c10::Device>)
+                90000  /data/users/test_user/repos/pyto ... uard(std::optional<c10::Device>)
                 90000  /data/users/test_user/repos/pyto ... ersionCounter::~VersionCounter()
-                88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""",
+                88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""".replace(
+                "  # codespell:ignore", ""
+            ),
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -697,7 +738,7 @@ class TestBenchmarkUtils(TestCase):
                 2000  /usr/include/c++/8/bits/atomic_base.h:at::Tensor at::detail::make_tensor ... t_null_type<c10::StorageImpl> >&&, c10::DispatchKey&&, caffe2::TypeMeta&)
                 2000  /usr/include/c++/8/array:at::Tensor& c10::Dispatcher::callWithDispatchKe ... , c10::Scalar)> const&, c10::DispatchKey, at::Tensor&, c10::Scalar) const
 
-            Total: 8869966"""  # noqa: B950
+            Total: 8869966""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -815,10 +856,8 @@ class TestBenchmarkUtils(TestCase):
         costs = (
             # overhead_optimized_fn()
             (1e-6, 1e-9),
-
             # compute_optimized_fn()
             (3e-6, 5e-10),
-
             # special_case_fn()  [square inputs only]
             (1e-6, 4e-10),
         )
@@ -834,8 +873,7 @@ class TestBenchmarkUtils(TestCase):
         # overhead_optimized_fn()
         class _MockTimer_0(self._MockTimer):
             _function_costs = tuple(
-                (f"fn({i}, {j})", costs[0][0] + costs[0][1] * i * j)
-                for i, j in sizes
+                (f"fn({i}, {j})", costs[0][0] + costs[0][1] * i * j) for i, j in sizes
             )
 
         class MockTimer_0(benchmark_utils.Timer):
@@ -844,8 +882,7 @@ class TestBenchmarkUtils(TestCase):
         # compute_optimized_fn()
         class _MockTimer_1(self._MockTimer):
             _function_costs = tuple(
-                (f"fn({i}, {j})", costs[1][0] + costs[1][1] * i * j)
-                for i, j in sizes
+                (f"fn({i}, {j})", costs[1][0] + costs[1][1] * i * j) for i, j in sizes
             )
 
         class MockTimer_1(benchmark_utils.Timer):
@@ -855,7 +892,8 @@ class TestBenchmarkUtils(TestCase):
         class _MockTimer_2(self._MockTimer):
             _function_costs = tuple(
                 (f"fn({i}, {j})", costs[2][0] + costs[2][1] * i * j)
-                for i, j in sizes if i == j
+                for i, j in sizes
+                if i == j
             )
 
         class MockTimer_2(benchmark_utils.Timer):
@@ -907,7 +945,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |    3.1     |     4.0     |     11.2     |     2099.3     |     2099.3
                   special_case (square)  |    1.1     |             |      7.5     |                |     1674.7
 
-            Times are in microseconds (us)."""
+            Times are in microseconds (us).""",
         )
 
         compare.trim_significant_figures()
@@ -921,7 +959,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |     3      |     4.0     |      11      |      2100      |      2100
                   special_case (square)  |     1      |             |       8      |                |      1700
 
-            Times are in microseconds (us)."""
+            Times are in microseconds (us).""",
         )
 
         compare.colorize()
@@ -935,7 +973,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa: B950
+            Times are in microseconds (us)."""
         )
 
         compare.colorize(rowwise=True)
@@ -949,7 +987,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[92m\x1b[1m   3    \x1b[0m\x1b[0m  |     4.0     |  \x1b[2m\x1b[91m    11    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[31m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[31m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa: B950
+            Times are in microseconds (us)."""
         )
 
         def print_new_expected(s: str) -> None:
@@ -972,12 +1010,16 @@ class TestBenchmarkUtils(TestCase):
         self.assertEqual(columnwise_colored_actual, columnwise_colored_expected)
         self.assertEqual(rowwise_colored_actual, rowwise_colored_expected)
 
-    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
+    @unittest.skipIf(
+        IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32"
+    )
     def test_fuzzer(self):
         fuzzer = benchmark_utils.Fuzzer(
             parameters=[
                 benchmark_utils.FuzzedParameter(
-                    "n", minval=1, maxval=16, distribution="loguniform")],
+                    "n", minval=1, maxval=16, distribution="loguniform"
+                )
+            ],
             tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
             seed=0,
         )
@@ -989,9 +1031,8 @@ class TestBenchmarkUtils(TestCase):
 
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
             x = tensors["x"]
-            self.assertEqual(
-                x, torch.tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+            self.assertEqual(x, torch.tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

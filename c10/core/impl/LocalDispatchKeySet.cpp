@@ -1,9 +1,6 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
-#include <iostream>
-
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // NB: POD, must be zero initialized!
 // Note [TLS Initialization]
@@ -14,14 +11,13 @@ namespace impl {
 // default state is zero, we obtain the actual include keyset by XORing
 // raw_local_dispatch_key_set.included_ with c10::default_included_set.  This
 // logic is encapsulated in struct PODLocalDispatchKeySet.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
-#if defined(_MSC_VER) || defined(C10_ANDROID)
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   return raw_local_dispatch_key_set;
 }
-#endif // defined(_MSC_VER) || defined(C10_ANDROID)
+#endif // defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set.set_included(key_set.included_);
@@ -50,29 +46,21 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
 // RAII API
 
 IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKeySet include)
-    : tls_(&raw_local_dispatch_key_set), include_(include - tls_->included()) {
-  if (!include_.empty()) {
-    tls_->set_included(tls_->included() | include_);
-  }
+    : tls_(&raw_local_dispatch_key_set), saved_state_(tls_->included()) {
+  tls_->set_included(saved_state_ | include);
 }
 
 IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
-  if (!include_.empty()) {
-    tls_->set_included(tls_->included() - include_);
-  }
+  tls_->set_included(saved_state_);
 }
 
 ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKeySet exclude)
-    : tls_(&raw_local_dispatch_key_set), exclude_(exclude - tls_->excluded()) {
-  if (!exclude_.empty()) {
-    tls_->set_excluded(tls_->excluded() | exclude_);
-  }
+    : tls_(&raw_local_dispatch_key_set), saved_state_(tls_->excluded()) {
+  tls_->set_excluded(saved_state_ | exclude);
 }
 
 ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
-  if (!exclude_.empty()) {
-    tls_->set_excluded(tls_->excluded() - exclude_);
-  }
+  tls_->set_excluded(saved_state_);
 }
 
 // Non-RAII API
@@ -118,5 +106,4 @@ bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
 bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
   return raw_local_dispatch_key_set.included().isSupersetOf(ks);
 }
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

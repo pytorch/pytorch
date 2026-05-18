@@ -1,12 +1,8 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/throughput_benchmark.h>
-#include <torch/csrc/utils/crash_handler.h>
 
-#include <pybind11/functional.h>
-
-namespace torch {
-namespace throughput_benchmark {
+namespace torch::throughput_benchmark {
 
 void initThroughputBenchmarkBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -18,7 +14,8 @@ void initThroughputBenchmarkBindings(PyObject* module) {
       .def_readwrite("num_worker_threads", &BenchmarkConfig::num_worker_threads)
       .def_readwrite("num_warmup_iters", &BenchmarkConfig::num_warmup_iters)
       .def_readwrite("num_iters", &BenchmarkConfig::num_iters)
-      .def_readwrite("profiler_output_path", &BenchmarkConfig::profiler_output_path);
+      .def_readwrite(
+          "profiler_output_path", &BenchmarkConfig::profiler_output_path);
 
   py::class_<BenchmarkExecutionStats>(m, "BenchmarkExecutionStats")
       .def_readonly("latency_avg_ms", &BenchmarkExecutionStats::latency_avg_ms)
@@ -34,32 +31,22 @@ void initThroughputBenchmarkBindings(PyObject* module) {
           })
       .def(
           "run_once",
-          [](ThroughputBenchmark& self, py::args args, py::kwargs kwargs) {
+          [](ThroughputBenchmark& self,
+             const py::args& args,
+             const py::kwargs& kwargs) {
             // Depending on this being ScriptModule of nn.Module we will release
             // the GIL or not further down in the stack
-            return self.runOnce(std::move(args), std::move(kwargs));
+            return self.runOnce(args, kwargs);
           })
-      .def("benchmark", [](ThroughputBenchmark& self, BenchmarkConfig config) {
-        // The benchmark always runs without the GIL. GIL will be used where
-        // needed. This will happen only in the nn.Module mode when manipulating
-        // inputs and running actual inference
-        pybind11::gil_scoped_release no_gil_guard;
-        return self.benchmark(config);
-      });
-
-
+      .def(
+          "benchmark",
+          [](ThroughputBenchmark& self, const BenchmarkConfig& config) {
+            // The benchmark always runs without the GIL. GIL will be used where
+            // needed. This will happen only in the nn.Module mode when
+            // manipulating inputs and running actual inference
+            pybind11::gil_scoped_release no_gil_guard;
+            return self.benchmark(config);
+          });
 }
 
-} // namespace throughput_benchmark
-
-namespace crash_handler {
-
-void initCrashHandlerBindings(PyObject* module) {
-  auto m = pybind11::handle(module).cast<pybind11::module>();
-
-  m.def("_enable_minidump_collection", _enable_minidump_collection)
-      .def("_disable_minidump_collection", _disable_minidump_collection)
-      .def("_get_minidump_directory", _get_minidump_directory);
-}
-} // namespace crash_handler
-} // namespace torch
+} // namespace torch::throughput_benchmark

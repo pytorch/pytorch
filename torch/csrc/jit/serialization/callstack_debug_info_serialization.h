@@ -14,8 +14,7 @@ namespace c10 {
 struct IValue;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class Pickler;
 class InlinedCallStackSerializer {
@@ -32,7 +31,7 @@ class InlinedCallStackSerializer {
  private:
   // module_info = [ClassType.qualifiedName, instance_name]
   c10::IValue serialize_module_instance_info(
-      const c10::optional<ModuleInstanceInfo>& m);
+      const std::optional<ModuleInstanceInfo>& m);
 
   // This caches serialized inlined callstack ptr, since many
   // InlinedCallStackPtr can refer to the same one.
@@ -49,7 +48,7 @@ class TORCH_API CallStackDebugInfoPickler {
   CallStackDebugInfoPickler() = default;
 
   std::vector<char> pickle(
-      const std::unordered_map<int64_t, DebugInfoPair>& callstack_ptrs,
+      const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
       const SourceRangeTagMap& source_range_tags);
 
  private:
@@ -64,7 +63,7 @@ class InlinedCallStackDeserializer {
       const std::shared_ptr<CompilationUnit>& cu);
 
  private:
-  c10::optional<ModuleInstanceInfo> deserialize_module_instance_info(
+  std::optional<ModuleInstanceInfo> deserialize_module_instance_info(
       const c10::IValue& iv,
       const std::shared_ptr<CompilationUnit>& cu);
 
@@ -77,8 +76,8 @@ class InlinedCallStackDeserializer {
 
 class TORCH_API CallStackDebugInfoUnpickler {
  public:
-  ska::flat_hash_map<int64_t, DebugInfoPair> unpickle(
-      at::DataPtr&& data,
+  ska::flat_hash_map<int64_t, DebugInfoTuple> unpickle(
+      const at::DataPtr& data,
       size_t size,
       const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
       const std::shared_ptr<CompilationUnit>& cu);
@@ -87,5 +86,4 @@ class TORCH_API CallStackDebugInfoUnpickler {
   InlinedCallStackDeserializer csds_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

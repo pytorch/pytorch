@@ -4,9 +4,7 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Internal system RPC to invoke distributed backward pass on remote nodes when
 // 'rref.backward()' is invoked.
@@ -24,16 +22,17 @@ class TORCH_API RRefBackwardReq : public rpc::RpcCommandBase {
   bool retainGraph() const;
 
   // Serialization and deserialization methods.
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<RRefBackwardReq> fromMessage(
       const rpc::Message& message);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const rpc::RRefId rrefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int64_t autogradContextId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool retainGraph_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -2,50 +2,60 @@
 
 #include <cmath>
 #include <cstring>
-#include <type_traits>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
-#include <c10/util/math_compat.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 #include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DECLARE_TRIGGER(simple_ir_eval_executed);
-
-class Value {
+class InterpValue {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Value() : dtype_(kInt) {
+  InterpValue() : dtype_(kInt) {
     Intvalues.push_back(0);
   }
 
-#define VALUE_CTOR(Type, Name)      \
-  Value(Type v) : dtype_(k##Name) { \
-    Name##values.push_back(v);      \
+  template <typename T>
+  InterpValue(Dtype dtype, T v) : dtype_(dtype) {
+#define TYPE_CASE(Type, Name)  \
+  if (dtype == k##Name) {      \
+    Name##values.push_back(v); \
+    return;                    \
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
+#undef TYPE_CASE
+    throw unsupported_dtype();
+  }
+
+#define VALUE_CTOR(Type, Name)            \
+  InterpValue(Type v) : dtype_(k##Name) { \
+    Name##values.push_back(v);            \
+  }
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR)
 #undef VALUE_CTOR
 
-#define VALUE_VEC_CTOR(Type, Name)  \
-  Value(const std::vector<Type>& v) \
+  explicit InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
+    QUInt8values.emplace_back(v.val_);
+  }
+
+  explicit InterpValue(c10::qint8 v) : dtype_(kQInt8) {
+    QInt8values.emplace_back(v.val_);
+  }
+
+#define VALUE_VEC_CTOR(Type, Name)        \
+  InterpValue(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR)
+  VALUE_VEC_CTOR(c10::quint8, QUInt8)
+  VALUE_VEC_CTOR(c10::qint8, QInt8)
 #undef VALUE_VEC_CTOR
 
   template <typename T>
@@ -53,6 +63,8 @@ class Value {
 
   template <typename T>
   const std::vector<T>& as_vec() const;
+
+  int64_t intValue() const;
 
   Dtype dtype() const {
     return dtype_;
@@ -62,46 +74,67 @@ class Value {
   Dtype dtype_;
 
 #define VALUE_STORAGE(Type, Name) std::vector<Type> Name##values;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_STORAGE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_STORAGE)
+  VALUE_STORAGE(c10::qint8, QInt8)
+  VALUE_STORAGE(c10::quint8, QUInt8)
 #undef VALUE_STORAGE
-  void* ptr;
+  void* ptr{nullptr};
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)   \
-  template <>                           \
-  inline Type Value::as<Type>() const { \
-    if (dtype_ != k##Name) {            \
-      throw unsupported_dtype();        \
-    }                                   \
-    return Name##values[0];             \
+#define VALUE_AS_DISPATCH(Type, Name)         \
+  template <>                                 \
+  inline Type InterpValue::as<Type>() const { \
+    if (dtype_ != k##Name) {                  \
+      throw unsupported_dtype();              \
+    }                                         \
+    return Name##values[0];                   \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH)
+VALUE_AS_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
-  template <>                                                   \
-  inline const std::vector<Type>& Value::as_vec<Type>() const { \
-    if (dtype_.scalar_type() != ScalarType::Name) {             \
-      throw unsupported_dtype();                                \
-    }                                                           \
-    return Name##values;                                        \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
+  template <>                                                         \
+  inline const std::vector<Type>& InterpValue::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {                   \
+      throw unsupported_dtype();                                      \
+    }                                                                 \
+    return Name##values;                                              \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH)
+VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_VEC_DISPATCH
+
+template <typename Type>
+auto underlyingValue(Type x) {
+  return x;
+}
+
+template <>
+inline auto underlyingValue<c10::quint8>(c10::quint8 x) {
+  return x.val_;
+}
+
+template <>
+inline auto underlyingValue<c10::qint8>(c10::qint8 x) {
+  return x.val_;
+}
 
 template <typename To, typename From>
 To raw_bitcast(const From& src) {
   TORCH_CHECK(sizeof(To) == sizeof(From), "Invalid bitcast invocation");
   To storage;
-  std::memcpy(&storage, &src, sizeof(From));
-  return reinterpret_cast<To&>(storage);
+  std::memcpy(&storage, &src, sizeof(To));
+  return storage;
 }
 
 class SimpleIREvaluatorImpl;
 class TORCH_API SimpleIREvaluator : public CodeGen {
  public:
   SimpleIREvaluator(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func");
@@ -117,11 +150,11 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
     call(args);
   }
 
-  void bindVar(const Var* v, const Expr* e);
-  Value value() const;
+  void bindVar(const VarPtr& v, const ExprPtr& e);
+  InterpValue value() const;
 
  private:
-  void bindArg(const BufferArg& buf, const CallArg& data);
+  void bindArg(const BufferArg& buf, void* data);
   void expand_intrinsics() {
     GenericIntrinsicsExpander intrinsics_expander;
     apply_mutator(&intrinsics_expander);
@@ -137,24 +170,21 @@ class ExprEval {
   using CallArg = CodeGen::CallArg;
 
   template <typename... Ts>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
-    Placeholder ret_buf("ret_val", dtype_, {1});
-    std::vector<const Expr*> indices;
-    const Expr* zero = new IntImm(0);
-    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+    BufHandle ret_buf("ret_val", {1}, dtype_);
+    std::vector<ExprHandle> indices;
+    ExprHandle zero = IntImm::make(0);
+    indices.reserve(ret_buf.ndim());
+    for (size_t i = 0; i < ret_buf.ndim(); i++) {
       indices.push_back(zero);
     }
-    Stmt* store_stmt =
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        new Store(ret_buf.data(), indices, expr.node());
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    buffer_args_extended.push_back(ret_buf);
+    StmtPtr store_stmt = Store::make(ret_buf, indices, expr);
+    buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
 
@@ -167,7 +197,7 @@ class ExprEval {
     call(call_args);
   }
 
-  void bindVar(const Var* v, const Expr* e) {
+  void bindVar(VarPtr v, ExprPtr e) {
     codegen_->bindVar(v, e);
   }
 
@@ -183,22 +213,47 @@ class ExprEval {
   void call(const std::vector<CallArg>& call_args) {
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
-#define TYPE_CASE(Type, Name)                           \
-  case ScalarType::Name: {                              \
-    std::vector<Type> ret_val_arg(1);                   \
-    call_args_extended.push_back(CallArg(ret_val_arg)); \
-    codegen_->call(call_args_extended);                 \
-    ret_value_ = Value(ret_val_arg[0]);                 \
+#define TYPE_CASE(Type, Name)                     \
+  case ScalarType::Name: {                        \
+    std::vector<Type> ret_val_arg(1);             \
+    call_args_extended.emplace_back(ret_val_arg); \
+    codegen_->call(call_args_extended);           \
+    ret_value_ = InterpValue(ret_val_arg[0]);     \
   } break;
-      // NOLINTNEXTLINE(modernize-use-emplace)
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+      TYPE_CASE(c10::quint8, QUInt8);
+      TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         std::vector<unsigned char> ret_val_arg(1);
-        // NOLINTNEXTLINE(modernize-use-emplace)
-        call_args_extended.push_back(CallArg(ret_val_arg.data()));
+        call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
-        ret_value_ = Value((bool)ret_val_arg[0]);
+        ret_value_ = InterpValue((bool)ret_val_arg[0]);
+      } break;
+      default:
+        throw unsupported_dtype();
+    }
+  }
+
+  void call_raw(const std::vector<void*>& args) {
+    std::vector<void*> args_extended = args;
+    switch (dtype_.scalar_type()) {
+#define TYPE_CASE(Type, Name)                    \
+  case ScalarType::Name: {                       \
+    std::vector<Type> ret_val_arg(1);            \
+    args_extended.push_back(ret_val_arg.data()); \
+    codegen_->call_raw(args_extended);           \
+    ret_value_ = InterpValue(ret_val_arg[0]);    \
+  } break;
+      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+      TYPE_CASE(c10::quint8, QUInt8);
+      TYPE_CASE(c10::qint8, QInt8);
+#undef TYPE_CASE
+      case ScalarType::Bool: {
+        std::vector<unsigned char> ret_val_arg(1);
+        args_extended.push_back(ret_val_arg.data());
+        codegen_->call_raw(args_extended);
+        ret_value_ = InterpValue((bool)ret_val_arg[0]);
       } break;
       default:
         throw unsupported_dtype();
@@ -206,8 +261,8 @@ class ExprEval {
   }
 
   template <typename T>
-  T value(std::vector<void*>& args) {
-    call(args);
+  T value(const std::vector<void*>& args) {
+    call_raw(args);
     return ret_value_.as<T>();
   }
 
@@ -224,19 +279,47 @@ class ExprEval {
  private:
   Dtype dtype_;
   std::unique_ptr<CodeGenType> codegen_;
-  Value ret_value_;
+  InterpValue ret_value_;
 };
 
-inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
+// Evaluates the given expression and returns an int64_t value if the result of
+// the given expression is int64_t.
+std::optional<int64_t> evalInt(ExprPtr e);
+
+// Substitutes the given vars with their corresponding expressions in the input
+// expression.
+inline ExprPtr Substitute(const ExprPtr& expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
-inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
+// Substitutes the given vars with their corresponding expressions in the input
+// statement.
+inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+// Creates a clone of the input expression and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline ExprPtr SubstituteInClone(
+    const ExprPtr& expr,
+    const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
+}
+
+// Creates a clone of the input statement and substitutes the given vars with
+// their corresponding expressions in the clone.
+// NOTE: This works because cloning reuses variables and does not create new
+// ones, and `VarMapping` input has variables as the key.
+inline StmtPtr SubstituteInClone(
+    const StmtPtr& stmt,
+    const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
+}
+
+} // namespace torch::jit::tensorexpr

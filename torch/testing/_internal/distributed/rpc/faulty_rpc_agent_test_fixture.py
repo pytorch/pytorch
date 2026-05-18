@@ -1,23 +1,29 @@
+# mypy: allow-untyped-defs
+
 import torch.distributed.rpc as rpc
 import torch.distributed.rpc._testing  # noqa: F401
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+
 # The following message types are currently retried in the RREF protocol and
 # distributed autograd. Thus only these messages should be tested with the
 # Faulty RPC Agent.
-retryable_message_types = ["RREF_FORK_REQUEST",
-                           "RREF_CHILD_ACCEPT",
-                           "RREF_USER_DELETE",
-                           "CLEANUP_AUTOGRAD_CONTEXT_REQ"]
+retryable_message_types = [
+    "RREF_FORK_REQUEST",
+    "RREF_CHILD_ACCEPT",
+    "RREF_USER_DELETE",
+    "CLEANUP_AUTOGRAD_CONTEXT_REQ",
+]
 
 # The following messages incur the corresponding delay in seconds while being
-# processed in FaultyProcessGroupAgent's enqueueSend() function.
+# processed in FaultyTensorPipeAgent's enqueueSend() function.
 default_messages_to_delay = {
     "PYTHON_CALL": 1.5,  # Python UDF
     "SCRIPT_CALL": 1.5,  # Script/Builtin
 }
+
 
 class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     def __init__(self, *args, **kwargs):
@@ -27,16 +33,14 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
 
     @property
     def rpc_backend(self):
-        return rpc.backend_registry.BackendType[
-            "FAULTY_PROCESS_GROUP"
-        ]
+        return rpc.backend_registry.BackendType["FAULTY_TENSORPIPE"]
 
     @property
     def rpc_backend_options(self):
         return rpc.backend_registry.construct_rpc_backend_options(
             self.rpc_backend,
             init_method=self.init_method,
-            num_send_recv_threads=8,
+            num_worker_threads=8,
             num_fail_sends=3,
             messages_to_fail=self.messages_to_fail,
             messages_to_delay=self.messages_to_delay,
@@ -50,13 +54,11 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
 
     def get_shutdown_error_regex(self):
         error_regexes = [
-            "Encountered exception in ProcessGroupAgent::enqueueSend",
-            "Encountered exception in ProcessGroupAgent::listenLoop()",
             "Exception in thread pool task",
             "Connection reset by peer",
-            "Connection closed by peer"
+            "Connection closed by peer",
         ]
-        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+        return "|".join([f"({error_str})" for error_str in error_regexes])
 
     def get_timeout_error_regex(self):
         return "RPC ran for more than"

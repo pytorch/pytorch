@@ -8,8 +8,7 @@
 #include <functional>
 #include <regex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -32,13 +31,19 @@ TORCH_API bool isBiasOfConvOrLinear(Value* v);
 TORCH_API bool isEmbeddingBagNonInput(Value* v);
 
 // Get the use as scalar input of clamp ops for the input value
-c10::optional<Use> getClampScalarInputUse(Value* v);
+std::optional<Use> getClampScalarInputUse(Value* v);
 
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
 // `v` is also observed/quantized, since we can derive
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
+
+// Clones the method by the name of orig_method_name into new_method_name method
+TORCH_API void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name);
 
 // Check if a value in the graph is a Scalar value
 TORCH_API bool isScalar(Value* v);
@@ -47,13 +52,13 @@ TORCH_API bool isScalar(Value* v);
 TORCH_API bool hitGraphInput(Value* value);
 
 // Converts a mangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
 // into an unmangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.Conv2d
 TORCH_API std::string removeTorchMangle(const std::string& orig_name);
 
 // Return the module name that corresponds to the value.
-TORCH_API c10::optional<std::string> getModuleName(Value* value);
+TORCH_API std::optional<std::string> getModuleName(Value* value);
 
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
@@ -70,7 +75,7 @@ TORCH_API bool isClamp(Node* n);
 // the input tensor is quantized or not, example: aten::size
 TORCH_API bool isTensorInfoNode(Node* n);
 
-// Check if this the the propaagate op that has single input, e.g. aten::cat
+// Check if this the propagate op that has single input, e.g. aten::cat
 TORCH_API bool isPropagateQuantSingleInputOp(Node* n);
 
 // Check if this is the propagate op that has two inputs, e.g. aten::add
@@ -85,7 +90,7 @@ TORCH_API bool isPropagateQuantOp(Node* n);
 // quantized::{op}_scalar
 TORCH_API bool isBinaryOpWithScalarInput(Node* n);
 
-TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
+TORCH_API std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -115,14 +120,14 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> nth_arg);
+    std::optional<int> nth_arg);
 
 // Check if `use` is a AtenFunction of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function
 bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> nth_arg);
+    std::optional<int> nth_arg);
 
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
@@ -144,8 +149,8 @@ TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
-// c10::nullopt
-c10::optional<Module> getInvokedModuleOpt(
+// std::nullopt
+std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
     Value* self);
@@ -170,10 +175,6 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
-
-bool is_functional_linear(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
@@ -210,5 +211,4 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

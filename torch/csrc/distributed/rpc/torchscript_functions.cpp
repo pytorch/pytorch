@@ -5,26 +5,20 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack,
+    std::vector<c10::IValue> stack,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
-  // This dummy tensor holds an at::RecordFunction when profiling is enabled.
-  // This is because at::RecordFunction is not yet registered as a TorchScript
-  // custom class (https://github.com/pytorch/pytorch/issues/35026)
-  at::Tensor handle = at::zeros(1);
+  c10::intrusive_ptr<torch::autograd::profiler::PythonRecordFunction> record;
   auto shouldProfile = torch::autograd::profiler::profilerEnabled() &&
       !torch::distributed::rpc::RemoteProfilerManager::getInstance()
            .isCurrentKeySet();
@@ -35,7 +29,8 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
             .qualifiedName(), /* name of torchscript function being run */
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
         dstWorkerName);
-    handle = torch::autograd::profiler::record_function_enter(rpcAsyncJitKey);
+    record =
+        torch::autograd::profiler::record_function_enter_new(rpcAsyncJitKey);
     auto& remoteProfilerManager =
         torch::distributed::rpc::RemoteProfilerManager::getInstance();
     remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
@@ -51,7 +46,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
       rpcTimeoutSeconds);
 
   // Get function return type to construct JitFuture.
-  auto returns = functionSchema.returns();
+  auto const& returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -70,12 +65,13 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
       futPtr->markCompleted(
           deserializeRespToIValue(
               *future.constValue().toCustomClass<Message>()),
-          future.dataPtrs());
+          future.storages());
     }
   }));
   if (shouldProfile) {
     auto profiledFutPtr =
-        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, futPtr);
+        torch::autograd::profiler::_call_end_callbacks_on_fut_new(
+            record, futPtr);
     return profiledFutPtr;
   }
   return futPtr;
@@ -93,7 +89,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
   auto& ctx = RRefContext::getInstance();
 
   // Get function return type to construct UserRRef.
-  auto returns = functionSchema.returns();
+  auto const& returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -155,6 +151,4 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

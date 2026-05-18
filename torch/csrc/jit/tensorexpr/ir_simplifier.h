@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -7,9 +8,11 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <utility>
+
 /* IR Simplification
  *
- * Simplfies expressions in two stages:
+ * Simplifies expressions in two stages:
  *  1. Recursively traverse the map combining similar operations into Terms
  * (interacted via Multiplication) and Polynomials (interacted via Addition). We
  * reorder the components of each Term or Polynomial into a consistent order to
@@ -18,18 +21,16 @@
  * of Muls, and each Polynomial into a sequence of Ads.
  */
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // A bunch of helpers for determine the Dtype of the output of a multi argument
 // Term or Polynomial.
 template <class ExprType>
-Dtype promoteTypesVec(const Expr* s, std::vector<const ExprType*>& v) {
+Dtype promoteTypesVec(const ExprPtr& s, const std::vector<ExprType>& v) {
   Dtype t = s->dtype();
   bool first = true;
 
-  for (auto* e : v) {
+  for (const auto& e : v) {
     if (first) {
       t = Dtype(t.scalar_type(), e->dtype().lanes());
       first = false;
@@ -40,13 +41,13 @@ Dtype promoteTypesVec(const Expr* s, std::vector<const ExprType*>& v) {
 }
 
 template <class ExprType>
-Dtype promoteTypesVec(std::vector<const ExprType*>& v) {
+Dtype promoteTypesVec(const std::vector<ExprType>& v) {
   if (v.empty()) {
     throw malformed_input("empty list of types");
   }
 
   Dtype t = v[0]->dtype();
-  for (auto* e : v) {
+  for (const auto& e : v) {
     t = promoteTypes(t, e->dtype());
   }
   return t;
@@ -54,8 +55,8 @@ Dtype promoteTypesVec(std::vector<const ExprType*>& v) {
 
 template <class ExprType>
 Dtype promoteTypesMap(
-    const Expr* s,
-    std::unordered_map<SimplifierHashType, const ExprType*>& m) {
+    const ExprPtr& s,
+    std::unordered_map<SimplifierHashType, ExprType>& m) {
   Dtype t = s->dtype();
   bool first = true;
   for (auto& e : m) {
@@ -69,12 +70,12 @@ Dtype promoteTypesMap(
 }
 
 template <class ExprType>
-Dtype promoteTypesVar(const ExprType* e) {
+Dtype promoteTypesVar(ExprType e) {
   return e->dtype();
 }
 
 template <class ExprType, class... Args>
-Dtype promoteTypesVar(const ExprType* e, Args... es) {
+Dtype promoteTypesVar(ExprType e, Args... es) {
   Dtype lhs = e->dtype();
   Dtype rhs = promoteTypesVar(es...);
   if (e->isConstant()) {
@@ -84,45 +85,10 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
   return promoteTypes(lhs, rhs);
 }
 
-// Creates a new Expr of the given type with the provided lhs and rhs.
-inline const Expr* newBinaryOpOfType(
-    IRNodeType expr_type,
-    const Expr* lhs,
-    const Expr* rhs,
-    bool option) {
-  switch (expr_type) {
-    case IRNodeType::kAdd:
-      return new Add(lhs, rhs);
-    case IRNodeType::kSub:
-      return new Sub(lhs, rhs);
-    case IRNodeType::kMul:
-      return new Mul(lhs, rhs);
-    case IRNodeType::kDiv:
-      return new Div(lhs, rhs);
-    case IRNodeType::kMod:
-      return new Mod(lhs, rhs);
-    case IRNodeType::kMax:
-      return new Max(lhs, rhs, option);
-    case IRNodeType::kMin:
-      return new Min(lhs, rhs, option);
-    case IRNodeType::kAnd:
-      return new And(lhs, rhs);
-    case IRNodeType::kXor:
-      return new Xor(lhs, rhs);
-    case IRNodeType::kLshift:
-      return new Lshift(lhs, rhs);
-    case IRNodeType::kRshift:
-      return new Rshift(lhs, rhs);
-    default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
-  }
-}
-
 // Uses the evaluator to fold an Expression with constant terms.
 // E.g. evaluateOp(Add(3, 4)) => 7.
 // Expr v must not have any unbound Vars.
-inline Expr* evaluateOp(const Expr* v) {
+inline ExprPtr evaluateOp(const ExprPtr& v) {
   ExprHandle handle(v);
   ExprEval<SimpleIREvaluator> eval(handle);
 
@@ -132,7 +98,7 @@ inline Expr* evaluateOp(const Expr* v) {
     Type val = eval.value<Type>();                            \
     return getImmediateByType(v->dtype().scalar_type(), val); \
   }
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
       LOG(FATAL) << "Unsupported datatype: " << v->dtype();
@@ -146,17 +112,17 @@ inline Expr* evaluateOp(const Expr* v) {
 class Term : public ExprNode<Term> {
  public:
   template <class... Args>
-  Term(HashProvider& hasher, const Expr* s, Args... ts)
+  Term(HashProvider& hasher, ExprPtr s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
     addComponent(ts...);
     sort();
   }
 
-  Term(HashProvider& hasher, const Expr* s, std::vector<const Expr*> v)
+  Term(HashProvider& hasher, ExprPtr s, std::vector<ExprPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
-        scalar_(s),
+        scalar_(std::move(s)),
         hasher_(hasher) {
     sort();
   }
@@ -164,8 +130,8 @@ class Term : public ExprNode<Term> {
   // Convenience constructor from a map of hash -> var, used when merging Terms.
   Term(
       HashProvider& hasher,
-      const Expr* s,
-      std::unordered_map<SimplifierHashType, const Expr*> varmap)
+      const ExprPtr& s,
+      std::unordered_map<SimplifierHashType, ExprPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
       addComponent(p.second);
@@ -173,10 +139,10 @@ class Term : public ExprNode<Term> {
     sort();
   }
 
-  const Expr* scalar() const {
+  ExprPtr scalar() const {
     return scalar_;
   }
-  const std::vector<const Expr*>& variables() const {
+  const std::vector<ExprPtr>& variables() const {
     return variables_;
   }
   HashProvider& hasher() const {
@@ -188,18 +154,18 @@ class Term : public ExprNode<Term> {
   SimplifierHashType hashVars() const;
 
  private:
-  std::vector<const Expr*> variables_;
-  const Expr* scalar_;
+  std::vector<ExprPtr> variables_;
+  ExprPtr scalar_;
   HashProvider& hasher_;
 
   void addComponent() {}
-  void addComponent(const Expr* e) {
-    variables_.push_back(e);
+  void addComponent(ExprPtr e) {
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(const Expr* e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Sort by hash to normalize order of components.
@@ -212,14 +178,14 @@ class Term : public ExprNode<Term> {
 class Polynomial : public ExprNode<Polynomial> {
  public:
   template <class... Args>
-  Polynomial(HashProvider& hasher, const Expr* s, Args... ts)
+  Polynomial(HashProvider& hasher, ExprPtr s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
     addTerm(ts...);
     sort();
   }
 
-  Polynomial(HashProvider& hasher, const Expr* s, std::vector<const Term*> v)
+  Polynomial(HashProvider& hasher, const ExprPtr& s, std::vector<TermPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -228,7 +194,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
 
   // Helper constructor for list of terms with no scalar component.
-  Polynomial(HashProvider& hasher, std::vector<const Term*> terms)
+  Polynomial(HashProvider& hasher, std::vector<TermPtr> terms)
       : ExprNodeBase(promoteTypesVec(terms)),
         variables_(std::move(terms)),
         scalar_(getImmediateByType(dtype(), 0)),
@@ -240,8 +206,8 @@ class Polynomial : public ExprNode<Polynomial> {
   // Polynomials.
   Polynomial(
       HashProvider& hasher,
-      const Expr* s,
-      std::unordered_map<SimplifierHashType, const Term*> varmap)
+      const ExprPtr& s,
+      std::unordered_map<SimplifierHashType, TermPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
       addTerm(p.second);
@@ -249,10 +215,10 @@ class Polynomial : public ExprNode<Polynomial> {
     sort();
   }
 
-  const Expr* scalar() const {
+  ExprPtr scalar() const {
     return scalar_;
   }
-  const std::vector<const Term*>& variables() const {
+  const std::vector<TermPtr>& variables() const {
     return variables_;
   }
   HashProvider& hasher() const {
@@ -262,17 +228,17 @@ class Polynomial : public ExprNode<Polynomial> {
   SimplifierHashType hashVars() const;
 
  private:
-  std::vector<const Term*> variables_;
-  const Expr* scalar_;
+  std::vector<TermPtr> variables_;
+  ExprPtr scalar_;
   HashProvider& hasher_;
 
-  void addTerm(const Term* t) {
-    variables_.push_back(t);
+  void addTerm(TermPtr t) {
+    variables_.push_back(std::move(t));
   }
   template <class... Ts>
-  void addTerm(const Term* t, Ts... ts) {
-    addTerm(t);
-    addTerm(ts...);
+  void addTerm(TermPtr t, Ts&&... ts) {
+    addTerm(std::move(t));
+    addTerm(std::forward<Ts>(ts)...);
   }
 
   // Sort by hash to normalize order of terms.
@@ -281,14 +247,14 @@ class Polynomial : public ExprNode<Polynomial> {
 
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
-  RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
+  RoundOff(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
  public:
   template <class... Args>
-  MaxTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+  MaxTerm(HashProvider& hasher, ExprPtr s, bool p, Args... ts)
       : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
         scalar_(s),
         hasher_(hasher),
@@ -299,9 +265,9 @@ class MaxTerm : public ExprNode<MaxTerm> {
 
   MaxTerm(
       HashProvider& hasher,
-      const Expr* s,
+      const ExprPtr& s,
       bool p,
-      std::vector<const Expr*> v)
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -314,10 +280,10 @@ class MaxTerm : public ExprNode<MaxTerm> {
     return propagate_nans_;
   }
 
-  const Expr* scalar() const {
+  ExprPtr scalar() const {
     return scalar_;
   }
-  const std::vector<const Expr*>& variables() const {
+  const std::vector<ExprPtr>& variables() const {
     return variables_;
   }
   HashProvider& hasher() const {
@@ -325,19 +291,19 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
 
  private:
-  std::vector<const Expr*> variables_;
-  const Expr* scalar_;
+  std::vector<ExprPtr> variables_;
+  ExprPtr scalar_;
   HashProvider& hasher_;
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(const Expr* e) {
-    variables_.push_back(e);
+  void addComponent(ExprPtr e) {
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(const Expr* e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
@@ -347,7 +313,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
 class MinTerm : public ExprNode<MinTerm> {
  public:
   template <class... Args>
-  MinTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+  MinTerm(HashProvider& hasher, ExprPtr s, bool p, Args... ts)
       : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
         scalar_(s),
         hasher_(hasher),
@@ -358,9 +324,9 @@ class MinTerm : public ExprNode<MinTerm> {
 
   MinTerm(
       HashProvider& hasher,
-      const Expr* s,
+      const ExprPtr& s,
       bool p,
-      std::vector<const Expr*> v)
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -373,10 +339,10 @@ class MinTerm : public ExprNode<MinTerm> {
     return propagate_nans_;
   }
 
-  const Expr* scalar() const {
+  ExprPtr scalar() const {
     return scalar_;
   }
-  const std::vector<const Expr*>& variables() const {
+  const std::vector<ExprPtr>& variables() const {
     return variables_;
   }
   HashProvider& hasher() const {
@@ -384,38 +350,61 @@ class MinTerm : public ExprNode<MinTerm> {
   }
 
  private:
-  std::vector<const Expr*> variables_;
-  const Expr* scalar_;
+  std::vector<ExprPtr> variables_;
+  ExprPtr scalar_;
   HashProvider& hasher_;
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(const Expr* e) {
-    variables_.push_back(e);
+  void addComponent(ExprPtr e) {
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(const Expr* e, Es... es) {
-    addComponent(e);
-    addComponent(es...);
+  void addComponent(ExprPtr e, Es&&... es) {
+    addComponent(std::move(e));
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
   void uniquefy();
 };
 
-// Stmt simplification should occur in both modes.
-class TORCH_API IRSimplifierBase : public IRMutator {
+// Context-sensitive IR simplification
+using VarBoundInfo = std::unordered_map<VarPtr, analysis::Bound>;
+
+class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
-  ~IRSimplifierBase() override = default;
+  ~SimplifierUnderContext() override = default;
+  // Add boundary info for index variables in for-loops
+  StmtPtr mutate(const ForPtr& v) override;
 
-  Stmt* mutate(const Block* v) override;
+  ExprPtr mutate(const DivPtr& v) override;
+  ExprPtr mutate(const ModPtr& v) override;
+  ExprPtr mutate(const CompareSelectPtr& v) override;
+  ExprPtr mutate(const IfThenElsePtr& v) override;
 
-  Stmt* mutate(const Cond* v) override;
+ protected:
+  bool getLoopBoundInfo(const ExprPtr& expr, analysis::Bound* loop_bound_info);
 
-  Stmt* mutate(const For* v) override;
+ protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  HashProvider hasher_;
+  VarBoundInfo var_bound_info_;
+};
+
+// Stmt simplification should occur in both modes.
+class TORCH_API PolynomialBase : public IRMutator {
+ public:
+  ~PolynomialBase() override = default;
+
+  StmtPtr mutate(const BlockPtr& v) override;
+
+  StmtPtr mutate(const CondPtr& v) override;
+
+  StmtPtr mutate(const ForPtr& v) override;
 
   // Trivially factorize terms by GCD of scalar components.
-  const Term* factorizePolynomial(const Polynomial* poly);
+  TermPtr factorizePolynomial(const PolynomialPtr& poly);
 
   HashProvider& hasher() {
     return hasher_;
@@ -427,195 +416,131 @@ class TORCH_API IRSimplifierBase : public IRMutator {
 };
 
 // Simplify the IR by combining arithmetic expressions over common terms.
-class TORCH_API PolynomialTransformer : public IRSimplifierBase {
+class TORCH_API PolynomialTransformer : public PolynomialBase {
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
   // Inserts term into the provided map, in the case of a hash collision
   // combines the term with the existing and updates the map.
   void addOrUpdateTerm(
-      std::unordered_map<SimplifierHashType, const Term*>& varmap,
-      const Term* term);
+      std::unordered_map<SimplifierHashType, TermPtr>& varmap,
+      const TermPtr& term);
 
   // Add Polynomial expressions, combining Terms representing the same
   // variables.
-  const Expr* addPolynomials(const Polynomial* lhs, const Polynomial* rhs);
+  ExprPtr addPolynomials(const PolynomialPtr& lhs, const PolynomialPtr& rhs);
 
-  // Insert a new Term into the provided polynomial. If the new term has common
-  // variables to an existing term it is combined.
-  const Expr* insertTerm(const Polynomial* poly, const Term* term);
+  // Insert a new Term into the provided polynomial. If the new term has
+  // common variables to an existing term it is combined.
+  ExprPtr insertTerm(const PolynomialPtr& poly, const TermPtr& term);
 
   // Merge and simplify addition.
-  const Expr* mutate(const Add* v) override;
+  ExprPtr mutate(const AddPtr& v) override;
 
   // Subtract one term from another, cancelling if necessary.
-  const Expr* subTerms(const Term* lhs, const Term* rhs, bool negated);
+  ExprPtr subTerms(const TermPtr& lhs, TermPtr rhs, bool negated);
 
   // Subtract the RHS Polynomial from the LHS Polynomial, cancelling out where
   // possible.
-  const Expr* subPolynomials(const Polynomial* lhs, const Polynomial* rhs);
+  ExprPtr subPolynomials(const PolynomialPtr& lhs, const PolynomialPtr& rhs);
 
   // Merge and simplify subtraction.
-  const Expr* mutate(const Sub* v) override;
+  ExprPtr mutate(const SubPtr& v) override;
 
   // Multiply two terms together, usually creating a new term with the variable
   // lists concatenated.
-  const Term* mulTerms(const Term* lhs, const Term* rhs);
+  TermPtr mulTerms(const TermPtr& lhs, const TermPtr& rhs);
 
   // Multiply a Polynomial by a Term.
-  const Expr* polyByTerm(const Polynomial* poly, const Term* term);
+  ExprPtr polyByTerm(const PolynomialPtr& poly, const TermPtr& term);
 
   // Match a rounding pattern and create a RoundOff if found.
-  const Expr* isRoundOff(const Expr* lhs, const Expr* rhs);
+  ExprPtr isRoundOff(const ExprPtr& lhs, const ExprPtr& rhs);
 
   // Inserts a new component into a term, simplifying if possible.
-  const Expr* insertIntoTerm(const Term* term, const Expr* expr);
+  ExprPtr insertIntoTerm(const TermPtr& term, const ExprPtr& expr);
 
   // Merge and simplify multiplication.
-  const Expr* mutate(const Mul* v) override;
+  ExprPtr mutate(const MulPtr& v) override;
 
-  const Expr* mutate(const Div* v) override;
+  ExprPtr mutate(const DivPtr& v) override;
 
-  const Expr* mutate(const Mod* v) override;
+  ExprPtr mutate(const ModPtr& v) override;
 
-  const Expr* mutate(const And* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(const AndPtr& v) override;
 
-  const Expr* mutate(const Xor* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(const XorPtr& v) override;
 
-  const Expr* mutate(const Lshift* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(const LshiftPtr& v) override;
 
-  const Expr* mutate(const Rshift* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  ExprPtr mutate(const RshiftPtr& v) override;
 
-  const Expr* mutate(const Max* v) override;
+  ExprPtr mutate(const MaxPtr& v) override;
 
-  const Expr* mutate(const Min* v) override;
+  ExprPtr mutate(const MinPtr& v) override;
 
-  const Expr* mutate(const CompareSelect* v) override;
+  ExprPtr mutate(const CompareSelectPtr& v) override;
 
-  const Expr* mutate(const Intrinsics* v) override;
+  ExprPtr mutate(const IntrinsicsPtr& v) override;
 
-  const Expr* mutate(const Cast* v) override;
+  ExprPtr mutate(const CastPtr& v) override;
 
-  const Expr* mutate(const IfThenElse* v) override;
+  ExprPtr mutate(const IfThenElsePtr& v) override;
 
-  template <typename Op>
-  static const Expr* mutateBinaryOp(
-      const BinaryOpNode<Op>* v,
-      IRMutator* mutator,
-      bool option = false) {
-    const Expr* lhs = v->lhs();
-    const Expr* rhs = v->rhs();
-    const Expr* lhs_new = lhs->accept_mutator(mutator);
-    const Expr* rhs_new = rhs->accept_mutator(mutator);
-
-    const Expr* node = v;
-
-    if (lhs != lhs_new || rhs != rhs_new) {
-      node = newBinaryOpOfType(v->expr_type(), lhs_new, rhs_new, option);
-    }
-
-    // Can only fold if both sides are constant.
-    if (!lhs_new->isConstant() || !rhs_new->isConstant()) {
-      return node;
-    }
-
-    return evaluateOp(node);
-  }
-
-  static const Expr* simplify(const Expr* e);
+  static ExprPtr simplify(ExprPtr e);
   static ExprHandle simplify(const ExprHandle& e);
-  static Stmt* simplify(Stmt* e);
+  static StmtPtr simplify(StmtPtr e);
 };
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.
-class TORCH_API TermExpander : public IRSimplifierBase {
+class TORCH_API TermExpander : public PolynomialBase {
   PolynomialTransformer* simplifier_;
-  std::set<const Var*> eliminated_allocations_;
+  std::set<VarPtr> eliminated_allocations_;
 
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
   TermExpander(PolynomialTransformer* simplifier) : simplifier_(simplifier) {}
   bool check_safe() {
     return eliminated_allocations_.empty();
   }
 
   // Expand Terms out to a series of Muls.
-  const Expr* mutate(const Term* v) override;
+  ExprPtr mutate(const TermPtr& v) override;
 
   // Expand Polynomials out to a series of Adds.
-  const Expr* mutate(const Polynomial* v) override;
+  ExprPtr mutate(const PolynomialPtr& v) override;
 
   // Expand MaxTerms to a series of Max ops.
-  const Expr* mutate(const MaxTerm* v) override;
+  ExprPtr mutate(const MaxTermPtr& v) override;
 
   // Expand MinTerms to a series of Min ops.
-  const Expr* mutate(const MinTerm* v) override;
+  ExprPtr mutate(const MinTermPtr& v) override;
 
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
-  const Expr* mutate(const RoundOff* v) override;
+  ExprPtr mutate(const RoundOffPtr& v) override;
 
   // Eliminate zero length allocations.
-  Stmt* mutate(const Allocate* v) override;
-  Stmt* mutate(const Free* v) override;
+  StmtPtr mutate(const AllocatePtr& v) override;
+  StmtPtr mutate(const FreePtr& v) override;
 
   // Override to enable condition fusing.
-  Block* fuseConditions(Block* v);
-  Stmt* fuseSyncThreads(Block* block);
-  Stmt* mutate(const Block* v) override;
+  BlockPtr fuseConditions(BlockPtr v);
+  StmtPtr fuseSyncThreads(BlockPtr block);
+  StmtPtr mutate(const BlockPtr& v) override;
 };
 
 class TORCH_API IRSimplifier {
  public:
-  static const Expr* simplify(const Expr* e) {
-    PolynomialTransformer simplifier;
-    e = e->accept_mutator(&simplifier);
-
-    // There may be terms left in the IR, expand them.
-    TermExpander expander(&simplifier);
-    e = e->accept_mutator(&expander);
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    if (!expander.check_safe()) {
-      throw malformed_input("eliminated null Allocation without free");
-    }
-
-    return e;
-  }
-
+  static StmtPtr simplify(StmtPtr s);
+  static ExprPtr simplify(ExprPtr e);
   static ExprHandle simplify(const ExprHandle& e) {
     return ExprHandle(simplify(e.node()));
-  }
-
-  static Stmt* simplify(Stmt* s) {
-    PolynomialTransformer simplifier;
-    s = s->accept_mutator(&simplifier);
-    if (s == nullptr) {
-      return nullptr;
-    }
-
-    // There may be terms left in the IR, expand them.
-    TermExpander expander(&simplifier);
-    s = s->accept_mutator(&expander);
-    if (!expander.check_safe()) {
-      throw malformed_input("eliminated null Allocation without free");
-    }
-
-    return s;
   }
 };
 
 // Flattens the buf and performs the simplifier on the flattened dims.
-const Expr* buf_flat_size(const Buf* v);
+ExprPtr buf_flat_size(const BufPtr& v);
 // Returns true if expressions A and B can be simplified to an equal expression.
-TORCH_API bool exprEquals(const Expr* A, const Expr* B);
+TORCH_API bool exprEquals(const ExprPtr& A, const ExprPtr& B);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

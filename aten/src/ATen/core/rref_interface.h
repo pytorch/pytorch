@@ -1,11 +1,11 @@
 #pragma once
 
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/jit_type_base.h>
 
 namespace c10 {
 
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 using worker_id_t = int16_t;
 
 // This abstract class contains only user-facing APIs, and will be shared
@@ -17,9 +17,10 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   // counting.
   RRefInterface(const RRefInterface& other) = delete;
   RRefInterface(RRefInterface&& other) = delete;
+  RRefInterface& operator=(const RRefInterface& other) = delete;
   RRefInterface& operator=(RRefInterface&& other) = delete;
 
-  virtual ~RRefInterface() = default;
+  ~RRefInterface() override = default;
 
   // returns the worker id of the owner
   virtual worker_id_t owner() const = 0;

@@ -5,11 +5,9 @@
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
-// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
-c10::FunctionSchema getIsAvailableSchema() {
+inline c10::FunctionSchema getIsAvailableSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument available("available", c10::BoolType::get());
   c10::FunctionSchema preprocessor_schema(
@@ -22,8 +20,7 @@ c10::FunctionSchema getIsAvailableSchema() {
 
 constexpr static auto kBackendsNamespace = "__backends__";
 
-// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
-c10::FunctionSchema getCompileSchema() {
+inline c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument mod("processed", c10::AnyType::get());
   auto any_dict_ty =
@@ -39,8 +36,7 @@ c10::FunctionSchema getCompileSchema() {
   return compile_schema;
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
-c10::FunctionSchema getExecuteSchema() {
+inline c10::FunctionSchema getExecuteSchema() {
   auto any_list_ty = c10::ListType::create(c10::AnyType::get());
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument handle("handle", c10::AnyType::get());
@@ -90,7 +86,7 @@ std::function<void(Stack&)> getExecuteFunc() {
 template <class TBackendInterface>
 class backend {
   static_assert(
-      std::is_base_of<PyTorchBackendInterface, TBackendInterface>::value,
+      std::is_base_of_v<PyTorchBackendInterface, TBackendInterface>,
       "torch::jit::backend<T> requires T to inherit from PyTorchBackendInterface");
   std::string backend_name_;
 
@@ -115,5 +111,4 @@ class backend {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

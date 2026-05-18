@@ -127,13 +127,13 @@ its methods or attributes.
 
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
-`PythonPrint` encouters a constant tensor it will emit a reference to a
+`PythonPrint` encounters a constant tensor it will emit a reference to a
 global `CONSTANTS` table (like `foo = CONSTANTS.c0`).
 
 When importing, the importer will know how to resolve this reference into an
 actual tensor by looking it up in the tensor table. So `CONSTANTS.c0` means
 "this is the `0th` tensor in the tensor tuple in `constants.pkl`." See
-[the constants section](#constantspkl-Constants-in-code) for more info.
+[the constants section](#constantspkl-constants-in-code) for more info.
 
 **Original source range records**. To aid debugging, `PythonPrint` remembers
 the "original" (user-written) location of the source code it's emitting. That
@@ -242,7 +242,7 @@ necessary for pickling a module object.
 ### `data.pkl`: How module object state is serialized
 
 All data is written into the `data.pkl` file with the exception of tensors
-(see [the tensor section](#tensors-How-tensors-are-serialized) below).
+(see [the tensor section](#data-how-tensors-are-serialized) below).
 "Data" means all parts of the module object state, like attributes,
 submodules, etc.
 
@@ -291,7 +291,7 @@ The load process has the following steps:
 
 The unpickling process consists of a single call to unpickle the module
 object contained in `data.pkl`. The `Unpickler` is given a callback that lets it
-resolved any qualified names it encounters into `ClassType`s. This is done by
+resolve any qualified names it encounters into `ClassType`s. This is done by
 resolving the qualified name to the appropriate file in `code/`, then
 compiling that file and returning the appropriate `ClassType`.
 
@@ -328,7 +328,7 @@ For example:
 
 ```
 class M(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         self.a = torch.rand(2, 3)
         self.b = torch.nn.Linear(10, 10)
 
@@ -371,10 +371,10 @@ TorchScript class, or a `ScriptModule`. Owns other its attribute types
 **`Object`**: An instance of a particular class. Own the `CompilationUnit`
 that owns its `ClassType`. This is to ensure that if the user passes the
 object around in C++, all its code will stay around and methods will be
-invokable.
+invocable.
 
 **`Module`**: A view over a `ClassType` and the `Object` that holds its state.
-Also responsible for turning unqualified names (e.g. `foward()`) into
+Also responsible for turning unqualified names (e.g. `forward()`) into
 qualified ones for lookup in the owning `CompilationUnit` (e.g.
 `__torch__.MyModule.forward`). Owns the `Object`, which transitively owns the
 `CompilationUnit`.

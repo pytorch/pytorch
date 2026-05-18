@@ -1,28 +1,29 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `LayerNorm` module.
 ///
 /// Example:
 /// ```
-/// LayerNorm model(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5));
+/// LayerNorm model(LayerNormOptions({2,
+/// 2}).elementwise_affine(false).eps(2e-5));
 /// ```
 struct TORCH_API LayerNormOptions {
   /* implicit */ LayerNormOptions(std::vector<int64_t> normalized_shape);
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
-  /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
+  /// a value added to the denominator for numerical stability. ``Default:
+  /// 1e-5``.
   TORCH_ARG(double, eps) = 1e-5;
   /// a boolean value that when set to ``true``, this module
-  /// has learnable per-element affine parameters initialized to ones (for weights)
-  /// and zeros (for biases). ``Default: true``.
+  /// has learnable per-element affine parameters initialized to ones (for
+  /// weights) and zeros (for biases). ``Default: true``.
   TORCH_ARG(bool, elementwise_affine) = true;
 };
 
@@ -42,11 +43,12 @@ struct TORCH_API LayerNormFuncOptions {
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
 
-  TORCH_ARG(Tensor, weight) = {};
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = {};
+  TORCH_ARG(Tensor, bias);
 
-  /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
+  /// a value added to the denominator for numerical stability. ``Default:
+  /// 1e-5``.
   TORCH_ARG(double, eps) = 1e-5;
 };
 
@@ -58,7 +60,8 @@ struct TORCH_API LayerNormFuncOptions {
 ///
 /// Example:
 /// ```
-/// LocalResponseNorm model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
+/// LocalResponseNorm
+/// model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
 /// ```
 struct TORCH_API LocalResponseNormOptions {
   /* implicit */ LocalResponseNormOptions(int64_t size) : size_(size) {}
@@ -78,8 +81,8 @@ struct TORCH_API LocalResponseNormOptions {
 namespace functional {
 /// Options for `torch::nn::functional::local_response_norm`.
 ///
-/// See the documentation for `torch::nn::LocalResponseNormOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::LocalResponseNormOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
@@ -107,7 +110,6 @@ struct TORCH_API CrossMapLRN2dOptions {
   TORCH_ARG(double, beta) = 0.75;
 
   TORCH_ARG(int64_t, k) = 1;
-
 };
 
 // ============================================================================
@@ -130,7 +132,7 @@ struct TORCH_API NormalizeFuncOptions {
   TORCH_ARG(double, eps) = 1e-12;
   /// the output tensor. If `out` is used, this
   /// operation won't be differentiable.
-  TORCH_ARG(c10::optional<Tensor>, out) = c10::nullopt;
+  TORCH_ARG(std::optional<Tensor>, out) = std::nullopt;
 };
 
 } // namespace functional
@@ -153,8 +155,8 @@ struct TORCH_API GroupNormOptions {
   /// a value added to the denominator for numerical stability. Default: 1e-5
   TORCH_ARG(double, eps) = 1e-5;
   /// a boolean value that when set to ``true``, this module
-  /// has learnable per-channel affine parameters initialized to ones (for weights)
-  /// and zeros (for biases). Default: ``true``.
+  /// has learnable per-channel affine parameters initialized to ones (for
+  /// weights) and zeros (for biases). Default: ``true``.
   TORCH_ARG(bool, affine) = true;
 };
 
@@ -175,9 +177,9 @@ struct TORCH_API GroupNormFuncOptions {
   /// number of groups to separate the channels into
   TORCH_ARG(int64_t, num_groups);
 
-  TORCH_ARG(Tensor, weight) = {};
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = {};
+  TORCH_ARG(Tensor, bias);
 
   /// a value added to the denominator for numerical stability. Default: 1e-5
   TORCH_ARG(double, eps) = 1e-5;
@@ -185,5 +187,4 @@ struct TORCH_API GroupNormFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

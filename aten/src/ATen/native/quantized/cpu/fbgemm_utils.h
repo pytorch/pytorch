@@ -1,15 +1,19 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>
+C10_DIAGNOSTIC_POP()
 #include <fbgemm/QuantUtils.h>
+C10_DIAGNOSTIC_POP()
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
 // column offsets used for the fully connect layer, which are both prepared in
@@ -23,7 +27,7 @@
 struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
   PackedLinearWeight(
       std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       std::vector<int32_t> col_offsets,
       std::vector<float> w_scale,
       std::vector<int32_t> w_zp,
@@ -35,7 +39,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
         w_zp(std::move(w_zp)),
         q_scheme(std::move(q_scheme)) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
@@ -45,82 +49,126 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       at::Tensor input,
       double output_scale,
       int64_t output_zero_point) override;
+
   at::Tensor apply_relu(
       at::Tensor input,
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor& apply_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  at::Tensor& apply_relu_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
 
-  c10::optional<at::Tensor> bias() override {
+  at::Tensor apply_with_input_q_dq_qweight_dq_output_fp32(
+      at::Tensor input,
+      double input_scale,
+      int64_t input_zero_point) override;
+
+  at::Tensor apply_with_input_q_dq_qweight_dq_relu_output_fp32(
+      at::Tensor input,
+      double input_scale,
+      int64_t input_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false)
+      override;
+
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
+      override;
+
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
+
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
  private:
   template <bool ReluFused>
-  at::Tensor apply_impl(
-      at::Tensor input,
+  at::Tensor& apply_impl(
+      const at::Tensor& input,
       double output_scale,
-      int64_t output_zero_point);
+      int64_t output_zero_point,
+      at::Tensor& output);
 
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
+  at::Tensor apply_with_input_q_dq_qweight_dq_output_fp32_impl(
+      const at::Tensor& input,
+      double input_scale,
+      int64_t input_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range = false);
 };
 
 struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   PackedLinearWeightFp16(
       std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
-      c10::optional<at::Tensor> bias)
+      std::optional<at::Tensor> bias)
       : w(std::move(w)), bias_(std::move(bias)) {}
 
   std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
 
   at::Tensor apply(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
   at::Tensor apply_relu(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
 
-  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false)
+      override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
+      override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  at::Tensor& apply_dynamic_out(
+      const at::Tensor& input,
+      at::Tensor& output,
+      bool reduce_range = false) override;
+  at::Tensor& apply_dynamic_relu_out(
+      const at::Tensor& input,
+      at::Tensor& output,
+      bool reduce_range = false) override;
 
-  c10::optional<at::Tensor> bias() override {
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
+
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
-  void set_bias(c10::optional<at::Tensor> bias) override;
+  void set_bias(std::optional<at::Tensor> bias) override;
 
  private:
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input);
+  at::Tensor& apply_dynamic_impl(const at::Tensor& input, at::Tensor& output);
 };
 
 template <int kSpatialDim = 2>
 struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeight(
       std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -132,22 +180,22 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       std::vector<float> w_scale,
       std::vector<int32_t> w_zp,
       c10::QScheme q_scheme)
-    : w(std::move(w)),
-    bias(std::move(bias)),
-    stride_(std::move(stride)),
-    padding_(std::move(padding)),
-    output_padding_(std::move(output_padding)),
-    dilation_(std::move(dilation)),
-    groups_(groups),
-    transpose_(transpose),
-    col_offsets(std::move(col_offsets)),
-    kernel(std::move(kernel)),
-    w_scale(std::move(w_scale)),
-    w_zp(std::move(w_zp)),
-    q_scheme(q_scheme) {}
+      : w(std::move(w)),
+        bias(std::move(bias)),
+        stride_(std::move(stride)),
+        padding_(std::move(padding)),
+        output_padding_(std::move(output_padding)),
+        dilation_(std::move(dilation)),
+        groups_(groups),
+        transpose_(transpose),
+        col_offsets(std::move(col_offsets)),
+        kernel(std::move(kernel)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)),
+        q_scheme(q_scheme) {}
 
   std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
-  c10::optional<at::Tensor> bias;
+  std::optional<at::Tensor> bias;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;
@@ -170,11 +218,15 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  at::Tensor apply_dynamic(
+    const at::Tensor& input,
+    bool reduce_range) override;
+
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -227,7 +279,7 @@ inline void convert_uint8_int8(
     int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     dst_int8[i] = static_cast<int8_t>(static_cast<int32_t>(src_uint8[i]) - 128);
   }
 }
@@ -237,15 +289,13 @@ inline void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     dst_uint8[i] =
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
 }
 
-namespace at {
-namespace native {
-namespace fbgemm_utils {
+namespace at::native::fbgemm_utils {
 
 template <int kSpatialDim = 2>
 fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
@@ -291,18 +341,14 @@ Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
 Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
 
 template <int kSpatialDim = 2>
-Tensor TransposeConvTensorUnpackConversion(
-    const Tensor& src,
-    int groups);
+Tensor TransposeConvTensorUnpackConversion(const Tensor& src, int groups);
 
 template <int kSpatialDim>
 Tensor ConvertConvWeightsToChannelLastTensor(
     const at::Tensor& src,
     int groups,
     bool transpose);
-} // namespace fbgemm_utils
-} // namespace native
-} // namespace at
+} // at::native::namespace fbgemm_utils
 
 #endif // USE_FBGEMM
 
@@ -320,9 +366,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
         bit_rate_(bit_rate),
         q_scheme(q_scheme),
         version_(version) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
-    if (!packed_w.is_contiguous()) {
-      packed_w = packed_w.contiguous();
+    if (!this->packed_w.is_contiguous()) {
+      this->packed_w = this->packed_w.contiguous();
     }
   }
 
@@ -334,7 +379,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
   int64_t version_;
 
   at::Tensor unpack() override;
-  static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(at::Tensor weight);
+  static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(
+      const at::Tensor& weight);
 
   int64_t bit_rate() const override {
     return bit_rate_;
@@ -345,19 +391,20 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
   }
 
   at::Tensor embeddingbag_byte(
-    const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets,
-    bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    bool is_embedding_op) override;
+      const at::Tensor& indices,
+      const std::optional<at::Tensor>& offsets,
+      bool pruned_weights,
+      const std::optional<at::Tensor>& per_sample_weights_,
+      const std::optional<at::Tensor>& compressed_indices_mapping,
+      bool include_last_offset,
+      bool is_embedding_op) override;
 
   at::Tensor embeddingbag_4bit(
-    const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets,
-    bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset) override;
+      const at::Tensor& indices,
+      const std::optional<at::Tensor>& offsets,
+      bool pruned_weights,
+      const std::optional<at::Tensor>& per_sample_weights_,
+      const std::optional<at::Tensor>& compressed_indices_mapping,
+      bool include_last_offset,
+      bool is_embedding_op) override;
 };

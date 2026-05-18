@@ -1,16 +1,28 @@
-#include <c10/util/Backtrace.h>
+// @allow-raw-throw
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
 #include <iostream>
-#include <numeric>
 #include <sstream>
 #include <string>
+#include <utility>
+
+// Google glog's api does not have an external function that allows one to check
+// if glog is initialized or not. It does have an internal function - so we are
+// declaring it here. This is a hack but has been used by a bunch of others too
+// (e.g. Torch, common/init). See also Logging.cpp in this directory.
+#ifdef C10_USE_GLOG
+namespace google {
+namespace glog_internal_namespace_ {
+bool IsGoogleLoggingInitialized();
+} // namespace glog_internal_namespace_
+} // namespace google
+#endif
 
 namespace c10 {
 
-Error::Error(std::string msg, std::string backtrace, const void* caller)
+Error::Error(std::string msg, Backtrace backtrace, const void* caller)
     : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
   refresh_what();
 }
@@ -25,7 +37,7 @@ Error::Error(
     const uint32_t line,
     const char* condition,
     const std::string& msg,
-    const std::string& backtrace,
+    Backtrace backtrace,
     const void* caller)
     : Error(
           str("[enforce fail at ",
@@ -36,7 +48,7 @@ Error::Error(
               condition,
               ". ",
               msg),
-          backtrace,
+          std::move(backtrace),
           caller) {}
 
 std::string Error::compute_what(bool include_backtrace) const {
@@ -46,22 +58,44 @@ std::string Error::compute_what(bool include_backtrace) const {
 
   if (context_.size() == 1) {
     // Fold error and context in one line
-    oss << " (" << context_[0] << ")";
+    oss << " (" << context_[0] << ')';
   } else {
     for (const auto& c : context_) {
       oss << "\n  " << c;
     }
   }
 
-  if (include_backtrace) {
-    oss << "\n" << backtrace_;
+  if (include_backtrace && backtrace_) {
+    oss << '\n' << backtrace_->get();
   }
 
   return oss.str();
 }
 
+const Backtrace& Error::backtrace() const {
+  return backtrace_;
+}
+
+const char* Error::what() const noexcept {
+  return what_
+      .ensure([this] {
+        try {
+          return compute_what(/*include_backtrace*/ true);
+        } catch (...) {
+          // what() is noexcept, we need to return something here.
+          return std::string{"<Error computing Error::what()>"};
+        }
+      })
+      .c_str();
+}
+
 void Error::refresh_what() {
-  what_ = compute_what(/*include_backtrace*/ true);
+  // Do not compute what_ eagerly, as it would trigger the computation of the
+  // backtrace. Instead, invalidate it, it will be computed on first access.
+  // refresh_what() is only called by non-const public methods which are not
+  // supposed to be called concurrently with any other method, so it is safe to
+  // invalidate here.
+  what_.reset();
   what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
 }
 
@@ -116,13 +150,13 @@ void torchInternalAssertFail(
 
 } // namespace detail
 
-namespace Warning {
+namespace WarningUtils {
 
 namespace {
 WarningHandler* getBaseHandler() {
   static WarningHandler base_warning_handler_ = WarningHandler();
   return &base_warning_handler_;
-};
+}
 
 class ThreadWarningHandler {
  public:
@@ -140,35 +174,12 @@ class ThreadWarningHandler {
   }
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local WarningHandler* warning_handler_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 } // namespace
-
-void warn(
-    const SourceLocation& source_location,
-    const std::string& msg,
-    const bool verbatim) {
-  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
-}
-
-void warn(
-    SourceLocation source_location,
-    detail::CompileTimeEmptyString msg,
-    const bool verbatim) {
-  warn(source_location, "", verbatim);
-}
-
-void warn(
-    SourceLocation source_location,
-    const char* msg,
-    const bool verbatim) {
-  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
-}
 
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
   ThreadWarningHandler::set_handler(handler);
@@ -178,8 +189,7 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-bool warn_always = false;
+static bool warn_always = false;
 
 void set_warnAlways(bool setting) noexcept(true) {
   warn_always = setting;
@@ -189,14 +199,81 @@ bool get_warnAlways() noexcept(true) {
   return warn_always;
 }
 
-} // namespace Warning
+WarnAlways::WarnAlways(bool setting /*=true*/)
+    : prev_setting(get_warnAlways()) {
+  set_warnAlways(setting);
+}
 
-void WarningHandler::process(
+WarnAlways::~WarnAlways() {
+  set_warnAlways(prev_setting);
+}
+
+} // namespace WarningUtils
+
+void warn(const Warning& warning) {
+  WarningUtils::ThreadWarningHandler::get_handler()->process(warning);
+}
+
+Warning::Warning(
+    warning_variant_t type,
     const SourceLocation& source_location,
-    const std::string& msg,
-    const bool /*verbatim*/) {
-  LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
-      << "Warning: " << msg << " (function " << source_location.function << ")";
+    std::string msg,
+    const bool verbatim)
+    : type_(type),
+      source_location_(source_location),
+      msg_(std::move(msg)),
+      verbatim_(verbatim) {}
+
+Warning::Warning(
+    warning_variant_t type,
+    SourceLocation source_location,
+    detail::CompileTimeEmptyString /*msg*/,
+    const bool verbatim)
+    : Warning(type, source_location, "", verbatim) {}
+
+Warning::Warning(
+    warning_variant_t type,
+    SourceLocation source_location,
+    const char* msg,
+    const bool verbatim)
+    : type_(type),
+      source_location_(source_location),
+      msg_(std::string(msg)),
+      verbatim_(verbatim) {}
+
+Warning::warning_variant_t Warning::type() const {
+  return type_;
+}
+
+const SourceLocation& Warning::source_location() const {
+  return source_location_;
+}
+
+const std::string& Warning::msg() const {
+  return msg_;
+}
+
+bool Warning::verbatim() const {
+  return verbatim_;
+}
+
+void WarningHandler::process(const Warning& warning) {
+#ifdef C10_USE_GLOG
+  // During static initialization (before InitGoogleLogging), glog's global
+  // flags may not be constructed yet. Accessing them causes SIOF crashes
+  // (T253115013, D96553733). Fall back to stderr in that case.
+  if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized()) {
+    std::cerr << warning.source_location().file << ':'
+              << warning.source_location().line
+              << ": Warning: " << warning.msg() << " (function "
+              << warning.source_location().function << ')' << std::endl;
+    return;
+  }
+#endif
+  LOG_AT_FILE_LINE(
+      WARNING, warning.source_location().file, warning.source_location().line)
+      << "Warning: " << warning.msg() << " (function "
+      << warning.source_location().function << ')';
 }
 
 std::string GetExceptionString(const std::exception& e) {

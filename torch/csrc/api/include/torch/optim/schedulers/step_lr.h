@@ -2,22 +2,19 @@
 
 #include <torch/optim/schedulers/lr_scheduler.h>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API StepLR : public LRScheduler {
-public:
+ public:
+  StepLR(
+      torch::optim::Optimizer& optimizer,
+      const unsigned step_size,
+      const double gamma = 0.1);
 
-  StepLR(torch::optim::Optimizer& optimizer,
-         const unsigned step_size,
-         const double gamma = 0.1);
-
-private:
+ private:
   std::vector<double> get_lrs() override;
 
   const unsigned step_size_;
   const double gamma_;
-
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

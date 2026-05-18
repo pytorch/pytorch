@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
+#include <c10/util/irange.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -9,41 +10,35 @@
 #include <vector>
 #include <type_traits>
 
-#ifdef _WIN32
-#define DISABLED_ON_WINDOWS(x) DISABLED_##x
-#else
-#define DISABLED_ON_WINDOWS(x) x
-#endif
-
 using namespace at;
 
 namespace {
 
-const auto int_min = std::numeric_limits<int>::min();
-const auto int_max = std::numeric_limits<int>::max();
-const auto long_min = std::numeric_limits<int64_t>::min();
-const auto long_max = std::numeric_limits<int64_t>::max();
-const auto float_lowest = std::numeric_limits<float>::lowest();
-const auto float_min = std::numeric_limits<float>::min();
-const auto float_max = std::numeric_limits<float>::max();
-const auto double_lowest = std::numeric_limits<double>::lowest();
-const auto double_min = std::numeric_limits<double>::min();
-const auto double_max = std::numeric_limits<double>::max();
+constexpr auto int_min = std::numeric_limits<int>::min();
+constexpr auto int_max = std::numeric_limits<int>::max();
+constexpr auto long_min = std::numeric_limits<int64_t>::min();
+constexpr auto long_max = std::numeric_limits<int64_t>::max();
+constexpr auto float_lowest = std::numeric_limits<float>::lowest();
+constexpr auto float_min = std::numeric_limits<float>::min();
+constexpr auto float_max = std::numeric_limits<float>::max();
+constexpr auto double_lowest = std::numeric_limits<double>::lowest();
+constexpr auto double_min = std::numeric_limits<double>::min();
+constexpr auto double_max = std::numeric_limits<double>::max();
 
 const std::vector<int> ints {
   int_min,
   int_min + 1,
   int_min + 2,
-  static_cast<int>(-sqrt(int_max)),
+  static_cast<int>(-sqrt(static_cast<double>(int_max))),
   -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int>(sqrt(int_max)),
+  static_cast<int>(sqrt(static_cast<double>(int_max))),
   int_max - 2,
   int_max - 1,
   int_max
 };
 const std::vector<int> non_neg_ints {
   0, 1, 2, 3,
-  static_cast<int>(sqrt(int_max)),
+  static_cast<int>(sqrt(static_cast<double>(int_max))),
   int_max - 2,
   int_max - 1,
   int_max
@@ -52,16 +47,16 @@ const std::vector<int64_t> longs {
   long_min,
   long_min + 1,
   long_min + 2,
-  static_cast<int64_t>(-sqrt(long_max)),
+  static_cast<int64_t>(-sqrt(static_cast<double>(long_max))),
   -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(long_max)),
+  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
   long_max - 2,
   long_max - 1,
   long_max
 };
 const std::vector<int64_t> non_neg_longs {
   0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(long_max)),
+  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
   long_max - 2,
   long_max - 1,
   long_max
@@ -86,7 +81,7 @@ const std::vector<double> doubles {
 };
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
     return;
@@ -95,7 +90,7 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (val != 0 && act == 0) {
     return;
@@ -111,12 +106,12 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return std::pow(base, exp);
 }
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return native::powi(base, exp);
 }
@@ -127,7 +122,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
 
   for (const auto pow : pows) {
     // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
-    if ( dtype == kInt && pow > std::numeric_limits<int>::max()) {
+    if ( dtype == kInt && pow > static_cast<float>(std::numeric_limits<int>::max())) {
       // value cannot be converted to type int without overflow
       // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_THROW(tensor.pow(pow), std::runtime_error);
@@ -203,7 +198,7 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
   std::cout.precision(dbl::max_digits10);
 
   const auto vals_tensor = torch::tensor(vals, vals_dtype);
-  for (size_t shift = 0; shift < pows.size(); shift++) {
+  for ([[maybe_unused]] const auto shirt : c10::irange(pows.size())) {
     const auto pows_tensor = torch::tensor(pows, pows_dtype);
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);
@@ -287,7 +282,6 @@ void test_inverse(const std::vector<T> vals) {
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, non_neg_ints, kInt, kInt);
   tensor_pow_scalar(ints, non_neg_longs, kInt, kInt);
@@ -295,7 +289,6 @@ TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, doubles, kInt, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongTensorPowAllScalars) {
   tensor_pow_scalar(longs, non_neg_ints, kLong, kLong);
   tensor_pow_scalar(longs, non_neg_longs, kLong, kLong);
@@ -303,7 +296,6 @@ TEST(PowTest, LongTensorPowAllScalars) {
   tensor_pow_scalar(longs, doubles, kLong, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatTensorPowAllScalars) {
   tensor_pow_scalar(floats, ints, kFloat, kDouble);
   tensor_pow_scalar(floats, longs, kFloat, kDouble);
@@ -311,7 +303,6 @@ TEST(PowTest, FloatTensorPowAllScalars) {
   tensor_pow_scalar(floats, doubles, kFloat, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, ints, kDouble, kDouble);
   tensor_pow_scalar(doubles, longs, kDouble, kDouble);
@@ -319,7 +310,6 @@ TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, doubles, kDouble, kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntScalarPowAllTensors) {
   scalar_pow_tensor(ints, c10::kInt, ints, c10::kInt);
   scalar_pow_tensor(ints, c10::kInt, longs, c10::kLong);
@@ -327,45 +317,37 @@ TEST(PowTest, IntScalarPowAllTensors) {
   scalar_pow_tensor(ints, c10::kInt, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongScalarPowAllTensors) {
   scalar_pow_tensor(longs, c10::kLong, longs, c10::kLong);
   scalar_pow_tensor(longs, c10::kLong, floats, c10::kFloat);
   scalar_pow_tensor(longs, c10::kLong, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatScalarPowAllTensors) {
   scalar_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
   scalar_pow_tensor(floats, c10::kFloat, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleScalarPowAllTensors) {
   scalar_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, IntTensorPowIntTensor) {
   tensor_pow_tensor(ints, c10::kInt, ints, c10::kInt);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, LongTensorPowLongTensor) {
   tensor_pow_tensor(longs, c10::kLong, longs, c10::kLong);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, FloatTensorPowFloatTensor) {
   tensor_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, DoubleTensorPowDoubleTensor) {
   tensor_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PowTest, TestIntegralPow) {
   test_pow_one(longs);
   test_pow_one(ints);

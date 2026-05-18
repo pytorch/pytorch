@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Example of the Timer and Fuzzer APIs:
 
 $ python -m examples.fuzzer
@@ -8,7 +9,7 @@ import sys
 import torch.utils.benchmark as benchmark_utils
 
 
-def main():
+def main() -> None:
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
             [
@@ -65,7 +66,7 @@ def main():
     print()
 
     # More string munging to make pretty output.
-    print(f"Average attemts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
+    print(f"Average attempts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
 
     def time_fn(m):
         return m.median / m.metadata["numel"]

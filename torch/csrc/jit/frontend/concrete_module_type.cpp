@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/frontend/concrete_module_type.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch {
-namespace jit {
+#include <iostream>
+
+namespace torch::jit {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
@@ -56,7 +59,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
     // Populate the builder metadata from the JIT type. This is to ensure
     // ConcreteModuleTypes produced from Python and ones produced from a JIT
     // type directly behave the same to the rest of the system.
-    for (size_t i = 0; i < classType->numAttributes(); i++) {
+    for (const auto i : c10::irange(classType->numAttributes())) {
       const auto& attrName = classType->getAttributeName(i);
       const auto& attrType = classType->getAttribute(i);
       if (attrType->is_module()) {
@@ -70,7 +73,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
       }
     }
 
-    for (size_t i = 0; i < classType->numConstants(); i++) {
+    for (const auto i : c10::irange(classType->numConstants())) {
       builder.addConstant(
           classType->getConstantName(i), classType->getConstant(i));
     }
@@ -146,47 +149,47 @@ TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
-c10::optional<py::object> ConcreteModuleType::getPyClass() const {
+std::optional<py::object> ConcreteModuleType::getPyClass() const {
   if (!data_.pyClass_) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return data_.pyClass_;
 }
 
-c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
+std::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
     const std::string& name) const {
   const auto it = data_.overloads_.find(name);
   if (it != data_.overloads_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
+std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
     const std::string& name) const {
   const auto it = data_.functionAttributes_.find(name);
   if (it != data_.functionAttributes_.end()) {
     return it->second.function_->function();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
+std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
     const std::string& name) const {
   const auto it = data_.builtinFunctions_.find(name);
   if (it != data_.builtinFunctions_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
+std::optional<std::string> ConcreteModuleType::findFailedAttribute(
     const std::string& name) const {
   const auto it = data_.failedAttributes_.find(name);
   if (it != data_.failedAttributes_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
@@ -201,7 +204,8 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
+  TORCH_INTERNAL_ASSERT(
+      it != data_.modules_.end(), "Cannot find submodule with name/key ", name);
   return it->meta_;
 }
 
@@ -272,8 +276,7 @@ void ConcreteModuleTypeBuilder::addBuiltinFunction(
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
     std::shared_ptr<ConcreteModuleType> meta) {
-  modules_.emplace_back(
-      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
+  modules_.emplace_back(std::move(name), std::move(meta));
 }
 
 void ConcreteModuleTypeBuilder::addForwardHook(py::object hook) {
@@ -302,39 +305,37 @@ void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
 
 void ConcreteModuleType::dump() const {
   std::cout << "ConcreteModuleType for: "
-            << py::getattr(data_.pyClass_, "__name__") << "\n";
+            << py::getattr(data_.pyClass_, "__name__") << '\n';
   std::cout << "Constants: \n";
   for (const auto& pr : data_.constants_) {
-    std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+    std::cout << '\t' << pr.first << ": " << pr.second << '\n';
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.key() << ": " << pr.value().type_->annotation_str()
-              << "\n";
+    std::cout << '\t' << pr.key() << ": " << pr.value().type_->annotation_str()
+              << '\n';
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : data_.modules_) {
-    std::cout << "\t" << info.name_ << ": "
-              << info.meta_->getJitType()->annotation_str() << "\n";
+    std::cout << '\t' << info.name_ << ": "
+              << info.meta_->getJitType()->annotation_str() << '\n';
   }
   std::cout << "\nForward Pre-Hooks: \n";
   for (const auto& pre_hook_id : data_.forwardPreHooks_) {
-    std::cout << "\t"
-              << "pre_hook id: " << pre_hook_id << "\n";
+    std::cout << '\t' << "pre_hook id: " << pre_hook_id << '\n';
   }
   std::cout << "\nForward Hooks: \n";
   for (const auto& hook_id : data_.forwardHooks_) {
-    std::cout << "\t"
-              << "hook id: " << hook_id << "\n";
+    std::cout << '\t' << "hook id: " << hook_id << '\n';
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
-    std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+    std::cout << '\t' << pr.first << ": " << pr.second << '\n';
   }
   std::string isPoisoned = data_.isPoisoned_ ? "true" : "false";
-  std::cout << "isPoisoned: " << isPoisoned << "\n";
+  std::cout << "isPoisoned: " << isPoisoned << '\n';
   if (jitType_) {
-    std::cout << "jit type: " << jitType_->annotation_str() << "\n";
+    std::cout << "jit type: " << jitType_->annotation_str() << '\n';
   }
 }
 
@@ -366,11 +367,11 @@ std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
 ConcreteModuleType::getModulesPy() const {
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
+  ret.reserve(data_.modules_.size());
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_));
+    ret.emplace_back(info.name_, info.meta_);
   }
   return ret;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

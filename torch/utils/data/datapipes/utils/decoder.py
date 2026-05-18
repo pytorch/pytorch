@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This file takes partial of the implementation from NVIDIA's webdataset at here:
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 
@@ -8,21 +9,59 @@ import pickle
 import tempfile
 
 import torch
+from torch.utils.data.datapipes.utils.common import StreamWrapper
 
 
-__all__ = ["basichandlers", "imagehandler", "videohandler", "audiohandler",
-           "mathandler", "Decoder", "extension_extract_fn"]
+__all__ = [
+    "Decoder",
+    "ImageHandler",
+    "MatHandler",
+    "audiohandler",
+    "basichandlers",
+    "extension_extract_fn",
+    "handle_extension",
+    "imagehandler",
+    "mathandler",
+    "videohandler",
+]
 
 
 ################################################################
 # handle basic datatypes
 ################################################################
-def basichandlers(extension, data):
+def basichandlers(extension: str, data):
+    """Transforms raw data (byte stream) into python objects.
+
+    Looks at the extension and loads the data into a python object supporting
+    the corresponding extension.
+
+    Args:
+        extension (str): The file extension
+        data (byte stream): Data to load into a python object.
+
+    Returns:
+        object: The data loaded into a corresponding python object
+            supporting the extension.
+
+    Example:
+        >>> import pickle
+        >>> data = pickle.dumps("some data")
+        >>> new_data = basichandlers("pickle", data)
+        >>> new_data
+        some data
+
+    The transformation of data for extensions are:
+        - txt, text, transcript: utf-8 decoded data of str format
+        - cls, cls2, class, count, index, inx, id: int
+        - json, jsn: json loaded data
+        - pickle, pyd: pickle loaded data
+        - pt: torch loaded data
+    """
 
     if extension in "txt text transcript":
         return data.decode("utf-8")
 
-    if extension in "cls cls2 class count index inx id".split():
+    if extension in ["cls", "cls2", "class", "count", "index", "inx", "id"]:
         try:
             return int(data)
         except ValueError:
@@ -31,10 +70,10 @@ def basichandlers(extension, data):
     if extension in "json jsn":
         return json.loads(data)
 
-    if extension in "pyd pickle".split():
+    if extension in ["pyd", "pickle"]:
         return pickle.loads(data)
 
-    if extension in "pt".split():
+    if extension == "pt":
         stream = io.BytesIO(data)
         return torch.load(stream)
 
@@ -72,9 +111,11 @@ imagespecs = {
     "pilrgba": ("pil", None, "rgba"),
 }
 
+
 def handle_extension(extensions, f):
     """
-    Returns a decoder handler function for the list of extensions.
+    Return a decoder handler function for the list of extensions.
+
     Extensions can be a space separated list of extensions.
     Extensions can contain dots, in which case the corresponding number
     of extension components must be present in the key given to f.
@@ -83,7 +124,6 @@ def handle_extension(extensions, f):
     handle_extension("jpg jpeg", my_decode_jpg)  # invoked for any file.jpg
     handle_extension("seg.jpg", special_case_jpg)  # invoked only for file.seg.jpg
     """
-
     extensions = extensions.lower().split()
 
     def g(key, data):
@@ -94,15 +134,17 @@ def handle_extension(extensions, f):
             if len(target) > len(extension):
                 continue
 
-            if extension[-len(target):] == target:
+            if extension[-len(target) :] == target:
                 return f(data)
             return None
+
     return g
 
 
 class ImageHandler:
     """
     Decode image data using the given `imagespec`.
+
     The `imagespec` specifies whether the image is decoded
     to numpy/torch/pi, decoded to uint8/float, and decoded
     to l/rgb/rgba:
@@ -125,25 +167,31 @@ class ImageHandler:
     - pilrgb: pil None rgb
     - pilrgba: pil None rgba
     """
-    def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), "unknown image specification: {}".format(imagespec)
+
+    def __init__(self, imagespec) -> None:
+        if imagespec not in list(imagespecs.keys()):
+            raise AssertionError(f"unknown image specification: {imagespec}")
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
-        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
+        if extension.lower() not in ["jpg", "jpeg", "png", "ppm", "pgm", "pbm", "pnm"]:
             return None
 
         try:
             import numpy as np
-        except ImportError as e:
-            raise ModuleNotFoundError("Package `numpy` is required to be installed for default image decoder."
-                                      "Please use `pip install numpy` to install the package")
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "Package `numpy` is required to be installed for default image decoder."
+                "Please use `pip install numpy` to install the package"
+            ) from e
 
         try:
             import PIL.Image
-        except ImportError as e:
-            raise ModuleNotFoundError("Package `PIL` is required to be installed for default image decoder."
-                                      "Please use `pip install Pillow` to install the package")
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "Package `PIL` is required to be installed for default image decoder."
+                "Please use `pip install Pillow` to install the package"
+            ) from e
 
         imagespec = self.imagespec
         atype, etype, mode = imagespecs[imagespec]
@@ -156,14 +204,20 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                if result.dtype != np.uint8:
+                    raise AssertionError(
+                        f"numpy image array should be type uint8, but got {result.dtype}"
+                    )
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                if result.dtype != np.uint8:
+                    raise AssertionError(
+                        f"numpy image array should be type uint8, but got {result.dtype}"
+                    )
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -173,6 +227,7 @@ class ImageHandler:
                     return torch.tensor(result) / 255.0
             return None
 
+
 def imagehandler(imagespec):
     return ImageHandler(imagespec)
 
@@ -181,15 +236,27 @@ def imagehandler(imagespec):
 # torch video
 ################################################################
 def videohandler(extension, data):
-    if extension not in "mp4 ogv mjpeg avi mov h264 mpg webm wmv".split():
+    if extension not in [
+        "mp4",
+        "ogv",
+        "mjpeg",
+        "avi",
+        "mov",
+        "h264",
+        "mpg",
+        "webm",
+        "wmv",
+    ]:
         return None
 
     try:
         import torchvision.io
     except ImportError as e:
-        raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video file loader."
-                                  "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
-                                  "to install the package")
+        raise ModuleNotFoundError(
+            "Package `torchvision` is required to be installed for default video file loader."
+            "Please use `pip install torchvision`"
+            "to install the package"
+        ) from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -208,9 +275,11 @@ def audiohandler(extension, data):
     try:
         import torchaudio  # type: ignore[import]
     except ImportError as e:
-        raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
-                                  "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
-                                  "to install the package")
+        raise ModuleNotFoundError(
+            "Package `torchaudio` is required to be installed for default audio file loader."
+            "Please use `pip install torchaudio`"
+            "to install the package"
+        ) from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -227,17 +296,20 @@ class MatHandler:
         try:
             import scipy.io as sio
         except ImportError as e:
-            raise ModuleNotFoundError("Package `scipy` is required to be installed for mat file."
-                                      "Please use `pip install scipy` or `conda install scipy`"
-                                      "to install the package")
+            raise ModuleNotFoundError(
+                "Package `scipy` is required to be installed for mat file."
+                "Please use `pip install scipy`"
+                "to install the package"
+            ) from e
         self.sio = sio
         self.loadmat_kwargs = loadmat_kwargs
 
     def __call__(self, extension, data):
-        if extension != 'mat':
+        if extension != "mat":
             return None
         with io.BytesIO(data) as stream:
             return self.sio.loadmat(stream, **self.loadmat_kwargs)
+
 
 def mathandler(**loadmat_kwargs):
     return MatHandler(**loadmat_kwargs)
@@ -258,28 +330,37 @@ def extension_extract_fn(pathname):
 class Decoder:
     """
     Decode key/data sets using a list of handlers.
+
     For each key/data item, this iterates through the list of
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, *handler, key_fn=extension_extract_fn):
+    def __init__(self, *handler, key_fn=extension_extract_fn) -> None:
         self.handlers = list(handler) if handler else []
         self.key_fn = key_fn
 
     # Insert new handler from the beginning of handlers list to make sure the new
     # handler having the highest priority
-    def add_handler(self, *handler):
+    def add_handler(self, *handler) -> None:
         if not handler:
             return
         self.handlers = list(handler) + self.handlers
+
+    @staticmethod
+    def _is_stream_handle(data):
+        obj_to_check = data.file_obj if isinstance(data, StreamWrapper) else data
+        return isinstance(obj_to_check, (io.BufferedIOBase, io.RawIOBase))
 
     def decode1(self, key, data):
         if not data:
             return data
 
         # if data is a stream handle, we need to read all the content before decoding
-        if isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase):
-            data = data.read()
+        if Decoder._is_stream_handle(data):
+            ds = data
+            # The behavior of .read can differ between streams (e.g. HTTPResponse), hence this is used instead
+            data = b"".join(data)
+            ds.close()
 
         for f in self.handlers:
             result = f(key, data)

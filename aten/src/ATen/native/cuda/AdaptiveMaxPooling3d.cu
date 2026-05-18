@@ -1,30 +1,38 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_max_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
-__device__ inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+__device__ inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-__device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+__device__ inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // 5d tensor B x D x T x H x W
@@ -36,7 +44,7 @@ __device__ inline int end_index(int a, int b, int c) {
  */
  template <typename T>
 __global__ void adaptivemaxpool(
-                        T *input, T *output, int64_t *indices,
+                        const T *input, T *output, int64_t *indices,
                         int isizeT, int isizeH, int isizeW,
                         int osizeT, int osizeH, int osizeW,
                         int64_t istrideD,
@@ -65,7 +73,7 @@ __global__ void adaptivemaxpool(
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
-  T *input_dt = input + d*istrideD + istartT*istrideT;
+  const T *input_dt = input + d*istrideD + istartT*istrideT;
   // output offset by slice/feature and frame/time
   T *output_dt = output + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/time
@@ -85,7 +93,7 @@ __global__ void adaptivemaxpool(
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
-      T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
+      const T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output_dt + oh*osizeW + ow;
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
@@ -96,7 +104,7 @@ __global__ void adaptivemaxpool(
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             T val = ptr_input[ih*istrideH + iw*istrideW];
-            if ((val > max) || THCNumerics<T>::isnan(val)) {
+            if ((val > max) || at::_isnan(val)) {
               max = val;
               argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW;
             }
@@ -113,7 +121,7 @@ __global__ void adaptivemaxpool(
 
 template <typename scalar_t>
 void adaptivemaxpool_loop(
-                        scalar_t *input_data,
+                        const scalar_t *input_data,
                         scalar_t *output_data,
                         int64_t *indices_data,
                         int64_t totalZ,
@@ -150,7 +158,7 @@ void adaptivemaxpool_loop(
  */
  template <typename T>
 __global__ void adaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
+  T *gradInput, const T *gradOutput, const int64_t *indices,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW,
   int64_t offsetZ
@@ -174,16 +182,16 @@ __global__ void adaptivemaxgradinput(
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  const T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  const int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
     for(ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      const T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
+      const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int argmax = (*ptr_ind);
       gradInput_d[argmax] += grad_delta;
@@ -194,8 +202,8 @@ __global__ void adaptivemaxgradinput(
 template <typename scalar_t>
 void adaptivemaxgradinput_loop(
   scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
+  const scalar_t *gradOutput_data,
+  const int64_t *indices_data,
   int64_t totalZ,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW)
@@ -226,7 +234,7 @@ void adaptivemaxgradinput_loop(
  */
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
+  T *gradInput, const T *gradOutput, const int64_t *indices,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW,
   int64_t offsetZ
@@ -250,19 +258,19 @@ __global__ void atomicadaptivemaxgradinput(
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/otme
-  T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
+  const T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/otme
-  int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
+  const int64_t *indices_dt = indices + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
     for(ow = ostartW; ow < oendW; ow += ostepW) {
       // Compute the gradients for the argmax input pixel
-      T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
-      int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
+      const T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
+      const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      gpuAtomicAdd(&(gradInput_d[argmax]), grad_delta);
+      gpuAtomicAddNoReturn(&(gradInput_d[argmax]), grad_delta);
     }
   }
 }
@@ -270,8 +278,8 @@ __global__ void atomicadaptivemaxgradinput(
 template <typename scalar_t>
 void atomicadaptivemaxgradinput_loop(
   scalar_t *gradInput_data,
-  scalar_t *gradOutput_data,
-  int64_t *indices_data,
+  const scalar_t *gradOutput_data,
+  const int64_t *indices_data,
   int64_t totalZ,
   int isizeT, int isizeH, int isizeW,
   int osizeT, int osizeH, int osizeW)
@@ -304,7 +312,10 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
   TensorArg input_arg{input, "input", 3};
 
   checkAllSameGPU(
-      "adaptive_max_pool3d_cuda", {output_arg, indices_arg, input_arg});
+      __func__, {output_arg, indices_arg, input_arg});
+  if (input.numel() == 0 || output.numel() == 0) {
+    return;
+  }
 
   int64_t osizeT = output_size[0];
   int64_t osizeH = output_size[1];
@@ -335,7 +346,11 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
     isizeH = input_.size(3);
     isizeW = input_.size(4);
 
-    istrideD = input_.stride(1);
+    // In the kernel, the batch and channel dimensions are treated as if they
+    // are flattened and istrideD is used as the stride of this flattened dim
+    // Handle the edge case where input_.size(1) == 1, where despite passing the
+    // contiguity check the stride might not be T * H * W
+    istrideD = isizeT * isizeH * isizeW;
     istrideT = input_.stride(2);
     istrideH = input_.stride(3);
     istrideW = input_.stride(4);
@@ -345,9 +360,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, input_.scalar_type(), "adaptive_max_pool3d_cuda", [&] {
-        scalar_t* input_data = input_.data_ptr<scalar_t>();
-        scalar_t* output_data = output.data_ptr<scalar_t>();
-        int64_t* indices_data = indices.data_ptr<int64_t>();
+        const scalar_t* input_data = input_.const_data_ptr<scalar_t>();
+        scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
+        int64_t* indices_data = indices.mutable_data_ptr<int64_t>();
 
         adaptivemaxpool_loop(
             input_data,
@@ -378,8 +393,11 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
   TensorArg indices_arg{indices, "indices", 4};
 
   checkAllSameGPU(
-      "adaptive_max_pool3d_backward_cuda",
+      __func__,
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
+  if (gradOutput.numel() == 0) {
+    return;
+  }
 
   const Tensor gradOutput_ = gradOutput.contiguous();
 
@@ -426,9 +444,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         input.scalar_type(),
         "adaptive_max_pool3d_backward_cuda",
         [&] {
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
-          int64_t* indices_data = indices.data_ptr<int64_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
+          const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 
           atomicadaptivemaxgradinput_loop(
               gradInput_data,
@@ -449,9 +467,9 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         input.scalar_type(),
         "adaptive_max_pool3d_backward_cuda",
         [&] {
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput_.data_ptr<scalar_t>();
-          int64_t* indices_data = indices.data_ptr<int64_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
+          const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 
           adaptivemaxgradinput_loop(
               gradInput_data,
@@ -467,5 +485,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         });
   }
  }
-} // at::native
-} // at
+} // namespace at::native

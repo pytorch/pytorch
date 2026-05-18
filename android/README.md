@@ -2,21 +2,30 @@
 
 ## Demo applications and tutorials
 
-Demo applications with code walk-through can be find in [this github repo](https://github.com/pytorch/android-demo-app).
+Please refer to [meta-pytorch/executorch-examples](https://github.com/meta-pytorch/executorch-examples/tree/main/dl3/android/DeepLabV3Demo) for the Android demo app based on [ExecuTorch](https://github.com/pytorch/executorch).
+
+Please join our [Discord](https://discord.com/channels/1334270993966825602/1349854760299270284) for any questions.
 
 ## Publishing
 
 ##### Release
 Release artifacts are published to jcenter:
 
-```
+```groovy
 repositories {
     jcenter()
 }
 
+# lite interpreter build
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.6.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
+    implementation 'org.pytorch:pytorch_android_lite:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.10.0'
+}
+
+# full jit build
+dependencies {
+    implementation 'org.pytorch:pytorch_android:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0'
 }
 ```
 
@@ -25,17 +34,26 @@ dependencies {
 Nightly(snapshots) builds are published every night from `master` branch to [nexus sonatype snapshots repository](https://oss.sonatype.org/#nexus-search;quick~pytorch_android)
 
 To use them repository must be specified explicitly:
-```
+```groovy
 repositories {
     maven {
         url "https://oss.sonatype.org/content/repositories/snapshots"
     }
 }
 
+# lite interpreter build
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.9.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.9.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_lite:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.12.0-SNAPSHOT'
+    ...
+}
+
+# full jit build
+dependencies {
+    ...
+    implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
     ...
 }
 ```
@@ -46,11 +64,11 @@ The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle
 In some cases you might want to use a local build of pytorch android, for example you may build custom libtorch binary with another set of operators or to make local changes.
 
 For this you can use `./scripts/build_pytorch_android.sh` script.
-```
+```bash
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
 git submodule update --init --recursive
-sh ./scripts/build_pytorch_android.sh
+bash ./scripts/build_pytorch_android.sh
 ```
 
 The workflow contains several steps:
@@ -68,21 +86,21 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
 
 After successful build you should see the result as aar file:
 
-```
+```bash
 $ find pytorch_android/build/ -type f -name *aar
 pytorch_android/build/outputs/aar/pytorch_android.aar
 pytorch_android_torchvision/build/outputs/aar/pytorch_android.aar
 ```
 
 It can be used directly in android projects, as a gradle dependency:
-```
+```groovy
 allprojects {
     repositories {
         flatDir {
@@ -95,23 +113,20 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     ...
-    implementation 'com.android.support:appcompat-v7:28.0.0'
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
-    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    implementation 'com.facebook.soloader:nativeloader:0.10.5'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'`, `'com.facebook.soloader:nativeloader:0.8.0'` and 'com.facebook.fbjni:fbjni-java-only:0.0.3', we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.5'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
-
-You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
 
 ## Linking to prebuilt libtorch library from gradle dependency
 
 In some cases, you may want to use libtorch from your android native build.
 You can do it without building libtorch android, using native libraries from PyTorch android gradle dependency.
 For that, you will need to add the next lines to your gradle build.
-```
+```groovy
 android {
 ...
     configurations {
@@ -134,7 +149,7 @@ android {
 }
 
 dependencies {
-    extractForNativeBuild('org.pytorch:pytorch_android:1.6.0')
+    extractForNativeBuild('org.pytorch:pytorch_android:1.10.0')
 }
 
 task extractAARForNativeBuild {
@@ -166,7 +181,7 @@ The added task will unpack them to gradle build directory.
 In your native build you can link to them adding these lines to your CMakeLists.txt:
 
 
-```
+```cmake
 # Relative path of gradle build directory to CMakeLists.txt
 set(build_DIR ${CMAKE_SOURCE_DIR}/build)
 
@@ -187,14 +202,14 @@ find_library(FBJNI_LIBRARY fbjni
   NO_CMAKE_FIND_ROOT_PATH)
 
 target_link_libraries(${PROJECT_NAME}
-  ${PYTORCH_LIBRARY})
+  ${PYTORCH_LIBRARY}
   ${FBJNI_LIBRARY})
 
 ```
 If your CMakeLists.txt file is located in the same directory as your build.gradle, `set(build_DIR ${CMAKE_SOURCE_DIR}/build)` should work for you. But if you have another location of it, you may need to change it.
 
 After that, you can use libtorch C++ API from your native code.
-```
+```cpp
 #include <string>
 #include <ATen/NativeFunctions.h>
 #include <torch/script.h>
@@ -217,8 +232,6 @@ void loadAndForwardModel(const std::string& modelPath) {
 ```
 
 To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
-
-[Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
 
 ## PyTorch Android API Javadoc
 

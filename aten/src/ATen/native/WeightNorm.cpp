@@ -1,14 +1,29 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/cpu/WeightNormKernel.h>
 
-#include <cstring>
-#include <memory>
-#include <sstream>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_weight_norm_differentiable_backward_native.h>
+#include <ATen/ops/_weight_norm_interface.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/_weight_norm_native.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/norm_except_dim.h>
+#include <ATen/ops/norm_except_dim_native.h>
+#endif
+
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
+
+DEFINE_DISPATCH(weight_norm_stub);
+DEFINE_DISPATCH(weight_norm_backward_stub);
 
 // Staying faithful to the Python for now for clarity, look for optimizations later
 // (e.g., single return statement for RVO)
@@ -32,6 +47,38 @@ Tensor norm_except_dim(const Tensor & v, int64_t pow, int64_t dim)
   }
 }
 
+std::tuple<Tensor,Tensor> weight_norm_cpu(
+    const Tensor& v,
+    const Tensor& g,
+    int64_t dim) {
+  auto w = at::empty_like(v, at::MemoryFormat::Contiguous);
+
+  // align with cuda behavior, keep norm in 'Float' when g is 'BFloat16'/'Half'
+  const auto dtype = (g.scalar_type() == at::ScalarType::BFloat16 || g.scalar_type() == at::ScalarType::Half) ?
+      at::ScalarType::Float : g.scalar_type();
+  auto norm = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(dtype));
+  weight_norm_stub(kCPU, w, norm, v, g, dim);
+
+  return std::tuple<Tensor, Tensor>{std::move(w), std::move(norm)};
+}
+
+std::tuple<Tensor, Tensor> weight_norm_backward_cpu(
+    const Tensor& grad_w,
+    const Tensor& saved_v,
+    const Tensor& saved_g,
+    const Tensor& saved_norm,
+    int64_t dim) {
+  TORCH_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
+  TORCH_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
+  TORCH_CHECK(saved_norm.is_contiguous(), "saved_norm must be contiguous");
+
+  auto grad_v = at::empty_like(saved_v, at::MemoryFormat::Contiguous);
+  auto grad_g = at::empty_like(saved_g, at::MemoryFormat::Contiguous);
+  weight_norm_backward_stub(kCPU, grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, dim);
+
+  return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
+}
+
 Tensor _weight_norm
   (const Tensor & v_in,
    const Tensor & g_in,
@@ -46,12 +93,12 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  bool can_use_fused = v.is_cuda() && (dim == 0 || dim == v.dim() - 1);
+  bool can_use_fused = (dim == 0) || (dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through
     // VariableType.cpp, and construct a WeightNormFusedBackward object in the autograd graph.
-    return std::get<0>(at::_weight_norm_cuda_interface(v, g, dim));
+    return std::get<0>(at::_weight_norm_interface(v, g, dim));
   } else {
     // Double-differentiable primitive ops
     // at::native::norm_except_dim would probably be fine as well.
@@ -59,7 +106,7 @@ Tensor _weight_norm
   }
 }
 
-// Differentiable backward path, an alternative to weight_norm_cuda_backward, to be used
+// Differentiable backward path, an alternative to weight_norm_backward, to be used
 // when backward is itself creating a graph.
 // The GradMode::is_enabled() check must be performed within Functions.cpp; that's why we
 // define a separate function here, instead of inlining it in weight_norm_cuda_backward.
@@ -99,15 +146,14 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
     auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
     auto grad_g = per_dim_sums/norms;
-    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+    return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
   } else { // dim == last_dim
     bcast_size[last_dim] = last_size;
     auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
     auto grad_g = per_dim_sums/norms;
-    return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+    return std::tuple<Tensor, Tensor>{std::move(grad_v), std::move(grad_g)};
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

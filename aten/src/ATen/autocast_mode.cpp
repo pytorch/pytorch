@@ -1,31 +1,26 @@
-#include <ATen/ATen.h>
-#include <torch/library.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/autocast_mode.h>
 
-#include <c10/util/intrusive_ptr.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <mutex>
+#include <ATen/CachedTensorUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
+#include <c10/util/flat_hash_map.h>
 
-#include <iostream>
-#include <exception>
+namespace at::autocast {
 
-namespace at {
-namespace autocast {
-
-bool is_enabled() {
-  //return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA) ||
-  //         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+bool is_autocast_enabled(at::DeviceType device_type) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
+  return !c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
 }
 
-void set_enabled(bool new_enabled) {
-  //c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
+void set_autocast_enabled(at::DeviceType device_type, bool enabled) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
+  c10::impl::tls_set_dispatch_key_excluded(dispatch_key, !enabled);
 }
 
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
-// Our heuristic is to cache fp16 casts of fp32 model weights (see cached_cast below).
+// Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
 //
 // After discussion with @ezyang, the cache uses the following structure:
 // The key is the fp32 source tensor's TensorImpl*, a proxy for a Tensor uuid that's
@@ -42,19 +37,58 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
+
+ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
+  static ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
+  return cached_casts;
+}
+std::mutex cached_casts_mutex;
+
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
 // any instance of autocast (which should occur at the end of each forward pass)
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local int nesting = 0;
-}
+
+// The order of this array MUST exactly match the definition order of DeviceType
+// in c10/core/DeviceType.h.
+static_assert(
+    at::COMPILE_TIME_MAX_DEVICE_TYPES == 21,
+    "The definition of the default autocast data type per device backend doesn't match with the definition of the device type.");
+thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    autocast_dtype = {
+        at::kBFloat16, // CPU
+        at::kHalf, // CUDA.
+        at::ScalarType::Undefined, // Reserved for explicit MKLDNN
+        at::ScalarType::Undefined, // OpenGL
+        at::ScalarType::Undefined, // OpenCL
+        at::ScalarType::Undefined, // IDEEP.
+        at::kHalf, // AMD HIP
+        at::ScalarType::Undefined, // FPGA
+        at::kBFloat16, // ONNX Runtime / Microsoft
+        at::kBFloat16, // XLA / TPU
+        at::ScalarType::Undefined, // Vulkan
+        at::ScalarType::Undefined, // Metal
+        at::kHalf, // XPU
+        at::kHalf, // MPS
+        at::ScalarType::Undefined, // Meta (tensors with no data)
+        at::kBFloat16, // HPU / HABANA
+        at::ScalarType::Undefined, // SX-Aurora / NEC
+        at::ScalarType::Undefined, // Lazy Tensors
+        at::kHalf, // Graphcore IPU
+        at::kHalf, // Meta training and inference devices
+        at::kHalf, // PrivateUse1 device
+};
+
+// should we enabled the cache inside autocast.
+thread_local bool cache_enabled = true;
+
+} // anonymous namespace
 
 void clear_cache() {
-  cached_casts.clear();
+  const std::lock_guard<std::mutex> lock(cached_casts_mutex);
+  get_cached_casts().clear();
 }
 
 int increment_nesting() {
@@ -65,22 +99,53 @@ int decrement_nesting() {
   return --nesting;
 }
 
+at::ScalarType get_autocast_dtype(at::DeviceType device_type) {
+  return autocast_dtype[static_cast<int>(device_type)];
+}
+
+void set_autocast_dtype(at::DeviceType device_type, at::ScalarType dtype) {
+  autocast_dtype[static_cast<int>(device_type)] = dtype;
+}
+
+bool is_autocast_cache_enabled() {
+  return cache_enabled;
+}
+
+void set_autocast_cache_enabled(bool enabled) {
+  cache_enabled = enabled;
+}
+
 // Overload to catch Tensor args
 // TODO (possible optimization):
 // Move cast_cache to an inline function in a header with cached_casts declared as
 // extern thread_local in the header.
-Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
-    // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
+Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_type) {
+  if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
+    // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
-    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf() && !arg.is_view());
+    //
+    // Fix #158232: Don't cache in inference_mode - those tensors can't be reused
+    // for training since enable_grad() cannot override inference_mode.
+    bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
+                         arg.scalar_type() == at::kFloat && arg.requires_grad() &&
+                         arg.is_leaf() && !arg.is_view() && cache_enabled &&
+                         !at::caching::is_cached_tensor(arg) &&
+                         !c10::InferenceMode::is_enabled());
+
     if (can_try_cache) {
-      auto it = cached_casts.find(arg.unsafeGetTensorImpl());
-      if (it != cached_casts.end()) {
+      const std::lock_guard<std::mutex> lock(cached_casts_mutex);
+      auto it = get_cached_casts().find(arg.unsafeGetTensorImpl());
+      if (it != get_cached_casts().end()) {
         return std::get<1>(it->second);
       } else {
+        // Fix #158232: When caching in no_grad() context, we still need grad_fn
+        // on the cached tensor so it can be reused in grad-enabled contexts.
+        // The AutoGradMode RAII guard temporarily enables grad for .to() only.
+        // Note: arg.requires_grad() is guaranteed true here (checked in can_try_cache)
+        // and inference_mode is excluded above since enable_grad can't override it.
+        c10::AutoGradMode enable_grad(true);
         auto casted_arg = arg.to(to_type);
-        cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
+        get_cached_casts().emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
       }
     } else {
@@ -91,117 +156,12 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
   }
 }
 
-// Policies correspond to op categories that need code-divergent handling.
-// Wrapper templates below are specialized based on a policy template parameter.
-enum class CastPolicy : uint8_t {
-  fp16 = 0, // Cast all inputs to at::kHalf before running the op.
-  fp32, // Cast all inputs to at::kFloat before running the op.
-  fp32_set_opt_dtype, // Treats functions (like softmax) that
-                      //   1. we'd like to run in fp32 and
-                      //   2. have a c10::optional<ScalarType> arg that controls the output type.
-                      // fp32_set_opt_dtype wrappers' policy is:  if the output type is already set,
-                      // don't touch it, otherwise, set it to at::kFloat.
-  fp32_append_dtype, // Treats functions (like norm) that
-                     //   1. we'd like to run in fp32 and
-                     //   2. have some overloads that accept an output type and other overloads that don't.
-                     // fp32_append_dtype wrappers wrap the overloads that don't have an output dtype.
-                     // The wrapper policy is:  append at::kFloat to the args, and redispatch to the
-                     // type-aware overload.
-  promote, // Run in the widest dtype among several args.
-};
-
-/********************************************************************************************************
-Templates to provide wrapper functions
-
-I'm copying the pattern used in core/boxing/impl/WrapFunctionIntoFunctor.h to extract args and return type.
-(see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
-
-This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
-(in my case several specializations of) an interior "WrapFunction_".
-Interior WrapFunction_ specializations are defined for each CastPolicy.
-********************************************************************************************************/
-
-// Base template for WrapFunction_, which is specialized to contain a "call" method each CastPolicy
-template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class ArgList> struct WrapFunction_ {};
-
-// CastPolicy::fp16
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    return (*F)(cached_cast(at::kHalf, args)...);
-  }
-};
-
-// CastPolicy::fp32
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    return (*F)(cached_cast(at::kFloat, args)...);
-  }
-};
-
-// CastPolicy::fp32_set_opt_dtype
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    if (firstarg_is_eligible(args...)) {
-      return (*F)(set_opt_dtype(at::kFloat, args)...);
-    } else {
-      // If ineligible, calls F with unaltered args.  Does not set opt dtype, because setting
-      // opt dtype explicitly may interfere with internal implicit promotion decisions.
-      return (*F)(args...);
-    }
-  }
-};
-
-// CastPolicy::fp32_append_dtype
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
-    return (*F)(args..., out_type);
-  }
-};
-
-// CastPolicy::promote
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-    auto to_type = promote_type(at::kHalf, args...);
-    return (*F)(cached_cast(to_type, args)...);
-  }
-};
-
-// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/impl/WrapFunctionIntoFunctor.h)
-template<CastPolicy policy,
-         class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
-                           // registered functions with arguments matching Registered, so we register
-                           // WrapFunction_::call methods with a matching signature to properly field those arguments.
-                           // guts::function_traits below extracts return_type and parameter_types from Registered,
-                           // which WrapFunction_ templates above use to declare their call methods.
-         class Redispatch, // The signature for the function we're redispatching to.  In most cases this is the same
-                           // as Registered, but for some ops (for example, ops where we append a dtype) it's useful
-                           // to redispatch to a function with a different signature.
-         Redispatch* F>    // The actual function we're redispatching to.
-struct WrapFunction final {
-  using type = WrapFunction_<policy,
-                             Redispatch,
-                             F,
-                             typename guts::function_traits<Registered>::return_type,
-                             typename guts::function_traits<Registered>::parameter_types>;
-};
-
 /*******************************
 Banned functions
 *******************************/
 
-Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t) {
-  AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
+static Tensor binary_cross_entropy_banned(const Tensor & /*unused*/, const Tensor & /*unused*/, const std::optional<Tensor>& /*unused*/, int64_t /*unused*/) {
+  TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
            "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
@@ -209,216 +169,426 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::op
 }
 
 namespace {
-/*****************************************************************************************************************
-This section performs load-time registration for autocast wrappers.
-
-It's debatable at what level operations should be patched.  We'd like casts to be autograd-exposed
-and precede autograd history recording, so that for fp16 ops, input tensors are saved for backward
-in fp16 rather than fp32.  Saving inputs in fp16 can significantly reduce a model's memory footprint.
-
-Option 1 (strawman):  Patch only at the level of explicit calls into cudnn/cublas (cudnn_convolution, etc),
-because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the ones that
-will benefit most from fp16.   Potential pitfall:  convolutions (and other ops) are wrapped in several
-layers of at::* calls.  If one of those happens to record autograd history, then we've lost the
-opportunity to save inputs in fp16.
-
-Option 2:  Patch the Python-exposed surface of calls, to make 100% sure autograd history
-recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
-
-I think Option 2 is the right answer for all ops, not just convolutions.  Option 2 is what I implement here.
-*****************************************************************************************************************/
-
-/********************************************************************************************************************
-Explicit registration for out-of-place ops
-
-The stuff below could be codegenned.  Ed said
-> you are going to have to write the function definition at some point, I wouldn't try to get clever about it
-Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
-********************************************************************************************************************/
-
-#define ADD_NS(RAW_OP) at::RAW_OP
-
-// Common cases where registration signature matches redispatch signature
-// (that's why SIGNATURE is repeated in the WrapFunction instantiation)
-#define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  m.impl(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
-
-// Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
-#define KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  m.impl(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
-    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call);
 
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
+
 TORCH_LIBRARY_IMPL(_, Autocast, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
-  // fp16
-  KERNEL(ADD_NS(_convolution), "_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
-  KERNEL(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated2", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), fp16)
-  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), fp16)
-  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
-  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), fp16)
-  // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
-  m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_lstm_cell)>::type::call)));
-  m.impl("_thnn_fused_gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
-  m.impl("lstm_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(lstm_cell)>::type::call)));
-  m.impl("gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(gru_cell)>::type::call)));
-  m.impl("rnn_tanh_cell", // tanh unary op is executed as a cuda math library call.
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_tanh_cell)>::type::call)));
-  m.impl("rnn_relu_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::fp16,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_relu_cell)>::type::call)));
+  // lower_precision_fp
+#define _KERNEL_CUDA_LOW_PRECISION_FP(...) \
+  KERNEL_CUDA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_CUDA_LOW_PRECISION_FP)
+  KERNEL_CUDA(cudnn_convolution, lower_precision_fp)
+  KERNEL_CUDA(cudnn_convolution_transpose, lower_precision_fp)
+
   // fp32
-  KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(exp), "exp", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(expm1), "expm1", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log), "log", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log10), "log10", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log2), "log2", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log1p), "log1p", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(reciprocal), "reciprocal", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(rsqrt), "rsqrt", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(sinh), "sinh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(tan), "tan", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "pow.Tensor_Scalar", Tensor (const Tensor &, const Scalar&), fp32)
-  KERNEL(ADD_NS(pow), "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "pow.Scalar", Tensor (const Scalar&, const Tensor &), fp32)
-  KERNEL(ADD_NS(softplus), "softplus", Tensor (const Tensor &, const Scalar&, const Scalar&), fp32)
-  KERNEL(ADD_NS(gelu), "gelu", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
-  m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32,
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 &ADD_NS(native_layer_norm)>::type::call)));
-  KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
-  KERNEL(ADD_NS(nuclear_norm), "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(ADD_NS(cosine_similarity), "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(poisson_nll_loss), "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
-  KERNEL(ADD_NS(cosine_embedding_loss), "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t), fp32)
-  KERNEL(ADD_NS(hinge_embedding_loss), "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(kl_div), "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
-  KERNEL(ADD_NS(l1_loss), "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(huber_loss), "huber_loss", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(mse_loss), "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(margin_ranking_loss), "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(soft_margin_loss), "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(triplet_margin_loss), "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
-  KERNEL(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, const Scalar&, const Scalar&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
-  KERNEL(ADD_NS(dist), "dist", Tensor (const Tensor &, const Tensor &, const Scalar&), fp32)
-  KERNEL(ADD_NS(pdist), "pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(ADD_NS(cdist), "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
-  KERNEL(ADD_NS(renorm), "renorm", Tensor (const Tensor &, const Scalar&, int64_t, const Scalar&), fp32)
+#define _KERNEL_CUDA_FP32(...) KERNEL_CUDA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_CUDA_FP32)
+
   // fp32_set_opt_dtype
-  KERNEL(ADD_NS(prod), "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(prod), "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(prod), "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(softmax), "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(softmax), "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(log_softmax), "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(log_softmax), "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumprod), "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumprod), "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumsum), "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(cumsum), "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+#define _KERNEL_CUDA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_CUDA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_CUDA_FP32_SET_OPT_DTYPE)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
-  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
-  // KERNEL(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  // KERNEL_CUDA(norm, ScalarOpt_dtype, fp32_set_opt_dtype)
+  // KERNEL_CUDA(norm, ScalarOpt_dim_dtype, fp32_set_opt_dtype)
+  // KERNEL_CUDA(norm, names_ScalarOpt_dim_dtype, fp32_set_opt_dtype)
+
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.Scalar", Tensor (const Tensor &, const Scalar&), Tensor (const Tensor &, const c10::optional<Scalar>&, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool, ScalarType), fp32_append_dtype)
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.names_ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool, ScalarType), fp32_append_dtype)
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_CUDA)
+
   // promote
-  KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
-  KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&), promote)
-  KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&), promote)
-  KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
-  KERNEL(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(index_put), "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
-  KERNEL(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
-  KERNEL(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
-  KERNEL(ADD_NS(scatter_add), "scatter_add", Tensor (const Tensor&, int64_t, const Tensor&, const Tensor&), promote)
+#define _KERNEL_CUDA_PROMOTE(...) KERNEL_CUDA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_CUDA_PROMOTE)
 
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
 
+TORCH_LIBRARY_IMPL(_, AutocastMPS, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-} // namespace autocast
-} // namespace at
+TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
+  // lower_precision_fp
+  KERNEL_MPS(_convolution, deprecated, lower_precision_fp)
+  KERNEL_MPS(_convolution, lower_precision_fp)
+  KERNEL_MPS(conv1d, lower_precision_fp)
+  KERNEL_MPS(conv2d, lower_precision_fp)
+  KERNEL_MPS(conv3d, lower_precision_fp)
+  KERNEL_MPS(conv_tbc, lower_precision_fp)
+  KERNEL_MPS(conv_transpose1d, lower_precision_fp)
+  KERNEL_MPS(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_MPS(convolution, lower_precision_fp)
+  KERNEL_MPS(_mps_convolution, lower_precision_fp)
+  KERNEL_MPS(prelu, lower_precision_fp)
+  KERNEL_MPS(addmm, lower_precision_fp)
+  KERNEL_MPS(addmv, lower_precision_fp)
+  KERNEL_MPS(addr, lower_precision_fp)
+  KERNEL_MPS(matmul, lower_precision_fp)
+  KERNEL_MPS(einsum, lower_precision_fp)
+  KERNEL_MPS(mm, lower_precision_fp)
+  KERNEL_MPS(mv, lower_precision_fp)
+  KERNEL_MPS(linear, lower_precision_fp)
+  KERNEL_MPS(addbmm, lower_precision_fp)
+  KERNEL_MPS(baddbmm, lower_precision_fp)
+  KERNEL_MPS(bmm, lower_precision_fp)
+  KERNEL_MPS(chain_matmul, lower_precision_fp)
+  KERNEL_MPS(linalg_multi_dot, lower_precision_fp)
+  KERNEL_MPS(lstm_cell, lower_precision_fp)
+  KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
+
+  // fp32
+  KERNEL_MPS(conv_transpose3d, input, fp32)
+  KERNEL_MPS(acos, fp32)
+  KERNEL_MPS(asin, fp32)
+  KERNEL_MPS(cosh, fp32)
+  KERNEL_MPS(erfinv, fp32)
+  KERNEL_MPS(exp, fp32)
+  KERNEL_MPS(expm1, fp32)
+  KERNEL_MPS(log, fp32)
+  KERNEL_MPS(log10, fp32)
+  KERNEL_MPS(log2, fp32)
+  KERNEL_MPS(log1p, fp32)
+  KERNEL_MPS(reciprocal, fp32)
+  KERNEL_MPS(rsqrt, fp32)
+  KERNEL_MPS(sinh, fp32)
+  KERNEL_MPS(tan, fp32)
+  KERNEL_MPS(pow, Tensor_Scalar, fp32)
+  KERNEL_MPS(pow, Tensor_Tensor, fp32)
+  KERNEL_MPS(pow, Scalar, fp32)
+  KERNEL_MPS(softplus, fp32)
+  KERNEL_MPS(layer_norm, fp32)
+  KERNEL_MPS(native_layer_norm, fp32)
+  KERNEL_MPS(group_norm, fp32)
+  KERNEL_MPS(frobenius_norm, dim, fp32)
+  KERNEL_MPS(nuclear_norm, fp32)
+  KERNEL_MPS(nuclear_norm, dim, fp32)
+  KERNEL_MPS(batch_norm, fp32)
+  KERNEL_MPS(cosine_similarity, fp32)
+  KERNEL_MPS(poisson_nll_loss, fp32)
+  KERNEL_MPS(cosine_embedding_loss, fp32)
+  KERNEL_MPS(nll_loss, fp32)
+  KERNEL_MPS(nll_loss2d, fp32)
+  KERNEL_MPS(hinge_embedding_loss, fp32)
+  KERNEL_MPS(kl_div, fp32)
+  KERNEL_MPS(l1_loss, fp32)
+  KERNEL_MPS(smooth_l1_loss, fp32)
+  KERNEL_MPS(huber_loss, fp32)
+  KERNEL_MPS(mse_loss, fp32)
+  KERNEL_MPS(margin_ranking_loss, fp32)
+  KERNEL_MPS(multilabel_margin_loss, fp32)
+  KERNEL_MPS(soft_margin_loss, fp32)
+  KERNEL_MPS(triplet_margin_loss, fp32)
+  KERNEL_MPS(multi_margin_loss, fp32)
+  KERNEL_MPS(binary_cross_entropy_with_logits, fp32)
+  KERNEL_MPS(dist, fp32)
+  KERNEL_MPS(pdist, fp32)
+  KERNEL_MPS(cdist, fp32)
+  KERNEL_MPS(renorm, fp32)
+  KERNEL_MPS(logsumexp, fp32)
+
+  // fp32_set_opt_dtype
+  KERNEL_MPS(prod, fp32)
+  KERNEL_MPS(prod, dim_int, fp32)
+  KERNEL_MPS(prod, dim_Dimname, fp32)
+  KERNEL_MPS(softmax, int, fp32)
+  KERNEL_MPS(softmax, Dimname, fp32)
+  KERNEL_MPS(log_softmax, int, fp32)
+  KERNEL_MPS(log_softmax, Dimname, fp32)
+  KERNEL_MPS(cumprod, fp32)
+  KERNEL_MPS(cumprod, dimname, fp32)
+  KERNEL_MPS(cumsum, fp32)
+  KERNEL_MPS(cumsum, dimname, fp32)
+  KERNEL_MPS(linalg_vector_norm, fp32)
+  KERNEL_MPS(linalg_matrix_norm, fp32)
+  KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
+  KERNEL_MPS(sum, fp32)
+  KERNEL_MPS(sum, dim_IntList, fp32)
+  KERNEL_MPS(sum, dim_DimnameList, fp32)
+  //
+  // promote
+  KERNEL_MPS(addcdiv, promote)
+  KERNEL_MPS(addcmul, promote)
+  KERNEL_MPS(atan2, promote)
+  KERNEL_MPS(bilinear, promote)
+  KERNEL_MPS(cross, promote)
+  KERNEL_MPS(dot, promote)
+  KERNEL_MPS(grid_sampler, promote)
+  KERNEL_MPS(index_put, promote)
+  KERNEL_MPS(tensordot, promote)
+  KERNEL_MPS(scatter_add, promote)
+}
+
+TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+
+TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
+  // lower_precision_fp cast policy
+  KERNEL_CPU(conv1d, lower_precision_fp)
+  KERNEL_CPU(conv1d, padding, lower_precision_fp)
+  KERNEL_CPU(conv2d, lower_precision_fp)
+  KERNEL_CPU(conv2d, padding, lower_precision_fp)
+  KERNEL_CPU(conv3d, lower_precision_fp)
+  KERNEL_CPU(conv3d, padding, lower_precision_fp)
+  KERNEL_CPU(bmm, lower_precision_fp)
+  KERNEL_CPU(mm, lower_precision_fp)
+  KERNEL_CPU(linalg_vecdot, lower_precision_fp)
+  KERNEL_CPU(baddbmm, lower_precision_fp)
+  KERNEL_CPU(addmm, lower_precision_fp)
+  KERNEL_CPU(_addmm_activation, lower_precision_fp)
+  KERNEL_CPU(addbmm, lower_precision_fp)
+  KERNEL_CPU(linear, lower_precision_fp)
+  KERNEL_CPU(_convolution, deprecated, lower_precision_fp)
+  KERNEL_CPU(matmul, lower_precision_fp)
+  KERNEL_CPU(conv_tbc, lower_precision_fp)
+  KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(conv_transpose1d, lower_precision_fp)
+  KERNEL_CPU(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_CPU(conv_transpose3d, input, lower_precision_fp)
+  KERNEL_CPU(prelu, lower_precision_fp)
+  KERNEL_CPU(scaled_dot_product_attention, lower_precision_fp)
+  KERNEL_CPU(_native_multi_head_attention, lower_precision_fp)
+
+  // fp32 cast policy
+  KERNEL_CPU(avg_pool3d, fp32)
+  KERNEL_CPU(binary_cross_entropy, fp32)
+  KERNEL_CPU(grid_sampler, fp32)
+  KERNEL_CPU(polar, fp32)
+  KERNEL_CPU(prod, fp32)
+  KERNEL_CPU(prod, dim_int, fp32)
+  KERNEL_CPU(prod, dim_Dimname, fp32)
+  KERNEL_CPU(quantile, fp32)
+  KERNEL_CPU(quantile, scalar, fp32)
+  KERNEL_CPU(nanquantile, fp32)
+  KERNEL_CPU(nanquantile, scalar, fp32)
+  KERNEL_CPU(stft, fp32)
+  KERNEL_CPU(stft, center, fp32)
+  KERNEL_CPU(cdist, fp32)
+  KERNEL_CPU(grid_sampler_2d, fp32)
+  KERNEL_CPU(_grid_sampler_2d_cpu_fallback, fp32)
+  KERNEL_CPU(grid_sampler_3d, fp32)
+  KERNEL_CPU(trace, fp32)
+  KERNEL_CPU(view_as_complex, fp32)
+  KERNEL_CPU(cholesky, fp32)
+  KERNEL_CPU(cholesky_inverse, fp32)
+  KERNEL_CPU(cholesky_solve, fp32)
+  KERNEL_CPU(inverse, fp32)
+  KERNEL_CPU(lu_solve, fp32)
+  KERNEL_CPU(orgqr, fp32)
+  KERNEL_CPU(ormqr, fp32)
+  KERNEL_CPU(pinverse, fp32)
+  KERNEL_CPU(max_pool3d, fp32)
+  KERNEL_CPU(max_unpool2d, fp32)
+  KERNEL_CPU(max_unpool3d, fp32)
+  KERNEL_CPU(adaptive_avg_pool3d, fp32)
+  KERNEL_CPU(reflection_pad1d, fp32)
+  KERNEL_CPU(reflection_pad2d, fp32)
+  KERNEL_CPU(replication_pad1d, fp32)
+  KERNEL_CPU(replication_pad2d, fp32)
+  KERNEL_CPU(replication_pad3d, fp32)
+  KERNEL_CPU(mse_loss, fp32)
+  KERNEL_CPU(cosine_embedding_loss, fp32)
+  KERNEL_CPU(nll_loss, fp32)
+  KERNEL_CPU(nll_loss2d, fp32)
+  KERNEL_CPU(hinge_embedding_loss, fp32)
+  KERNEL_CPU(poisson_nll_loss, fp32)
+  KERNEL_CPU(smooth_l1_loss, fp32)
+  KERNEL_CPU(cross_entropy_loss, fp32)
+  KERNEL_CPU(l1_loss, fp32)
+  KERNEL_CPU(huber_loss, fp32)
+  KERNEL_CPU(margin_ranking_loss, fp32)
+  KERNEL_CPU(soft_margin_loss, fp32)
+  KERNEL_CPU(triplet_margin_loss, fp32)
+  KERNEL_CPU(multi_margin_loss, fp32)
+  KERNEL_CPU(ctc_loss, IntList, fp32)
+  KERNEL_CPU(ctc_loss, Tensor, fp32)
+  KERNEL_CPU(kl_div, fp32)
+  KERNEL_CPU(multilabel_margin_loss, fp32)
+  KERNEL_CPU(binary_cross_entropy_with_logits, fp32)
+  KERNEL_CPU(fft_fft, fp32)
+  KERNEL_CPU(fft_ifft, fp32)
+  KERNEL_CPU(fft_fft2, fp32)
+  KERNEL_CPU(fft_ifft2, fp32)
+  KERNEL_CPU(fft_fftn, fp32)
+  KERNEL_CPU(fft_ifftn, fp32)
+  KERNEL_CPU(fft_rfft, fp32)
+  KERNEL_CPU(fft_irfft, fp32)
+  KERNEL_CPU(fft_rfft2, fp32)
+  KERNEL_CPU(fft_irfft2, fp32)
+  KERNEL_CPU(fft_rfftn, fp32)
+  KERNEL_CPU(fft_irfftn, fp32)
+  KERNEL_CPU(fft_hfft, fp32)
+  KERNEL_CPU(fft_ihfft, fp32)
+  KERNEL_CPU(linalg_cond, fp32)
+  KERNEL_CPU(linalg_cond, p_str, fp32)
+  KERNEL_CPU(linalg_matrix_rank, fp32)
+  KERNEL_CPU(linalg_matrix_rank, tol_tensor, fp32)
+  KERNEL_CPU(linalg_matrix_rank, atol_rtol_tensor, fp32)
+  KERNEL_CPU(linalg_matrix_rank, atol_rtol_float, fp32)
+  KERNEL_CPU(linalg_solve, fp32)
+  KERNEL_CPU(linalg_cholesky, fp32)
+  KERNEL_CPU(linalg_svdvals, fp32)
+  KERNEL_CPU(linalg_eigvals, fp32)
+  KERNEL_CPU(linalg_eigvalsh, fp32)
+  KERNEL_CPU(linalg_inv, fp32)
+  KERNEL_CPU(linalg_householder_product, fp32)
+  KERNEL_CPU(linalg_tensorinv, fp32)
+  KERNEL_CPU(linalg_tensorsolve, fp32)
+  KERNEL_CPU(fake_quantize_per_tensor_affine, fp32)
+  KERNEL_CPU(geqrf, fp32)
+  KERNEL_CPU(_lu_with_info, fp32)
+  KERNEL_CPU(qr, fp32)
+  KERNEL_CPU(svd, fp32)
+  KERNEL_CPU(triangular_solve, fp32)
+  KERNEL_CPU(fractional_max_pool2d, fp32)
+  KERNEL_CPU(fractional_max_pool3d, fp32)
+  KERNEL_CPU(adaptive_max_pool3d, fp32)
+  KERNEL_CPU(multilabel_margin_loss_forward, fp32)
+  KERNEL_CPU(linalg_qr, fp32)
+  KERNEL_CPU(linalg_cholesky_ex, fp32)
+  KERNEL_CPU(linalg_svd, fp32)
+  KERNEL_CPU(linalg_eig, fp32)
+  KERNEL_CPU(linalg_eigh, fp32)
+  KERNEL_CPU(linalg_lstsq, fp32)
+  KERNEL_CPU(linalg_inv_ex, fp32)
+
+  // promote
+  KERNEL_CPU(stack, promote)
+  KERNEL_CPU(cat, promote)
+  KERNEL_CPU(index_copy, promote)
+  KERNEL_CPU(index_copy, dimname, promote)
+
+}
+
+// MTIA
+TORCH_LIBRARY_IMPL(_, AutocastMTIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMTIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MTIA_LOW_PRECISION_FP(...) \
+  KERNEL_MTIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MTIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MTIA_FP32(...) KERNEL_MTIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MTIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MTIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MTIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MTIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MTIA)
+
+  // promote
+#define _KERNEL_MTIA_PROMOTE(...) KERNEL_MTIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MTIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// MAIA
+TORCH_LIBRARY_IMPL(_, AutocastMAIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMAIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MAIA_LOW_PRECISION_FP(...) \
+  KERNEL_MAIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MAIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MAIA_FP32(...) KERNEL_MAIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MAIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MAIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MAIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MAIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA)
+
+  // promote
+#define _KERNEL_MAIA_PROMOTE(...) KERNEL_MAIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MAIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// XPU
+TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastXPU, m) {
+  // lower_precision_fp
+#define _KERNEL_XPU_LOW_PRECISION_FP(...) \
+  KERNEL_XPU(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_XPU_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_XPU_FP32(...) KERNEL_XPU(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_XPU_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_XPU_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_XPU(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_XPU_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU)
+
+  // promote
+#define _KERNEL_XPU_PROMOTE(...) KERNEL_XPU(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_XPU_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+} // namespace
+} // namespace at::autocast

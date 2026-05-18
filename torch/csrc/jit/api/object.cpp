@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 Object::Object(
     std::shared_ptr<CompilationUnit> cu,
@@ -15,18 +14,13 @@ Object::Object(
           c10::StrongTypePtr(std::move(cu), type),
           type->numAttributes())) {}
 
-ObjectPtr Object::_ivalue() const {
-  TORCH_INTERNAL_ASSERT(_ivalue_);
-  return _ivalue_;
-}
-
-c10::optional<Method> Object::find_method(const std::string& basename) const {
+std::optional<Method> Object::find_method(const std::string& basename) const {
   for (Function* fn : type()->methods()) {
     if (fn->name() == basename) {
       return Method(_ivalue(), fn);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void Object::define(const std::string& src, const ResolverPtr& resolver) {
@@ -43,5 +37,4 @@ Object Object::deepcopy() const {
   return Object(_ivalue()->deepcopy());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

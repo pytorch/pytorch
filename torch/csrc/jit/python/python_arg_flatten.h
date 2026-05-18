@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/python/pybind.h>
 
@@ -9,9 +10,7 @@
 #include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace python {
+namespace torch::jit::python {
 
 struct IODescriptor {
   struct VariableMetadata {
@@ -75,22 +74,22 @@ static inline std::ostream& operator<<(
     out << ", device=" << meta_device.index();
   }
   out << ") {";
-  for (size_t i = 0; i < meta.sizes.size(); ++i) {
+  for (const auto i : c10::irange(meta.sizes.size())) {
     if (i > 0)
       out << ", ";
     out << meta.sizes[i];
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
 static inline std::ostream& operator<<(
     std::ostream& out,
     const IODescriptor& desc) {
-  out << desc.structure << "\n";
-  out << "  with grad_enabled=" << desc.grad_enabled << "\n";
-  for (size_t i = 0; i < desc.metadata.size(); ++i) {
-    out << "  with v" << i << " having type " << desc.metadata[i] << "\n";
+  out << desc.structure << '\n';
+  out << "  with grad_enabled=" << desc.grad_enabled << '\n';
+  for (const auto i : c10::irange(desc.metadata.size())) {
+    out << "  with v" << i << " having type " << desc.metadata[i] << '\n';
   }
   return out;
 }
@@ -117,6 +116,4 @@ PyObject* unflatten(
     at::ArrayRef<autograd::Variable> vars,
     const IODescriptor& structure);
 
-} // namespace python
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::python

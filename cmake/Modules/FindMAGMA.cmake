@@ -13,7 +13,9 @@
 #  MAGMA_LIBRARIES - list of libraries to link against to use MAGMA
 #  MAGMA_INCLUDE_DIR - include directory
 
-IF(NOT MAGMA_FOUND)
+if(MAGMA_FOUND)
+  return()
+endif()
 
 include(FindPackageHandleStandardArgs)
 
@@ -34,4 +36,20 @@ ELSE (MAGMA_LIBRARIES)
   SET(MAGMA_FOUND FALSE)
 ENDIF (MAGMA_LIBRARIES)
 
-ENDIF(NOT MAGMA_FOUND)
+add_library(torch::magma INTERFACE IMPORTED)
+set_property(TARGET torch::magma
+             PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${MAGMA_INCLUDE_DIR}")
+set_property(TARGET torch::magma
+             PROPERTY INTERFACE_LINK_LIBRARIES "${MAGMA_LIBRARIES}")
+
+# Check for Magma V2
+include(CheckPrototypeDefinition)
+check_prototype_definition(magma_get_sgeqrf_nb
+  "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
+  "0"
+  "magma.h"
+  MAGMA_V2)
+if(MAGMA_V2)
+  set_property(TARGET torch::magma
+               PROPERTY INTERFACE_COMPILE_DEFINITIONS "MAGMA_V2")
+endif(MAGMA_V2)

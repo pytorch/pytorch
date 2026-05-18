@@ -1,17 +1,16 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using ParameterList = const std::vector<VarHandle>;
 using ReduceInteraction = std::function<ExprHandle(ExprHandle, ExprHandle)>;
@@ -26,30 +25,32 @@ class TORCH_API Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
-      : init_(init.node()), interaction_(interaction) {}
-
   template <typename RI>
-  Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
-    interaction_ = interaction;
-  }
-  virtual ~Reducer() = default;
+  Reducer(ExprHandle init, RI interaction)
+      : init_(init.node()), interaction_(std::move(interaction)) {}
 
-  const Expr* initializer() const {
+  ExprPtr initializer() const {
     return init_;
   }
 
-  ReduceOp* operator()(
-      const Buf* result_buf,
+  ExprHandle operator()(
+      const BufHandle& result_buf,
       ExprHandle body,
-      const std::vector<const Expr*>& output,
-      const std::vector<const Var*>& inner) const;
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
-  ReduceOp* operator()(
-      const Buf* result_buf,
-      const Expr* body,
-      const std::vector<const Expr*>& output,
-      const std::vector<const Var*>& inner) const;
+  ReduceOpPtr operator()(
+      const BufPtr& result_buf,
+      ExprPtr body,
+      const std::vector<ExprPtr>& output,
+      const std::vector<VarPtr>& inner) const;
+
+  ExprHandle operator()(
+      const BufHandle& result_buf,
+      BufHandle acc_buf,
+      const ExprHandle& body,
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
   // Polymorphic handling of Body functions with a variety of parameters.
   static ExprHandle getReduceBody(
@@ -103,20 +104,30 @@ class TORCH_API Reducer {
 
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
-  static Expr* complete(
-      const Buf* accumulator,
-      ReduceInteraction interaction,
+  static ExprPtr complete(
+      const BufPtr& accumulator,
+      const ReduceInteraction& interaction,
       ExprHandle body,
-      const std::vector<const Expr*>& output_args,
-      const std::vector<const Var*>& reduce_args) {
+      const std::vector<ExprPtr>& output_args,
+      const std::vector<VarPtr>& reduce_args) {
     ExprHandle accum =
-        ExprHandle(new Load(body.dtype(), accumulator, output_args));
-    auto e = interaction(accum, body);
+        ExprHandle(alloc<Load>(body.dtype(), accumulator, output_args));
+    auto e = interaction(std::move(accum), std::move(body));
     return e.node();
+  }
+  static ExprHandle complete(
+      const BufHandle& accumulator,
+      const ReduceInteraction& interaction,
+      ExprHandle body,
+      const std::vector<ExprHandle>& output_args,
+      const std::vector<VarHandle>& reduce_args) {
+    ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
+    auto e = interaction(std::move(accum), std::move(body));
+    return e;
   }
 
  private:
-  const Expr* init_;
+  ExprPtr init_;
   ReduceInteraction interaction_;
 };
 
@@ -128,16 +139,48 @@ class TORCH_API Reducer {
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
-      const Expr* body,
-      std::vector<const Var*> reduce_args,
-      const Reducer& reducer)
+      const ExprPtr& body,
+      std::vector<VarPtr> reduce_args,
+      Reducer reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
-        reducer_(reducer) {}
+        reducer_(std::move(reducer)) {
+    result_buf_ = nullptr;
+    acc_buf_ = nullptr;
+    ri_operand_ = nullptr;
+  }
+
+  ReduceOp(
+      const ExprPtr& body,
+      std::vector<VarPtr> reduce_args,
+      BufPtr result_buf,
+      BufPtr acc_buf,
+      ExprPtr ri_operand,
+      Reducer reducer)
+      : ExprNodeBase(body->dtype()),
+        body_(body),
+        reduce_args_(std::move(reduce_args)),
+        result_buf_(std::move(result_buf)),
+        acc_buf_(std::move(acc_buf)),
+        ri_operand_(std::move(ri_operand)),
+        reducer_(std::move(reducer)) {}
+
+  static ExprHandle make(
+      ExprHandle body,
+      const std::vector<VarHandle>& reduce_args,
+      const Reducer& reducer);
+
+  static ExprHandle make(
+      ExprHandle body,
+      const std::vector<VarHandle>& reduce_args,
+      BufHandle result_buf,
+      BufHandle acc_buf,
+      ExprHandle ri_operand,
+      const Reducer& reducer);
 
   // return the body expression which obtains the value to be reduced.
-  const Expr* body() const {
+  ExprPtr body() const {
     return body_;
   }
 
@@ -147,20 +190,47 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
   }
 
   // returns variables associated with the axes of reduction.
-  const std::vector<const Var*>& reduce_args() const {
+  const std::vector<VarPtr>& reduce_args() const {
     return reduce_args_;
   }
 
+  void setAccBuf(BufHandle acc_buf) {
+    acc_buf_ = acc_buf.node();
+  }
+  BufPtr getAccBuf() {
+    return acc_buf_;
+  }
+
+  void setResultBuf(BufHandle buf) {
+    result_buf_ = buf.node();
+  }
+  BufPtr getResultBuf() {
+    return result_buf_;
+  }
+
+  void setRiOperand(ExprHandle ri_operand) {
+    ri_operand_ = ri_operand.node();
+  }
+  ExprPtr getRiOperand() {
+    return ri_operand_;
+  }
+
  private:
-  const Expr* body_;
-  std::vector<const Var*> reduce_args_;
+  // body_ = reducer_->interaction_(result_buf_, ri_operand_)
+  ExprPtr body_;
+  std::vector<VarPtr> reduce_args_;
+
+  BufPtr result_buf_;
+  BufPtr acc_buf_;
+  ExprPtr ri_operand_;
+
   const Reducer reducer_;
 };
 
 class Sum : public Reducer {
  public:
   Sum()
-      : Reducer(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
+      : Reducer(ExprHandle(0), [](const ExprHandle& a, const ExprHandle& b) {
           return a + b;
         }) {}
 };
@@ -170,7 +240,7 @@ inline ExprHandle maximumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::max());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -183,7 +253,7 @@ inline ExprHandle minimumVal(ScalarType type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
     return ExprHandle(std::numeric_limits<Type>::min());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -197,11 +267,15 @@ class Maximum : public Reducer {
   Maximum(Dtype dtype)
       : Reducer(
             minimumVal(dtype.scalar_type()),
-            [](ExprHandle a, ExprHandle b) { return Max::make(a, b, true); }) {}
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Max::make(a, b, true);
+            }) {}
   Maximum(ExprHandle initializer)
-      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
-          return Max::make(a, b, true);
-        }) {}
+      : Reducer(
+            std::move(initializer),
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Max::make(a, b, true);
+            }) {}
 };
 
 class Minimum : public Reducer {
@@ -209,24 +283,24 @@ class Minimum : public Reducer {
   Minimum(Dtype dtype)
       : Reducer(
             maximumVal(dtype.scalar_type()),
-            [](ExprHandle a, ExprHandle b) { return Min::make(a, b, true); }) {}
-  Minimum(ExprHandle initializer)
-      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Min::make(a, b, true);
+            }) {}
+  Minimum(const ExprHandle& initializer)
+      : Reducer(initializer, [](const ExprHandle& a, const ExprHandle& b) {
           return Min::make(a, b, true);
         }) {}
 };
 
 class ReductionExpander : public IRMutator {
  public:
-  Stmt* expand(Stmt* s) {
+  StmtPtr expand(const StmtPtr& s) {
     return s->accept_mutator(this);
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
+  ExprPtr mutate(const ReduceOpPtr& v) override {
     return v->body();
   }
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

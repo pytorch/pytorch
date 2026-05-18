@@ -56,7 +56,6 @@ const std::string leaky_relu_model = R"JIT(
       return torch.leaky_relu(x, neg_slope)
 )JIT";
 
-
 void import_libs(
     std::shared_ptr<at::CompilationUnit> cu,
     const std::string& class_name,
@@ -65,9 +64,8 @@ void import_libs(
   torch::jit::SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& /* unused */) -> std::shared_ptr<torch::jit::Source> {
-        return src;
-      },
+      [&](const std::string& /* unused */)
+          -> std::shared_ptr<torch::jit::Source> { return src; },
       /*version=*/2);
   si.loadType(c10::QualifiedName(class_name));
 }
@@ -126,5 +124,20 @@ const std::string long_model = R"JIT(
 torch::jit::Module getLongScriptModel() {
   torch::jit::Module module("m");
   module.define(long_model);
+  return module;
+}
+
+const std::string signed_log1p_model = R"JIT(
+  def forward(self, a):
+      b = torch.abs(a)
+      c = torch.log1p(b)
+      d = torch.sign(a)
+      e = d * c
+      return e
+)JIT";
+
+torch::jit::Module getSignedLog1pModel() {
+  torch::jit::Module module("signed_log1p");
+  module.define(signed_log1p_model);
   return module;
 }

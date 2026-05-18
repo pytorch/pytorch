@@ -1,14 +1,16 @@
 #ifndef MetalNeuronType_h
 #define MetalNeuronType_h
 
+#include <c10/macros/Macros.h>
+
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 
 #include <ATen/ATen.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 enum class NeuronType {
   None,
@@ -20,8 +22,8 @@ enum class NeuronType {
 };
 
 static inline NeuronType neuronType(
-    c10::optional<c10::Scalar> output_min,
-    c10::optional<c10::Scalar> output_max) {
+    std::optional<c10::Scalar> output_min,
+    std::optional<c10::Scalar> output_max) {
   float inf_max = std::numeric_limits<float>::infinity();
   float inf_min = -std::numeric_limits<float>::infinity();
   float output_max_ =
@@ -37,7 +39,7 @@ static inline NeuronType neuronType(
   }
 }
 
-static inline MPSCNNNeuron* neuronType(NeuronType type) {
+static inline MPSCNNNeuron* neuron(NeuronType type) {
   if (type == NeuronType::Relu) {
     return [MPSCNNNeuronOp relu];
   } else if (type == NeuronType::Sigmoid) {
@@ -45,18 +47,27 @@ static inline MPSCNNNeuron* neuronType(NeuronType type) {
   } else if (type == NeuronType::Tanh) {
     return [MPSCNNNeuronOp tanh];
   } else if (type == NeuronType::HardSigmoid) {
-    if (@available(iOS 11.0, *)) {
-      return [MPSCNNNeuronOp hardSigmoid];
-    } else {
-      return nil;
-    }
+    return [MPSCNNNeuronOp hardSigmoid];
   } else {
     return nil;
   }
 }
 
+API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
+static inline MPSNNNeuronDescriptor* neuronDescriptor(NeuronType type) {
+  if (type == NeuronType::Relu) {
+    return [MPSCNNNeuronOpDescriptor reluDescriptor];
+  } else if (type == NeuronType::Sigmoid) {
+    return [MPSCNNNeuronOpDescriptor sigmoidDescriptor];
+  } else if (type == NeuronType::Tanh) {
+    return [MPSCNNNeuronOpDescriptor tanhDescriptor];
+  } else if (type == NeuronType::HardSigmoid) {
+    return [MPSCNNNeuronOpDescriptor hardSigmoidDescriptor];
+  } else {
+    return [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeNone];
+  }
 }
-}
-}
+
+} // namespace at::native::metal
 
 #endif /* MetalNeuronType_h */

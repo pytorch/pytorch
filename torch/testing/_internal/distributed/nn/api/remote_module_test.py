@@ -1,17 +1,19 @@
-#!/usr/bin/python3
+# mypy: allow-untyped-defs
+
 import enum
-import unittest
-from typing import Tuple
 
 import torch
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
-from torch import Tensor, nn
+from torch import nn, Tensor
 from torch._jit_internal import Future
 from torch.distributed.nn import RemoteModule
-from torch.distributed.nn.api.remote_module import _REMOTE_MODULE_PICKLED_ATTRIBUTES
-from torch.distributed.nn.api.remote_module import _RemoteModule
+from torch.distributed.nn.api.remote_module import (
+    _REMOTE_MODULE_PICKLED_ATTRIBUTES,
+    _RemoteModule,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -43,6 +45,11 @@ def remote_forward_async(remote_module, args):
     return remote_module.forward_async(*args).wait()
 
 
+# RPC handler for getting training mode on the destination worker.
+def get_remote_training_arg(module_rref):
+    return module_rref.local_value().training
+
+
 class ModuleCreationMode(enum.Enum):
     MODULE_CTOR_WITH_INTERFACE = "module_ctor_with_interface"
     MODULE_CTOR = "module_ctor"
@@ -52,7 +59,7 @@ class ModuleCreationMode(enum.Enum):
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
@@ -61,13 +68,13 @@ class MyModuleInterface:
 class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
     def forward_async(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Future[Tuple[str, int, Tensor]]:
+    ) -> Future[tuple[str, int, Tensor]]:
         pass
 
 
@@ -78,7 +85,7 @@ class MyModule(nn.Module):
 
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[str, int, Tensor]:
+    ) -> tuple[str, int, Tensor]:
         return word, number, tensor
 
 
@@ -129,7 +136,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
-        remote_device = "{}/cpu".format(dst_worker_name)
+        remote_device = f"{dst_worker_name}/cpu"
         args = (1,)
         kwargs = dict(first_kwarg=2)
 
@@ -137,13 +144,13 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(remote_device, BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs).forward()
 
     @dist_utils.dist_init
     def test_forward_async(self):
@@ -255,6 +262,31 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             self.assertEqual(rref, remote_module.module_rref)
             for param in rref.to_here().parameters():
                 self.assertTrue(torch.equal(param, _PARAM_VAL))
+
+    @dist_utils.dist_init
+    def test_train_eval(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            remote_module.train()
+            ret1 = rpc.rpc_sync(
+                dst_worker_name,
+                get_remote_training_arg,
+                args=(remote_module.get_module_rref(),),
+            )
+            self.assertEqual(ret1, True)
+
+            remote_module.eval()
+            ret2 = rpc.rpc_sync(
+                dst_worker_name,
+                get_remote_training_arg,
+                args=(remote_module.get_module_rref(),),
+            )
+            self.assertEqual(ret2, False)
 
     @dist_utils.dist_init
     def test_unsupported_methods(self):
@@ -380,14 +412,6 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.named_modules()
 
             with self.assertRaisesRegex(
-                ValueError, r"Method ``train`` not supported for RemoteModule"
-            ):
-                remote_module.train()
-            with self.assertRaisesRegex(
-                ValueError, r"Method ``eval`` not supported for RemoteModule"
-            ):
-                remote_module.eval()
-            with self.assertRaisesRegex(
                 ValueError, r"Method ``requires_grad_`` not supported for RemoteModule"
             ):
                 remote_module.requires_grad_()
@@ -405,29 +429,61 @@ class RemoteModuleTest(CommonRemoteModuleTest):
                 remote_module.extra_repr()
 
     @dist_utils.dist_init
-    def test_send_remote_module_with_a_new_attribute_over_the_wire(self):
+    def test_send_remote_module_with_a_new_attribute_not_pickled_over_the_wire(self):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
 
-        # If add a new attribute is added to this RemoteModule, which will be sent over the wire by RPC,
-        # this new field must be added to either _REMOTE_MODULE_PICKLED_ATTRIBUTES or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
-        # to avoid runtime error.
+        # If a new attribute is added to this RemoteModule after the initialization,
+        # and it will be sent over the wire by RPC,
+        # this new field will not be pickled, because it's not specified in _REMOTE_MODULE_PICKLED_ATTRIBUTES.
+        # Note that adding a new attribute out of constructor should rarely happen.
+        # If a new attribute is added to RemoteModule constructor,
+        # there is a sanity check to enforce developers to add this attribute to either
+        # _REMOTE_MODULE_PICKLED_ATTRIBUTES or _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
         for remote_module in self._create_remote_module_iter(
             dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             new_attr_name = "new_attr"
             setattr(remote_module, new_attr_name, 1)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Attribute ``{}`` of RemoteModule must be either in "
-                "``_REMOTE_MODULE_PICKLED_ATTRIBUTES``  or ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``".format(
-                    new_attr_name
+
+            attrs = rpc.rpc_sync(
+                dst_worker_name, remote_module_attributes, (remote_module,)
+            )
+            self.assertNotIn(new_attr_name, attrs)
+
+    @dist_utils.dist_init
+    def test_remote_module_py_pickle_not_supported(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            with TemporaryFileName() as fname:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot pickle RemoteModule in python pickler. RemoteModule can only be pickled when using RPC",
+                ):
+                    torch.save(remote_module, fname)
+
+    @dist_utils.dist_init
+    def test_remote_module_py_pickle_not_supported_script(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+        ):
+            with (
+                TemporaryFileName() as fname,
+                self.assertRaisesRegex(
+                    torch.jit.Error, "can only be pickled when using RPC"
                 ),
             ):
-                rpc.rpc_sync(
-                    dst_worker_name, remote_module_attributes, (remote_module,)
-                )
+                torch.save(remote_module, fname)
 
 
 class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
@@ -442,7 +498,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
         dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
 
-        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # Unpickled attributes include both the inherent attributes of RemoteModule
         # (not inherited from the superclass) and two installed methods.
         expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
         expected_unpickled_attrs.append("forward_async")
@@ -463,7 +519,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_scriptable"])
 
             # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
-            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
+            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``forward_async``,
             # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")
             ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
@@ -473,46 +529,54 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             )
             self.assertEqual(ret2, tuple(reversed(args)))
 
-    @unittest.skip(
-        "Script RemoteModule cannot be sent over RPC at this time. See #57865"
-    )
     @dist_utils.dist_init
-    def test_send_remote_module_over_the_wire_script(self):
+    def test_send_remote_module_over_the_wire_script_not_supported(self):
         if self.rank != 0:
             return
         dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
 
-        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # Unpickled attributes include both the inherent attributes of RemoteModule
         # (not inherited from the superclass) and two installed methods.
         expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
         expected_unpickled_attrs.append("forward_async")
         expected_unpickled_attrs.append("forward")
 
-        # Create a remote module on worker1 and then pass it to worker2 over the RPC layer.
-        for remote_module in self._create_remote_module_iter(
-            dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+        with self.assertRaisesRegex(
+            RuntimeError, "Passing a script RemoteModule over RPC is not supported."
         ):
-            # Test querying some simple attributes from worker2.
-            attrs = rpc.rpc_sync(
-                dst_worker2_name, remote_module_attributes, (remote_module,)
-            )
-            self.assertListEqual(list(attrs.keys()), expected_unpickled_attrs)
-            self.assertEqual(attrs["on"], "worker1")
-            self.assertEqual(attrs["device"], "cpu")
-            self.assertFalse(attrs["is_device_map_set"])
-            self.assertFalse(attrs["is_scriptable"])
+            # Create a remote module on worker1 and then pass it to worker2 over the RPC layer.
+            for remote_module in self._create_remote_module_iter(
+                dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
+            ):
+                # Test querying some simple attributes from worker2.
+                rpc.rpc_sync(
+                    dst_worker2_name, remote_module_attributes, (remote_module,)
+                )
 
-            # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
-            # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``foward_async``,
-            # not have another worker to initiate forward over the RPC layer.
-            args = (torch.ones(1), 2, "3")
-            ret1 = rpc.rpc_sync(dst_worker2_name, remote_forward, (remote_module, args))
-            self.assertEqual(ret1, tuple(reversed(args)))
-            ret2 = rpc.rpc_sync(
-                dst_worker2_name, remote_forward_async, (remote_module, args)
+    @dist_utils.dist_init
+    def test_create_remote_module_from_module_rref(self):
+        if self.rank != 0:
+            return
+        dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
+
+        # Create a remote module on worker1 and then pass its `module_rref` to worker2 over the RPC layer.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            remote_module2 = rpc.rpc_sync(
+                dst_worker2_name,
+                RemoteModule.init_from_module_rref,
+                (dst_worker2_name, remote_module.get_module_rref()),
             )
-            self.assertEqual(ret2, tuple(reversed(args)))
+
+            args = (torch.ones(1), 2, "3")
+            ret1 = rpc.rpc_sync(dst_worker1_name, remote_forward, (remote_module, args))
+            ret2 = rpc.rpc_sync(
+                dst_worker2_name, remote_forward, (remote_module2, args)
+            )
+            self.assertEqual(ret1, ret2)
 
 
 class CudaRemoteModuleTest(CommonRemoteModuleTest):
@@ -521,10 +585,21 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
     def test_valid_device(self):
         if self.rank != 0:
             return
-        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker_name = dist_utils.worker_name(dst_rank)
 
         for remote_module in self._create_remote_module_iter(
-            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
+            f"{dst_worker_name}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            device = rpc.rpc_sync(
+                dst_worker_name, remote_device, (remote_module.module_rref,)
+            )
+            self.assertEqual(device.type, "cuda")
+            self.assertEqual(device.index, 0)
+
+        # Test rank works as well.
+        for remote_module in self._create_remote_module_iter(
+            f"rank:{dst_rank}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             device = rpc.rpc_sync(
                 dst_worker_name, remote_device, (remote_module.module_rref,)
@@ -543,71 +618,85 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             RuntimeError,
             r"Expected one of .+ device type at start of device string",
         ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/foo".format(dst_worker_name),
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
+                    f"{dst_worker_name}/foo",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"CUDA error: invalid device ordinal"
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cuda:100".format(dst_worker_name),
+        if TEST_WITH_ROCM:
+            errorString = (
+                r"HIP error: invalid device ordinal\n"
+                r"HIP kernel errors might be asynchronously reported at some other API call, "
+                r"so the stacktrace below might be incorrect.\n"
+                r"For debugging consider passing AMD_SERIALIZE_KERNEL=3"
+            )
+        else:
+            errorString = r"CUDA error: invalid device ordinal"
+        with self.assertRaisesRegex(RuntimeError, errorString):
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
+                    f"{dst_worker_name}/cuda:100",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cpu2".format(dst_worker_name),
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
+                    f"{dst_worker_name}/cpu2",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
-            list(
-                self._create_remote_module_iter(
-                    "{}/".format(dst_worker_name),
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
+                    f"{dst_worker_name}/",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
         ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cuda:0/cuda:1".format(dst_worker_name),
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
+                    f"{dst_worker_name}/cuda:0/cuda:1",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
+            ValueError,
+            r"Could not parse remote_device: /. The valid format is '<workername>/<device>'",
         ):
-            list(
-                self._create_remote_module_iter(
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
                     "/",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
+            ValueError,
+            r"Could not parse remote_device: /cuda:0. The valid format is '<workername>/<device>'",
         ):
-            list(
-                self._create_remote_module_iter(
+            [
+                m.forward()
+                for m in self._create_remote_module_iter(
                     "/cuda:0",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
     @skip_if_lt_x_gpu(1)
     @dist_utils.dist_init
@@ -624,7 +713,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         # Only test Python nn.Module, because script module methods don't support taking kwargs.
         for remote_module in self._create_remote_module_iter(
-            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
+            f"{dst_worker_name}/cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             ret_fut = remote_module.forward_async(*args, **kwargs)
             ret = ret_fut.wait()
@@ -648,7 +737,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         scripted_remote_module = next(
             self._create_remote_module_iter(
-                "{}/cuda:0".format(dst_worker_name),
+                f"{dst_worker_name}/cuda:0",
                 modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE],
             )
         )

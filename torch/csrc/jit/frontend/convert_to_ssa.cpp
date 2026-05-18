@@ -4,10 +4,8 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/mini_environment.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
@@ -93,10 +91,8 @@ struct ControlFlowLoadStores {
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
-      auto unified = unifyTypes(true_type, false_type);
-      if (!unified) {
-        continue;
-      }
+      auto unified =
+          unifyTypes(true_type, false_type, /*default_to_union=*/true);
 
       addBlockOutput(true_block, true_type, x);
       addBlockOutput(false_block, false_type, x);
@@ -347,5 +343,4 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   TransformExits(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

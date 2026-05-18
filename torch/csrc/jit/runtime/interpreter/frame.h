@@ -6,9 +6,7 @@
 #include <torch/csrc/jit/runtime/interpreter/code_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-namespace torch {
-namespace jit {
-namespace interpreter {
+namespace torch::jit::interpreter {
 
 // A Frame captures function's state
 // (e.g. `pc` and `base_pointer`)
@@ -28,7 +26,7 @@ struct Frame {
   size_t base_pointer;
 
   // unique to every frame with prim::profile across all threads
-  c10::optional<size_t> id;
+  std::optional<size_t> id;
 
   // RecordFunction object associated with this frame
   std::unique_ptr<at::RecordFunction> record_function;
@@ -39,6 +37,4 @@ struct Frame {
   static size_t genId();
 };
 
-} // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::interpreter

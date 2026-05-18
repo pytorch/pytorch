@@ -38,7 +38,7 @@ uint32_t crc32_combine (uint32_t crcA, uint32_t crcB, size_t lengthB);
 
 /// compute CRC32 (bitwise algorithm)
 uint32_t crc32_bitwise (const void* data, size_t length, uint32_t previousCrc32 = 0);
-/// compute CRC32 (half-byte algoritm)
+/// compute CRC32 (half-byte algorithm)
 uint32_t crc32_halfbyte(const void* data, size_t length, uint32_t previousCrc32 = 0);
 
 #ifdef CRC32_USE_LOOKUP_TABLE_BYTE
@@ -96,17 +96,26 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   #define __BIG_ENDIAN    4321
 #endif
 
-// define endianess and some integer data types
+// define endianness and some integer data types
 #if defined(_MSC_VER) || defined(__MINGW32__)
   // Windows always little endian
   #define __BYTE_ORDER __LITTLE_ENDIAN
 
   // intrinsics / prefetching
-  #include <xmmintrin.h>
+  #if defined(_M_ARM64)
+    #include <intrin.h>
+  #else
+    #include <xmmintrin.h>
+  #endif
+
   #ifdef __MINGW32__
     #define PREFETCH(location) __builtin_prefetch(location)
   #else
-    #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
+    #if defined(_M_ARM64)
+      #define PREFETCH(location) __prefetch(location)
+    #else
+      #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
+    #endif
   #endif
 #elif defined(__APPLE__)
   #include <TargetConditionals.h>
@@ -127,12 +136,12 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
     #endif
 #elif defined(__ARMEB__)
   #define __BYTE_ORDER __BIG_ENDIAN
-#elif defined(__BYTE_ORDER__)
-  #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      #define __BYTE_ORDER __BIG_ENDIAN
-  #else
-      #define __BYTE_ORDER __LITTLE_ENDIAN
-  #endif
+#elif (defined(__BYTE_ORDER__) and !defined(__BYTE_ORDER))
+    #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        #define __BYTE_ORDER __BIG_ENDIAN
+    #else
+        #define __BYTE_ORDER __LITTLE_ENDIAN
+    #endif
 #else
   // defines __BYTE_ORDER as __LITTLE_ENDIAN or __BIG_ENDIAN
   #include <sys/param.h>
@@ -142,8 +151,10 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
 #ifdef __GNUC__
   #define PREFETCH(location) __builtin_prefetch(location)
 #else
+#ifndef PREFETCH
   // no prefetching
   #define PREFETCH(location) ;
+#endif
 #endif
 
 // abort if byte order is undefined
@@ -157,7 +168,7 @@ namespace
   /// zlib's CRC32 polynomial
   const uint32_t Polynomial = 0xEDB88320;
 
-  /// swap endianess
+  /// swap endianness
   static inline uint32_t swap(uint32_t x)
   {
   #if defined(__GNUC__) || defined(__clang__)
@@ -218,7 +229,7 @@ uint32_t crc32_bitwise(const void* data, size_t length, uint32_t previousCrc32)
 }
 
 
-/// compute CRC32 (half-byte algoritm)
+/// compute CRC32 (half-byte algorithm)
 uint32_t crc32_halfbyte(const void* data, size_t length, uint32_t previousCrc32)
 {
   uint32_t crc = ~previousCrc32; // same as previousCrc32 ^ 0xFFFFFFFF
@@ -651,7 +662,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   // - if you append length(B) zeros to A and call it A' (think of it as AAAA000)
   //   and   prepend length(A) zeros to B and call it B' (think of it as 0000BBB)
   //   then exists a C' = A' ^ B'
-  // - remember: if you XOR someting with zero, it remains unchanged: X ^ 0 = X
+  // - remember: if you XOR something with zero, it remains unchanged: X ^ 0 = X
   // - that means C' = A concat B so that crc(A concat B) = crc(C') = crc(A') ^ crc(B')
   // - the trick is to compute crc(A') based on crc(A)
   //                       and crc(B') based on crc(B)

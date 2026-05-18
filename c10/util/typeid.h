@@ -1,57 +1,52 @@
 #pragma once
 
+#include <array>
 #include <atomic>
-#include <cassert>
-#include <complex>
-#include <cstdlib>
-#include <iostream>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <ostream>
+#include <string>
 #include <type_traits>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
-#ifdef __GXX_RTTI
-#include <typeinfo>
-#endif
 
-#include <exception>
-
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Backtrace.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
-#include <c10/util/Type.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
-#include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 
 #include <c10/core/ScalarType.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
- * Types must be registered using CAFFE_KNOWN_TYPE() for them to have a type id.
- * If a type is registered, you can also create an object containing meta data
- * like constructor, destructor, stringified name, ... about the type by calling
- * TypeMeta::Make<T>. This returns a TypeMeta() object, which is basically just
- * a pointer to the type information, so it's cheap to pass around.
+ * Types must be registered using CAFFE_DECLARE_KNOWN_TYPE() (in their header)
+ * and CAFFE_DEFINE_KNOWN_TYPE() (in their .cpp file) for them to have a type
+ * id. If a type is registered, you can also create an object containing meta
+ * data like constructor, destructor, stringified name, ... about the type by
+ * calling TypeMeta::Make<T>. This returns a TypeMeta() object, which is
+ * basically just a pointer to the type information, so it's cheap to pass
+ * around.
  */
 
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro
-// CAFFE_KNOWN_TYPE defines a template specialization, which relies
+// CAFFE_KNOWN_TYPE (and CAFFE_DECLARE_KNOWN_TYPE) defines a template
+// specialization, which relies
 // on the namespace of TypeMeta matching the namespace where the macro is
 // called.  This requires us to fix all of the call-sites, which I want to do
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace c10 {
-namespace guts {
+
+namespace c10::guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
 
 namespace caffe2 {
 
@@ -75,7 +70,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
+  static constexpr TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -139,7 +134,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      c10::string_view name) noexcept
+      std::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -156,7 +151,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  c10::string_view name_;
+  std::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -171,7 +166,7 @@ struct TypeMetaData final {
 template <typename T>
 inline void _PlacementNew(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     new (typed_ptr + i) T;
   }
 }
@@ -185,19 +180,19 @@ inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
 
 template <
     typename T,
-    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementNew<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
@@ -216,14 +211,14 @@ inline void* _NewNotDefault() {
 
 template <
     typename T,
-    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_New<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_NewNotDefault<T>;
 }
@@ -235,7 +230,7 @@ template <typename T>
 inline void _Copy(const void* src, void* dst, size_t n) {
   const T* typed_src = static_cast<const T*>(src);
   T* typed_dst = static_cast<T*>(dst);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     typed_dst[i] = typed_src[i];
   }
 }
@@ -250,21 +245,19 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
       " does not allow assignment.");
 }
 
-template <
-    typename T,
-    std::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
+template <typename T, std::enable_if_t<std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_Copy<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
@@ -275,14 +268,14 @@ inline constexpr TypeMetaData::Copy* _PickCopy() {
 template <typename T>
 inline void _PlacementDelete(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     typed_ptr[i].~T();
   }
 }
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementDelete<T>;
 }
@@ -309,7 +302,7 @@ class _Uninitialized final {};
 //
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr uint8_t scalarTypeItemSizes[NumScalarTypes] = {
+static constexpr std::array<uint8_t, NumScalarTypes> scalarTypeItemSizes = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
@@ -334,6 +327,7 @@ class C10_API TypeMeta final {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept;
+  ~TypeMeta() = default;
 
   /**
    * Copy constructor.
@@ -345,6 +339,7 @@ class C10_API TypeMeta final {
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
+  TypeMeta& operator=(TypeMeta&& src) noexcept = default;
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
   inline TypeMeta& operator=(ScalarType scalar_type) noexcept {
@@ -398,7 +393,7 @@ class C10_API TypeMeta final {
     return data().placementNew_;
   }
   /**
-   * Returns the typed copy function pointer for individual iterms.
+   * Returns the typed copy function pointer for individual items.
    */
   Copy* copy() const noexcept {
     return data().copy_;
@@ -415,11 +410,11 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  c10::string_view name() const noexcept {
+  std::string_view name() const noexcept {
     return data().name_;
   }
 
-  friend bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept;
+  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -429,12 +424,12 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Id() noexcept {
+  static constexpr TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
+  static std::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
@@ -469,7 +464,7 @@ class C10_API TypeMeta final {
    * convert ScalarType enum values to TypeMeta handles
    */
   static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
-    const size_t index = static_cast<uint16_t>(scalar_type);
+    const auto index = static_cast<uint16_t>(scalar_type);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         index < NumScalarTypes,
         "Unrecognized Scalartype ",
@@ -481,7 +476,7 @@ class C10_API TypeMeta final {
   /**
    * convert TypeMeta handles to ScalarType enum values
    */
-  inline ScalarType toScalarType() {
+  inline ScalarType toScalarType() const {
     if (C10_LIKELY(isScalarType())) {
       return static_cast<ScalarType>(index_);
     }
@@ -496,24 +491,54 @@ class C10_API TypeMeta final {
   // initialized" static constexpr size_t MaxTypeIndex = 32;
   //
 #if defined C10_MOBILE
-// The reason for this to be 32 and not UINT8_MAX is that the array
+// The reason for this not to be UINT8_MAX is that the array
 // initialization takes space which is proportional to the size of the array.
 // The compiler seems to add code (or data padding) to initialize the array with
-// empty elements. In practice, this array doesn't hold more than 18 elements
-// (on mobile), so 32 should be plenty for now. Please see
+// empty elements. Please see
 // https://github.com/pytorch/pytorch/pull/51881 for details.
 //
-#define MaxTypeIndex 32
+#define MaxTypeIndex                                                           \
+  (NumScalarTypes + 15 /* number of CAFFE_DEFINE_KNOWN_TYPE in typeid.cpp */ + \
+   1 /* 1 more for caffe2 tensor */)
 #else
 #define MaxTypeIndex UINT8_MAX
 #endif
 
-  static std::atomic<uint16_t> nextTypeIndex;
+  // Protects type metadata allocation.
+  // NOLINTNEXTLINE(facebook-hte-NonPodStaticDeclaration)
+  static std::mutex& getTypeMetaDatasLock();
+  static uint16_t nextTypeIndex;
 
   static detail::TypeMetaData* typeMetaDatas();
 
+  static uint16_t existingMetaDataIndexForType(TypeIdentifier identifier);
+
+ public:
+#ifdef __CUDACC__
+  // NOTE [ TypeIdentifier::Get nvcc/clang discrepancy]
+  // nvcc and clang do not produce identical results for
+  // TypeIdentifier::Get, because TypeIdentifier::Get relies on
+  // __PRETTY_FUNCTION__ and they don't agree on the canonical names
+  // of types (e.g., nvcc normalizes to `short unsigned int`, but clang
+  // calls it `unsigned short`). Hide the implementation of this function
+  // from nvcc so that we always use clang (or whatever host C++ compiler)
+  // for TypeIdentifier::Get.
   template <class T>
-  static uint16_t addTypeMetaData() {
+  C10_EXPORT static uint16_t addTypeMetaData();
+#else
+  template <class T>
+  C10_EXPORT static uint16_t addTypeMetaData() {
+    const auto identifier = TypeIdentifier::Get<T>();
+    // Need to hold this for the rest of the function, protecting:
+    // 1) existingMetaDataIndexForType()
+    // 2) nextTypeIndex++
+    // 3) the write into typeMetaDatas()
+    std::lock_guard<std::mutex> lock(getTypeMetaDatasLock());
+    // It may exist already if added in a different dynamic shared library.
+    const uint16_t existing_index = existingMetaDataIndexForType(identifier);
+    if (existing_index != MaxTypeIndex) {
+      return existing_index;
+    }
     const uint16_t index = nextTypeIndex++;
     TORCH_CHECK(
         index <= MaxTypeIndex,
@@ -526,11 +551,13 @@ class C10_API TypeMeta final {
         detail::_PickCopy<T>(),
         detail::_PickPlacementDelete<T>(),
         detail::_PickDelete<T>(),
-        TypeIdentifier::Get<T>(),
+        identifier,
         c10::util::get_fully_qualified_type_name<T>()};
     return index;
   }
+#endif
 
+ private:
   // specializations return indexes into typeMetaDataInstances()
   template <class T>
   C10_API static uint16_t _typeMetaData() noexcept;
@@ -565,10 +592,10 @@ C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<
 inline TypeMeta::TypeMeta() noexcept
     : index_(_typeMetaData<detail::_Uninitialized>()) {}
 
-inline bool operator==(const TypeMeta lhs, const TypeMeta rhs) noexcept {
+inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.index_ == rhs.index_);
 }
-inline bool operator!=(const TypeMeta lhs, const TypeMeta rhs) noexcept {
+inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -581,6 +608,9 @@ inline std::ostream& operator<<(
 /**
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
+ *
+ * CAFFE_KNOWN_TYPE is deprecated; prefer CAFFE_DECLARE_KNOWN_TYPE and
+ * CAFFE_DEFINE_KNOWN_TYPE.
  *
  * CAFFE_KNOWN_TYPE does explicit instantiation of TypeIdentifier::Get<T>
  * template function and thus needs to be put in a single translation unit (.cpp
@@ -603,11 +633,83 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
+// CAFFE_KNOWN_TYPE is deprecated! Use CAFFE_DECLARE_KNOWN_TYPE and
+// CAFFE_DEFINE_KNOWN_TYPE instead.
 #define CAFFE_KNOWN_TYPE(T)                                          \
+  template uint16_t TypeMeta::addTypeMetaData<T>();                  \
   template <>                                                        \
   EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
     static const uint16_t index = addTypeMetaData<T>();              \
     return index;                                                    \
   }
+
+#define CAFFE_DEFINE_KNOWN_TYPE(T, ident)                   \
+  template uint16_t TypeMeta::addTypeMetaData<T>();         \
+  namespace detail {                                        \
+  EXPORT_IF_NOT_GCC const uint16_t ident##_metadata_index = \
+      TypeMeta::addTypeMetaData<T>();                       \
+  } // namespace detail
+
+// Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
+// call to access _typeMetaData in the common case.
+#define CAFFE_DECLARE_KNOWN_TYPE(T, ident)                 \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
+  namespace detail {                                       \
+  extern C10_API const uint16_t ident##_metadata_index;    \
+  } /* namespace detail */                                 \
+  template <>                                              \
+  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
+  TypeMeta::_typeMetaData<T>() noexcept {                  \
+    return detail::ident##_metadata_index;                 \
+  }
+
+#define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
+  template <>                                           \
+  uint16_t TypeMeta::_typeMetaData<T>() noexcept {      \
+    static const uint16_t index = addTypeMetaData<T>(); \
+    return index;                                       \
+  }
+
+CAFFE_DECLARE_KNOWN_TYPE(std::string, std_string)
+CAFFE_DECLARE_KNOWN_TYPE(char, char)
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::mutex>, std_unique_ptr_std_mutex)
+CAFFE_DECLARE_KNOWN_TYPE(
+    std::unique_ptr<std::atomic<bool>>,
+    std_unique_ptr_std_atomic_bool)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int32_t>, std_vector_int32_t)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int64_t>, std_vector_int64_t)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<unsigned long>, std_vector_unsigned_long)
+CAFFE_DECLARE_KNOWN_TYPE(bool*, bool_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(char*, char_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(int*, int_ptr)
+
+// For some of the compilers, long is defined separately from int32_t and
+// int64_t. As a result we will need to actually define them separately.
+// It is recommended that one does NOT use long - use int32_t and int64_t
+// explicitly. Explicit long type annotation may go away in the future.
+// details: This hack works by defining a _guard_long_unique type, which is
+// long iff the compiler has a separate long type and is a dummy type otherwise.
+// we then allocate a type id to that _guard_long_unique. If the compiler has a
+// separate long type, this allocates a type id for long. Otherwise, it
+// allocates a type id for the dummy type, which doesn't matter.
+namespace detail {
+template <class T>
+class _guard_long_unique_dummy final {};
+template <class T>
+using _guard_long_unique = std::conditional_t<
+    std::is_same_v<long, int32_t> || std::is_same_v<long, int64_t>,
+    _guard_long_unique_dummy<T>,
+    T>;
+} // namespace detail
+
+CAFFE_DECLARE_KNOWN_TYPE(
+    detail::_guard_long_unique<long>,
+    detail_guard_long_unique_long)
+CAFFE_DECLARE_KNOWN_TYPE(
+    detail::_guard_long_unique<std::vector<long>>,
+    detail_guard_long_unique_std_vector_long)
+
+CAFFE_DECLARE_KNOWN_TYPE(float*, float_ptr)
+CAFFE_DECLARE_KNOWN_TYPE(at::Half*, at_Half)
 
 } // namespace caffe2

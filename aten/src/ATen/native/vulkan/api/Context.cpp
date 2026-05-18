@@ -1,142 +1,125 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/vulkan/Context.h>
-#include <ATen/native/vulkan/ops/Copy.h>
 
+#include <cstring>
+#include <memory>
 #include <sstream>
+
+#ifndef VULKAN_DESCRIPTOR_POOL_SIZE
+#define VULKAN_DESCRIPTOR_POOL_SIZE 1024u
+#endif
+
+#ifndef VULKAN_QUERY_POOL_SIZE
+#define VULKAN_QUERY_POOL_SIZE 4096u
+#endif
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-namespace {
 
-VkDevice create_device(
-    const VkPhysicalDevice physical_device,
-    const uint32_t compute_queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
-
-  const float queue_priorities = 1.0f;
-  const VkDeviceQueueCreateInfo device_queue_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-    nullptr,
-    0u,
-    compute_queue_family_index,
-    1u,
-    &queue_priorities,
-  };
-
-  uint32_t device_extension_properties_count = 0;
-  VK_CHECK(vkEnumerateDeviceExtensionProperties(
-      physical_device,
-      nullptr,
-      &device_extension_properties_count,
-      nullptr));
-
-  std::vector<VkExtensionProperties> device_extension_properties(
-      device_extension_properties_count);
-
-  VK_CHECK(vkEnumerateDeviceExtensionProperties(
-      physical_device,
-      nullptr,
-      &device_extension_properties_count,
-      device_extension_properties.data()));
-
-  constexpr const char* const requested_device_extensions[]{
-  #ifdef VK_KHR_portability_subset
-    // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
-    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-  #endif
-  };
-
-  std::vector<const char*> enabled_device_extensions;
-
-  for (const auto& requested_device_extension : requested_device_extensions) {
-    for (const auto& extension : device_extension_properties) {
-      if (strcmp(requested_device_extension, extension.extensionName) == 0) {
-        enabled_device_extensions.push_back(requested_device_extension);
-        break;
-      }
-    }
-  }
-
-  const VkDeviceCreateInfo device_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-    nullptr,
-    0u,
-    1u,
-    &device_queue_create_info,
-    0u,
-    nullptr,
-    static_cast<uint32_t>(enabled_device_extensions.size()),
-    enabled_device_extensions.data(),
-    nullptr,
-  };
-
-  VkDevice device{};
-  VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
-  TORCH_CHECK(device, "Invalid Vulkan device!");
-
-  return device;
-}
-
-VkQueue acquire_queue(
-    const VkDevice device,
-    const uint32_t compute_queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-
-  VkQueue queue{};
-  vkGetDeviceQueue(device, compute_queue_family_index, 0, &queue);
-  TORCH_CHECK(queue, "Invalid Vulkan queue!");
-
-  return queue;
-}
-
-} // namespace
-
-Context::Context(const Adapter& adapter)
-    : adapter_(adapter),
-      device_(
-          create_device(
-              adapter.handle,
-              adapter.compute_queue_family_index),
-          &VK_DELETER(Device)),
-      queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(gpu()),
-      shader_(gpu()),
-      pipeline_(gpu()),
-      descriptor_(gpu()),
-      resource_(gpu()) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
+Context::Context(size_t adapter_i, const ContextConfig& config)
+    : config_(config),
+      // Important handles
+      adapter_p_(runtime()->get_adapter_p(adapter_i)),
+      device_(adapter_p_->device_handle()),
+      queue_(adapter_p_->request_queue()),
+      // Resource pools
+      command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
+      descriptor_pool_(device_, config_.descriptorPoolConfig),
+      fences_(device_),
+// Diagnostics
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+      querypool_(config_.queryPoolConfig, adapter_p_),
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+      // Command buffer submission
+      cmd_mutex_{},
+      cmd_(VK_NULL_HANDLE, 0u),
+      submit_count_{0u},
+      // Memory Management
+      buffer_clearlist_mutex_{},
+      buffers_to_clear_{},
+      image_clearlist_mutex_{},
+      images_to_clear_{} {
 }
 
 Context::~Context() {
   try {
     flush();
+    // Let the device know the context is done with the queue
+    adapter_p_->return_queue(queue_);
+  } catch (...) {
   }
-  catch (const std::exception& e) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! Error: ",
-        e.what());
-  }
-  catch (...) {
-    TORCH_WARN(
-        "Vulkan: Context destructor raised an exception! "
-        "Error: Unknown");
+}
+
+DescriptorSet Context::get_descriptor_set(
+    const ShaderInfo& shader_descriptor,
+    const utils::uvec3& local_workgroup_size) {
+  VkDescriptorSetLayout shader_layout =
+      shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
+
+  VkPipelineLayout pipeline_layout =
+      pipeline_layout_cache().retrieve(shader_layout);
+
+  VkPipeline pipeline = pipeline_cache().retrieve(
+      {pipeline_layout_cache().retrieve(shader_layout),
+       shader_cache().retrieve(shader_descriptor),
+       local_workgroup_size});
+
+  cmd_.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
+
+  return descriptor_pool().get_descriptor_set(
+      shader_layout, shader_descriptor.kernel_layout);
+}
+
+void Context::register_shader_dispatch(
+    const DescriptorSet& descriptors,
+    PipelineBarrier& pipeline_barrier,
+    const ShaderInfo& shader_descriptor,
+    const utils::uvec3& global_workgroup_size) {
+  // Adjust the global workgroup size based on the output tile size
+  const utils::uvec3 effective_global_wg = {
+      utils::div_up(
+          global_workgroup_size.data[0u],
+          shader_descriptor.out_tile_size.data[0u]),
+      utils::div_up(
+          global_workgroup_size.data[1u],
+          shader_descriptor.out_tile_size.data[1u]),
+      utils::div_up(
+          global_workgroup_size.data[2u],
+          shader_descriptor.out_tile_size.data[2u]),
+  };
+
+  cmd_.bind_descriptors(descriptors.get_bind_handle());
+  cmd_.insert_barrier(pipeline_barrier);
+
+  cmd_.dispatch(effective_global_wg);
+}
+
+void Context::submit_cmd_to_gpu(VkFence fence_handle, const bool final_use) {
+  if (cmd_) {
+    cmd_.end();
+    adapter_p_->submit_cmd(
+        queue_, cmd_.get_submit_handle(final_use), fence_handle);
+
+    submit_count_ = 0u;
   }
 }
 
 void Context::flush() {
   VK_CHECK(vkQueueWaitIdle(queue()));
 
-  resource().pool.purge();
-  descriptor().pool.purge();
-  command().pool.purge();
+  command_pool_.flush();
+  descriptor_pool_.flush();
+
+  // If there is an existing command buffer, invalidate it
+  if (cmd_) {
+    cmd_.invalidate();
+  }
+
+  std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
+  std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
+  buffers_to_clear_.clear();
+  images_to_clear_.clear();
 }
 
 bool available() {
@@ -146,75 +129,96 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
-      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
-        // Select the first adapter.
-        return true;
-      });
+      const uint32_t submit_frequency = 16u;
 
-      return new Context(adapter);
-    }
-    catch (const std::exception& e) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: ", e.what());
-    }
-    catch (...) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: Unknown");
+      const CommandPoolConfig cmd_config{
+          32u, // cmdPoolInitialSize
+          8u, // cmdPoolBatchSize
+      };
+
+      const DescriptorPoolConfig descriptor_pool_config{
+          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorPoolMaxSets
+          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorUniformBufferCount
+          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorStorageBufferCount
+          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorCombinedSamplerCount
+          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorStorageImageCount
+          32u, // descriptorPileSizes
+      };
+
+      const QueryPoolConfig query_pool_config{
+          VULKAN_QUERY_POOL_SIZE, // maxQueryCount
+          256u, // initialReserveSize
+      };
+
+      const ContextConfig config{
+          submit_frequency, // cmdSubmitFrequency
+          cmd_config, // cmdPoolConfig
+          descriptor_pool_config, // descriptorPoolConfig
+          query_pool_config, // queryPoolConfig
+      };
+
+      return new Context(runtime()->default_adapter_i(), config);
+    } catch (...) {
     }
 
     return nullptr;
   }());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      context,
-      "Invalid Vulkan context!");
-
   return context.get();
 }
 
-struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
-  bool is_vulkan_available() const override {
-    return available();
-  }
+//
+// UniformParamsBuffer
+//
 
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
-    return vulkan::ops::copy_(self, src);
-  }
-};
-static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
+namespace {
 
-Descriptor::Set dispatch_prologue(
-    Command::Buffer& command_buffer,
-    const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group_size) {
-  Context* const context = api::context();
-  const GPU gpu = context->gpu();
-  Descriptor& descriptor = context->descriptor();
-  Pipeline& pipeline = context->pipeline();
-  Shader& shader = context->shader();
+void memcpy_to_buffer(const VulkanBuffer& src, VulkanBuffer& dst) {
+  MemoryMap dst_mapping(dst, MemoryAccessType::WRITE);
 
-  const Shader::Layout::Object shader_layout =
-      shader.layout.cache.retrieve({
-        shader_layout_signature,
-      });
+  MemoryMap src_mapping(src, MemoryAccessType::READ);
+  src_mapping.invalidate();
 
-  command_buffer.bind(
-      pipeline.cache.retrieve({
-        pipeline.layout.cache.retrieve({
-          shader_layout.handle,
-        }),
-        shader.cache.retrieve(shader_descriptor),
-        local_work_group_size,
-      }));
+  void* dst_ptr = dst_mapping.template data<void>();
+  void* src_ptr = src_mapping.template data<void>();
 
-  return descriptor.pool.allocate(shader_layout);
+  // @lint-ignore CLANGTIDY facebook-security-vulnerable-memcpy
+  memcpy(dst_ptr, src_ptr, src.mem_size());
 }
 
-void dispatch_epilogue(
-    Command::Buffer& command_buffer,
-    const Descriptor::Set& descriptor_set,
-    const Shader::WorkGroup& global_work_group) {
-  command_buffer.bind(descriptor_set);
-  command_buffer.dispatch(global_work_group);
+} // namespace
+
+UniformParamsBuffer::UniformParamsBuffer(const UniformParamsBuffer& other)
+    : context_p_(other.context_p_), vulkan_buffer_{} {
+  if (other.vulkan_buffer_) {
+    vulkan_buffer_ = context_p_->adapter_ptr()->vma().create_uniform_buffer(
+        other.vulkan_buffer_.mem_size());
+
+    memcpy_to_buffer(other.vulkan_buffer_, vulkan_buffer_);
+  }
+}
+
+UniformParamsBuffer& UniformParamsBuffer::operator=(
+    const UniformParamsBuffer& other) {
+  if (&other != this) {
+    context_p_ = other.context_p_;
+
+    // Move vulkan_buffer_ to another VulkanBuffer for cleanup
+    if (vulkan_buffer_) {
+      VulkanBuffer temp_buffer(std::move(vulkan_buffer_));
+      context_p_->register_buffer_cleanup(temp_buffer);
+    }
+    // vulkan_buffer_ should now be empty
+
+    if (other.vulkan_buffer_) {
+      vulkan_buffer_ = context_p_->adapter_ptr()->vma().create_uniform_buffer(
+          other.vulkan_buffer_.mem_size());
+
+      memcpy_to_buffer(other.vulkan_buffer_, vulkan_buffer_);
+    }
+  }
+
+  return *this;
 }
 
 } // namespace api

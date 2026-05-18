@@ -1,31 +1,32 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using lstm_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, TensorList, TensorList, bool, int64_t, double, bool, bool, bool);
 using rnn_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool, bool);
 using lstm_packed_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, TensorList, bool, int64_t, double, bool, bool);
 using rnn_packed_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool);
 
-DECLARE_DISPATCH(lstm_fn, lstm_cudnn_stub);
-DECLARE_DISPATCH(lstm_fn, lstm_miopen_stub);
-DECLARE_DISPATCH(rnn_fn, gru_cudnn_stub);
-DECLARE_DISPATCH(rnn_fn, gru_miopen_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_tanh_cudnn_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_tanh_miopen_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_relu_cudnn_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_relu_miopen_stub);
-DECLARE_DISPATCH(lstm_packed_fn, lstm_packed_cudnn_stub);
-DECLARE_DISPATCH(lstm_packed_fn, lstm_packed_miopen_stub);
-DECLARE_DISPATCH(rnn_packed_fn, gru_packed_cudnn_stub);
-DECLARE_DISPATCH(rnn_packed_fn, gru_packed_miopen_stub);
-DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub);
-DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_miopen_stub);
-DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
-DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_miopen_stub);
+DECLARE_DISPATCH(lstm_fn, lstm_cudnn_stub)
+DECLARE_DISPATCH(lstm_fn, lstm_miopen_stub)
+DECLARE_DISPATCH(lstm_fn, lstm_mkldnn_stub)
+DECLARE_DISPATCH(rnn_fn, gru_cudnn_stub)
+DECLARE_DISPATCH(rnn_fn, gru_miopen_stub)
+DECLARE_DISPATCH(rnn_fn, rnn_tanh_cudnn_stub)
+DECLARE_DISPATCH(rnn_fn, rnn_tanh_miopen_stub)
+DECLARE_DISPATCH(rnn_fn, rnn_relu_cudnn_stub)
+DECLARE_DISPATCH(rnn_fn, rnn_relu_miopen_stub)
+DECLARE_DISPATCH(lstm_packed_fn, lstm_packed_cudnn_stub)
+DECLARE_DISPATCH(lstm_packed_fn, lstm_packed_miopen_stub)
+DECLARE_DISPATCH(rnn_packed_fn, gru_packed_cudnn_stub)
+DECLARE_DISPATCH(rnn_packed_fn, gru_packed_miopen_stub)
+DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub)
+DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_miopen_stub)
+DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub)
+DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_miopen_stub)
 
 inline void check_attributes(const Tensor& input, const TensorList& params, const TensorList& hiddens, bool check_dtype=false) {
   auto input_device = input.device();
@@ -45,8 +46,8 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
     }
   };
 
-  for (auto h : hiddens) check_tensors("hidden", h);
-  for (auto p : params) check_tensors("parameter", p);
+  for (const auto& h : hiddens) check_tensors("hidden", h);
+  for (const auto& p : params) check_tensors("parameter", p);
 }
 
-}} // namespace at::native
+} // namespace at::native

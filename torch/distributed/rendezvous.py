@@ -1,22 +1,30 @@
+# mypy: allow-untyped-defs
 try:
     from urllib.parse import urlparse, urlunparse
-except ImportError:
-    raise ImportError("urllib cannot be found, urlparse from python2 is no longer supported.")
+except ImportError as e:
+    raise ImportError(
+        "urllib cannot be found, urlparse from python2 is no longer supported."
+    ) from e
 
-import torch._six as six
 import numbers
 import os
 import sys
+from collections.abc import Callable, Iterator
 from datetime import timedelta
-from typing import Optional, Dict, Union
-from torch.distributed import FileStore, TCPStore, PrefixStore
+
+from torch.distributed import FileStore, Store, TCPStore
+
 from .constants import default_pg_timeout
 
-_rendezvous_handlers = {}
+
+_rendezvous_handlers: dict[str, Callable[..., Iterator[tuple[Store, int, int]]]] = {}
+
+__all__ = ["register_rendezvous_handler", "rendezvous"]
 
 
 def register_rendezvous_handler(scheme, handler):
-    """Registers a new rendezvous handler.
+    """
+    Register a new rendezvous handler.
 
     Before we can run collective algorithms, participating processes
     need to find each other and exchange information to be able to
@@ -40,47 +48,75 @@ def register_rendezvous_handler(scheme, handler):
     """
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
-        raise RuntimeError(
-            "Rendezvous handler for {}:// already registered".format(scheme)
-        )
+        raise RuntimeError(f"Rendezvous handler for {scheme}:// already registered")
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
-    if not isinstance(url, six.string_classes):
-        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
+# Query will have format "rank=0&world_size=1" and is
+# converted into {"rank": 0, "world_size": 1}
+def _query_to_dict(query: str) -> dict[str, str]:
+    return {
+        pair[0]: pair[1]
+        for pair in (pair.split("=") for pair in filter(None, query.split("&")))
+    }
 
-    if not isinstance(rank, numbers.Integral):
-        raise RuntimeError("`rank` must be an integer. {}".format(rank))
 
-    if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
+    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
+    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
+    if sys.platform == "win32":
+        #  PyTorch is built without libuv support on windows, so default to 0
+        return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
+    return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
-    # Append node-specific arguments.
+
+def _rendezvous_helper(url: str, rank: int, world_size_opt: int | None, **kwargs):
     result = urlparse(url)
-    if rank != -1 or world_size != -1:
-        query_dict: Dict[str, Union[int, str]] = dict(
-            # mypy doesn't allow dict() to accept List of values (#257)
-            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
-        )
-        assert (
-            "rank" not in query_dict and "world_size" not in query_dict
-        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
-            url=url
-        )
+    if world_size_opt is None:
+        world_size = -1
+        if result.scheme == "env":
+            rank = int(os.environ.get("RANK", rank))
+            # If the world_size env variable is not present then it is a dynamic group
+            world_size = int(os.environ.get("WORLD_SIZE", world_size))
+    else:
+        world_size = world_size_opt
+    if rank != -1 or world_size != -1 or world_size_opt is None:
+        query_dict = _query_to_dict(result.query)
+        if "rank" in query_dict or "world_size" in query_dict:
+            raise AssertionError(
+                f"The url: {url} has node-specific arguments(rank, world_size) already."
+            )
         if rank != -1:
-            query_dict["rank"] = rank
-        if world_size != -1:
-            query_dict["world_size"] = world_size
-
+            query_dict["rank"] = str(rank)
+        if world_size != -1 or world_size_opt is None:
+            query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query="{}".format("&".join(["{}={}".format(k, v) for k, v in query_dict.items()]))
+            query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
+        # pyrefly: ignore [bad-assignment]
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
+        raise RuntimeError(f"No rendezvous handler for {result.scheme}://")
     return _rendezvous_handlers[result.scheme](url, **kwargs)
+
+
+def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
+    if not isinstance(url, (str, bytes)):
+        raise RuntimeError(f"`url` must be a string. {type(url)}: {url}")
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError(f"`rank` must be an integer. {rank}")
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError(f"`world_size` must be an integer. {world_size}")
+
+    return _rendezvous_helper(url, rank, world_size, **kwargs)
+
+
+def _create_store_from_options(backend_options, rank):
+    store, _, _ = next(_rendezvous_helper(backend_options.init_method, rank, None))
+    return store
 
 
 def _rendezvous_error(msg):
@@ -93,8 +129,9 @@ def _file_rendezvous_handler(url: str, **kwargs):
 
     result = urlparse(url)
     path = result.path
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         import urllib.request
+
         full_path = result.netloc + result.path
         path = urllib.request.url2pathname(full_path)
         if path:
@@ -103,16 +140,14 @@ def _file_rendezvous_handler(url: str, **kwargs):
 
     if not path:
         raise _error("path missing")
-    query: Dict[str, str]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
     store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
@@ -120,38 +155,98 @@ def _file_rendezvous_handler(url: str, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
+def _torchelastic_use_agent_store() -> bool:
+    return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
+
+
+def _create_c10d_store(
+    hostname, port, rank, world_size, timeout, use_libuv=True
+) -> Store:
+    """
+    Smartly creates a c10d Store object on ``rank`` based on whether we need to reuse agent store.
+
+    The TCPStore server is assumed to be hosted
+    on ``hostname:port``.
+
+    By default, the TCPStore server uses the asynchronous implementation
+    ``LibUVStoreDaemon`` which utilizes libuv.
+
+    If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
+    the agent leader (node rank 0) hosts the TCPStore server (for which the
+    endpoint is specified by the given ``hostname:port``). Hence
+    ALL ranks will create and return a TCPStore client (e.g. ``start_daemon=False``).
+
+    If ``torchelastic_use_agent_store()`` is ``False``, then rank 0 will host
+    the TCPStore (with multi-tenancy) and it is assumed that rank 0's hostname
+    and port are correctly passed via ``hostname`` and ``port``. All
+    non-zero ranks will create and return a TCPStore client.
+    """
+    # check if port is uint16_t
+    if not 0 <= port < 2**16:
+        raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
+
+    if _torchelastic_use_agent_store():
+        # We create a new TCPStore for every retry so no need to add prefix for each attempt.
+        return TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=False,
+            timeout=timeout,
+        )
+    else:
+        start_daemon = rank == 0
+        return TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=start_daemon,
+            timeout=timeout,
+            multi_tenant=True,
+            use_libuv=use_libuv,
+        )
+
+
+def _tcp_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
-    if not result.port:
+    if result.port is None:
         raise _error("port number missing")
-    query: Dict[str, Union[int, str]]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
-    start_daemon = rank == 0
-    assert result.hostname is not None
-    store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
+
+    if result.hostname is None:
+        raise AssertionError("hostname cannot be None")
+
+    store = _create_c10d_store(
+        result.hostname, result.port, rank, world_size, timeout, use_libuv
+    )
+
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
+def _env_rendezvous_handler(
+    url: str, timeout: timedelta = default_pg_timeout, **kwargs
+):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
-        return _error("environment variable %s expected, but not set" % var)
+        return _error(f"environment variable {var} expected, but not set")
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)
@@ -161,47 +256,36 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
             return env_val
 
     result = urlparse(url)
-    query: Dict[str, Union[int, str]]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
+    query_dict = _query_to_dict(result.query)
 
-    rank: Optional[Union[str, int]]
-    world_size: Optional[Union[str, int]]
-    master_port: Optional[Union[str, int]]
+    rank: int
+    world_size: int
+    master_port: int
+    master_addr: str
 
-    if "rank" in query:
-        rank = int(query["rank"])
+    if "rank" in query_dict:
+        rank = int(query_dict["rank"])
     else:
         rank = int(_get_env_or_raise("RANK"))
 
-    if "world_size" in query:
-        world_size = int(query["world_size"])
+    if "world_size" in query_dict:
+        world_size = int(query_dict["world_size"])
     else:
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
+    store = _create_c10d_store(
+        master_addr, master_port, rank, world_size, timeout, use_libuv
+    )
 
-    use_torchelastic_store = os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None)
-
-    if use_torchelastic_store == str(True):
-        worker_process_prefix = "/worker"
-        # When TORCHELASTIC_USE_AGENT_STORE is set up, the worker process is assumed
-        # to be invoked by the torchelastic agent. Torchelastic agent creates a tcp daemon thread
-        # on the GROUP_RANK=0, as a result all user worker processes should create store with: daemon=False
-        tcp_store = TCPStore(master_addr, master_port, world_size, False, timeout)
-        # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (PrefixStore(worker_process_prefix, tcp_store), rank, world_size)
-    else:
-        # Start the TCP store daemon on the rank 0
-        start_daemon = rank == 0
-        store = TCPStore(master_addr, master_port, world_size, start_daemon, timeout)
-        # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
-        yield (store, rank, world_size)
+    yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError("Unable to perform rerendezvous using env:// method")
+    raise RuntimeError("Unable to perform re-rendezvous using env:// method")
+
 
 register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
 register_rendezvous_handler("env", _env_rendezvous_handler)

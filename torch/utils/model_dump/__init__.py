@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# mypy: allow-untyped-defs
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 
@@ -41,7 +42,8 @@ run "python -m http.server", then load http://localhost:8000/skeleton.html
 in the browser.  In another terminal, run
 "python -m torch.utils.model_dump --style=json FILE > \
     torch/utils/model_dump/model_info.json"
-every time you update the Python code.  When you update JS, just refresh.
+every time you update the Python code or model.
+When you update JS, just refresh.
 
 Possible improvements:
     - Fix various TODO comments in this file and the JS.
@@ -62,42 +64,54 @@ Possible improvements:
       (they probably don't work at all right now).
 """
 
-import sys
-import os
-import io
-import pathlib
-import re
 import argparse
-import zipfile
+import io
+import itertools
 import json
+import os
 import pickle
 import pprint
+import re
+import sys
 import urllib.parse
-
-from typing import (
-    Dict,
-)
+import zipfile
+from pathlib import Path
+import warnings
 
 import torch.utils.show_pickle
 
 
 DEFAULT_EXTRA_FILE_SIZE_LIMIT = 16 * 1024
 
+__all__ = ['get_storage_info', 'hierarchical_pickle', 'get_model_info', 'get_inline_skeleton',
+           'burn_in_info', 'get_info_and_burn_skeleton']
 
 def get_storage_info(storage):
-    assert isinstance(storage, torch.utils.show_pickle.FakeObject)
-    assert storage.module == "pers"
-    assert storage.name == "obj"
-    assert storage.state is None
-    assert isinstance(storage.args, tuple)
-    assert len(storage.args) == 1
+    if not isinstance(storage, torch.utils.show_pickle.FakeObject):
+        raise AssertionError(f"storage is not FakeObject: {type(storage)}")
+    if storage.module != "pers":
+        raise AssertionError(f"storage.module is not 'pers': {storage.module!r}")
+    if storage.name != "obj":
+        raise AssertionError(f"storage.name is not 'obj': {storage.name!r}")
+    if storage.state is not None:
+        raise AssertionError(f"storage.state is not None: {storage.state!r}")
+    if not isinstance(storage.args, tuple):
+        raise AssertionError(f"storage.args is not a tuple: {type(storage.args)}")
+    if len(storage.args) != 1:
+        raise AssertionError(f"len(storage.args) is not 1: {len(storage.args)}")
     sa = storage.args[0]
-    assert isinstance(sa, tuple)
-    assert len(sa) == 5
-    assert sa[0] == "storage"
-    assert isinstance(sa[1], torch.utils.show_pickle.FakeClass)
-    assert sa[1].module == "torch"
-    assert sa[1].name.endswith("Storage")
+    if not isinstance(sa, tuple):
+        raise AssertionError(f"sa is not a tuple: {type(sa)}")
+    if len(sa) != 5:
+        raise AssertionError(f"len(sa) is not 5: {len(sa)}")
+    if sa[0] != "storage":
+        raise AssertionError(f"sa[0] is not 'storage': {sa[0]!r}")
+    if not isinstance(sa[1], torch.utils.show_pickle.FakeClass):
+        raise AssertionError(f"sa[1] is not FakeClass: {type(sa[1])}")
+    if sa[1].module != "torch":
+        raise AssertionError(f"sa[1].module is not 'torch': {sa[1].module!r}")
+    if not sa[1].name.endswith("Storage"):
+        raise AssertionError(f"sa[1].name does not end with 'Storage': {sa[1].name!r}")
     storage_info = [sa[1].name.replace("Storage", "")] + list(sa[2:])
     return storage_info
 
@@ -119,45 +133,81 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__."):
-            assert data.args == ()
+        if (
+            typename.startswith(('__torch__.', 'torch.jit.LoweredWrapper.', 'torch.jit.LoweredModule.'))
+        ):
+            if data.args != ():
+                raise AssertionError("data.args is not ()")
             return {
                 "__module_type__": typename,
                 "state": hierarchical_pickle(data.state),
             }
         if typename == "torch._utils._rebuild_tensor_v2":
-            assert data.state is None
-            storage, offset, size, stride, requires_grad, hooks = data.args
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
+            storage, offset, size, stride, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
-            assert data.state is None
-            storage, offset, size, stride, quantizer, requires_grad, hooks = data.args
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
+            storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
-            assert isinstance(quantizer, tuple)
-            assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)
-            assert quantizer[0].module == "torch"
+            if not isinstance(quantizer, tuple):
+                raise AssertionError("quantizer is not a tuple")
+            if not isinstance(quantizer[0], torch.utils.show_pickle.FakeClass):
+                raise AssertionError("quantizer[0] is not a FakeClass")
+            if quantizer[0].module != "torch":
+                raise AssertionError("quantizer[0].module is not torch")
             if quantizer[0].name == "per_tensor_affine":
-                assert len(quantizer) == 3
-                assert isinstance(quantizer[1], float)
-                assert isinstance(quantizer[2], int)
+                if len(quantizer) != 3:
+                    raise AssertionError("len(quantizer) is not 3")
+                if not isinstance(quantizer[1], float):
+                    raise AssertionError("quantizer[1] is not a float")
+                if not isinstance(quantizer[2], int):
+                    raise AssertionError("quantizer[2] is not an int")
                 quantizer_extra = list(quantizer[1:3])
             else:
                 quantizer_extra = []
             quantizer_json = [quantizer[0].name] + quantizer_extra
             return {"__qtensor__": [storage_info, offset, size, stride, quantizer_json, requires_grad]}
         if typename == "torch.jit._pickle.restore_type_tag":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             obj, typ = data.args
-            assert isinstance(typ, str)
+            if not isinstance(typ, str):
+                raise AssertionError("typ is not a string")
             return hierarchical_pickle(obj)
         if re.fullmatch(r"torch\.jit\._pickle\.build_[a-z]+list", typename):
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             ls, = data.args
-            assert isinstance(ls, list)
+            if not isinstance(ls, list):
+                raise AssertionError("ls is not a list")
             return hierarchical_pickle(ls)
-        raise Exception(f"Can't prepare fake object of type for JS: {typename}")
-    raise Exception(f"Can't prepare data of type for JS: {type(data)}")
+        if typename == "torch.device":
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
+            name, = data.args
+            if not isinstance(name, str):
+                raise AssertionError("name is not a string")
+            # Just forget that it was a device and return the name.
+            return name
+        if typename == "builtin.UnicodeDecodeError":
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
+            msg, = data.args
+            if not isinstance(msg, str):
+                raise AssertionError("msg is not a string")
+            # Hack: Pretend this is a module so we don't need custom serialization.
+            # Hack: Wrap the message in a tuple so it looks like a nice state object.
+            # TODO: Undo at least that second hack.  We should support string states.
+            return {
+                "__module_type__": typename,
+                "state": hierarchical_pickle((msg,)),
+            }
+        raise Exception(f"Can't prepare fake object of type for JS: {typename}")  # noqa: TRY002
+    raise Exception(f"Can't prepare data of type for JS: {type(data)}")  # noqa: TRY002
 
 
 def get_model_info(
@@ -175,7 +225,7 @@ def get_model_info(
         file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
     elif isinstance(path_or_file, str):
         default_title = path_or_file
-        file_size = pathlib.Path(path_or_file).stat().st_size
+        file_size = Path(path_or_file).stat().st_size
     else:
         default_title = "buffer"
         path_or_file.seek(0, io.SEEK_END)
@@ -187,34 +237,43 @@ def get_model_info(
     with zipfile.ZipFile(path_or_file) as zf:
         path_prefix = None
         zip_files = []
+        # pyrefly: ignore [bad-assignment]
         for zi in zf.infolist():
             prefix = re.sub("/.*", "", zi.filename)
             if path_prefix is None:
                 path_prefix = prefix
             elif prefix != path_prefix:
-                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")
-            zip_files.append(dict(
-                filename=zi.filename,
-                compression=zi.compress_type,
-                compressed_size=zi.compress_size,
-                file_size=zi.file_size,
-            ))
-
-        assert path_prefix is not None
+                raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")  # noqa: TRY002
+            zip_files.append(
+                {
+                    "filename": zi.filename,
+                    "compression": zi.compress_type,
+                    "compressed_size": zi.compress_size,
+                    "file_size": zi.file_size,
+                }
+            )
+        if path_prefix is None:
+            raise AssertionError("path_prefix is None")
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
-        with zf.open(path_prefix + "/data.pkl") as handle:
-            raw_model_data = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
-            model_data = hierarchical_pickle(raw_model_data)
+        def get_pickle(name):
+            if path_prefix is None:
+                raise AssertionError("path_prefix is None")
+            with zf.open(path_prefix + f"/{name}.pkl") as handle:
+                raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
+                return hierarchical_pickle(raw)
 
-        # Intern strings that are likely to be re-used.
+        model_data = get_pickle("data")
+        constants = get_pickle("constants")
+
+        # Intern strings that are likely to be reused.
         # Pickle automatically detects shared structure,
-        # so re-used strings are stored efficiently.
+        # so reused strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings : Dict[str, int] = {}
+        interned_strings : dict[str, int] = {}
 
-        def ist(s):
+        def intern(s):
             if s not in interned_strings:
                 interned_strings[s] = len(interned_strings)
             return interned_strings[s]
@@ -231,7 +290,22 @@ def get_model_info(
             # Parse debug info and add begin/end markers if not present
             # to ensure that we cover the entire source code.
             debug_info_t = pickle.loads(raw_debug)
-            assert isinstance(debug_info_t, tuple)
+            text_table = None
+
+            if (len(debug_info_t) == 3 and
+                    isinstance(debug_info_t[0], str) and
+                    debug_info_t[0] == 'FORMAT_WITH_STRING_TABLE'):
+                _, text_table, content = debug_info_t
+
+                def parse_new_format(line):
+                    # (0, (('', '', 0), 0, 0))
+                    num, ((text_indexes, fname_idx, offset), start, end), tag = line
+                    text = ''.join(text_table[x] for x in text_indexes)  # type: ignore[index]
+                    fname = text_table[fname_idx]  # type: ignore[index]
+                    return num, ((text, fname, offset), start, end), tag
+
+                debug_info_t = map(parse_new_format, content)
+
             debug_info = list(debug_info_t)
             if not debug_info:
                 debug_info.append((0, (('', '', 0), 0, 0)))
@@ -239,11 +313,11 @@ def get_model_info(
                 debug_info.append((len(raw_code), (('', '', 0), 0, 0)))
 
             code_parts = []
-            for di, di_next in zip(debug_info, debug_info[1:]):
-                # accounting for source range serialization format change
-                start, source_range, _ = di
+            for di, di_next in itertools.pairwise(debug_info):
+                start, source_range, *_ = di
                 end = di_next[0]
-                assert end > start
+                if end <= start:
+                    raise AssertionError("end is not greater than start")
                 source, s_start, s_end = source_range
                 s_text, s_file, s_line = source
                 # TODO: Handle this case better.  TorchScript ranges are in bytes,
@@ -254,7 +328,7 @@ def get_model_info(
                     s_start = 0
                     s_end = 0
                 text = raw_code[start:end]
-                code_parts.append([text.decode("utf-8"), ist(s_file), s_line, ist(s_text), s_start, s_end])
+                code_parts.append([text.decode("utf-8"), intern(s_file), s_line, intern(s_text), s_start, s_end])
             code_files[zi.filename] = code_parts
 
         extra_files_json_pattern = re.compile(re.escape(path_prefix) + "/extra/.*\\.json")
@@ -282,7 +356,7 @@ def get_model_info(
                 # TODO: handle errors here and just ignore the file?
                 # NOTE: For a lot of these files (like bytecode),
                 # we could get away with just unpickling, but this should be safer.
-                obj = torch.utils.show_pickle.DumpUnpickler.dump(handle, out_stream=io.StringIO())
+                obj = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
             buf = io.StringIO()
             pprint.pprint(obj, buf)
             contents = buf.getvalue()
@@ -293,17 +367,20 @@ def get_model_info(
                 continue
             extra_pickles[zi.filename] = contents
 
-    return {"model": dict(
-        title=title,
-        file_size=file_size,
-        version=version,
-        zip_files=zip_files,
-        interned_strings=list(interned_strings),
-        code_files=code_files,
-        model_data=model_data,
-        extra_files_jsons=extra_files_jsons,
-        extra_pickles=extra_pickles,
-    )}
+    return {
+        "model": {
+            "title": title,
+            "file_size": file_size,
+            "version": version,
+            "zip_files": zip_files,
+            "interned_strings": list(interned_strings),
+            "code_files": code_files,
+            "model_data": model_data,
+            "constants": constants,
+            "extra_files_jsons": extra_files_jsons,
+            "extra_pickles": extra_pickles,
+        }
+    }
 
 
 def get_inline_skeleton():
@@ -313,15 +390,15 @@ def get_inline_skeleton():
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
 
-    if sys.version_info < (3, 7):
-        raise Exception("get_inline_skeleton requires Python 3.7")
-
     import importlib.resources
 
-    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore[attr-defined]
-    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore[attr-defined]
+    # pyrefly: ignore [bad-argument-type]
+    skeleton = importlib.resources.read_text(__package__, "skeleton.html")
+    # pyrefly: ignore [bad-argument-type]
+    js_code = importlib.resources.read_text(__package__, "code.js")
     for js_module in ["preact", "htm"]:
-        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore[attr-defined]
+        # pyrefly: ignore [bad-argument-type]
+        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
     skeleton = skeleton.replace(' src="./code.js">', ">\n" + js_code)
@@ -341,10 +418,18 @@ def burn_in_info(skeleton, info):
     # mess up our page.  Unconditionally escape fixes that.
     return skeleton.replace(
         "BURNED_IN_MODEL_INFO = null",
-        "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
+        "BURNED_IN_MODEL_INFO = " + json.dumps(info, sort_keys=True).replace("/", "\\/"))
 
 
-def main(argv, stdout=None):
+def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
+    model_info = get_model_info(path_or_bytesio, **kwargs)
+    skeleton = get_inline_skeleton()
+    page = burn_in_info(skeleton, model_info)
+    return page
+
+
+def main(argv, *, stdout=None) -> None:
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.", stacklevel=2)
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")
@@ -356,10 +441,10 @@ def main(argv, stdout=None):
     output = stdout or sys.stdout
 
     if args.style == "json":
-        output.write(json.dumps(info) + "\n")
+        output.write(json.dumps(info, sort_keys=True) + "\n")
     elif args.style == "html":
         skeleton = get_inline_skeleton()
         page = burn_in_info(skeleton, info)
         output.write(page)
     else:
-        raise Exception("Invalid style")
+        raise Exception("Invalid style")  # noqa: TRY002

@@ -3,12 +3,11 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
  public:
   using Iterator = OrderedDict<std::string, Tensor>::Iterator;
@@ -27,21 +26,22 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
   /// Pretty prints the `ParameterDict` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::ParameterDict(" << std::endl;
+    stream << "torch::nn::ParameterDict(" << '\n';
     for (const auto& pair : parameters_) {
-      stream << "(" << pair.key() << ")"
-             << ": Parameter containing: [" << pair.value().scalar_type()
-             << " of size " << pair.value().sizes() << "]";
+      stream << '(' << pair.key() << ')' << ": Parameter containing: ["
+             << pair.value().scalar_type() << " of size "
+             << pair.value().sizes() << ']';
       ;
-      stream << std::endl;
+      stream << '\n';
     }
-    stream << ")";
+    stream << ')';
   }
 
   /// Insert the parameter along with the key into ParameterDict
   /// The parameter is set to be require grad by default
-  Tensor& insert(std::string key, Tensor param) {
-    return register_parameter(key, param, param.requires_grad());
+  Tensor& insert(const std::string& key, const Tensor& param) {
+    bool requires_grad = param.requires_grad();
+    return register_parameter(key, param, requires_grad);
   }
 
   /// Remove key from the ParameterDict and return its value, throw exception
@@ -107,7 +107,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     parameters_.clear();
   }
 
-  /// Check if the centain parameter with the key in the ParameterDict
+  /// Check if the certain parameter with the key in the ParameterDict
   bool contains(const std::string& key) const noexcept {
     return parameters_.contains(key);
   }
@@ -143,5 +143,4 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
 TORCH_MODULE(ParameterDict);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

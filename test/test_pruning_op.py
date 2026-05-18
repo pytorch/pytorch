@@ -1,9 +1,10 @@
+# Owner(s): ["module: unknown"]
 
 import hypothesis.strategies as st
 from hypothesis import given
 import numpy as np
 import torch
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
@@ -16,8 +17,8 @@ class PruningOpTest(TestCase):
     # We mask a row if its indicator value is less than the threshold.
     def _generate_rowwise_mask(self, embedding_rows):
         indicator = torch.from_numpy((np.random.random_sample(embedding_rows)).astype(np.float32))
-        threshold = np.random.random_sample()
-        mask = torch.BoolTensor([True if val >= threshold else False for val in indicator])
+        threshold = float(np.random.random_sample())
+        mask = torch.BoolTensor([val >= threshold for val in indicator])
         return mask
 
     def _test_rowwise_prune_op(self, embedding_rows, embedding_dims, indices_type, weights_dtype):
@@ -50,11 +51,12 @@ class PruningOpTest(TestCase):
         ref_pruned_weights, ref_compressed_indices_map = get_reference_result(
             embedding_weights, mask, indices_type)
 
-        torch.testing.assert_allclose(pt_pruned_weights, ref_pruned_weights)
+        torch.testing.assert_close(pt_pruned_weights, ref_pruned_weights)
         self.assertEqual(pt_compressed_indices_map, ref_compressed_indices_map)
         self.assertEqual(pt_compressed_indices_map.dtype, indices_type)
 
 
+    @skipIfTorchDynamo()
     @given(
         embedding_rows=st.integers(1, 100),
         embedding_dims=st.integers(1, 100),
@@ -66,6 +68,7 @@ class PruningOpTest(TestCase):
         self._test_rowwise_prune_op(embedding_rows, embedding_dims, torch.int, weights_dtype)
 
 
+    @skipIfTorchDynamo()
     @given(
         embedding_rows=st.integers(1, 100),
         embedding_dims=st.integers(1, 100),
@@ -75,3 +78,7 @@ class PruningOpTest(TestCase):
     )
     def test_rowwise_prune_op_64bit_indices(self, embedding_rows, embedding_dims, weights_dtype):
         self._test_rowwise_prune_op(embedding_rows, embedding_dims, torch.int64, weights_dtype)
+
+
+if __name__ == '__main__':
+    run_tests()

@@ -1,13 +1,16 @@
-import os
-import tempfile
-import torch
+# Owner(s): ["module: unknown"]
 
-from backend import Model, to_custom_backend, get_custom_backend_library_path
-from torch.testing._internal.common_utils import TestCase, run_tests
+import tempfile
+
+from backend import get_custom_backend_library_path, Model, to_custom_backend
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestCustomBackend(TestCase):
     def setUp(self):
+        super().setUp()
         # Load the library containing the custom backend.
         self.library_path = get_custom_backend_library_path()
         torch.ops.load_library(self.library_path)
@@ -37,14 +40,11 @@ class TestCustomBackend(TestCase):
         self.test_execute()
 
         # Save and load.
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
+        with tempfile.NamedTemporaryFile() as f:
             f.close()
             torch.jit.save(self.model, f.name)
             loaded = torch.jit.load(f.name)
-        finally:
-            os.unlink(f.name)
-        self.model = loaded
+            self.model = loaded
 
         # Test execution again.
         self.test_execute()

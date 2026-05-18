@@ -1,21 +1,23 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import socket
 import threading
 import time
-import socket
 from datetime import timedelta
-from typing import List
 from unittest import TestCase
+from unittest.mock import patch
 
 from torch.distributed.elastic.rendezvous.utils import (
-    _PeriodicTimer,
     _delay,
     _matches_machine_hostname,
     _parse_rendezvous_config,
+    _PeriodicTimer,
     _try_parse_port,
     parse_rendezvous_endpoint,
 )
@@ -226,7 +228,9 @@ class UtilsTest(TestCase):
     def test_matches_machine_hostname_returns_true_if_hostname_is_machine_address(
         self,
     ) -> None:
-        addr_list = socket.getaddrinfo(socket.gethostname(), None, proto=socket.IPPROTO_TCP)
+        addr_list = socket.getaddrinfo(
+            socket.gethostname(), None, proto=socket.IPPROTO_TCP
+        )
 
         for addr in (addr_info[4][0] for addr_info in addr_list):
             with self.subTest(addr=addr):
@@ -251,6 +255,32 @@ class UtilsTest(TestCase):
                 time2 = time.monotonic()
 
                 self.assertGreaterEqual(time2 - time1, 0.2)
+
+    @patch(
+        "socket.getaddrinfo",
+        side_effect=[
+            [(None, None, 0, "a_host", ("1.2.3.4", 0))],
+            [(None, None, 0, "a_different_host", ("1.2.3.4", 0))],
+        ],
+    )
+    def test_matches_machine_hostname_returns_true_if_ip_address_match_between_hosts(
+        self,
+        _0,
+    ) -> None:
+        self.assertTrue(_matches_machine_hostname("a_host"))
+
+    @patch(
+        "socket.getaddrinfo",
+        side_effect=[
+            [(None, None, 0, "a_host", ("1.2.3.4", 0))],
+            [(None, None, 0, "another_host_with_different_ip", ("1.2.3.5", 0))],
+        ],
+    )
+    def test_matches_machine_hostname_returns_false_if_ip_address_not_match_between_hosts(
+        self,
+        _0,
+    ) -> None:
+        self.assertFalse(_matches_machine_hostname("a_host"))
 
 
 class PeriodicTimerTest(TestCase):
@@ -319,7 +349,7 @@ class PeriodicTimerTest(TestCase):
         call_interval = 0.2
 
         # Keep the log of intervals between each consecutive call.
-        actual_call_intervals: List[float] = []
+        actual_call_intervals: list[float] = []
 
         # Keep the number of times the function was called.
         call_count = 0

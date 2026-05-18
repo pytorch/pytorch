@@ -1,5 +1,7 @@
-import torch
 from utils import NUM_LOOP_ITERS
+
+import torch
+
 
 def add_tensors_loop(x, y):
     z = torch.add(x, y)
@@ -7,9 +9,10 @@ def add_tensors_loop(x, y):
         z = torch.add(z, x)
     return z
 
+
 class SimpleAddModule(torch.nn.Module):
     def __init__(self, add_op):
-        super(SimpleAddModule, self).__init__()
+        super().__init__()
         self.add_op = add_op
 
     def forward(self, x, y):

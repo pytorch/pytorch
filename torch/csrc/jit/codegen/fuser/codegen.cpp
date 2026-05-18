@@ -1,11 +1,8 @@
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 
-#include <ATen/ATen.h>
+#include <ATen/code_template.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/codegen/fuser/tensor_info.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -15,31 +12,27 @@
 #include <cstdint>
 #include <iostream>
 #include <sstream>
-#include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Template for computing the offset into the tensor to access a value
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto dim_calc = CodeTemplate(R"(
+static auto dim_calc = at::jit::CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
 ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
 static std::string valueName(const Value* n) {
-  return "n" + c10::to_string(n->unique());
+  return "n" + std::to_string(n->unique());
 }
 
 static std::string scalarValue(const int64_t v) {
-  return c10::to_string(v);
+  return std::to_string(v);
 }
 
 static std::string scalarValue(const bool v) {
-  return c10::to_string(v);
+  return std::to_string(v);
 }
 
 // Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
@@ -67,7 +60,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     return "half";
   }
   if (type == at::ScalarType::BFloat16) {
-    return "__nv_bfloat16";
+    return cuda::bfloat16_type_string;
   }
 
   switch (type) {
@@ -77,7 +70,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("unknown scalar type");
+      TORCH_CHECK(false, "unknown scalar type");
   }
 }
 
@@ -91,53 +84,51 @@ static const char* calcScalarTypeName(const at::ScalarType type) {
   return scalarTypeName(type);
 }
 
-static std::string variableType(const std::shared_ptr<c10::Type>& t) {
-  if (t->kind() == TypeKind::IntType) {
+static std::string variableType(const c10::Type& t) {
+  if (t.kind() == TypeKind::IntType) {
     return "int64_t";
-  } else if (t->kind() == TypeKind::FloatType) {
+  } else if (t.kind() == TypeKind::FloatType) {
     return "double";
-  } else if (t->kind() == TypeKind::BoolType) {
+  } else if (t.kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
+  } else if (auto scalar_type = t.expectRef<TensorType>().scalarType()) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 static std::string typeCastedValueName(
-    const std::shared_ptr<c10::Type>& t,
+    const c10::Type& t,
     const at::ScalarType outtype,
     const std::string& vn) {
-  if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
+  if (t.kind() == TypeKind::IntType || t.kind() == TypeKind::BoolType) {
     if (!isIntegralType(outtype, /*includeBool=*/false)) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
-  } else if (t->kind() == TypeKind::FloatType) {
+  } else if (t.kind() == TypeKind::FloatType) {
     // We don't guard this on anything because in our type system for scalars,
     // there is not a distinction between `float` and `double`, however there
     // *is* a distinction in tensor scalar types. We conservatively insert a
     // cast here, which may end up being a no-op if the tensor's scalar type
     // is `double`.
     return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
-  } else if (t->kind() == TypeKind::NoneType) {
+  } else if (t.kind() == TypeKind::NoneType) {
     // Support None value for optional arguments like memory format
     return vn;
-  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
+  } else if (auto scalar_type = t.expectRef<TensorType>().scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 // Writes RHS of special handling "simple mappable" ops
-static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
+static std::string encodeSpecialRHS(const Node* n, at::jit::TemplateEnv& env) {
   // special case for clamp fusion on missing min/max inputs
   // Note: It may seem unusual to have the bounds as the first case below,
   // this is so that if min or max is NaN, they are "ignored"
@@ -158,11 +149,10 @@ static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
       env.s("1", valueName(min));
       return format("(${0} < ${1} ? ${1} : ${0})", env);
     } else {
-      throw std::runtime_error(
-          "At least one of 'min' or 'max' must not be None");
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
     }
   } else {
-    throw std::runtime_error("Cannot encode RHS of the node, op not supported");
+    TORCH_CHECK(false, "Cannot encode RHS of the node, op not supported");
   }
 }
 
@@ -261,7 +251,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::where, "(${0} ? ${1} : ${2})"},
   };
 
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
 
   if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
     return encodeSpecialRHS(n, env);
@@ -275,10 +265,10 @@ static std::string encodeRHS(const Node* n) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
       env.s(
-          c10::to_string(i),
-          typeCastedValueName(in->type(), *outtype, valueName(in)));
+          std::to_string(i),
+          typeCastedValueName(*in->type(), *outtype, valueName(in)));
       // Uncasted operands only used for comparison operators
-      env.s(c10::to_string(i) + "_nocast", valueName(in));
+      env.s(std::to_string(i) + "_nocast", valueName(in));
       i++;
     }
 
@@ -299,7 +289,7 @@ static void emitIndexingFor(
     const std::string& tensor,
     const int ndim,
     const bool last_is_cont) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("tensor", tensor);
   out << format("IndexType ${tensor}_offset = 0;\n", env);
   out << format("IndexType ${tensor}_linearIndex = linearIndex;\n", env);
@@ -323,7 +313,7 @@ static void emitCheckFor(
     const std::string& tensor,
     const int ndim,
     const TensorDesc& desc) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("tensor", tensor);
   env.s("scalar_type", scalarTypeName(desc.scalar_type));
 
@@ -365,11 +355,11 @@ static void emitCheckFor(
 std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>&
+    const std::vector<std::pair<const Value*, const std::optional<TensorDesc>>>&
         inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("kernelName", name);
   env.s(
       "IndexType",
@@ -392,7 +382,7 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
     std::string tensor =
         "t" +
-        c10::to_string(
+        std::to_string(
             formals.size()); // can't be unique() because Param may be an output
     const auto nDim = desc.nDim();
     emitCheckFor(tensorChecks, tensor, nDim, desc);
@@ -414,14 +404,14 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
     std::string scalar =
         "s" +
-        c10::to_string(
+        std::to_string(
             formals.size()); // can't be unique() because Param may be an output
     env.d(
         "formal_index",
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
     env.s("scalar", scalar);
-    env.s("scalar_type", variableType(n->type()));
+    env.s("scalar_type", variableType(*n->type()));
     formals.push_back(format("${scalar_type} ${scalar}", env));
     argument_loads.push_back(
         format("*static_cast<${scalar_type}*>(args[${formal_index}])", env));
@@ -491,7 +481,7 @@ std::string generateKernel(
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
         env.s("access_vec4", format("t${formal}_buf[i]", env));
       }
-      env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
+      env.s("lhs_type", calcScalarTypeName(input.second->scalar_type));
 
       // load input in vectorized code path
       auto ele_size = at::elementSize((*input.second).scalar_type);
@@ -525,7 +515,7 @@ std::string generateKernel(
     } else {
       env.s("access", format("s${formal}", env));
       env.s("access_vec4", format("s${formal}", env));
-      env.s("lhs_type", variableType(input.first->type()));
+      env.s("lhs_type", variableType(*input.first->type()));
     }
     body << format("${lhs_type} ${node} = ${access};\n", env);
     body_vec4 << format("${lhs_type} ${node} = ${access_vec4};\n", env);
@@ -539,7 +529,7 @@ std::string generateKernel(
   //       places where the constant None node is used
   // Note: No need to iterate over reference as n is a pointer
   for (const auto n : graph.nodes()) {
-    static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
+    static_assert(std::is_pointer_v<decltype(n)>, "n must be a pointer");
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
     if (n->kind() == prim::FusedConcat)
@@ -569,11 +559,11 @@ std::string generateKernel(
       }
       env.s("node", valueName(n->output()));
       env.s("rhs", rhs);
-      env.s("lhs_type", variableType(n->output()->type()));
+      env.s("lhs_type", variableType(*n->output()->type()));
     } else {
       env.s("node", valueName(n->output()));
       env.s("rhs", encodeRHS(n));
-      env.s("lhs_type", variableType(n->output()->type()));
+      env.s("lhs_type", variableType(*n->output()->type()));
     }
 
     body << format("${lhs_type} ${node} = ${rhs};\n", env);
@@ -638,7 +628,7 @@ std::string generateKernel(
   }
 
   // Includes headers
-  // Note: CUDA kernels support halfs and random generation, CPU kernels do not
+  // Note: CUDA kernels support Halfs and random generation, CPU kernels do not
   if (has_half_tensor) {
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
@@ -660,22 +650,6 @@ std::string generateKernel(
     env.s("RandInit", "");
   }
 
-  // HIP headers must be included until precompiled header feature is available
-  // clang-format off
-#ifdef __HIP_PLATFORM_HCC__
-#if ROCM_VERSION < 40200
-  if (use_cuda && has_half_tensor) {
-    env.s("RuntimeHeader", R"(
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
-)");
-  } else if (use_cuda) {
-    env.s("RuntimeHeader", R"(
-#include <hip/hip_runtime.h>
-)");
-  }
-#endif
-#endif
   // clang-format on
 
   // Instantiates the CUDA or CPU-specific templates
@@ -697,11 +671,9 @@ std::string generateKernel(
   }
 
   if (debugFuser()) {
-    std::cerr << "fusion code:" << code_string << std::endl;
+    std::cerr << "fusion code:" << code_string << '\n';
   }
   return code_string;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

@@ -1,59 +1,56 @@
 #pragma once
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <istream>
 #include <memory>
 
 #include <caffe2/serialize/file_adapter.h>
 
-namespace torch {
-namespace jit {
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
+namespace torch::jit {
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
-enum MobileModuleLoadOptions {
-  OPERATOR_CHECK = 1,
-};
-
-const uint64_t _default_mobile_module_load_options =
-    MobileModuleLoadOptions::OPERATOR_CHECK;
+constexpr const char* kArchiveNameBytecode = "bytecode";
+constexpr const char* kArchiveNameConstants = "constants";
+constexpr const char* kArchiveNameVersion = "version";
 
 // The family of methods below load a serialized Mobile Module
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files);
+    std::optional<at::Device> device,
+    ExtraFilesMap& extra_file,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    std::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device = c10::nullopt);
+    std::optional<c10::Device> device = std::nullopt);
 
 /**
  * Load only the contents of the "extra/" files whose names are
@@ -69,7 +66,7 @@ TORCH_API mobile::Module _load_for_mobile(
  */
 void _load_extra_only_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap& extra_files);
 
 // Currently used by both mobile/import.cpp and model_compatibility.cpp.
@@ -77,14 +74,19 @@ void _load_extra_only_for_mobile(
 // version type_resolver and obj_loader.
 at::TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit);
+    const std::shared_ptr<CompilationUnit>& compilation_unit);
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit);
+    const std::shared_ptr<CompilationUnit>& compilation_unit);
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
-    at::StrongTypePtr type,
-    at::IValue input,
-    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit);
+    const at::StrongTypePtr& type,
+    const at::IValue& input,
+    mobile::CompilationUnit& mobile_compilation_unit);
+
+// Given a reader, which has access to a model file,
+// return true if there exists tensors in `bytecode` archive
+bool isTensorInBytecodeArchive(
+    caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 namespace mobile {
 
@@ -102,5 +104,5 @@ TORCH_API std::set<std::string> _export_operator_list(
     torch::jit::mobile::Module& module);
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

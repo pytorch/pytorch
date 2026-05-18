@@ -1,16 +1,11 @@
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/utils/byte_order.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
-/*static */ thread_local c10::optional<std::string>
-    RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
+/*static */ thread_local std::optional<std::string>
+    RemoteProfilerManager::currentThreadLocalKey_ = std::nullopt;
 /*static */ RemoteProfilerManager& RemoteProfilerManager::getInstance() {
   static RemoteProfilerManager* handler = new RemoteProfilerManager();
   return *handler;
@@ -28,11 +23,11 @@ void RemoteProfilerManager::setCurrentKey(std::string key) {
 }
 
 bool RemoteProfilerManager::isCurrentKeySet() const {
-  return currentThreadLocalKey_ ? true : false;
+  return currentThreadLocalKey_.has_value();
 }
 
 void RemoteProfilerManager::unsetCurrentKey() {
-  currentThreadLocalKey_ = c10::nullopt;
+  currentThreadLocalKey_ = std::nullopt;
 }
 
 void RemoteProfilerManager::eraseKey(const ProfilingId& globallyUniqueId) {
@@ -85,6 +80,4 @@ RemoteProfilerManager::RemoteProfilerManager() {
       static_cast<int64_t>(RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_);
   currentLocalId_ = workerId << kAutoIncrementBits;
 }
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -1,11 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_softmax_native.h>         // for mkldnn_softmax
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_softmax(
     const Tensor& self,
@@ -14,15 +20,14 @@ Tensor mkldnn_softmax(
   TORCH_CHECK(false, "mkldnn_softmax: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_softmax(
     const Tensor& self,
@@ -39,7 +44,6 @@ Tensor mkldnn_softmax(
                                  self.options().device_opt());
 }
 
-} // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

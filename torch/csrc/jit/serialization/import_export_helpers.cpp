@@ -8,14 +8,12 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
-
-static const std::string kExportSuffix = "py";
+namespace torch::jit {
 
 std::string qualifierToArchivePath(
     const std::string& qualifier,
     const std::string& export_prefix) {
+  static const std::string kExportSuffix = "py";
   std::string path = qualifier;
   std::replace_if(
       path.begin(), path.end(), [](char c) { return c == '.'; }, '/');
@@ -30,19 +28,13 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
   if (!reader.hasRecord(path)) {
     return nullptr;
   }
-  at::DataPtr data;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t size;
-  std::tie(data, size) = reader.getRecord(path);
+  auto [data, size] = reader.getRecord(path);
 
   std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
 
   std::string debug_file = path + ".debug_pkl";
   if (reader.hasRecord(debug_file)) {
-    at::DataPtr debug_data;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t debug_size;
-    std::tie(debug_data, debug_size) = reader.getRecord(debug_file);
+    auto [debug_data, debug_size] = reader.getRecord(debug_file);
     gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
         std::move(debug_data), debug_size);
   }
@@ -53,5 +45,4 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
       gen_ranges);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

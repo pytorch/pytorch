@@ -1,10 +1,9 @@
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 torch::autograd::variable_list SendRpcBackward::apply(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     torch::autograd::variable_list&& inputs) {
   TORCH_INTERNAL_ASSERT(
       inputs.empty(), "SendRpcBackward should receive no inputs");
@@ -27,6 +26,4 @@ const torch::autograd::variable_list& SendRpcBackward::getGrads() const {
   return grads_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

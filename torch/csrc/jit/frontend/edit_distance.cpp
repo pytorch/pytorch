@@ -3,8 +3,7 @@
 #include <cstring>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // computes levenshtein edit distance between two words
 // returns maxEditDistance + 1 if the edit distance exceeds MaxEditDistance
@@ -13,10 +12,10 @@ size_t ComputeEditDistance(
     const char* word1,
     const char* word2,
     size_t maxEditDistance) {
-  size_t m = strlen(word1);
-  size_t n = strlen(word2);
+  size_t m = std::strlen(word1);
+  size_t n = std::strlen(word2);
 
-  const unsigned small_buffer_size = 64;
+  constexpr unsigned small_buffer_size = 64;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   unsigned small_buffer[small_buffer_size];
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -36,8 +35,7 @@ size_t ComputeEditDistance(
 
     unsigned previous = y - 1;
     for (size_t x = 1; x <= n; ++x) {
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      int old_row = row[x];
+      const auto old_row = row[x];
       row[x] = std::min(
           previous + (word1[y - 1] == word2[x - 1] ? 0u : 1u),
           std::min(row[x - 1], row[x]) + 1);
@@ -54,5 +52,4 @@ size_t ComputeEditDistance(
   return result;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

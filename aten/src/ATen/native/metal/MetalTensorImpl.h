@@ -23,28 +23,20 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes),
         strides_(strides.vec()) {
-    TensorImpl::set_has_contiguity_policy(
-        TensorImpl::HasContiguityPolicy::CustomBehavior);
   }
 
-  IntArrayRef strides() const override {
+  // TODO: manually storing strides here is dumb
+
+  IntArrayRef strides_custom() const override {
     return strides_;
   }
 
-  bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    return c10::fromIntArrayRefKnownNonNegative(strides_);
+  }
+
+  c10::SymBool sym_is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     return true;
-  }
-
-  int64_t stride(int64_t d) const override {
-    d = at::maybe_wrap_dim(d, this->dim(), false);
-    return strides_[d];
-  }
-
-  void release_resources() override {
-    using MetalTensorImplStorage = at::native::metal::MetalTensorImplStorage;
-    auto&& handle = (MetalTensorImplStorage)this->opaque_handle();
-    handle.texture()->release();
-    OpaqueTensorImpl<OpaqueHandle>::release_resources();
   }
 
  private:

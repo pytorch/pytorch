@@ -10,14 +10,15 @@ import inspect
 import logging
 import os
 import warnings
-from typing import Optional
+
+from torch.distributed.elastic.utils.log_level import get_log_level
 
 
-def get_logger(name: Optional[str] = None):
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
-    env. variable or INFO as default. The function will use the
+    env. variable or WARNING as default. The function will use the
     module name of the caller if no name is provided.
 
     Args:
@@ -30,13 +31,13 @@ def get_logger(name: Optional[str] = None):
     return _setup_logger(name or _derive_module_name(depth=2))
 
 
-def _setup_logger(name: Optional[str] = None):
-    log = logging.getLogger(name)
-    log.setLevel(os.environ.get("LOGLEVEL", "INFO"))
-    return log
+def _setup_logger(name: str | None = None) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
+    return logger
 
 
-def _derive_module_name(depth: int = 1) -> Optional[str]:
+def _derive_module_name(depth: int = 1) -> str | None:
     """
     Derives the name of the caller module from the stack frames.
 
@@ -45,7 +46,8 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
     """
     try:
         stack = inspect.stack()
-        assert depth < len(stack)
+        if depth >= len(stack):
+            raise AssertionError
         # FrameInfo is just a named tuple: (frame, filename, lineno, function, code_context, index)
         frame_info = stack[depth]
 
@@ -63,5 +65,6 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
         warnings.warn(
             f"Error deriving logger module name, using <None>. Exception: {e}",
             RuntimeWarning,
+            stacklevel=2,
         )
         return None

@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# mypy: allow-untyped-defs
 
 
 def get_remote_module_template(enable_moving_cpu_tensors_to_cuda: bool):
@@ -55,7 +56,7 @@ _generated_methods = [
 """
 
 # This template may cause typing error (the mismatch between ``Tuple[()]`` and ``Tuple[Any]``)
-# even if the code is only used for instaniation but not execution.
+# even if the code is only used for instantiation but not execution.
 # Therefore, only include handling moving CPU tensors to a cuda device if necessary.
 # TODO: Merge these two templates together in the future once TorchScript syntax is improved.
 _REMOTE_FORWARD_TEMPLATE_ENABLE_MOVING_CPU_TENSORS_TO_CUDA = """

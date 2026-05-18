@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/api/module.h>
 #include <torch/jit.h>
 #include <torch/script.h>
-#include <torch/csrc/jit/api/module.h>
 
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <string>
 
 int main(int argc, char* argv[]) {

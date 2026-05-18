@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import os
 from abc import ABC, abstractmethod
 
@@ -6,7 +8,7 @@ import torch.testing._internal.dist_utils
 
 class RpcAgentTestFixture(ABC):
     @property
-    def world_size(self):
+    def world_size(self) -> int:
         return 4
 
     @property
@@ -35,12 +37,11 @@ class RpcAgentTestFixture(ABC):
     def rpc_backend_options(self):
         pass
 
-    def setup_fault_injection(self, faulty_messages, messages_to_delay):
+    def setup_fault_injection(self, faulty_messages, messages_to_delay):  # noqa: B027
         """Method used by dist_init to prepare the faulty agent.
 
         Does nothing for other agents.
         """
-        pass
 
     # Shutdown sequence is not well defined, so we may see any of the following
     # errors when running tests that simulate errors via a shutdown on the
@@ -52,7 +53,6 @@ class RpcAgentTestFixture(ABC):
         tests that check for failures. This function is used to match against
         possible errors to ensure failures were raised properly.
         """
-        pass
 
     @abstractmethod
     def get_timeout_error_regex(self):
@@ -61,4 +61,3 @@ class RpcAgentTestFixture(ABC):
         RPC has timed out. Useful for use with assertRaisesRegex() to ensure we
         have the right errors during timeout.
         """
-        pass

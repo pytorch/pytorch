@@ -18,27 +18,26 @@
 extern "C" {
 #endif
 
-  PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_conv2d(
-      pytorch_qnnp_operator_t op,
-      size_t output_tile_size,
-      size_t tiled_output_size);
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_conv3d(
+    pytorch_qnnp_operator_t op,
+    size_t output_tile_size,
+    size_t tiled_output_size);
 
-  PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_dwconv2d(
-      pytorch_qnnp_operator_t convolution,
-      size_t batch_start,
-      size_t step_height,
-      size_t step_width);
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_dwconv(
+    pytorch_qnnp_operator_t op,
+    size_t batch_start);
 
-  PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_deconv2d(
-      pytorch_qnnp_operator_t op,
-      size_t output_tile_size,
-      size_t tiled_output_size);
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_deconv2d(
+    pytorch_qnnp_operator_t op,
+    size_t output_tile_size,
+    size_t tiled_output_size);
 
-  PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_maxpool2d(
-      pytorch_qnnp_operator_t op,
-      size_t batch_start,
-      size_t step_height,
-      size_t step_width);
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_init_maxpool2d(
+    pytorch_qnnp_operator_t op,
+    size_t batch_start);
+
+PYTORCH_QNNP_INTERNAL void pytorch_qnnp_indirection_set_step_dimensions(
+    pytorch_qnnp_operator_t op);
 
 #ifdef __cplusplus
 } /* extern "C" */

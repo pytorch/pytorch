@@ -1,11 +1,10 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `CosineSimilarity` module.
 ///
@@ -23,13 +22,14 @@ struct TORCH_API CosineSimilarityOptions {
 namespace functional {
 /// Options for `torch::nn::functional::cosine_similarity`.
 ///
-/// See the documentation for `torch::nn::CosineSimilarityOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::CosineSimilarityOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::cosine_similarity(input1, input2, F::CosineSimilarityFuncOptions().dim(1));
+/// F::cosine_similarity(input1, input2,
+/// F::CosineSimilarityFuncOptions().dim(1));
 /// ```
 using CosineSimilarityFuncOptions = CosineSimilarityOptions;
 } // namespace functional
@@ -40,7 +40,8 @@ using CosineSimilarityFuncOptions = CosineSimilarityOptions;
 ///
 /// Example:
 /// ```
-/// PairwiseDistance model(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true));
+/// PairwiseDistance
+/// model(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true));
 /// ```
 struct TORCH_API PairwiseDistanceOptions {
   /// The norm degree. Default: 2
@@ -54,8 +55,8 @@ struct TORCH_API PairwiseDistanceOptions {
 namespace functional {
 /// Options for `torch::nn::functional::pairwise_distance`.
 ///
-/// See the documentation for `torch::nn::PairwiseDistanceOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::PairwiseDistanceOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
@@ -65,5 +66,4 @@ namespace functional {
 using PairwiseDistanceFuncOptions = PairwiseDistanceOptions;
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

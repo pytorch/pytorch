@@ -1,14 +1,19 @@
 import tensorboard
-from setuptools import distutils
+from torch._vendor.packaging.version import Version
 
-LooseVersion = distutils.version.LooseVersion
+if not hasattr(tensorboard, "__version__") or Version(
+    tensorboard.__version__
+) < Version("1.15"):
+    raise ImportError("TensorBoard logging requires TensorBoard version 1.15 or above")
 
-if not hasattr(tensorboard, '__version__') or LooseVersion(tensorboard.__version__) < LooseVersion('1.15'):
-    raise ImportError('TensorBoard logging requires TensorBoard version 1.15 or above')
-
-del distutils
-del LooseVersion
+del Version
 del tensorboard
 
-from .writer import FileWriter, SummaryWriter  # noqa: F401
-from tensorboard.summary.writer.record_writer import RecordWriter  # noqa: F401
+from .writer import FileWriter, SummaryWriter
+from tensorboard.summary.writer.record_writer import RecordWriter
+
+__all__ = [
+    "FileWriter",
+    "RecordWriter",
+    "SummaryWriter",
+]

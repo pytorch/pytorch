@@ -1,107 +1,144 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
-
-#include <THC/THC.h>
-#include <THC/THCGeneral.hpp>
+#include <c10/util/env.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
 #endif
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_v2.h>
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <miopen/version.h>
+#include <hipblaslt/hipblaslt-version.h>
 #endif
 
 #ifndef USE_ROCM
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>
-#include <functional>
 #include <memory>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace c10::cuda::_internal {
+void setHasPrimaryContext(bool (*func)(DeviceIndex));
+}
+
+namespace at::cuda::detail {
+
+const at::cuda::NVRTC& nvrtc();
+DeviceIndex current_device();
+
+static void (*magma_init_fn)() = nullptr;
+
+void set_magma_init_fn(void (*fn)()) {
+  magma_init_fn = fn;
+}
+
+namespace {
+bool _hasPrimaryContext(DeviceIndex device_index) {
+  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+              "hasPrimaryContext expects a valid device index, but got device_index=", static_cast<int>(device_index));
+  unsigned int ctx_flags = 0;
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
+  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  int ctx_is_active = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  return ctx_is_active == 1;
+}
+
+// Register hasPrimaryContext back to c10::cuda
+struct _Initializer {
+  _Initializer() {
+      c10::cuda::_internal::setHasPrimaryContext(_hasPrimaryContext);
+  }
+  ~_Initializer() {
+      c10::cuda::_internal::setHasPrimaryContext(nullptr);
+  }
+} initializer;
+} // anonymous namespace
+
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
+void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  THCState* thc_state = THCState_alloc();
 
-  THCudaInit(thc_state);
-#ifdef USE_MAGMA
-  THCMagma_init(thc_state);
+  const auto num_devices = c10::cuda::device_count_ensure_non_zero();
+  c10::cuda::CUDACachingAllocator::init(num_devices);
+  at::cuda::detail::init_p2p_access_cache(num_devices);
+
+#if AT_MAGMA_ENABLED()
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initialize magma, init routine not set");
+  magma_init_fn();
 #endif
-  return std::unique_ptr<THCState, void (*)(THCState*)>(
-      thc_state, [](THCState* p) {
-        if (p)
-          THCState_free(p);
-      });
 }
 
-const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
+}
+
+Generator CUDAHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::CUDAGeneratorImpl>(device_index);
 }
 
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
-bool CUDAHooks::isPinnedPtr(void* data) const {
+bool CUDAHooks::isPinnedPtr(const void* data) const {
   // First check if driver is broken/missing, in which case PyTorch CPU
   // functionalities should still work, we should report `false` here.
-  if (!CUDAHooks::hasCUDA()) {
+  if (!at::cuda::is_available()) {
     return false;
   }
   // cudaPointerGetAttributes grabs context on the current device, so we set
   // device to one that already has context, if exists.
   at::OptionalDeviceGuard device_guard;
-  auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
+  auto primary_ctx_device_index = getDeviceIndexWithPrimaryContext();
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
-  cudaPointerAttributes attr;
+  cudaPointerAttributes attr{};
+  // We do not believe that CUDA needs mutable access to the data
+  // here.
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear HIP error
     return false;
   }
 #endif
-#if CUDA_VERSION >= 10000
   return attr.type == cudaMemoryTypeHost;
-#else
-  return attr.memoryType == cudaMemoryTypeHost;
-#endif
 }
 
 bool CUDAHooks::hasCUDA() const {
@@ -109,7 +146,7 @@ bool CUDAHooks::hasCUDA() const {
 }
 
 bool CUDAHooks::hasMAGMA() const {
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
   return true;
 #else
   return false;
@@ -118,6 +155,55 @@ bool CUDAHooks::hasMAGMA() const {
 
 bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
+}
+
+bool CUDAHooks::hasCuSOLVER() const {
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::hasCuBLASLt() const {
+#if defined(CUDART_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+
+bool CUDAHooks::hasCKSDPA() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_SDPA)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CUDAHooks::hasCKGEMM() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CUDAHooks::hasROCM() const {
+  // Currently, this is same as `compiledWithMIOpen`.
+  // But in future if there are ROCm builds without MIOpen,
+  // then `hasROCM` should return true while `compiledWithMIOpen`
+  // should return false
+  return AT_ROCM_ENABLED();
 }
 
 #if defined(USE_DIRECT_NVRTC)
@@ -144,47 +230,34 @@ static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvr
 }
 #endif
 
-const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+const at::cuda::NVRTC& nvrtc() {
   // must hold onto DynamicLibrary otherwise it will unload
   static auto handle = load_nvrtc();
   return *handle.second;
 }
 
-int64_t CUDAHooks::current_device() const {
-  int device;
-  cudaError_t err = cudaGetDevice(&device);
+const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+  return at::cuda::detail::nvrtc();
+}
+
+DeviceIndex current_device() {
+  c10::DeviceIndex device = 0;
+  cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }
   return -1;
 }
 
-bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags;
-  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
-  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
-  int ctx_is_active = 0;
-  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
-  return ctx_is_active == 1;
+/**
+ * DEPRECATED: use getCurrentDevice() instead
+ */
+DeviceIndex CUDAHooks::current_device() const {
+  return at::cuda::detail::current_device();
 }
 
-c10::optional<int64_t> CUDAHooks::getDevceIndexWithPrimaryContext() const {
-  // check current device first
-  int64_t current_device_index = CUDAHooks::current_device();
-  if (current_device_index >= 0) {
-    if (CUDAHooks::hasPrimaryContext(current_device_index)) {
-      return current_device_index;
-    }
-  }
-  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs(); device_index++) {
-    if (device_index == current_device_index) continue;
-    if (CUDAHooks::hasPrimaryContext(device_index)) {
-      return device_index;
-    }
-  }
-  return c10::nullopt;
+bool CUDAHooks::hasPrimaryContext(DeviceIndex device_index) const {
+  return _hasPrimaryContext(device_index);
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
@@ -205,7 +278,9 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (!hasCUDA()) {
+    return false;
+  }
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
@@ -216,9 +291,46 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
+#if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16RNNWithCuDNN() const {
+#if AT_CUDNN_ENABLED() && (CUDNN_VERSION >= 91300)
+  if (!hasCUDA()) {
+    return false;
+  }
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
     return true;
   } else {
     return false;
@@ -232,7 +344,47 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionRuntimeCuDNN() const {
+#if AT_CUDNN_ENABLED()
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCuDNNFrontend() const {
+#if AT_CUDNN_ENABLED()
+  return CUDNN_FRONTEND_VERSION;
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN Frontend version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionMIOpen() const {
+#if AT_ROCM_ENABLED()
+  return MIOPEN_VERSION_MAJOR * 10000 +
+         MIOPEN_VERSION_MINOR * 100 +
+         MIOPEN_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
+#endif
+}
+
+long CUDAHooks::versionHipBLASLt() const {
+#if AT_ROCM_ENABLED()
+  return HIPBLASLT_VERSION_MAJOR * 10000 +
+         HIPBLASLT_VERSION_MINOR * 100 +
+         HIPBLASLT_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
 #endif
 }
 
@@ -257,42 +409,54 @@ bool CUDAHooks::hasCUDART() const {
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
-  int runtimeVersion;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  int runtimeVersion = 0;
+  AT_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
-  auto printCudaStyleVersion = [&](int v) {
-    oss << (v / 1000) << "." << (v / 10 % 100);
-    if (v % 10 != 0) {
-      oss << "." << (v % 10);
+  auto printCudaStyleVersion = [&](size_t v) {
+#ifdef USE_ROCM
+    // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
+    if(v < 500) {
+      // If major=xx, minor=yy then format -> xxyy
+      oss << (v / 100) << '.' << (v % 10);
     }
+    else {
+      // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
+      oss << (v / 10000000) << '.' << (v / 100000 % 100) << '.' << (v % 100000);
+    }
+#else
+    oss << (v / 1000) << '.' << (v / 10 % 100);
+    if (v % 10 != 0) {
+      oss << '.' << (v % 10);
+    }
+#endif
   };
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   oss << "  - CUDA Runtime ";
 #else
   oss << "  - HIP Runtime ";
 #endif
   printCudaStyleVersion(runtimeVersion);
-  oss << "\n";
+  oss << '\n';
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
-  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << '\n';
 #endif
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
 
 
-  auto printCudnnStyleVersion = [&](int v) {
-    oss << (v / 1000) << "." << (v / 100 % 10);
+  auto printCudnnStyleVersion = [&](size_t v) {
+    oss << (v / 1000) << '.' << (v / 100 % 10);
     if (v % 100 != 0) {
-      oss << "." << (v % 100);
+      oss << '.' << (v % 100);
     }
   };
 
@@ -303,22 +467,22 @@ std::string CUDAHooks::showConfig() const {
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
     printCudaStyleVersion(cudnnCudartVersion);
-    oss << ")";
+    oss << ')';
   }
-  oss << "\n";
+  oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
     oss << "    - Built with CuDNN ";
     printCudnnStyleVersion(CUDNN_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << '.' << MIOPEN_VERSION_MINOR << '.' << MIOPEN_VERSION_PATCH << '\n';
 #endif
 
-#ifdef USE_MAGMA
-  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+#if AT_MAGMA_ENABLED()
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
   return oss.str();
@@ -328,48 +492,92 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  AT_ERROR(
+  TORCH_CHECK(false,
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_max_size_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
-void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
-#ifndef __HIP_PLATFORM_HCC__
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(DeviceIndex device_index, int64_t max_size) const {
   at::native::detail::cufft_set_plan_cache_max_size_impl(device_index, max_size);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheSize(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
+int64_t CUDAHooks::cuFFTGetPlanCacheSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_size_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
-void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
+void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
+/**
+ * DEPRECATED: use deviceCount() instead
+ */
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
 
-void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+DeviceIndex CUDAHooks::deviceCount() const {
+  return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return at::cuda::detail::current_device();
+}
+
+#ifdef USE_ROCM
+bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index) const {
+  hipDeviceProp_t* prop;
+  if (device_index == -1){
+      prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+      prop = at::cuda::getDeviceProperties(device_index);
+  }
+
+  std::string device_arch = prop->gcnArchName;
+  for (std::string arch : archs) {
+      size_t substring = device_arch.find(arch);
+      if (substring != std::string::npos) {
+          return true;
+      }
+  }
+  return false;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950"
+#endif
+  };
+  return archs;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950", "gfx1150", "gfx1151",
+#endif
+#if ROCM_VERSION >= 70200
+    "gfx1250"
+#endif
+  };
+  return archs;
+}
+#endif
+
+void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
 }
@@ -378,8 +586,6 @@ void CUDAHooks::deviceSynchronize(int64_t device_index) const {
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
 
-REGISTER_CUDA_HOOKS(CUDAHooks);
+REGISTER_CUDA_HOOKS(CUDAHooks)
 
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail

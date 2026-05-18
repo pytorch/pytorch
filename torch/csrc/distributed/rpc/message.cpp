@@ -1,8 +1,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/custom_class.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 Message::Message() = default;
 
@@ -21,31 +20,6 @@ Message::Message(
       tensors_(std::move(tensors)),
       type_(type),
       id_(id) {}
-
-Message::Message(const Message& other) = default;
-
-Message::Message(Message&& other) noexcept = default;
-
-Message& Message::operator=(Message const& rhs) & {
-  auto payload = rhs.payload_;
-  auto tensors = rhs.tensors_;
-  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-Message& Message::operator=(Message&& rhs) & {
-  Message(std::move(rhs.payload_), std::move(rhs.tensors_), rhs.type_, rhs.id_)
-      .swap(*this);
-  return *this;
-}
-
-void Message::swap(Message& rhs) noexcept {
-  std::swap(payload_, rhs.payload_);
-  std::swap(tensors_, rhs.tensors_);
-  std::swap(type_, rhs.type_);
-  std::swap(id_, rhs.id_);
-}
 
 std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
@@ -76,11 +50,13 @@ MessageType Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageTypeFlags::REQUEST_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::REQUEST_TYPE) &
+      static_cast<int>(type_);
 }
 
 bool Message::isResponse() const {
-  return MessageTypeFlags::RESPONSE_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::RESPONSE_TYPE) &
+      static_cast<int>(type_);
 }
 
 int64_t Message::id() const {
@@ -91,13 +67,34 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(const std::exception& e, int64_t id) {
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
+    const {
+  // Sparse tensors do not have storage. Instead, a sparse tensor
+  // contains two tensors indices and values, and both contain storage.
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
+  storages.reserve(2 * tensors_.size());
+  for (const auto& tensor : tensors_) {
+    if (tensor.is_sparse()) {
+      storages.emplace_back(tensor._indices().storage().getWeakStorageImpl());
+      storages.emplace_back(tensor._values().storage().getWeakStorageImpl());
+    } else {
+      storages.emplace_back(tensor.storage().getWeakStorageImpl());
+    }
+  }
+  return storages;
+}
+
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::exception& e,
+    int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
 
-Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
+c10::intrusive_ptr<Message> createExceptionResponse(
+    const std::string& exceptionStr,
+    int64_t id) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,
@@ -116,6 +113,4 @@ static const auto message = torch::class_<Message>("rpc", "_Message");
 
 } // namespace
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -1,14 +1,11 @@
 #pragma once
 
 #include <shared_mutex>
+#include <utility>
 
 #include <torch/csrc/autograd/profiler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
-namespace profiler {
-namespace processglobal {
+namespace torch::distributed::rpc::profiler::processglobal {
 
 using namespace torch::autograd::profiler;
 
@@ -27,7 +24,7 @@ using namespace torch::autograd::profiler;
 // threads.
 class State {
  public:
-  explicit State(const ProfilerConfig& config) : config_(config) {}
+  explicit State(ProfilerConfig config) : config_(std::move(config)) {}
   ~State() = default;
 
   const ProfilerConfig& config() const {
@@ -37,7 +34,7 @@ class State {
   void pushResult(thread_event_lists result) {
     std::unique_lock<std::mutex> lock(resultsMutex_);
 
-    // NB: When a thread wants to push an entry into the this container,
+    // NB: When a thread wants to push an entry into this container,
     // main control logic might have exited the process-global profile range.
     results_.emplace_back(std::move(result));
   }
@@ -76,17 +73,15 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 
 // This class is used to implement a stack of ``State``s.
 // It has 2 members.
-// One is `prevPtr`, a shared_ptr poiniting to previous elememnt in the
+// One is `prevPtr`, a shared_ptr pointing to previous element in the
 // stack.
 // The other is ``statePtr``, a shared_ptr pointing to ``State``.
 class StateStackEntry {
  public:
   StateStackEntry(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<StateStackEntry> prevPtr,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<State> statePtr)
-      : prevPtr_(prevPtr), statePtr_(statePtr) {}
+      : prevPtr_(std::move(prevPtr)), statePtr_(std::move(statePtr)) {}
 
   static void pushRange(std::shared_ptr<State> profilerProcessGlobalStatePtr);
   static std::shared_ptr<State> popRange();
@@ -106,7 +101,9 @@ class StateStackEntry {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::shared_ptr<StateStackEntry> prevPtr_{nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::shared_ptr<State> statePtr_{nullptr};
 };
 
@@ -129,8 +126,4 @@ TORCH_API void enableServer(const ProfilerConfig& new_config);
 // This enables all RPC threads running server-side request callbacks.
 TORCH_API std::vector<thread_event_lists> disableServer();
 
-} // namespace processglobal
-} // namespace profiler
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc::profiler::processglobal

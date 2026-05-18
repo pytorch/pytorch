@@ -1,11 +1,10 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Method;
 struct Module;
@@ -42,12 +41,16 @@ struct TORCH_API PythonPrint {
   const SourceRangeRecords& ranges() const;
   uint64_t minVersion() const;
 
-  ~PythonPrint();
-
  private:
   std::shared_ptr<PythonPrintImpl> pImpl;
 };
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
-} // namespace jit
-} // namespace torch
+
+TORCH_API void jitModuleToPythonCodeAndConstants(
+    const Module& module,
+    ExtraFilesMap* jit_sources, // output
+    std::vector<IValue>* constants // output
+);
+
+} // namespace torch::jit

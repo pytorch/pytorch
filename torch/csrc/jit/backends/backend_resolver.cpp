@@ -2,8 +2,7 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 // Essentially ClassNamespaceValue from import_source.cpp without the
 // SourceImporterImpl reference. This helps resolve the
@@ -15,7 +14,7 @@ struct ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
 
@@ -41,7 +40,7 @@ struct ClassNamespaceValue : public SugaredValue {
 struct LoweredModuleResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
@@ -67,5 +66,4 @@ std::shared_ptr<Resolver> loweredModuleResolver() {
   return resolver;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -6,7 +6,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Trivial1) {
   Graph graph, pattern;
   parseIR(
@@ -24,7 +23,6 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Trivial2) {
   Graph graph;
   auto* g_in = graph.addInput();
@@ -48,7 +46,6 @@ TEST(SubgraphMatcherTest, Trivial2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Trivial3) {
   Graph graph, pattern;
   parseIR(
@@ -68,7 +65,6 @@ graph(%a, %b):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Trivial4) {
   Graph graph;
   auto* g_in0 = graph.addInput();
@@ -97,7 +93,6 @@ TEST(SubgraphMatcherTest, Trivial4) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Linear1) {
   Graph graph, pattern;
   parseIR(
@@ -120,7 +115,6 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Linear2) {
   Graph graph;
   auto* g_in = graph.addInput();
@@ -171,7 +165,6 @@ TEST(SubgraphMatcherTest, Linear2) {
  *      |
  *     eee
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Diamond1) {
   Graph graph, pattern1, pattern2;
   parseIR(
@@ -223,7 +216,6 @@ graph(%0):
  *      |
  *      o1
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, Diamond2) {
   Graph graph;
   auto* g_in = graph.addInput();
@@ -262,7 +254,6 @@ TEST(SubgraphMatcherTest, Diamond2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, XPattern) {
   Graph graph, pattern;
   parseIR(
@@ -290,7 +281,6 @@ graph(%0, %1):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, MultipleMatches) {
   Graph graph, pattern;
   parseIR(
@@ -312,7 +302,6 @@ graph(%t0):
   AT_ASSERT(matches.size() == 4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, OverlappingMatches) {
   Graph graph, pattern;
   parseIR(
@@ -335,7 +324,6 @@ graph(%t0):
   AT_ASSERT(matches.size() == 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, MatchInBasicBlocks1) {
   Graph graph;
   parseIR(
@@ -373,7 +361,6 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, MatchInBasicBlocks2) {
   Graph graph;
   parseIR(
@@ -409,7 +396,6 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, MatchesAttributes) {
   Graph graph;
   parseIR(
@@ -494,7 +480,6 @@ graph(%a, %b):
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, BadPattern) {
   Graph graph, pattern1, pattern2;
   parseIR(
@@ -532,7 +517,6 @@ graph(%x):
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcherTest, MultiOutput) {
   {
     Graph graph, pattern;

@@ -5,7 +5,7 @@ set -ex
 UNKNOWN=()
 
 # defaults
-PARALLEL=0
+PARALLEL=1
 
 while [[ $# -gt 0 ]]
 do
@@ -23,13 +23,8 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
-
-pip install pytest scipy hypothesis # these may not be necessary
-pip install pytest-cov # installing since `coverage run -m pytest ..` doesn't work
-pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
+# allows coverage to run w/o failing due to a missing plug-in
+pip install -e tools/coverage_plugins_package
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -44,45 +39,13 @@ args+=("--cov")
 args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
-if [[ $PARALLEL == 1 ]]; then
-  args+=("-n")
-  args+=("3")
-fi
 
-# These exclusions are for tests that take a long time / a lot of GPU
-# memory to run; they should be passing (and you will test them if you
-# run them locally
-pytest "${args[@]}" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
-  --ignore "$top_dir/test/onnx/test_custom_ops.py" \
-  --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
-  --ignore "$top_dir/test/onnx/test_utility_funs.py" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
-  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
-  "${test_paths[@]}"
+time python "${top_dir}/test/run_test.py" --onnx --verbose
 
-# onnxruntime only support py3
-# "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
-    "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    "$top_dir/test/onnx/test_utility_funs.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
-fi
-if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
-  # Update the loop for new opsets
-  for i in $(seq 10 13); do
-    pytest "${args[@]}" \
-      "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
-  done
-fi
+# xdoctests on onnx
+xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 
 # Our CI expects both coverage.xml and .coverage to be within test/
-mv .coverage test/.coverage
+if [ -d .coverage ]; then
+  mv .coverage test/.coverage
+fi

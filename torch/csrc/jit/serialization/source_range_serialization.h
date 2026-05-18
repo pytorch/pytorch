@@ -12,14 +12,14 @@ namespace c10 {
 struct IValue;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class Pickler;
 class SourceRangeSerializer;
 static constexpr size_t kByteOffsetIndex = 0;
 static constexpr size_t kSourceRangeIndex = 1;
 static constexpr size_t kSourceRangeTagIndex = 2;
+constexpr std::string_view kFormatWithStringTable = "FORMAT_WITH_STRING_TABLE";
 
 class SourceRangePickler {
  public:
@@ -35,6 +35,12 @@ class SourceRangePickler {
 
 class SourceRangeDeserializer {
  public:
+  SourceRangeDeserializer() = default;
+  explicit SourceRangeDeserializer(const c10::IValue& text_table) {
+    for (const auto& x : text_table.toTuple()->elements()) {
+      text_table_.emplace_back(std::make_shared<std::string>(x.toStringRef()));
+    }
+  }
   SourceRange deserialize(const c10::IValue& iv);
 
  private:
@@ -43,15 +49,18 @@ class SourceRangeDeserializer {
       c10::intrusive_ptr<c10::ivalue::Tuple>,
       std::shared_ptr<Source>>
       cached_sources;
+  std::vector<std::shared_ptr<std::string>> text_table_;
 };
 
 class SourceRangeUnpickler {
  public:
-  virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
+  virtual std::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;
 
   virtual ~SourceRangeUnpickler() = default;
 };
 
-} // namespace jit
-} // namespace torch
+TORCH_API void setShouldUseFormatWithStringTable(
+    bool should_use_format_with_string_table);
+
+} // namespace torch::jit

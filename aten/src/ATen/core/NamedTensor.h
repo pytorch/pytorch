@@ -2,9 +2,10 @@
 
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/C++17.h>
 
 namespace at {
+
+class TensorBase;
 
 // XXX: This file exists because TensorImpl is in c10, but Dimname is in ATen.
 // Due to the c10/ATen library split, TensorImpl cannot depend on Dimname,
@@ -15,7 +16,7 @@ namespace at {
 // actually exists outside of c10 and needs to be moved in.
 
 // TensorImpl has a unique_ptr<NamedTensorMetaInterface> field.
-// XXX: Ideally we would just put optional<vector<Dimname>> into TensorImpl.
+// XXX: Ideally we would just put std::optional<vector<Dimname>> into TensorImpl.
 //
 // This class has an important invariant: there must be at least ONE
 // non-wildcard
@@ -26,11 +27,11 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
     HasNonWildcard
   };
 
-  explicit NamedTensorMeta(HAS_NON_WILDCARD, DimnameList names)
+  explicit NamedTensorMeta(HAS_NON_WILDCARD /*unused*/, DimnameList names)
     : names_(names.vec()) {
     check_invariants();
   }
-  explicit NamedTensorMeta(HAS_NON_WILDCARD, std::vector<Dimname>&& names)
+  explicit NamedTensorMeta(HAS_NON_WILDCARD /*unused*/, std::vector<Dimname>&& names)
     : names_(std::move(names)) {
     check_invariants();
   }
@@ -43,7 +44,7 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
 
   // Used for an assertion in TensorImpl.h
   int64_t slow_dim() const override {
-    return names_.size();
+    return static_cast<int64_t>(names_.size());
   }
 
   void check_invariants() const {
@@ -51,13 +52,13 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
       std::any_of(names_.begin(), names_.end(), [](const Dimname& n) { return !n.isWildcard(); }));
   }
 
-  void set_names(HAS_NON_WILDCARD, DimnameList new_names) {
+  void set_names(HAS_NON_WILDCARD /*unused*/, DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());
     check_invariants();
   }
 
-  void set_names(HAS_NON_WILDCARD, std::vector<Dimname>&& new_names) {
+  void set_names(HAS_NON_WILDCARD /*unused*/, std::vector<Dimname>&& new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     names_ = std::move(new_names);
     check_invariants();
@@ -78,9 +79,13 @@ struct TORCH_API NamesMode {
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
 struct TORCH_API NoNamesGuard {
-  NoNamesGuard() : prev_mode(NamesMode::is_enabled()), initialized(true) {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
     NamesMode::set_enabled(false);
   }
+  NoNamesGuard(const NoNamesGuard&) = delete;
+  NoNamesGuard(NoNamesGuard&&) = delete;
+  NoNamesGuard& operator=(const NoNamesGuard&) = delete;
+  NoNamesGuard& operator=(NoNamesGuard&&) = delete;
   ~NoNamesGuard() {
     if (initialized) {
       reset();
@@ -92,15 +97,15 @@ struct TORCH_API NoNamesGuard {
   }
  private:
   bool prev_mode;
-  bool initialized;
+  bool initialized{true};
 };
 
-void check_names_valid_for(const Tensor& tensor, DimnameList names);
+void check_names_valid_for(const TensorBase& tensor, DimnameList names);
 void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
-TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, c10::optional<DimnameList> names);
-TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API const TensorBase& internal_set_names_inplace(const TensorBase& tensor, std::optional<DimnameList> names);
+TORCH_API const TensorBase& internal_set_names_inplace(const TensorBase& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 constexpr size_t kMaxNamedTensorDim = 64;
 
@@ -110,7 +115,7 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-TORCH_API void internal_set_names_inplace(TensorImpl* impl, c10::optional<DimnameList> names, bool validate_names);
+TORCH_API void internal_set_names_inplace(TensorImpl* impl, std::optional<DimnameList> names, bool validate_names);
 TORCH_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names);
@@ -131,8 +136,7 @@ TORCH_API DimnameList get_names(const TensorImpl* impl);
 // Returns the names of the tensor if they have been allocated; returns nullopt
 // instead if the haven't been. The names of a tensor are not allocated if a
 // tensor is constructed with names=None.
-TORCH_API c10::optional<DimnameList> get_opt_names(const TensorImpl* impl);
-
+TORCH_API std::optional<DimnameList> get_opt_names(const TensorImpl* impl);
 
 } // namespace impl
 

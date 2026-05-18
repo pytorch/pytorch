@@ -1,23 +1,43 @@
-import torch
-from .. import Tensor
-from typing import Tuple, Optional
-import builtins
+from typing_extensions import TypeIs
+
+from torch import device, dtype, Tensor
 
 class Parameter(Tensor):
-    def __init__(self, data: Tensor=..., requires_grad: builtins.bool=...): ...
+    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
 
-    ...
-
-def is_lazy(param: Tensor): ...
+def is_lazy(
+    param: Tensor,
+) -> TypeIs[UninitializedParameter | UninitializedBuffer]: ...
 
 class UninitializedParameter(Tensor):
-    def __init__(self, data: Tensor=..., requires_grad: builtins.bool=...): ...
+    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
+    def materialize(
+        self,
+        shape: tuple[int, ...],
+        device: device | None = None,
+        dtype: dtype | None = None,
+    ) -> None: ...
 
-    def materialize(self, shape: Tuple[int, ...], device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None): ...
-    ...
+class Buffer(Tensor):
+    persistent: bool
+    def __init__(
+        self,
+        data: Tensor = ...,
+        requires_grad: bool = ...,
+        persistent: bool = ...,
+    ) -> None: ...
 
 class UninitializedBuffer(Tensor):
-    def __init__(self, data: Tensor=..., requires_grad: builtins.bool=...): ...
-
-    def materialize(self, shape: Tuple[int, ...], device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None): ...
-    ...
+    persistent: bool
+    def __init__(
+        self,
+        data: Tensor = ...,
+        requires_grad: bool = ...,
+        persistent: bool = ...,
+    ) -> None: ...
+    def materialize(
+        self,
+        shape: tuple[int, ...],
+        device: device | None = None,
+        dtype: dtype | None = None,
+    ) -> None: ...

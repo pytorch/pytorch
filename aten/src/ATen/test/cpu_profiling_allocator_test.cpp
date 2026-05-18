@@ -32,7 +32,6 @@ at::Tensor run_with_control_flow(
   return output;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_control_flow) {
   at::Tensor a = at::rand({23, 16, 16, 16});
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});
@@ -64,8 +63,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     }
     bool success{true};
     for (uint64_t i = 0; i < 10; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      bool validation_success;
+      bool validation_success = false;
       {
         c10::WithValidateAllocationPlanGuard
           validation_guard(&plan, &validation_success);
@@ -76,13 +74,21 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     }
     return success;
   };
-  ASSERT_FALSE(validate_allocation_plan(false, true));
-  ASSERT_FALSE(validate_allocation_plan(true, false));
   ASSERT_TRUE(validate_allocation_plan(true, true));
   ASSERT_TRUE(validate_allocation_plan(false, false));
+
+  #ifdef C10_MOBILE
+  // Returning false when record mode != validation mode only applies to
+  // DefaultMobileCPUAllocator, DefaultCPUAllocator has no such behavior
+  // and will always return true
+  ASSERT_FALSE(validate_allocation_plan(false, true));
+  ASSERT_FALSE(validate_allocation_plan(true, false));
+  #else
+  ASSERT_TRUE(validate_allocation_plan(false, true));
+  ASSERT_TRUE(validate_allocation_plan(true, false));
+  #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   at::Tensor a = at::rand({23, 16, 16, 16});
   at::Tensor conv_weight = at::rand({16, 16, 3, 3});
@@ -157,6 +163,12 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
   ASSERT_TRUE(ref_output.equal(output));
+
+  // Returning the same pointers is not a guarantee when the default
+  // allocator is used. It looks like the underlying memory pointer
+  // can change as long as output and ref_output remain equal. This
+  // has already been confirmed in the previous two tests
+  #ifdef C10_MOBILE
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -172,15 +184,26 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   ASSERT_THROW(validate_allocation_plan(true, false, false), c10::Error);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(false, true, false), c10::Error);
+  #else
+  // Throwing when record mode != validation mode only applies to
+  // DefaultMobileCPUAllocator, DefaultCPUAllocator has no such
+  // behavior and throw nothing
+  ASSERT_NO_THROW(validate_allocation_plan(true, false, false));
+  ASSERT_NO_THROW(validate_allocation_plan(false, true, false));
+  #endif
 }
 
 int main(int argc, char* argv[]) {
   // Setting the priority high to make sure no other allocator gets used instead of this.
-  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
-  // Need to disable mkldnn for this test since it allocatred memory
-  // via raw_allocate inteface which requires context pointer and raw
+  c10::SetCPUAllocator(c10::GetDefaultCPUAllocator(), /*priority*/ 100);
+
+  #ifdef C10_MOBILE
+  // Need to disable mkldnn for this test since it allocated memory
+  // via raw_allocate interface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
+  #endif
+
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();

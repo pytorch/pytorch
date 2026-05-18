@@ -1,10 +1,12 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/div_rtn.h>
+#include <c10/util/safe_numerics.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-static inline void col2im_shape_check(
+inline void col2im_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t output_height,
@@ -35,6 +37,13 @@ static inline void col2im_shape_check(
       dilation_height,
       " dilation_width: ",
       dilation_width);
+  TORCH_CHECK(
+      pad_width >= 0 && pad_height >= 0,
+      "padding should be non-negative, but got pad_height: ",
+      pad_height,
+      " pad_width: ",
+      pad_width);
+
 
   int64_t ndim = input.ndimension();
   // allow dim=0 only the batch dimension.
@@ -46,9 +55,17 @@ static inline void col2im_shape_check(
 
   int64_t batch_dim = (ndim == 3) ? 0 : -1;
   int64_t n_input_plane = input.size(batch_dim + 1);
+  uint64_t prod_kernel_size = 1;
+
+  TORCH_CHECK(!c10::mul_overflows(static_cast<uint64_t>(kernel_width), static_cast<uint64_t>(kernel_height), &prod_kernel_size),
+            "Given kernel_width = ",
+            kernel_width,
+            " and kernel_height = ",
+            kernel_height,
+            " the product of kernel_width and kernel_height overflowed.");
 
   if (n_input_plane % (kernel_width * kernel_height) != 0) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Expected size of input's dimension 1 to be divisible by the "
         "product of kernel_size, but got input.size(1)=",
         n_input_plane,
@@ -73,7 +90,7 @@ static inline void col2im_shape_check(
       1;
 
   if (input_length != (n_blocks_height * n_blocks_width)) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Given output_size=(",
         output_height,
         ", ",
@@ -106,8 +123,19 @@ static inline void col2im_shape_check(
         ".");
   }
 
+  TORCH_CHECK(
+    n_blocks_height >= 1 && n_blocks_width >= 1,
+    "Given output_size=(", output_height, ", ", output_width, "), ",
+    "kernel_size=(", kernel_height, ", ", kernel_width, "), ",
+    "dilation=(", dilation_height, ", ", dilation_width, "), ",
+    "padding=(", pad_height, ", ", pad_width, "), ",
+    "stride=(", stride_height, ", ", stride_width, "), ",
+    "calculated shape of the array of sliding blocks as ",
+    "(", n_blocks_height, ", ", n_blocks_width, "), ",
+    "which is too small (non-positive)");
+
   if (output_width < 1 || output_height < 1) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Expected output spatial size to be positive, but got: output_size=(",
         output_height,
         ", ",
@@ -116,7 +144,7 @@ static inline void col2im_shape_check(
   }
 }
 
-static inline void im2col_shape_check(
+inline void im2col_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t kernel_height,
@@ -185,11 +213,11 @@ static inline void im2col_shape_check(
       1;
 
   if (output_height < 1 || output_width < 1) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Given input with spatial size (",
         input_height,
         ", ",
-        input_height,
+        input_width,
         "), kernel_size=(",
         kernel_height,
         ", ",
@@ -206,9 +234,8 @@ static inline void im2col_shape_check(
         output_height,
         ", ",
         output_width,
-        "), which is too small (non-positive).");
+        "), but its components must be at least one.");
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

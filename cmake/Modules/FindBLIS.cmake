@@ -17,6 +17,7 @@ SET(BLIS_INCLUDE_SEARCH_PATHS
   /opt/blis/include
   $ENV{BLIS_HOME}
   $ENV{BLIS_HOME}/include
+  $ENV{BLIS_HOME}/include/blis
 )
 
 SET(BLIS_LIB_SEARCH_PATHS

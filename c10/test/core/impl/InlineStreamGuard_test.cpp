@@ -1,7 +1,11 @@
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <gtest/gtest.h>
 
 #include <c10/core/impl/FakeGuardImpl.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <vector>
 
 using namespace c10;
 using namespace c10::impl;
@@ -10,7 +14,7 @@ constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
 
 static Device dev(DeviceIndex index) {
-  return Device(TestDeviceType, index);
+  return Device{TestDeviceType, index};
 }
 
 static Stream stream(DeviceIndex index, StreamId sid) {
@@ -21,7 +25,6 @@ static Stream stream(DeviceIndex index, StreamId sid) {
 
 using TestGuard = InlineStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -40,7 +43,6 @@ TEST(InlineStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -58,7 +60,6 @@ TEST(InlineStreamGuard, ResetStreamSameSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -78,7 +79,6 @@ TEST(InlineStreamGuard, ResetStreamDifferentSameDevice) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -105,7 +105,6 @@ TEST(InlineStreamGuard, ResetStreamDifferentDevice) {
 
 using OptionalTestGuard = InlineOptionalStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, Constructor) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -114,19 +113,19 @@ TEST(InlineOptionalStreamGuard, Constructor) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), make_optional(stream(1, 2)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 2));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   {
-    OptionalTestGuard g(make_optional(stream(1, 2)));
+    OptionalTestGuard g(stream(1, 2));
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), make_optional(stream(1, 2)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 2));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
@@ -142,7 +141,6 @@ TEST(InlineOptionalStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -152,15 +150,14 @@ TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), make_optional(stream(1, 3)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 3));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
   TestGuardImpl::setDeviceIndex(0);
   TestGuardImpl::resetStreams();
@@ -171,8 +168,8 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(2), 3);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), make_optional(stream(2, 3)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(2, 3));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(2), 0);
@@ -185,7 +182,6 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
 
 using MultiTestGuard = InlineMultiStreamGuard<TestGuardImpl>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlineMultiStreamGuard, Constructor) {
   TestGuardImpl::resetStreams();
   {

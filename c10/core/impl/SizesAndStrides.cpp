@@ -1,7 +1,6 @@
 #include <c10/core/impl/SizesAndStrides.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 void SizesAndStrides::resizeSlowPath(
     const size_t newSize,
@@ -27,8 +26,8 @@ void SizesAndStrides::resizeSlowPath(
     if (isInline()) {
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       int64_t* tempStorage =
+          // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
           static_cast<int64_t*>(malloc(storageBytes(newSize)));
       TORCH_CHECK(
           tempStorage,
@@ -77,5 +76,4 @@ void SizesAndStrides::resizeSlowPath(
   size_ = newSize;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

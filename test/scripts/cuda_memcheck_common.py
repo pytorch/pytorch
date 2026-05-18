@@ -1,9 +1,9 @@
 # this file contains a simple parser that parses report
 # from cuda-memcheck
 
+
 class ParseError(Exception):
     """Whenever the simple parser is unable to parse the report, this exception will be raised"""
-    pass
 
 
 class Report:
@@ -47,7 +47,7 @@ class Error:
 def parse(message):
     """A simple parser that parses the report of cuda-memcheck. This parser is meant to be simple
     and it only split the report into separate errors and a summary. Where each error is further
-    splitted into error message and backtrace. No further details are parsed.
+    split into error message and backtrace. No further details are parsed.
 
     A report contains multiple errors and a summary on how many errors are detected. It looks like:
 
@@ -77,25 +77,25 @@ def parse(message):
     ========= ERROR SUMMARY: 4 errors
     """
     errors = []
-    HEAD = '========='
+    HEAD = "========="
     headlen = len(HEAD)
     started = False
     in_message = False
     message_lines = []
     lines = message.splitlines()
     for l in lines:
-        if l == HEAD + ' CUDA-MEMCHECK':
+        if l == HEAD + " CUDA-MEMCHECK":
             started = True
             continue
         if not started or not l.startswith(HEAD):
             continue
-        l = l[headlen + 1:]
-        if l.startswith('ERROR SUMMARY:'):
+        l = l[headlen + 1 :]
+        if l.startswith("ERROR SUMMARY:"):
             return Report(l, errors)
         if not in_message:
             in_message = True
             message_lines = [l]
-        elif l == '':
+        elif l == "":
             errors.append(Error(message_lines))
             in_message = False
         else:

@@ -1,5 +1,4 @@
-from . import benchmark
-from . import tensor_engine
+from . import benchmark, tensor_engine
 
 
 class NormalizationBench(benchmark.Benchmark):
@@ -12,7 +11,8 @@ class NormalizationBench(benchmark.Benchmark):
 
         self.data = self.nchw_rand(
             [self.N, self.C, self.H, self.W],
-            device=device, dtype=dtype,
+            device=device,
+            dtype=dtype,
             requires_grad=self.requires_grad,
         )
         self.running_mean = self.rand([self.C], device=device, dtype=dtype)

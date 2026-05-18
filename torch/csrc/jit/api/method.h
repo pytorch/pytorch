@@ -1,11 +1,12 @@
+#pragma once
 
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -17,11 +18,14 @@ using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-struct TORCH_API Method {
+struct TORCH_API Method : public torch::IMethod {
   Method(ObjectPtr owner, Function* function);
 
   // the module that contains this method.
   Module owner() const;
+  // the raw objectptr that owns this method, for when the method is owned by a
+  // torchbind object.
+  ObjectPtr raw_owner() const;
   void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
@@ -29,7 +33,7 @@ struct TORCH_API Method {
 
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
-      const Kwargs& kwargs = Kwargs());
+      const Kwargs& kwargs = Kwargs()) const override;
 
   // Run method async. Invocation on this function would invokes a JIT
   // interpreter that executes ops inline, one by one, on caller's thread. A
@@ -41,10 +45,10 @@ struct TORCH_API Method {
       TaskLauncher taskLauncher = at::launch);
 
   std::shared_ptr<Graph> graph() const {
-    return function_->graph();
+    return toGraphFunction(*function_).graph();
   }
 
-  const std::string& name() const {
+  const std::string& name() const override {
     return function_->name();
   }
 
@@ -53,7 +57,7 @@ struct TORCH_API Method {
   }
 
   GraphExecutor& get_executor() {
-    return function_->get_executor();
+    return toGraphFunction(*function_).get_executor();
   }
 
   Function& function() const {
@@ -61,7 +65,11 @@ struct TORCH_API Method {
   }
 
  private:
-  // Methods are uniqued onwed by a single module. This raw pointer allows
+  void setArgumentNames(
+      std::vector<std::string>& /*argumentNames*/ /*argumentNamesOut*/)
+      const override;
+
+  // Methods are uniqued owned by a single module. This raw pointer allows
   // looking up the module.
   ObjectPtr owner_;
 
@@ -75,5 +83,4 @@ namespace script {
 using Method = ::torch::jit::Method;
 } // namespace script
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

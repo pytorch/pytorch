@@ -1,17 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/jit.h>
+
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-int device(const autograd::Variable& v) {
+at::Device device(const autograd::Variable& v) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return v.device().is_cuda() ? v.get_device() : -1;
+  return v.device();
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
@@ -45,7 +48,6 @@ autograd::Variable undef() {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const CF = at::CPU(at::kFloat);
   auto const CD = at::CPU(at::kDouble);
@@ -109,7 +111,7 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
 // }
 
 // TEST(ArgumentSpecTest, VaryingShape) {
-//   c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
+//   c10::VaryingShape<int64_t> vs(std::optional<size_t>{});
 //   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
 //   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
 //   ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
@@ -131,18 +133,17 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
 //   ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& CF = at::CPU(at::kFloat);
   auto& CD = at::CPU(at::kDouble);
   auto& GF = at::CUDA(at::kFloat);
   auto& GD = at::CUDA(at::kDouble);
 
-  auto graph = jit::compile(R"JIT(
+  auto graph = toGraphFunction(jit::compile(R"JIT(
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                   ->get_function("fn")
+                                   ->get_function("fn"))
                    .graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);

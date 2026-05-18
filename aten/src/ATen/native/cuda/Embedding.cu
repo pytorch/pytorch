@@ -1,30 +1,40 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
-#include <THC/THCThrustAllocator.cuh>
-
-#include <thrust/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/unique.h>
+#include <ATen/cuda/cub.cuh>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/embedding_dense_backward_native.h>
+#include <ATen/ops/embedding_renorm_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
-#ifdef __HIP_PLATFORM_HCC__
-static const int BLOCKDIMY = 16;
+#if defined(USE_ROCM)
+static constexpr int BLOCKDIMY = 16;
 #else
-static const int BLOCKDIMY = 32;
+static constexpr int BLOCKDIMY = 32;
 #endif
 
 template
@@ -32,7 +42,7 @@ template
    typename accscalar_t,
    typename index_t>
 __global__ void embedding_backward_feature_kernel
-  (index_t* indices,
+  (const index_t* indices,
    const scalar_t* __restrict__ grad,
    scalar_t* __restrict__ grad_weight,
    int n, // OK to pass as int, we don't expect 2 billion+ samples in one shot
@@ -84,11 +94,10 @@ __global__ void embedding_backward_feature_kernel
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx && src_row < n) // Per-warp exit condition, safe with ballot_sync
       {
-        int match_found_this_thread =
-          (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
-        if(threadIdx.x >= n_this_chunk)
-          match_found_this_thread = 0;
-#ifdef __HIP_PLATFORM_HCC__
+        int match_found_this_thread = 0;
+        if(threadIdx.x < n_this_chunk)
+          match_found_this_thread = (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
+#if defined(USE_ROCM)
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
         int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
@@ -101,7 +110,7 @@ __global__ void embedding_backward_feature_kernel
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
             first_remaining_peer = __ffsll(matchmask) - 1;
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -137,7 +146,7 @@ __global__ void embedding_backward_kernel(
   // 5     <warp 3>
   // 8     <warp 4>
 
-  // Number of values proceessed by each thread (grain size)
+  // Number of values processed by each thread (grain size)
   const int SZ = 4;
 
   if (idx < numel
@@ -184,7 +193,11 @@ template <typename scalar_t, typename accscalar_t, typename index_t>
 __global__ void renorm_kernel(
     scalar_t* weights, index_t* indices, accscalar_t max_norm,
     accscalar_t norm_type, int64_t dim,
-    int64_t weights_stride0, int64_t weights_stride1) {
+    int64_t weights_stride0, int64_t weights_stride1,
+    const int64_t *num_unique_indices) {
+  if (blockIdx.x >= *num_unique_indices) {
+    return;
+  }
 
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
@@ -205,8 +218,7 @@ __global__ void renorm_kernel(
     }
   }
 
-  using Op = ReduceAdd<accscalar_t>;
-  v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
+  v = cuda_utils::BlockReduceSum(v, sdata);
 
   if (tid == 0) {
     sdata[0] = std::pow(v, static_cast<accscalar_t>(1.0 / norm_type));
@@ -224,13 +236,16 @@ __global__ void renorm_kernel(
 
 } // anonymous namespace
 
-Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
+
+Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
-  auto indices_arg = TensorArg(indices, "indices", 1);
+  auto indices_arg = TensorArg(indices_, "indices", 1);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
+
+  auto indices = indices_.contiguous();
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
@@ -240,8 +255,9 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(THCCeilDiv(stride, (int64_t)C10_WARP_SIZE));
-    dim3 block(C10_WARP_SIZE, BLOCKDIMY);
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(stride, (int64_t)warp_size));
+    dim3 block(warp_size, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -254,11 +270,11 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
           embedding_backward_feature_kernel<scalar_t, accscalar_t, index_t>
             <<<grid,
                 block,
-                sizeof(accscalar_t)*C10_WARP_SIZE*BLOCKDIMY + sizeof(int)*C10_WARP_SIZE*BLOCKDIMY,
+                sizeof(accscalar_t)*warp_size*BLOCKDIMY + sizeof(int)*warp_size*BLOCKDIMY,
                 stream>>>
-            (indices_contig.data_ptr<index_t>(),
-              grad.data_ptr<scalar_t>(),
-              grad_weight.data_ptr<scalar_t>(),
+            (indices_contig.const_data_ptr<index_t>(),
+              grad.const_data_ptr<scalar_t>(),
+              grad_weight.mutable_data_ptr<scalar_t>(),
               static_cast<int>(num_indices),
               static_cast<int64_t>(stride),
               static_cast<int>(padding_idx));
@@ -272,61 +288,45 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   auto orig_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor count;
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
-    using device_ptr = thrust::device_ptr<index_t>;
+    auto range = at::arange(num_indices, indices.options());
+    int64_t nbits = padding_idx >= 0
+      ? cuda::cub::get_num_bits(num_weights)
+      : cuda::cub::get_num_bits(num_weights - 1 - padding_idx);
+    cuda::cub::radix_sort_pairs(
+      indices.const_data_ptr<index_t>(), sorted_indices.mutable_data_ptr<index_t>(),
+      range.const_data_ptr<index_t>(), orig_indices.mutable_data_ptr<index_t>(),
+      num_indices, false, 0, nbits);
+  });
 
-    // Sort the inputs into sorted with the corresponding indices; we
-    // don't need a stable or multidimensional sort, so just use Thrust
-    // directly
-    {
-        sorted_indices.copy_(indices);
-
-        auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-        auto policy = thrust::cuda::par(allocator).on(stream);
-
-        // Fill sortedOrigIndices with sequential indices
-        auto count_iter = thrust::counting_iterator<index_t>(0);
-        auto orig_data = device_ptr(orig_indices.data_ptr<index_t>());
-        thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
-
-        // Sort; a stable sort is not required
-        auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
-        thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data,
-                            ThrustLTOp<index_t>());
-    }
-
-    if (scale_grad_by_freq) {
-      count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-      auto policy = thrust::cuda::par(allocator).on(stream);
+  if (scale_grad_by_freq) {
+    count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
-      auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
-      auto count_data = device_ptr(count.data_ptr<index_t>());
-      thrust::inclusive_scan_by_key(
-        policy,
+      auto sorted_data = sorted_indices.const_data_ptr<index_t>();
+      auto count_data = count.mutable_data_ptr<index_t>();
+      cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        sorted_data + num_indices,
-        thrust::make_constant_iterator(1),
-        count_data
+        ATEN_CUB_CONSTANT_ITERATOR(index_t)(1),
+        count_data,
+        num_indices
       );
 
       // Take the maximum of each count per unique key in reverse:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 3 3 3 2 2 1 2 2
-      thrust::inclusive_scan_by_key(
-        policy,
-        thrust::make_reverse_iterator(sorted_data + num_indices),
-        thrust::make_reverse_iterator(sorted_data),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::equal_to<index_t>(),
-        thrust::maximum<index_t>()
+      cuda::cub::inclusive_scan_by_key(
+        cccl_make_reverse_iterator(sorted_data + num_indices),
+        cccl_make_reverse_iterator(static_cast<const index_t*>(count_data) + num_indices),
+        cccl_make_reverse_iterator(count_data + num_indices),
+        ATEN_CUB_MAXIMUM(),
+        num_indices
       );
-    }
-  });
+    });
+  }
 
   return embedding_backward_cuda_kernel(grad, orig_indices,
       sorted_indices, count, num_weights, padding_idx);
@@ -340,33 +340,39 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cuda_", [&] () {
-    using device_ptr = thrust::device_ptr<index_t>;
 
     auto num_indices = indices.numel();
     auto indices_contig = std::get<0>(indices.sort()).contiguous();
-    auto indices_data = device_ptr(indices_contig.data_ptr<index_t>());
-
     auto unique_indices = at::empty(indices.numel(), indices.options());
-    auto unique_data = device_ptr(unique_indices.data_ptr<index_t>());
-    auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
-    auto num_unique_indices = static_cast<int>(end - unique_data);
+    auto num_unique_indices = at::empty({}, indices.options().dtype(kLong));
 
-    dim3 grid(num_unique_indices);
-    dim3 block(128);
+    cuda::cub::unique(
+      indices_contig.const_data_ptr<index_t>(),
+      unique_indices.mutable_data_ptr<index_t>(),
+      num_unique_indices.mutable_data_ptr<int64_t>(),
+      num_indices
+    );
+
+    int warp_size = at::cuda::warp_size();
+    TORCH_INTERNAL_ASSERT(num_threads() % warp_size == 0 &&
+                  num_threads() <= static_cast<uint32_t>(cuda_utils::kCUDABlockReduceMaxThreads()),
+                  "BlockReduceSum requires all warps be active");
+    const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
+    dim3 grid = unique_indices.numel();
+    dim3 block = num_threads();
     int dim = self.stride(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-        self.data_ptr<scalar_t>(),
-        unique_indices.data_ptr<index_t>(),
+      renorm_kernel<<<grid, block, (block.x / warp_size) * sizeof(accscalar_t), stream>>>(
+        self.mutable_data_ptr<scalar_t>(),
+        unique_indices.const_data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),
         static_cast<accscalar_t>(norm_type),
-        dim, self.stride(0), self.stride(1));
+        dim, self.stride(0), self.stride(1),
+        num_unique_indices_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
@@ -374,4 +380,4 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

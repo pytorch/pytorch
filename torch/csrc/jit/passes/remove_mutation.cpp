@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool MutationRemover::removeListMutation() {
   return RemoveListMutation(graph_->block());
@@ -11,29 +11,35 @@ bool MutationRemover::removeTensorMutation() {
   return RemoveTensorMutation(graph_->block());
 }
 
-bool MutationRemover::newMemoryLocation(Value* v) {
+bool MutationRemover::hasSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
   // bail on nodes with side effects, blocks, or graph / graph inputs
   Node* n = v->node();
-  bool unhandled_node = n->blocks().size() != 0 ||
+  bool unhandled_node = !n->blocks().empty() ||
       n->hasAttribute(attr::Subgraph) || n->hasSideEffects() ||
       (v->node()->kind() == prim::Param);
 
   // if the output isn't contained or alias by the inputs to its node, it's
-  // unique
-  return !unhandled_node &&
-      !getOrCreateAliasDb()->mayContainAlias(v->node()->inputs(), v) &&
-      !(v->node()->kind() == prim::Param);
+  // unique. No need to check for alias if the node is a ListConstruct.
+  bool mayAliasInputs = (v->node()->kind() != prim::ListConstruct) &&
+      aliasDb->mayContainAlias(v->node()->inputs(), v);
+  return unhandled_node || mayAliasInputs || (v->node()->kind() == prim::Param);
 }
 
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
   WithInsertPoint guard(n);
   auto inputs = n->inputs();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node* new_node;
+  Node* new_node = nullptr;
   if (n->matches(
           "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
-    new_node =
-        graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
+    auto dtype = graph_->insert(prim::dtype, {inputs.at(0)});
+    new_node = graph_
+                   ->insert(
+                       aten::full_like,
+                       {inputs.at(0), inputs.at(1)},
+                       {NamedValue("dtype", dtype)})
+                   ->node();
+    new_node->copyMetadata(n);
+    new_node->output()->setType(n->output()->type());
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
     new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
   } else if (
@@ -67,11 +73,29 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
+static bool removableSetItem(Node* n) {
+  if (n->kind() != aten::_set_item ||
+      n->input(1)->node()->kind() != prim::Constant) {
+    return false;
+  }
+  if (n->inputs().at(0)->node()->kind() != prim::ListConstruct) {
+    return false;
+  }
+  auto li_node = n->inputs().at(0)->node();
+  int64_t index = *constant_as<int64_t>(n->input(1));
+  if (index < 0) {
+    index += li_node->inputs().size();
+  }
+  auto li_len = static_cast<int64_t>(li_node->inputs().size());
+  return index < li_len && index >= 0;
+}
+
 bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
   return (
       (n->kind() == aten::append ||
        (n->kind() == aten::insert &&
-        n->inputs().at(1)->node()->kind() == prim::Constant)) &&
+        n->inputs().at(1)->node()->kind() == prim::Constant) ||
+       (removableSetItem(n))) &&
       n->inputs().at(0)->node()->kind() == prim::ListConstruct);
 }
 
@@ -81,7 +105,7 @@ bool MutationRemover::tryMakeCreationAndMutationAtomic(
   // We can only remove mutation to values that are unique aliases in the
   // graph. if x = y[0] or y = self.y, then removing the mutation could
   // change observable semantics
-  if (!newMemoryLocation(mutated_value)) {
+  if (hasSideEffectOrAlias(mutated_value, getOrCreateAliasDb())) {
     return false;
   }
 
@@ -116,7 +140,8 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
     return false;
   }
 
-  if (!newMemoryLocation(true_value) || !newMemoryLocation(false_value)) {
+  if (hasSideEffectOrAlias(true_value, getOrCreateAliasDb()) ||
+      hasSideEffectOrAlias(false_value, getOrCreateAliasDb())) {
     return false;
   }
 
@@ -150,7 +175,7 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     // x.append(v1) (or x.insert(0, v1))
     // to:
     // x = {v0, v1} (or x = {v1, v0})
-    // We can remove x.append from the the alias db list of writes.
+    // We can remove x.append from the alias db list of writes.
     // All other aliasing properties remain valid.
     Node* list_construct = mutated_value->node();
     switch (node->kind()) {
@@ -169,12 +194,21 @@ bool MutationRemover::RemoveListMutation(Block* block) {
         list_construct->insertInput(pos, node->inputs().at(2));
         break;
       }
+      case aten::_set_item: {
+        int pos = toIValue(node->inputs().at(1))->toInt();
+        int size = list_construct->inputs().size();
+        if (pos < 0) {
+          pos = std::max(pos + size, 0);
+        }
+        list_construct->replaceInput(pos, node->input(2));
+        break;
+      }
       default:
         TORCH_INTERNAL_ASSERT(false);
     }
 
     // process use-chain and aliasing of node output
-    bool has_output = (node->outputs().size() > 0);
+    bool has_output = (!node->outputs().empty());
     if (has_output) {
       node->output()->replaceAllUsesWith(mutated_value);
       getOrCreateAliasDb()->writeIndex_->erase(node);
@@ -217,8 +251,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
       continue;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Node* new_node;
+    Node* new_node = nullptr;
     if (isSpecialMappedOp(node)) {
       new_node = createSpecialMappedOp(node);
     } else {
@@ -255,12 +288,12 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     // For the remainder of the function, x0 will have the
     // same aliasing relationships as the original x.
     // To avoid rebuilding the entire alias db, we can replace
-    // the memory dag element of x with x0.
+    // the memory DAG element of x with x0.
     getOrCreateAliasDb()->replaceWithNewValue(
         mutated_value, new_node->output());
 
     // it is an invariant that all mutable types have an element in the memory
-    // dag so we must regive x an alias db element. We have already verified
+    // DAG so we must regive x an alias db element. We have already verified
     // that the mutated value is a fresh alias with a single use.
     getOrCreateAliasDb()->createValue(mutated_value);
 
@@ -303,7 +336,7 @@ bool MutationRemover::inplaceOpVariant(Node* n) {
   // all inplace ops at time of writing have a single input that is mutated
   // and returned. check that this is true, anything else could have strange
   // semantics,
-  if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+  if (n->outputs().size() != 1 || n->inputs().empty()) {
     return false;
   }
   auto inputs = n->inputs();
@@ -314,7 +347,7 @@ bool MutationRemover::inplaceOpVariant(Node* n) {
   }
 
   auto new_schema = name.substr(0, name.size() - 1);
-  return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
+  return !getAllOperatorsFor(Symbol::fromQualString(new_schema)).empty();
 }
 
 bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {
@@ -324,10 +357,24 @@ bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {
 
 bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
-    c10::optional<std::function<bool(Node*)>> mutation_filter) {
+    std::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
   return mr.removeTensorMutation();
 }
 
-} // namespace jit
-} // namespace torch
+static const std::unordered_set<Symbol> activation_ops = []() {
+  std::unordered_set<Symbol> target_ops;
+  for (const auto& iter : activation_type_promotion_mapping) {
+    std::string name = std::string(iter.first.toQualString()) + "_";
+    target_ops.insert(Symbol::fromQualString(name));
+  }
+  return target_ops;
+}();
+
+bool InplaceToFunctionalActivation(const std::shared_ptr<Graph>& graph) {
+  return RemoveTensorMutation(graph, [](Node* node) {
+    return activation_ops.count(node->kind()) != 0;
+  });
+}
+
+} // namespace torch::jit

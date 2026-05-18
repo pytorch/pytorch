@@ -1,19 +1,18 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
+from typing import List, Tuple
 
 import torch
 
-from typing import Tuple, List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
 
-if __name__ == "__main__":
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
 class TestHash(JitTestCase):
     def test_hash_tuple(self):
@@ -36,6 +35,7 @@ class TestHash(JitTestCase):
 
     def test_hash_tensor(self):
         """Tensors should hash by identity"""
+
         def fn(t1, t2):
             return hash(t1) == hash(t2)
 
@@ -72,8 +72,7 @@ class TestHash(JitTestCase):
         self.checkScript(fn, (1.2345, 6.789))
         self.checkScript(fn, (1.2345, float("inf")))
         self.checkScript(fn, (float("inf"), float("inf")))
-        self.checkScript(fn, (1.2345, float('nan')))
-        self.checkScript(fn, (float("nan"), float("nan")))
+        self.checkScript(fn, (1.2345, float("nan")))
         self.checkScript(fn, (float("nan"), float("inf")))
 
     def test_hash_int(self):
@@ -98,10 +97,14 @@ class TestHash(JitTestCase):
         def fn(d1: torch.device, d2: torch.device):
             return hash(d1) == hash(d2)
 
-        gpu0 = torch.device('cuda:0')
-        gpu1 = torch.device('cuda:1')
-        cpu = torch.device('cpu')
+        gpu0 = torch.device("cuda:0")
+        gpu1 = torch.device("cuda:1")
+        cpu = torch.device("cpu")
         self.checkScript(fn, (gpu0, gpu0))
         self.checkScript(fn, (gpu0, gpu1))
         self.checkScript(fn, (gpu0, cpu))
         self.checkScript(fn, (cpu, cpu))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

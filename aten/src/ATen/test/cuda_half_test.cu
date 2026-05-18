@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <cuda.h>
 #include <cuda_fp16.h>
@@ -20,7 +21,7 @@ __device__ void test(){
 
   __half a = __float2half(3.0f);
   __half b = __float2half(2.0f);
-  __half c = a - Half(b);
+  __half c = Half(a) - Half(b);
   assert(static_cast<Half>(c) == Half(1.0));
 
   // asserting if the  functions used on
@@ -32,7 +33,7 @@ __device__ void test(){
   // use the std namespace, but just "::" so that the function
   // gets resolved from nvcc math_functions.hpp
 
-  float threshold = 0.00001;
+  [[maybe_unused]] float threshold = 0.00001;
   assert(::abs(::lgamma(Half(10.0)) - ::lgamma(10.0f)) <= threshold);
   assert(::abs(::exp(Half(1.0)) - ::exp(1.0f)) <= threshold);
   assert(::abs(::log(Half(1.0)) - ::log(1.0f)) <= threshold);
@@ -51,7 +52,11 @@ __device__ void test(){
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
-  assert(::abs(::atanh(Half(1.0)) - ::atanh(1.0f)) <= threshold);
+  // See note below about VC++ and isinf
+#ifndef  _MSC_VER
+  assert(::isinf(::atanh(Half(1.0))));
+#endif
+  assert(::abs(::atanh(Half(.5)) - ::atanh(.5f)) <= threshold);
   assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(Half(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
@@ -66,15 +71,20 @@ __device__ void test(){
   assert(
       ::abs(::atan2(Half(7.0), Half(0.0)) - ::atan2(7.0f, 0.0f)) <= threshold);
   // note: can't use  namespace on isnan and isinf in device code
-#ifdef _MSC_VER
+
   // Windows requires this explicit conversion. The reason is unclear
   // related issue with clang: https://reviews.llvm.org/D37906
-  assert(::abs(::isnan((float)Half(0.0)) - ::isnan(0.0f)) <= threshold);
-  assert(::abs(::isinf((float)Half(0.0)) - ::isinf(0.0f)) <= threshold);
-#else
+#ifndef _MSC_VER
   assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
   assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 #endif
+
+  // test complex<32>
+  Half real = 3.0f;
+  Half imag = -10.0f;
+  auto complex = c10::complex<Half>(real, imag);
+  assert(complex.real() == real);
+  assert(complex.imag() == imag);
 }
 
 __global__ void kernel(){
@@ -83,6 +93,7 @@ __global__ void kernel(){
 
 void launch_function(){
   kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // half common math functions tests in device

@@ -2,23 +2,21 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 CleanupAutogradContextReq::CleanupAutogradContextReq(int64_t context_id)
-    : context_id_(context_id){};
+    : context_id_(context_id) {}
 
 int64_t CleanupAutogradContextReq::getContextId() {
   return context_id_;
 }
 
-rpc::Message CleanupAutogradContextReq::toMessageImpl() && {
+c10::intrusive_ptr<rpc::Message> CleanupAutogradContextReq::toMessageImpl() && {
   // pickle context_id using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> payload =
       jit::pickle(at::IValue(context_id_), &tensorTable);
-  return rpc::Message(
+  return c10::make_intrusive<rpc::Message>(
       std::move(payload),
       std::move(tensorTable),
       rpc::MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
@@ -27,7 +25,7 @@ rpc::Message CleanupAutogradContextReq::toMessageImpl() && {
 std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
     fromMessage(const rpc::Message& message) {
   // unpickle and get the context_id we need to clean up
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
   IValue ivalue_context_id = jit::unpickle(
       payload,
@@ -40,6 +38,4 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   return std::make_unique<CleanupAutogradContextReq>(context_id);
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -23,6 +23,7 @@ QNNPACK_SOURCES = {
         "q8conv/8x8-neon.c",
         "q8dwconv/mp8x25-neon.c",
         "q8dwconv/mp8x25-neon-per-channel.c",
+        "q8dwconv/mp8x27-neon.c",
         "q8dwconv/up8x9-neon.c",
         "q8dwconv/up8x9-neon-per-channel.c",
         "q8gavgpool/mp8x7p7q-neon.c",
@@ -58,6 +59,7 @@ QNNPACK_SOURCES = {
         "q8conv/4x4c2-sse2.c",
         "q8dwconv/mp8x25-sse2.c",
         "q8dwconv/mp8x25-sse2-per-channel.c",
+        "q8dwconv/mp8x27-sse2.c",
         "q8dwconv/up8x9-sse2.c",
         "q8dwconv/up8x9-sse2-per-channel.c",
         "q8gavgpool/mp8x7p7q-sse2.c",
@@ -122,9 +124,9 @@ if __name__ == "__main__":
                 # because they are ignored by arc focus & buck project.
 
                 if condition is None:
-                    print("#include <%s>" % filename, file=wrapper)
+                    print(f"#include <{filename}>", file=wrapper)
                 else:
                     # Include source file only if condition is satisfied
-                    print("#if %s" % condition, file=wrapper)
-                    print("#include <%s>" % filename, file=wrapper)
-                    print("#endif /* %s */" % condition, file=wrapper)
+                    print(f"#if {condition}", file=wrapper)
+                    print(f"#include <{filename}>", file=wrapper)
+                    print(f"#endif /* {condition} */", file=wrapper)

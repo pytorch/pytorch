@@ -1,19 +1,16 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 
-#include <torch/csrc/DynamicTypes.h>
+#include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/QScheme.h>
-#include <c10/core/QScheme.h>
 
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
+namespace torch::utils {
 
-namespace torch {
-namespace utils {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::array<PyObject*, at::COMPILE_TIME_NUM_QSCHEMES> thp_qscheme_array;
 
 void initializeQSchemes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -21,15 +18,14 @@ void initializeQSchemes() {
     throw python_error();
   }
 
-  for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+  for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
     auto qscheme = static_cast<at::QScheme>(i);
-    PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));
-    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;
-    Py_INCREF(qscheme_obj);
-    if (PyModule_AddObject(
-            torch_module, toString(qscheme).c_str(), qscheme_obj) != 0) {
+    THPObjectPtr qscheme_obj(THPQScheme_New(qscheme, toString(qscheme)));
+    if (PyModule_AddObjectRef(
+            torch_module, toString(qscheme).c_str(), qscheme_obj.get()) != 0) {
       throw python_error();
     }
+    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj.release();
   }
 }
 
@@ -40,6 +36,4 @@ PyObject* getTHPQScheme(at::QScheme qscheme) {
   }
   return qscheme_;
 }
-
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

@@ -1,14 +1,14 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <fstream>
 #include <memory>
 
-#include "c10/macros/Macros.h"
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
-namespace caffe2 {
-namespace serialize {
+
+namespace caffe2::serialize {
 
 class TORCH_API FileAdapter final : public ReadAdapterInterface {
  public:
@@ -17,12 +17,19 @@ class TORCH_API FileAdapter final : public ReadAdapterInterface {
   size_t size() const override;
   size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
       const override;
-  ~FileAdapter();
+  ~FileAdapter() override;
 
  private:
-  std::ifstream file_stream_;
-  std::unique_ptr<IStreamAdapter> istream_adapter_;
+  // An RAII Wrapper for a FILE pointer. Closes on destruction.
+  struct RAIIFile {
+    FILE* fp_;
+    explicit RAIIFile(const std::string& file_name);
+    ~RAIIFile();
+  };
+
+  RAIIFile file_;
+  // The size of the opened file in bytes
+  uint64_t size_;
 };
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

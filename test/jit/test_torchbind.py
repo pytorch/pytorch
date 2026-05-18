@@ -1,38 +1,36 @@
+# Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
+
+import copy
 import io
 import os
 import sys
-import copy
-import unittest
+from typing import Optional
 
 import torch
-from typing import Optional
-from pathlib import Path
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS, IS_FBCODE
 from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
+@skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        if TEST_WITH_ROCM:
-            torch_root = Path(torch.__file__).resolve().parent
-            p = torch_root / 'lib' / 'libtorchbind_test.so'
-        else:
-            torch_root = Path(__file__).resolve().parent.parent.parent
-            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that crash on torchbind static methods (can't downcast to
+        # GraphFunction). Record state baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
+        load_torchbind_test_lib()
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):
@@ -44,15 +42,17 @@ class TestTorchbind(JitTestCase):
             val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
             return val
+
         test_equality(f, lambda x: x)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
             val = torch.classes._TorchScriptTesting._Foo(5, 3)
-            val.increment('foo')
+            val.increment("foo")
 
         def f():
             ss = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
             return ss.pop()
+
         test_equality(f, lambda x: x)
 
         def f():
@@ -60,10 +60,11 @@ class TestTorchbind(JitTestCase):
             ss2 = torch.classes._TorchScriptTesting._StackString(["111", "222"])
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
+
         test_equality(f, lambda x: x)
 
         # test nn module with prepare_scriptable function
-        class NonJitableClass(object):
+        class NonJitableClass:
             def __init__(self, int1, int2):
                 self.int1 = int1
                 self.int2 = int2
@@ -73,7 +74,7 @@ class TestTorchbind(JitTestCase):
 
         class CustomWrapper(torch.nn.Module):
             def __init__(self, foo):
-                super(CustomWrapper, self).__init__()
+                super().__init__()
                 self.foo = foo
 
             def forward(self) -> None:
@@ -110,8 +111,11 @@ class TestTorchbind(JitTestCase):
         scripted = torch.jit.script(foo)
         # Ensure we are creating the object and calling __init__
         # rather than calling the __init__wrapper nonsense
-        fc = FileCheck().check('prim::CreateObject()')\
-                        .check('prim::CallMethod[name="__init__"]')
+        fc = (
+            FileCheck()
+            .check("prim::CreateObject()")
+            .check('prim::CallMethod[name="__init__"]')
+        )
         fc.run(str(scripted.graph))
         out = scripted()
         self.assertEqual(out.pop(), "mom")
@@ -161,7 +165,7 @@ class TestTorchbind(JitTestCase):
         out, result = scripted()
         self.assertEqual(result, 10)
 
-        with self.assertRaisesRegex(RuntimeError, 'can\'t set attribute'):
+        with self.assertRaisesRegex(RuntimeError, "can't set attribute"):
             out.y = 5
 
         def foo_not_setter():
@@ -171,9 +175,11 @@ class TestTorchbind(JitTestCase):
             # getY method intentionally adds 4 to x
             return fooGetterSetter.y
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError,
-                                                 'Tried to set read-only attribute: y',
-                                                 'fooGetterSetter.y = old + 4'):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            "Tried to set read-only attribute: y",
+            "fooGetterSetter.y = old + 4",
+        ):
             scripted = torch.jit.script(foo_not_setter)
 
     def test_torchbind_def_property_readwrite(self):
@@ -190,9 +196,9 @@ class TestTorchbind(JitTestCase):
             fooReadWrite.y = 5
             return fooReadWrite
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError,
-                                                 'Tried to set read-only attribute: y',
-                                                 'fooReadWrite.y = 5'):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Tried to set read-only attribute: y", "fooReadWrite.y = 5"
+        ):
             scripted = torch.jit.script(foo_readwrite_error)
 
     def test_torchbind_take_instance_as_method_arg(self):
@@ -237,14 +243,16 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_class_attr_recursive(self):
         class FooBar(torch.nn.Module):
             def __init__(self, foo_model):
-                super(FooBar, self).__init__()
+                super().__init__()
                 self.foo_mod = foo_model
 
             def forward(self) -> int:
                 return self.foo_mod.info()
 
             def to_ivalue(self):
-                torchbind_model = torch.classes._TorchScriptTesting._Foo(self.foo_mod.info(), 1)
+                torchbind_model = torch.classes._TorchScriptTesting._Foo(
+                    self.foo_mod.info(), 1
+                )
                 return FooBar(torchbind_model)
 
         inst = FooBar(torch.classes._TorchScriptTesting._Foo(2, 3))
@@ -253,8 +261,8 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
-            def __init__(self):
-                super(FooBar1234, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
@@ -263,14 +271,16 @@ class TestTorchbind(JitTestCase):
         inst = FooBar1234()
         scripted = torch.jit.script(inst)
         eic = self.getExportImportCopy(scripted)
-        assert eic() == "deserialized"
+        if eic() != "deserialized":
+            raise AssertionError(f"Expected 'deserialized', got {eic()!r}")
         for expected in ["deserialized", "was", "i"]:
-            assert eic.f.pop() == expected
+            if eic.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
-                super(FooBar4321, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -284,14 +294,16 @@ class TestTorchbind(JitTestCase):
         # values at instantiation in the test with some transformation, but
         # because it seems we serialize/deserialize multiple times, that
         # transformation isn't as you would it expect it to be.
-        assert eic() == 7
+        if eic() != 7:
+            raise AssertionError(f"Expected 7, got {eic()!r}")
         for expected in [7, 3, 3, 1]:
-            assert eic.f.pop() == expected
+            if eic.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
-                super(FooBar4321, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -300,14 +312,16 @@ class TestTorchbind(JitTestCase):
         inst = FooBar4321()
         scripted = torch.jit.script(inst)
         copied = copy.deepcopy(scripted)
-        assert copied.forward() == 7
+        if copied.forward() != 7:
+            raise AssertionError(f"Expected 7, got {copied.forward()!r}")
         for expected in [7, 3, 3, 1]:
-            assert copied.f.pop() == expected
+            if copied.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
-                super(FooBar4321, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -315,14 +329,16 @@ class TestTorchbind(JitTestCase):
 
         inst = FooBar4321()
         copied = copy.deepcopy(inst)
-        assert copied() == 7
+        if copied() != 7:
+            raise AssertionError(f"Expected 7, got {copied()!r}")
         for expected in [7, 3, 3, 1]:
-            assert copied.f.pop() == expected
+            if copied.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
-            def __init__(self):
-                super(TryTracing, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -332,18 +348,18 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     def test_torchbind_pass_wrong_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+        with self.assertRaisesRegex(RuntimeError, "but instead found type 'Tensor'"):
             torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
 
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
-            def __init__(self):
-                super(TryTracingNest, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
-            def __init__(self):
-                super(TryTracing123, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.nest = TryTracingNest()
 
             def forward(self):
@@ -357,19 +373,23 @@ class TestTorchbind(JitTestCase):
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
-        nt_loaded = torch.load(b)
+        # weights_only=False as trying to load ScriptObject
+        nt_loaded = torch.load(b, weights_only=False)
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class \'foo.IDontExist\', but it does not exist!'):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Tried to instantiate class 'foo.IDontExist', but it does not exist!",
+        ):
             torch.classes.foo.IDontExist(3, 4, 5)
 
     def test_torchbind_optional_explicit_attr(self):
         class TorchBindOptionalExplicitAttr(torch.nn.Module):
-            foo : Optional[torch.classes._TorchScriptTesting._StackString]
+            foo: Optional[torch.classes._TorchScriptTesting._StackString]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.classes._TorchScriptTesting._StackString(["test"])
 
@@ -378,13 +398,13 @@ class TestTorchbind(JitTestCase):
                 if foo_obj is not None:
                     return foo_obj.pop()
                 else:
-                    return '<None>'
+                    return "<None>"
 
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
     def test_torchbind_no_init(self):
-        with self.assertRaisesRegex(RuntimeError, 'torch::init'):
+        with self.assertRaisesRegex(RuntimeError, "torch::init"):
             x = torch.classes._TorchScriptTesting._NoInit()
 
     def test_profiler_custom_op(self):
@@ -395,17 +415,17 @@ class TestTorchbind(JitTestCase):
 
         found_event = False
         for e in prof.function_events:
-            if e.name == '_TorchScriptTesting::take_an_instance':
+            if e.name == "_TorchScriptTesting::take_an_instance":
                 found_event = True
         self.assertTrue(found_event)
 
     def test_torchbind_getattr(self):
         foo = torch.classes._TorchScriptTesting._StackString(["test"])
-        self.assertEqual(None, getattr(foo, 'bar', None))
+        self.assertEqual(None, getattr(foo, "bar", None))
 
     def test_torchbind_attr_exception(self):
         foo = torch.classes._TorchScriptTesting._StackString(["test"])
-        with self.assertRaisesRegex(AttributeError, 'does not have a field'):
+        with self.assertRaisesRegex(AttributeError, "does not have a field"):
             foo.bar
 
     def test_lambda_as_constructor(self):
@@ -420,6 +440,25 @@ class TestTorchbind(JitTestCase):
             return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
 
         self.checkScript(fn, (1,))
+
+    def test_staticmethod_default_args(self):
+        def fn(inp: int) -> int:
+            res = (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    inp
+                )
+            )
+            return (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    res, 4
+                )
+            )
+
+        self.checkScript(fn, (1,))
+
+    def test_hasattr(self):
+        ss = torch.classes._TorchScriptTesting._StackString(["foo", "bar"])
+        self.assertFalse(hasattr(ss, "baz"))
 
     def test_default_args(self):
         def fn() -> int:
@@ -447,3 +486,7 @@ class TestTorchbind(JitTestCase):
             return obj.decrement()
 
         self.checkScript(gn, ())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

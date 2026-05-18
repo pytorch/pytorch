@@ -2,14 +2,16 @@
 #define MPSImageWrapper_h
 
 #import <ATen/native/metal/MetalCommandBuffer.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 #include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {
 namespace metal {
 
-class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
+class API_AVAILABLE(ios(11.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
   ~MPSImageWrapper();
@@ -30,10 +32,10 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
 
  private:
   std::vector<int64_t> _imageSizes;
-  MPSImage* _image = nullptr;
+  MPSImage* _image = nil;
   id<MTLBuffer> _buffer = nil;
-  __weak MetalCommandBuffer* _commandBuffer;
-  id<PTMetalCommandBuffer> _delegate;
+  MetalCommandBuffer* _commandBuffer = nil;
+  id<PTMetalCommandBuffer> _delegate = nil;
 };
 
 } // namespace metal

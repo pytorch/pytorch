@@ -1,13 +1,10 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 
-#include <c10/util/Exception.h>
-
-#include <mutex>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
@@ -65,28 +62,29 @@ bool SharedParserData::isBinary(int kind, int* prec) {
 }
 
 C10_EXPORT int stringToKind(const std::string& str) {
-  static std::once_flag init_flag;
-  static std::unordered_map<std::string, int> str_to_kind;
-  std::call_once(init_flag, []() {
-    for (char tok : std::string(valid_single_char_tokens))
-      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-      str_to_kind[std::string(1, tok)] = tok;
+  static std::unordered_map<std::string, int> str_to_kind = []() {
+    std::unordered_map<std::string, int> ret_str_to_kind;
+    ret_str_to_kind.reserve(std::strlen(valid_single_char_tokens));
+    for (const char* tok = valid_single_char_tokens; *tok; tok++) {
+      ret_str_to_kind[std::string(1, *tok)] = static_cast<unsigned char>(*tok);
+    }
 #define DEFINE_CASE(tok, _, str) \
   if (std::string(str) != "")    \
-    str_to_kind[str] = tok;
+    ret_str_to_kind[str] = tok;
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
-  });
+    return ret_str_to_kind;
+  }();
   try {
     return str_to_kind.at(str);
-  } catch (std::out_of_range& err) {
+  } catch (std::out_of_range&) {
     throw std::out_of_range("unknown token in stringToKind");
   }
 }
 
 C10_EXPORT std::string kindToString(int kind) {
   if (kind < 256)
-    return std::string(1, kind);
+    return std::string(1, static_cast<char>(kind));
   switch (kind) {
 #define DEFINE_CASE(tok, str, _) \
   case tok:                      \
@@ -94,7 +92,7 @@ C10_EXPORT std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("Unknown kind: " + c10::guts::to_string(kind));
+      TORCH_CHECK(false, "Unknown kind: ", kind);
   }
 }
 
@@ -103,5 +101,4 @@ C10_EXPORT SharedParserData& sharedParserData() {
   return data;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

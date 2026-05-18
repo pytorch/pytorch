@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using rpc::Message;
 using rpc::MessageType;
@@ -17,7 +15,7 @@ RRefBackwardReq::RRefBackwardReq(
       autogradContextId_(autogradContextId),
       retainGraph_(retainGraph) {}
 
-Message RRefBackwardReq::toMessageImpl() && {
+c10::intrusive_ptr<Message> RRefBackwardReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
 
   // Add all the fields.
@@ -30,7 +28,7 @@ Message RRefBackwardReq::toMessageImpl() && {
   std::vector<char> payload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
       MessageType::RREF_BACKWARD_REQ);
@@ -39,14 +37,14 @@ Message RRefBackwardReq::toMessageImpl() && {
 std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
     const Message& message) {
   // Unpickle the message and retrieve tupleElements.
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
   IValue tuple = jit::unpickle(
       payload,
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  const auto& tupleElements = std::move(*std::move(tuple).toTuple()).elements();
 
   // Build RRefBackwardReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 3);
@@ -72,6 +70,4 @@ bool RRefBackwardReq::retainGraph() const {
   return retainGraph_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

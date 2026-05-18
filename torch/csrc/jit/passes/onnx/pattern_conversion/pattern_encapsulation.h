@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Introduction
 //
@@ -18,7 +17,7 @@ namespace jit {
 // information. Shape and type information is only available after
 // _jit_pass_onnx, which converts aten nodes to onnx nodes. So there is a
 // interdependent issue. _jit_pass_onnx depends on preprocess passes to convert
-// aten nodes into convertable condition, and preprocess passes depend on
+// aten nodes into convertible condition, and preprocess passes depend on
 // _jit_pass_onnx to convert upstream nodes and apply onnx shape inference.
 // Separating the pass into two parts breaks the interdependency.
 //
@@ -28,7 +27,6 @@ namespace jit {
 // the subblock of a new placeholder node. The outputs of the new placeholder
 // node are used in place of the original nodes instead. The category of the
 // pattern is stored as attr::name.
-TORCH_API c10::optional<Node*> EncapsulatePatternIntoSubblock(Node* n);
+TORCH_API std::optional<Node*> EncapsulatePatternIntoSubblock(Node* n);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

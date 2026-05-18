@@ -1,11 +1,10 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/utils/Factory.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 bool use_channel_shuffle(
     const Tensor& input,
@@ -17,7 +16,7 @@ bool use_channel_shuffle(
   //   and all dimensions must be positive.
   // * The number of groups must be larger than 1 and
   //   the number of channels must be divisible by the number of groups.
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
       // Input
       (4 == input.dim()) &&
       (input.device().is_cpu()) &&
@@ -55,7 +54,7 @@ Tensor channel_shuffle(
       },
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.names());
+      input_padded_contig_nhwc.opt_names());
 
   int64_t channels_per_group =
       input_padded_contig_nhwc.size(Layout::Activation4D::channels) / groups;
@@ -80,12 +79,19 @@ Tensor channel_shuffle(
                        input_padded_contig_nhwc.size(Layout::Activation4D::height) *
                        input_padded_contig_nhwc.size(Layout::Activation4D::width);
 
-  const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
+  const xnn_status reshape_status = xnn_reshape_channel_shuffle_nc_x32(
       channel_shuffle_op,                                           // operator
       batch_size,                                                   // batch_size
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>(),                  // output
       caffe2::pthreadpool_());                                      // threadpool
+
+  TORCH_CHECK(
+      xnn_status_success == reshape_status,
+      "xnn_reshape_channel_shuffle_nc_x32 failed!");
+
+  const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
+      channel_shuffle_op,                                           // operator
+      input_padded_contig_nhwc.const_data_ptr<float>(),                   // input
+      output_padded_contig_nhwc.data_ptr<float>());                 // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
@@ -102,8 +108,6 @@ Tensor channel_shuffle(
   return output_padded_contig_nhwc.contiguous(input.suggest_memory_format());
 }
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

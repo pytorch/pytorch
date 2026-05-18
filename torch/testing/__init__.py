@@ -1,3 +1,7 @@
-from ._core import *  # noqa: F403
-from ._asserts import *  # noqa: F403
-from ._check_kernel_launches import *  # noqa: F403
+from torch._C import FileCheck as FileCheck
+
+from . import _utils
+
+# pyrefly: ignore [deprecated]
+from ._comparison import assert_allclose, assert_close as assert_close
+from ._creation import make_tensor as make_tensor

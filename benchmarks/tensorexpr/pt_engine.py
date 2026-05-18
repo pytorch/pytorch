@@ -1,12 +1,16 @@
 import torch
 
 
-class TorchTensorEngine(object):
+class TorchTensorEngine:
     def rand(self, shape, device=None, dtype=None, requires_grad=False):
-        return torch.rand(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+        return torch.rand(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
 
     def randn(self, shape, device=None, dtype=None, requires_grad=False):
-        return torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+        return torch.randn(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
 
     def nchw_rand(self, shape, device=None, requires_grad=False):
         return self.rand(shape, device=device, requires_grad=requires_grad)
@@ -49,6 +53,15 @@ class TorchTensorEngine(object):
 
     def cat(self, inputs, dim=0):
         return torch.cat(inputs, dim=dim)
+
+    def clamp(self, data, min, max):
+        return torch.clamp(data, min=min, max=max)
+
+    def relu(self, data):
+        return torch.nn.functional.relu(data)
+
+    def tanh(self, data):
+        return torch.tanh(data)
 
     def max_pool2d(self, data, kernel_size, stride=1):
         return torch.nn.functional.max_pool2d(data, kernel_size, stride=stride)

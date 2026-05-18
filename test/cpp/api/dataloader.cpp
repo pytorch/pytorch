@@ -5,6 +5,7 @@
 #include <test/cpp/api/support.h>
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <c10/util/tempfile.h>
 
 #include <algorithm>
@@ -32,14 +33,13 @@ struct DummyDataset : datasets::Dataset<DummyDataset, int> {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return size_;
   }
 
   size_t size_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DatasetCallsGetCorrectly) {
   DummyDataset d;
   std::vector<int> batch = d.get_batch({0, 1, 2, 3, 4});
@@ -47,7 +47,6 @@ TEST(DataTest, DatasetCallsGetCorrectly) {
   ASSERT_EQ(batch, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, TransformCallsGetApplyCorrectly) {
   struct T : transforms::Transform<int, std::string> {
     std::string apply(int input) override {
@@ -64,8 +63,7 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
 // dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
 // contains 10, 5, 20 examples respectively.
 
-struct DummyChunkDataReader
-    : public datasets::ChunkDataReader<int> {
+struct DummyChunkDataReader : public datasets::ChunkDataReader<int> {
  public:
   using BatchType = datasets::ChunkDataReader<int>::ChunkType;
   using DataType = datasets::ChunkDataReader<int>::ExampleType;
@@ -89,14 +87,13 @@ struct DummyChunkDataReader
     return chunk_count_;
   };
 
-  void reset() override{};
+  void reset() override {};
 
   const static size_t chunk_count_ = 3;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
   size_t chunk_sizes[chunk_count_] = {10, 5, 20};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
@@ -154,14 +151,13 @@ struct InfiniteStreamDataset
     return batch;
   }
 
-  torch::optional<size_t> size() const override {
-    return torch::nullopt;
+  std::optional<size_t> size() const override {
+    return std::nullopt;
   }
 
   size_t counter = 0;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, InfiniteStreamDataset) {
   const size_t kBatchSize = 13;
 
@@ -177,7 +173,7 @@ TEST(DataTest, InfiniteStreamDataset) {
   for (auto& batch : *data_loader) {
     ASSERT_LT(batch_index, 3);
     ASSERT_EQ(batch.size(), kBatchSize);
-    for (size_t j = 0; j < kBatchSize; ++j) {
+    for (const auto j : c10::irange(kBatchSize)) {
       ASSERT_EQ(batch.at(j), 1 + (batch_index * kBatchSize) + j);
     }
     batch_index += 1;
@@ -185,7 +181,6 @@ TEST(DataTest, InfiniteStreamDataset) {
   ASSERT_EQ(batch_index, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, NoSequencerIsIdentity) {
   using namespace torch::data::detail::sequencers; // NOLINT
   NoSequencer<int> no_sequencer;
@@ -193,7 +188,6 @@ TEST(DataTest, NoSequencerIsIdentity) {
   ASSERT_EQ(value, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, OrderedSequencerIsSetUpWell) {
   using namespace torch::data::detail::sequencers; // NOLINT
   struct S {
@@ -205,7 +199,6 @@ TEST(DataTest, OrderedSequencerIsSetUpWell) {
   ASSERT_EQ(sequencer.buffer_.size(), kMaxJobs);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, OrderedSequencerReOrdersValues) {
   using namespace torch::data::detail::sequencers; // NOLINT
   struct S {
@@ -237,7 +230,6 @@ TEST(DataTest, OrderedSequencerReOrdersValues) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, BatchLambdaAppliesFunctionToBatch) {
   using InputBatch = std::vector<int>;
   using OutputBatch = std::string;
@@ -249,7 +241,6 @@ TEST(DataTest, BatchLambdaAppliesFunctionToBatch) {
   ASSERT_EQ(e.get_batch({1, 2, 3, 4, 5}), std::string("20"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, LambdaAppliesFunctionToExample) {
   auto d = DummyDataset().map(transforms::Lambda<int, std::string>(
       static_cast<std::string (*)(int)>(std::to_string)));
@@ -257,7 +248,6 @@ TEST(DataTest, LambdaAppliesFunctionToExample) {
   ASSERT_EQ(d.get_batch({0, 1, 2, 3, 4}), expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CollateReducesBatch) {
   auto d =
       DummyDataset().map(transforms::Collate<int>([](std::vector<int> input) {
@@ -266,7 +256,6 @@ TEST(DataTest, CollateReducesBatch) {
   ASSERT_EQ(d.get_batch({1, 2, 3, 4, 5}), 20);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CollationReducesBatch) {
   struct Summer : transforms::Collation<int> {
     int apply_batch(std::vector<int> input) override {
@@ -277,7 +266,6 @@ TEST(DataTest, CollationReducesBatch) {
   ASSERT_EQ(d.get_batch({1, 2, 3, 4, 5}), 20);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SequentialSamplerReturnsIndicesInOrder) {
   samplers::SequentialSampler sampler(10);
   ASSERT_EQ(sampler.next(3).value(), std::vector<size_t>({0, 1, 2}));
@@ -286,7 +274,6 @@ TEST(DataTest, SequentialSamplerReturnsIndicesInOrder) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SequentialSamplerReturnsLessValuesForLastBatch) {
   samplers::SequentialSampler sampler(5);
   ASSERT_EQ(sampler.next(3).value(), std::vector<size_t>({0, 1, 2}));
@@ -294,7 +281,6 @@ TEST(DataTest, SequentialSamplerReturnsLessValuesForLastBatch) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SequentialSamplerResetsWell) {
   samplers::SequentialSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
@@ -304,7 +290,6 @@ TEST(DataTest, SequentialSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SequentialSamplerResetsWithNewSizeWell) {
   samplers::SequentialSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
@@ -318,7 +303,6 @@ TEST(DataTest, SequentialSamplerResetsWithNewSizeWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CanSaveAndLoadSequentialSampler) {
   {
     samplers::SequentialSampler a(10);
@@ -344,7 +328,6 @@ TEST(DataTest, CanSaveAndLoadSequentialSampler) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, RandomSamplerReturnsIndicesInCorrectRange) {
   samplers::RandomSampler sampler(10);
 
@@ -369,7 +352,6 @@ TEST(DataTest, RandomSamplerReturnsIndicesInCorrectRange) {
   ASSERT_FALSE(sampler.next(10).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, RandomSamplerReturnsLessValuesForLastBatch) {
   samplers::RandomSampler sampler(5);
   ASSERT_EQ(sampler.next(3).value().size(), 3);
@@ -377,7 +359,6 @@ TEST(DataTest, RandomSamplerReturnsLessValuesForLastBatch) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, RandomSamplerResetsWell) {
   samplers::RandomSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
@@ -387,7 +368,6 @@ TEST(DataTest, RandomSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, RandomSamplerResetsWithNewSizeWell) {
   samplers::RandomSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
@@ -400,7 +380,6 @@ TEST(DataTest, RandomSamplerResetsWithNewSizeWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
   {
     samplers::RandomSampler a(10);
@@ -431,7 +410,6 @@ TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, StreamSamplerReturnsTheBatchSizeAndThenRemainder) {
   samplers::StreamSampler sampler(/*epoch_size=*/100);
   ASSERT_EQ(sampler.next(10).value(), 10);
@@ -441,7 +419,6 @@ TEST(DataTest, StreamSamplerReturnsTheBatchSizeAndThenRemainder) {
   ASSERT_FALSE(sampler.next(1).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, StreamSamplerResetsWell) {
   samplers::StreamSampler sampler(/*epoch_size=*/5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
@@ -451,7 +428,6 @@ TEST(DataTest, StreamSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
   samplers::StreamSampler sampler(/*epoch_size=*/5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
@@ -464,14 +440,12 @@ TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, TensorDatasetConstructsFromSingleTensor) {
   datasets::TensorDataset dataset(torch::eye(5));
   ASSERT_TRUE(
       torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32).allclose(dataset.get(2)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, TensorDatasetConstructsFromInitializerListOfTensors) {
   std::vector<torch::Tensor> vector = torch::eye(5).chunk(5);
   datasets::TensorDataset dataset(vector);
@@ -479,14 +453,13 @@ TEST(DataTest, TensorDatasetConstructsFromInitializerListOfTensors) {
       torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32).allclose(dataset.get(2)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, StackTransformWorksForExample) {
   struct D : public datasets::Dataset<D> {
     Example<> get(size_t index) override {
       return {tensor[index], 1 + tensor[index]};
     }
 
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return tensor.size(0);
     }
 
@@ -504,7 +477,6 @@ TEST(DataTest, StackTransformWorksForExample) {
   ASSERT_TRUE(second.target.allclose(1 + torch::eye(4).slice(/*dim=*/0, 2, 4)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, StackTransformWorksForTensorExample) {
   auto d = datasets::TensorDataset(torch::eye(4))
                .map(transforms::Stack<TensorExample>());
@@ -531,12 +503,11 @@ struct TensorStringDataset
     return {torch::tensor(static_cast<double>(index)), std::to_string(index)};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, TensorTransformWorksForAnyTargetType) {
   auto d = TensorStringDataset().map(T<std::string>{});
   std::vector<Example<torch::Tensor, std::string>> batch = d.get_batch({1, 2});
@@ -549,7 +520,6 @@ TEST(DataTest, TensorTransformWorksForAnyTargetType) {
   ASSERT_EQ(batch[1].target, "2");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, TensorLambdaWorksforAnyTargetType) {
   auto d = TensorStringDataset().map(transforms::TensorLambda<std::string>(
       [](torch::Tensor input) { return input * 2; }));
@@ -572,12 +542,11 @@ struct DummyTensorDataset
     return {tensor, static_cast<int>(channels)};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, NormalizeTransform) {
   auto dataset = DummyTensorDataset().map(transforms::Normalize<int>(0.5, 0.1));
 
@@ -647,20 +616,19 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   UnCopyableDataset(UnCopyableDataset&&) = default;
   UnCopyableDataset& operator=(UnCopyableDataset&&) = default;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UnCopyableDataset() = default;
+  ~UnCopyableDataset() override = default;
 
   Example<> get(size_t index) override {
-    return {torch::tensor({static_cast<int64_t>(index)}),
-            torch::tensor({static_cast<int64_t>(index)})};
+    return {
+        torch::tensor({static_cast<int64_t>(index)}),
+        torch::tensor({static_cast<int64_t>(index)})};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, MapDoesNotCopy) {
   auto dataset = UnCopyableDataset()
                      .map(transforms::TensorLambda<>(
@@ -675,7 +643,6 @@ TEST(DataTest, MapDoesNotCopy) {
   ASSERT_EQ(data[0].item<float>(), 7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, QueuePushAndPopFromSameThread) {
   torch::data::detail::Queue<int> queue;
   queue.push(1);
@@ -684,7 +651,6 @@ TEST(DataTest, QueuePushAndPopFromSameThread) {
   ASSERT_EQ(queue.pop(), 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, QueuePopWithTimeoutThrowsUponTimeout) {
   torch::data::detail::Queue<int> queue;
   ASSERT_THROWS_WITH(
@@ -693,7 +659,6 @@ TEST(DataTest, QueuePopWithTimeoutThrowsUponTimeout) {
       "(timeout was 10 ms)");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, QueuePushAndPopFromDifferentThreads) {
   using torch::data::detail::Queue;
 
@@ -718,7 +683,6 @@ TEST(DataTest, QueuePushAndPopFromDifferentThreads) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, QueueClearEmptiesTheQueue) {
   torch::data::detail::Queue<int> queue;
   queue.push(1);
@@ -728,7 +692,6 @@ TEST(DataTest, QueueClearEmptiesTheQueue) {
   ASSERT_THROWS_WITH(queue.pop(1 * kMillisecond), "Timeout");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DataShuttleCanPushAndPopJob) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   shuttle.push_job(1);
@@ -737,7 +700,6 @@ TEST(DataTest, DataShuttleCanPushAndPopJob) {
   ASSERT_EQ(shuttle.pop_job(), 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DataShuttleCanPushAndPopResult) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   // pop_result() will only attempt to pop if there was a push_job() batch.
@@ -753,7 +715,6 @@ TEST(DataTest, DataShuttleCanPushAndPopResult) {
   ASSERT_EQ(shuttle.pop_result().value(), 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DataShuttlePopResultReturnsNulloptWhenNoJobsInFlight) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   ASSERT_FALSE(shuttle.pop_result().has_value());
@@ -765,7 +726,6 @@ TEST(DataTest, DataShuttlePopResultReturnsNulloptWhenNoJobsInFlight) {
   ASSERT_FALSE(shuttle.pop_result().has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DataShuttleDrainMeansPopResultReturnsNullopt) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   shuttle.push_job(1);
@@ -774,7 +734,6 @@ TEST(DataTest, DataShuttleDrainMeansPopResultReturnsNullopt) {
   ASSERT_FALSE(shuttle.pop_result().has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DataShuttlePopResultTimesOut) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   shuttle.push_job(1);
@@ -794,12 +753,11 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SharedBatchDatasetReallyIsShared) {
   // This test will only compile if we really are not making any copies.
   // There is otherwise no logic to test and because it is not deterministic
@@ -818,7 +776,6 @@ TEST(DataTest, SharedBatchDatasetReallyIsShared) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, SharedBatchDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
   // This will not compile if a copy is made.
   auto shared_dataset =
@@ -849,7 +806,7 @@ struct TestIndexDataset
     }
     return batch;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return data.size();
   }
   std::vector<int> data;
@@ -857,10 +814,10 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset(torch::optional<size_t> new_size = torch::nullopt) override {}
-  torch::optional<TestIndex> next(size_t batch_size) override {
+  void reset(std::optional<size_t> new_size = std::nullopt) override {}
+  std::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
-      return torch::nullopt;
+      return std::nullopt;
     }
     std::vector<size_t> indices(batch_size);
     std::iota(indices.begin(), indices.end(), size_t(0));
@@ -873,28 +830,24 @@ struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   size_t size_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CanUseCustomTypeAsIndexType) {
   const int kBatchSize = 10;
   auto data_loader = torch::data::make_data_loader(
       TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
-  size_t i = 0;
   for (auto batch : *data_loader) {
-    for (int j = 0; j < kBatchSize; ++j) {
+    for (const auto j : c10::irange(kBatchSize)) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
-    i += 1;
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DistributedRandomSamplerSingleReplicaProduceCorrectSamples) {
   size_t sample_count = 10;
   samplers::DistributedRandomSampler drs(sample_count);
 
   std::vector<size_t> res;
-  torch::optional<std::vector<size_t>> idx;
+  std::optional<std::vector<size_t>> idx;
   while ((idx = drs.next(3)).has_value()) {
     res.insert(std::end(res), std::begin(*idx), std::end(*idx));
   }
@@ -902,12 +855,11 @@ TEST(DataTest, DistributedRandomSamplerSingleReplicaProduceCorrectSamples) {
   ASSERT_EQ(res.size(), sample_count);
 
   std::sort(res.begin(), res.end());
-  for (size_t i = 0; i < res.size(); ++i) {
+  for (const auto i : c10::irange(res.size())) {
     ASSERT_EQ(res[i], i);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
   size_t sample_count = 10;
   size_t num_replicas = 3;
@@ -918,16 +870,16 @@ TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
                            size_t batch_size) {
     std::vector<std::unique_ptr<samplers::DistributedRandomSampler>> samplers;
 
-    for (size_t i = 0; i < num_replicas; ++i) {
+    for (const auto i : c10::irange(num_replicas)) {
       samplers.emplace_back(
-          torch::make_unique<samplers::DistributedRandomSampler>(
+          std::make_unique<samplers::DistributedRandomSampler>(
               sample_count, num_replicas, i, allow_duplicates));
     }
 
     std::vector<size_t> res;
-    for (size_t i = 0; i < num_replicas; ++i) {
+    for (const auto i : c10::irange(num_replicas)) {
       (*samplers[i]).reset();
-      torch::optional<std::vector<size_t>> idx;
+      std::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
         res.insert(std::end(res), std::begin(*idx), std::end(*idx));
       }
@@ -950,7 +902,6 @@ TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
   {
     samplers::DistributedRandomSampler a(10);
@@ -986,14 +937,13 @@ TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
   size_t sample_count = 10;
   size_t batch_size = 3;
   samplers::DistributedSequentialSampler dss(sample_count);
 
   std::vector<size_t> res;
-  torch::optional<std::vector<size_t>> idx;
+  std::optional<std::vector<size_t>> idx;
   while ((idx = dss.next(batch_size)).has_value()) {
     res.insert(std::end(res), std::begin(*idx), std::end(*idx));
   }
@@ -1001,12 +951,11 @@ TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
   ASSERT_EQ(res.size(), sample_count);
 
   std::sort(res.begin(), res.end());
-  for (size_t i = 0; i < res.size(); ++i) {
+  for (const auto i : c10::irange(res.size())) {
     ASSERT_EQ(res[i], i);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
   size_t sample_count = 10;
   size_t num_replicas = 3;
@@ -1018,16 +967,16 @@ TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
     std::vector<std::unique_ptr<samplers::DistributedSequentialSampler>>
         samplers;
 
-    for (size_t i = 0; i < num_replicas; ++i) {
+    for (const auto i : c10::irange(num_replicas)) {
       samplers.emplace_back(
-          torch::make_unique<samplers::DistributedSequentialSampler>(
+          std::make_unique<samplers::DistributedSequentialSampler>(
               sample_count, num_replicas, i, allow_duplicates));
     }
 
     std::vector<size_t> res;
-    for (size_t i = 0; i < num_replicas; ++i) {
+    for (const auto i : c10::irange(num_replicas)) {
       (*samplers[i]).reset();
-      torch::optional<std::vector<size_t>> idx;
+      std::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
         res.insert(std::end(res), std::begin(*idx), std::end(*idx));
       }
@@ -1050,7 +999,6 @@ TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataTest, CanSaveAndLoadDistributedSequentialSampler) {
   {
     samplers::DistributedSequentialSampler a(10);
@@ -1076,7 +1024,6 @@ TEST(DataTest, CanSaveAndLoadDistributedSequentialSampler) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, DataLoaderOptionsDefaultAsExpected) {
   DataLoaderOptions partial_options;
   FullDataLoaderOptions full_options(partial_options);
@@ -1088,7 +1035,6 @@ TEST(DataLoaderTest, DataLoaderOptionsDefaultAsExpected) {
   ASSERT_TRUE(full_options.enforce_ordering);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, DataLoaderOptionsCoalesceOptionalValues) {
   auto partial_options = DataLoaderOptions(32).workers(10);
   FullDataLoaderOptions full_options(partial_options);
@@ -1096,7 +1042,6 @@ TEST(DataLoaderTest, DataLoaderOptionsCoalesceOptionalValues) {
   ASSERT_EQ(full_options.max_jobs, 2 * 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
   auto data_loader = torch::data::make_data_loader(
       DummyDataset().map(transforms::Lambda<int>([](int x) { return x + 1; })));
@@ -1104,17 +1049,14 @@ TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
 }
 
 struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
-  torch::data::Example<> get(size_t i) {
+  torch::data::Example<> get(size_t i) override {
     return {torch::ones(i), torch::ones(i)};
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
-  torch::optional<size_t> size() const noexcept {
-    return torch::nullopt;
+  std::optional<size_t> size() const noexcept override {
+    return std::nullopt;
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     DataLoaderTest,
     MakeDataLoaderThrowsWhenConstructingSamplerWithUnsizedDataset) {
@@ -1123,7 +1065,6 @@ TEST(
       "Expected the dataset to be sized in order to construct the Sampler");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, IteratorsCompareEqualToThemselves) {
   auto data_loader = torch::data::make_data_loader(DummyDataset(), 32);
   auto begin = data_loader->begin();
@@ -1132,7 +1073,6 @@ TEST(DataLoaderTest, IteratorsCompareEqualToThemselves) {
   ASSERT_EQ(end, end);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ValidIteratorsCompareUnequalToEachOther) {
   auto data_loader = torch::data::make_data_loader(DummyDataset(), 32);
   auto i = data_loader->begin();
@@ -1142,7 +1082,6 @@ TEST(DataLoaderTest, ValidIteratorsCompareUnequalToEachOther) {
   ASSERT_NE(i, j);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, SentinelIteratorsCompareEqualToEachOther) {
   auto data_loader = torch::data::make_data_loader(DummyDataset(), 32);
   auto i = data_loader->end();
@@ -1150,7 +1089,6 @@ TEST(DataLoaderTest, SentinelIteratorsCompareEqualToEachOther) {
   ASSERT_EQ(i, j);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, IteratorsCompareEqualToSentinelWhenExhausted) {
   DummyDataset dataset;
   auto data_loader =
@@ -1168,7 +1106,6 @@ TEST(DataLoaderTest, IteratorsCompareEqualToSentinelWhenExhausted) {
   ASSERT_EQ(i, end);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, IteratorsShareState) {
   DummyDataset dataset;
   auto data_loader =
@@ -1186,7 +1123,6 @@ TEST(DataLoaderTest, IteratorsShareState) {
   ASSERT_EQ(j, end);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   DummyDataset dataset;
   auto data_loader =
@@ -1208,14 +1144,13 @@ TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   ASSERT_EQ(*iterator, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
   struct D : datasets::BatchDataset<D, int> {
     int get_batch(torch::ArrayRef<size_t> indices) override {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return 1 + indices.front();
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 10;
     }
   };
@@ -1232,7 +1167,6 @@ TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
   ASSERT_EQ(values, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {
   DummyDataset dataset;
   auto data_loader =
@@ -1244,7 +1178,6 @@ TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {
       "while another iterator is not yet exhausted");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, IncrementingExhaustedValidIteratorThrows) {
   DummyDataset dataset;
   auto data_loader =
@@ -1255,7 +1188,6 @@ TEST(DataLoaderTest, IncrementingExhaustedValidIteratorThrows) {
   ASSERT_THROWS_WITH(++i, "Attempted to increment iterator past the end");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, DereferencingExhaustedValidIteratorThrows) {
   DummyDataset dataset;
   auto data_loader =
@@ -1267,7 +1199,6 @@ TEST(DataLoaderTest, DereferencingExhaustedValidIteratorThrows) {
       *i, "Attempted to dereference iterator that was past the end");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, IncrementingSentinelIteratorThrows) {
   DummyDataset dataset;
   auto data_loader =
@@ -1278,7 +1209,6 @@ TEST(DataLoaderTest, IncrementingSentinelIteratorThrows) {
       "Incrementing the DataLoader's past-the-end iterator is not allowed");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, DereferencingSentinelIteratorThrows) {
   DummyDataset dataset;
   auto data_loader =
@@ -1289,7 +1219,6 @@ TEST(DataLoaderTest, DereferencingSentinelIteratorThrows) {
       "Dereferencing the DataLoader's past-the-end iterator is not allowed");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, YieldsCorrectBatchSize) {
   DummyDataset dataset;
   auto data_loader = torch::data::make_data_loader(dataset, 25);
@@ -1301,7 +1230,6 @@ TEST(DataLoaderTest, YieldsCorrectBatchSize) {
   ASSERT_EQ(++iterator, data_loader->end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     DataLoaderTest,
     ReturnsLastBatchWhenSmallerThanBatchSizeWhenDropLastIsFalse) {
@@ -1316,7 +1244,6 @@ TEST(
   ASSERT_EQ(++iterator, data_loader->end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     DataLoaderTest,
     DoesNotReturnLastBatchWhenSmallerThanBatchSizeWhenDropLastIsTrue) {
@@ -1330,7 +1257,6 @@ TEST(
   ASSERT_EQ(++iterator, data_loader->end());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, RespectsTimeout) {
   struct Baton {
     std::condition_variable cv;
@@ -1344,7 +1270,7 @@ TEST(DataLoaderTest, RespectsTimeout) {
       baton->cv.wait_for(lock, 1000 * kMillisecond);
       return 0;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     std::shared_ptr<Baton> baton;
@@ -1418,7 +1344,7 @@ struct Barrier {
 // each worker thread has a unique ID in `0...kNumberOfWorkers-1`.
 // There is a hard-coded ordering, `kOrderInWhichWorkersReturnTheirBatch`, in
 // which we want the worker threads to return. For this, an iterator into this
-// order is maintained. When the derferenced iterator (the current order index)
+// order is maintained. When the dereferenced iterator (the current order index)
 // matches the thread ID of a worker, it knows it can now return its index as
 // well as progress the iterator. Inside the dataloader, the sequencer should
 // buffer these indices such that they are ultimately returned in order.
@@ -1462,7 +1388,7 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
     return indices.front();
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return kNumberOfWorkers;
   }
 
@@ -1471,7 +1397,6 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
 
 } // namespace ordering_test
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   auto data_loader = torch::data::make_data_loader(
       ordering_test::Dataset{},
@@ -1489,7 +1414,6 @@ TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   ASSERT_EQ(expected, output);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, Reset) {
   DummyDataset dataset;
   auto data_loader =
@@ -1512,13 +1436,12 @@ TEST(DataLoaderTest, Reset) {
   ASSERT_EQ(++iterator, end);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   struct D : datasets::Dataset<DummyDataset, int> {
     int get(size_t index) override {
       throw std::invalid_argument("badness");
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
   };
@@ -1540,31 +1463,30 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
 
   auto data_loader = torch::data::make_data_loader(D{});
 
-  for (size_t i = 0; i < 10; ++i) {
+  for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1577,26 +1499,25 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
   const int kNumberOfWorkers = 4;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       std::lock_guard<std::mutex> lock(mutex);
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
     std::mutex mutex;
@@ -1606,7 +1527,7 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
       torch::data::datasets::make_shared_dataset<D>(),
       DataLoaderOptions().workers(kNumberOfWorkers));
 
-  for (size_t i = 0; i < 10; ++i) {
+  for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1619,24 +1540,23 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, StatefulDatasetWithMap) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
@@ -1650,7 +1570,7 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
               })),
       DataLoaderOptions{});
 
-  for (size_t i = 0; i < 10; ++i) {
+  for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1663,30 +1583,29 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, StatefulDatasetWithCollate) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D> {
-    torch::optional<std::vector<Example<>>> get_batch(
+    std::optional<std::vector<Example<>>> get_batch(
         size_t batch_size) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         counter += batch_size;
         std::vector<Example<>> batch(
             /*count=*/batch_size,
-            Example<>{torch::ones(batch_size + 1),
-                      torch::zeros(batch_size - 1)});
+            Example<>{
+                torch::ones(batch_size + 1), torch::zeros(batch_size - 1)});
         return batch;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
@@ -1697,7 +1616,7 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
 
   // Notice that the `get_batch()` of the dataset returns a vector<Example>, but
   // the `Stack` collation stacks the tensors into one.
-  torch::optional<Example<>> batch = d.get_batch(kBatchSize);
+  std::optional<Example<>> batch = d.get_batch(kBatchSize);
   ASSERT_TRUE(batch.has_value());
   ASSERT_EQ(batch->data.size(0), kBatchSize);
   ASSERT_EQ(batch->data.size(1), kBatchSize + 1);
@@ -1712,7 +1631,6 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
 // contains test cases with different parameter combination. (For example,
 // different prefetch count, batch size and data loader worker count). It
 // verifies the return batches size and content when the order is deterministic.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDataSetGetBatch) {
   // different prefetch count for testing.
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -1753,7 +1671,8 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
             dataset,
             DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-        for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
+        for (const auto epoch_index : c10::irange(epoch_count)) {
+          (void)epoch_index; // Suppress unused variable warning
           std::vector<bool> result(total_example_count, false);
           int iteration_count = 0;
           for (auto iterator = data_loader->begin();
@@ -1765,11 +1684,11 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
             // When prefetch_count is equal to 1 and no worker thread, the batch
             // order is deterministic. So we can verify elements in each batch.
             if (prefetch_count == 1 && dataloader_worker_count == 0) {
-              for (size_t j = 0; j < batch_size; ++j) {
+              for (const auto j : c10::irange(batch_size)) {
                 ASSERT_EQ(batch[j], iteration_count * batch_size + j);
               }
             }
-            for (size_t j = 0; j < batch_size; ++j) {
+            for (const auto j : c10::irange(batch_size)) {
               result[batch[j]] = true;
             }
           }
@@ -1783,7 +1702,6 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
   const size_t prefetch_count = 1;
   const size_t batch_size = 5;
@@ -1806,8 +1724,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
           datasets::ChunkDatasetOptions(prefetch_count, batch_size));
 
   auto data_loader = torch::data::make_data_loader(
-      dataset,
-      DataLoaderOptions(requested_batch_size).workers(0));
+      dataset, DataLoaderOptions(requested_batch_size).workers(0));
 
   std::string exception_msg =
       "The requested batch size does not match with the initialized batch "
@@ -1817,10 +1734,8 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
   ASSERT_THROWS_WITH(*(data_loader->begin()), exception_msg);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
-  struct DummyEmptyChunkDataReader
-      : datasets::ChunkDataReader<int> {
+  struct DummyEmptyChunkDataReader : datasets::ChunkDataReader<int> {
    public:
     using BatchType = datasets::ChunkDataReader<int>::ChunkType;
 
@@ -1832,7 +1747,7 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
       return 1;
     };
 
-    void reset() override{};
+    void reset() override {};
   };
 
   const size_t prefetch_count = 1;
@@ -1862,7 +1777,6 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
   struct D : public datasets::ChunkDataReader<int> {
    public:
@@ -1877,7 +1791,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
       return 2;
     };
 
-    void reset() override{};
+    void reset() override {};
   };
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -1916,7 +1830,6 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
   const size_t prefetch_count = 2;
   const size_t batch_size = 5;
@@ -1939,7 +1852,9 @@ TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
   samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
 
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+      dataset.map(transforms::BatchLambda<
+                  DummyChunkDataReader::BatchType,
+                  DummyChunkDataReader::DataType>(
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
@@ -1958,7 +1873,6 @@ TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
   ASSERT_EQ(chunk_sampler.index(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
   const size_t prefetch_count = 2;
   const size_t batch_size = 5;
@@ -1981,10 +1895,10 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
           datasets::ChunkDatasetOptions(
               prefetch_count, batch_size, cache_size));
 
-  samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
-
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+      dataset.map(transforms::BatchLambda<
+                  DummyChunkDataReader::BatchType,
+                  DummyChunkDataReader::DataType>(
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
@@ -2006,7 +1920,6 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
 // validation. This is only for testing the specific save/load functionality. In
 // real user case, the user should still use matching ChunkDataset::save and
 // ChunkDataset::load method.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDatasetSave) {
   const size_t chunk_count_ = 6;
   const size_t chunk_size = 10;
@@ -2023,7 +1936,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     BatchType batch_data_ = BatchType(chunk_size, 0);
   };
 
@@ -2062,8 +1975,9 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
         dataset,
         DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-    for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
-      int iteration_count = 0;
+    for (const auto epoch_index : c10::irange(epoch_count)) {
+      (void)epoch_index; // Suppress unused variable warning
+      unsigned iteration_count = 0;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
            ++iterator, ++iteration_count) {
         if ((iteration_count + 1) % save_interval == 0) {
@@ -2089,7 +2003,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
           // statues, there are three possible scenarios for the writer thread:
           // 1. it hasn't started loading the next chunk data yet, so the
           // sequential sampler index is still 0;
-          // 2. it started to load the second chunk, so the sequencial sampler
+          // 2. it started to load the second chunk, so the sequential sampler
           // index is at 1;
           // 3. it finished loading the second chunk, and start to load the
           // third chunk, because the cache is still fully occupied by the data
@@ -2118,14 +2032,12 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
 }
 
 // Test ChunkDataset load function.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDatasetLoad) {
   auto tempfile = c10::make_tempfile();
 
   const size_t prefetch_count = 1;
   const size_t batch_size = 10;
   const size_t dataloader_worker_count = 0;
-  const size_t save_interval = 2;
 
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
@@ -2164,7 +2076,7 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   auto data_loader = torch::data::make_data_loader(
       dataset, DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-  for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
+  for (const auto epoch_index : c10::irange(epoch_count)) {
     int iteration_count = 0;
 
     // For the first epoch, the returned batch should be returned from the
@@ -2197,24 +2109,23 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   ASSERT_EQ(new_sampler.index(), skipped_chunk);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
   const size_t chunk_size = 5;
   const size_t batch_size = 5;
 
   class S : public samplers::Sampler<> {
    public:
-    explicit S(size_t size) : size_(size), index_(0){};
+    explicit S(size_t size) : size_(size), index_(0) {};
 
-    void reset(torch::optional<size_t> new_size = torch::nullopt) override {
+    void reset(std::optional<size_t> new_size = std::nullopt) override {
       if (new_size.has_value()) {
         size_ = *new_size;
       }
       indices_.resize(size_);
       size_t index = 0;
 
-      // Repeatly sample every 5 indices.
-      for (size_t i = 0; i < batch_size; ++i) {
+      // Repeatedly sample every 5 indices.
+      for (const auto i : c10::irange(batch_size)) {
         for (size_t j = 0; j < size_ / batch_size; ++j) {
           indices_[index++] = i + batch_size * j;
         }
@@ -2223,10 +2134,10 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
     }
 
     // Returns the next batch of indices.
-    torch::optional<std::vector<size_t>> next(size_t batch_size) override {
+    std::optional<std::vector<size_t>> next(size_t batch_size) override {
       const auto remaining_indices = size_ - index_;
       if (remaining_indices == 0) {
-        return torch::nullopt;
+        return std::nullopt;
       }
       auto return_size = std::min(batch_size, remaining_indices);
       std::vector<size_t> index_batch(
@@ -2259,7 +2170,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     size_t chunk_count_;
   };
 
@@ -2306,13 +2217,11 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       std::vector<int> expected_result;
       {
         // construct expected result
-        int offset = 0;
-
-        for (int i = 0; i < (chunk_count + cross_chunk_shuffle_count - 1) /
-                 cross_chunk_shuffle_count;
-             i++) {
-          for (int j = 0; j < chunk_size; ++j) {
-            for (int k = 0; k < cross_chunk_shuffle_count; ++k) {
+        for (const auto i : c10::irange(
+                 (chunk_count + cross_chunk_shuffle_count - 1) /
+                 cross_chunk_shuffle_count)) {
+          for ([[maybe_unused]] const auto j : c10::irange(chunk_size)) {
+            for (const auto k : c10::irange(cross_chunk_shuffle_count)) {
               if (i * cross_chunk_shuffle_count + k < chunk_count) {
                 expected_result.push_back(i * cross_chunk_shuffle_count + k);
               }
@@ -2328,7 +2237,6 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataLoaderTest, CustomPreprocessPolicy) {
   const size_t chunk_size = 5;
   const size_t batch_size = 10;
@@ -2350,7 +2258,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     size_t chunk_count_;
   };
 
@@ -2358,8 +2266,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
   auto sorting_policy = [](std::vector<int>& raw_batch_data) {
     std::sort(raw_batch_data.begin(), raw_batch_data.end());
   };
-  std::function<void(std::vector<int>&)> policy_function =
-      sorting_policy;
+  std::function<void(std::vector<int>&)> policy_function = sorting_policy;
 
   const size_t prefetch_count = 1;
   const size_t cache_size = 10;
@@ -2400,7 +2307,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
            ++iterator) {
         auto batch_result = *iterator;
         if (batch_result.size() > chunk_size * cross_chunk_shuffle_count) {
-          for (int i = 0; i < batch_result.size(); i += chunk_size) {
+          for (unsigned i = 0; i < batch_result.size(); i += chunk_size) {
             ASSERT_TRUE(std::is_sorted(
                 batch_result.begin() + i,
                 batch_result.begin() + i + chunk_size));

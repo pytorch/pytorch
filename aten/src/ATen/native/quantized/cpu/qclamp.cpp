@@ -1,24 +1,30 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <torch/library.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/clamp_native.h>
+#include <ATen/ops/hardtanh_native.h>
+#endif
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_min_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qclamp_max_stub);
 
 namespace {
@@ -32,7 +38,7 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
 
@@ -66,7 +72,7 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
     clamp_op,
     input_contig.size(0), // batch_size
-    (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input_data
+    reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()), // input_data
     num_elems, // input_stride
     (uint8_t*)qy.data_ptr<c10::quint8>(), // output_data
     num_elems); // output_stride
@@ -88,8 +94,8 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
 
 Tensor quantized_clamp_impl(
     const Tensor& qx,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   Tensor qy;
   if (min && max) {
 #ifdef USE_PYTORCH_QNNPACK
@@ -121,8 +127,8 @@ Tensor quantized_clamp_impl(
 // at::native functions for the native_functions.yaml
 Tensor clamp_quantized_cpu(
     const Tensor& qx,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
     qy = quantized_clamp_impl(qx, min, max);
@@ -163,5 +169,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <fmt/format.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
@@ -23,11 +22,11 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <c10/util/irange.h>
+
 using namespace torch::autograd::profiler;
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 void processRemoteProfiledEvents(
     autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
@@ -36,7 +35,7 @@ void processRemoteProfiledEvents(
   TORCH_CHECK(
       enabled,
       "Profiler was expected to be enabled. This can happen in callback "
-      " continutations that run in different threads, and the TLS of the "
+      " continuations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
   std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
@@ -90,7 +89,7 @@ std::string makeRPCError(
   return fmt::format(
       "{}:{}:{}",
       torch::distributed::rpc::kRPCErrorPrefix,
-      errorType,
+      static_cast<int>(errorType),
       rpcErrorStr);
 }
 
@@ -175,7 +174,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       // Need to reverse the device map for the backward pass of distributed
       // autograd.
-      std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
+      DeviceMap reverseDeviceMap;
       for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
         reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
       }
@@ -295,12 +294,12 @@ parseWireSections(const void* data, size_t data_size) {
     if (ptr == endp) {
       break;
     }
-    size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
-    headerEnts.emplace_back(std::make_pair(name, sz));
+    size_t sz = std::stoll(std::string(sizePtr, ptr - sizePtr));
+    headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
   if (!ok) {
-    throw std::runtime_error("failed parse");
+    TORCH_CHECK(false, "failed parse");
   }
 
   std::unordered_map<std::string, std::pair<const char*, size_t>> out;
@@ -309,14 +308,14 @@ parseWireSections(const void* data, size_t data_size) {
     ptr += headerEnt.second;
   }
   if (ptr != endp) {
-    throw std::runtime_error("failed bounds");
+    TORCH_CHECK(false, "failed bounds");
   }
   return out;
 }
 
-static const char* kMeta = "meta";
-static const char* kPayload = "payload";
-}; // namespace
+static constexpr const char* kMeta = "meta";
+static constexpr const char* kPayload = "payload";
+} // namespace
 
 c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors) {
@@ -330,7 +329,7 @@ c10::List<at::Tensor> cloneSparseTensors(
     auto storageSize = t.storage().nbytes();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
-    constexpr size_t kMinRecopyBytes = 8 * 1024;
+    constexpr size_t kMinRecopyBytes = 8ull * 1024;
     return storageSize >= kMinRecopyBytes &&
         storageSize >= usefulSize * kMinMultiple;
   };
@@ -377,7 +376,7 @@ std::string wireSerialize(
     pickler.stop();
     tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < tensorData.size(); i++) {
+    for (const auto i : c10::irange(tensorData.size())) {
       // Construct WritableTensorData for each tensor in the pickler tensorData
       // Since tensorData is in function scope, and getWritableTensorData just
       // record the tensors, the data() pointers stay valid for CPU tensors
@@ -387,7 +386,7 @@ std::string wireSerialize(
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
       entries.push_back(
-          {c10::to_string(i),
+          {std::to_string(i),
            writeableTensorData.data(),
            writeableTensorData.sizeInBytes()});
     }
@@ -399,7 +398,7 @@ std::string wireSerialize(
     tot += e.size;
     header.append(e.name)
         .append(" ")
-        .append(c10::to_string(e.size))
+        .append(std::to_string(e.size))
         .append("\n");
   }
   header.push_back('\n');
@@ -443,7 +442,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
       auto it = sections.find(ename);
       if (it == sections.end()) {
-        throw std::runtime_error("Couldn't find entity " + ename);
+        TORCH_CHECK(false, "Couldn't find entity " + ename);
       }
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);
@@ -474,10 +473,11 @@ void writeWrappedPayload(
       additionalPayload.end());
 
   // Add size of the additional payload
-  int64_t indexToWrite = originalPayload.size();
+  int64_t indexToWrite = static_cast<int64_t>(originalPayload.size());
   originalPayload.resize(originalPayload.size() + sizeof(int64_t));
-  const int64_t additionalPayloadSize = additionalPayload.size();
-  torch::utils::THP_encodeInt64Buffer(
+  const int64_t additionalPayloadSize =
+      static_cast<int64_t>(additionalPayload.size());
+  torch::utils::THP_encodeBuffer(
       reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
       &additionalPayloadSize,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,
@@ -488,11 +488,10 @@ std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message) {
   // Read the additional payload remove it from the payload.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t additionalPayloadSize;
+  TORCH_INTERNAL_ASSERT(payload.size() >= sizeof(int64_t));
   size_t indexToRead = payload.size() - sizeof(int64_t);
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
-  torch::utils::THP_decodeInt64Buffer(
+  int64_t additionalPayloadSize = 0;
+  torch::utils::THP_decodeBuffer(
       &additionalPayloadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,
@@ -500,22 +499,21 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      payload.size() > additionalPayloadSize,
+      additionalPayloadSize > 0 &&
+          static_cast<int64_t>(payload.size()) > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
       " but additional payload size is ",
       additionalPayloadSize);
   auto wrappedPayloadBegin =
-      static_cast<const char*>(message.payload().data()) + payload.size() -
-      additionalPayloadSize;
+      message.payload().data() + payload.size() - additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
       wrappedPayloadBegin,
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       tensorTable);
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  std::vector<at::IValue> tupleElements = tuple.toTupleRef().elements().vec();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }
@@ -564,7 +562,7 @@ void populateRemoteProfiledEvents(
         if (e.kind() == EventKind::PopRange) {
           auto it = startEvents.find(e.handle());
           if (it != startEvents.end()) {
-            e.setCudaUs(it->second->cudaElapsedUs(e));
+            e.setCudaUs(static_cast<int64_t>(it->second->cudaElapsedUs(e)));
           } else {
             TORCH_WARN("Found a pop event without a corresponding push event");
             e.setCudaUs(0);
@@ -577,6 +575,4 @@ void populateRemoteProfiledEvents(
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

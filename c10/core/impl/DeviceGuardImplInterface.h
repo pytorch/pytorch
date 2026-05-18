@@ -1,13 +1,16 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Registry.h>
 
+#include <array>
 #include <atomic>
 
 namespace c10 {
@@ -16,28 +19,21 @@ namespace c10 {
 class DataPtr;
 
 /**
- * Flags defining the behavior of events.
+ * Note [Flags defining the behavior of events]
  *
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
  * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same. For example,
- * when PyTorch creates a CUDA event it sets the flag
- * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ * choice for events on that backend, which may not be the same.
  *
  * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
- * should map one-to-one with actual event flags for those backends.
+ * backend implementation.
  */
 enum class EventFlag {
+  // Disable timing
   PYTORCH_DEFAULT,
+  // Enable timing
   BACKEND_DEFAULT,
-  // CUDA flags
-  CUDA_EVENT_DEFAULT,
-  CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
-  // HIP flags
-  HIP_EVENT_DEFAULT,
-  HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
   // FOR TESTING ONLY
   INVALID
 };
@@ -62,6 +58,14 @@ namespace impl {
  * those uses will be devirtualized.
  */
 struct C10_API DeviceGuardImplInterface {
+  DeviceGuardImplInterface() = default;
+  DeviceGuardImplInterface(const DeviceGuardImplInterface&) = default;
+  DeviceGuardImplInterface& operator=(const DeviceGuardImplInterface&) =
+      default;
+  DeviceGuardImplInterface(DeviceGuardImplInterface&&) noexcept = default;
+  DeviceGuardImplInterface& operator=(DeviceGuardImplInterface&&) noexcept =
+      default;
+
   /**
    * Return the type of device managed by this guard implementation.
    */
@@ -103,21 +107,33 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Get the current stream for a given device.
    */
-  virtual Stream getStream(Device) const noexcept = 0;
+  virtual Stream getStream(Device) const = 0;
 
   /**
    * Get the default stream for a given device.
    */
-  virtual Stream getDefaultStream(Device) const {
+  virtual Stream getDefaultStream(Device /*unused*/) const {
     TORCH_CHECK(false, "Backend doesn't support acquiring a default stream.")
   }
 
   /**
    * Get a stream from the global pool for a given device.
    */
-  virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
-      const {
+  virtual Stream getStreamFromGlobalPool(
+      Device /*unused*/,
+      bool isHighPriority = false) const {
+    (void)isHighPriority; // Suppress unused variable warning
     TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
+  }
+
+  /**
+   * Return a new stream for a given device and priority. The stream will be
+   * copied and shared around, device backend should be able to correctly handle
+   * the lifetime of the stream.
+   */
+  virtual Stream getNewStream(Device /*unused*/, int priority = 0) const {
+    (void)priority;
+    TORCH_CHECK(false, "Backend doesn't support create a new Stream.")
   }
 
   /**
@@ -125,12 +141,23 @@ struct C10_API DeviceGuardImplInterface {
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  virtual Stream exchangeStream(Stream) const noexcept = 0;
+  virtual Stream exchangeStream(Stream) const = 0;
+
+  /**
+   * Returns a backend-specific, opaque native handle associated with the given
+   * stream.
+   *
+   * The returned pointer is owned and managed by PyTorch. Callers must not
+   * modify or free it.
+   */
+  virtual void* getStreamNativeHandle(const Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support getting stream native handle.")
+  }
 
   /**
    * Destroys the given event.
    */
-  virtual void destroyEvent(void* event, const DeviceIndex device_index)
+  virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept {}
 
   /**
@@ -140,10 +167,10 @@ struct C10_API DeviceGuardImplInterface {
    * event to continue and marks that version as recorded.
    * */
   virtual void record(
-      void** event,
-      const Stream& stream,
-      const DeviceIndex device_index,
-      const c10::EventFlag flag) const {
+      void** /*event*/,
+      const Stream& /*stream*/,
+      const DeviceIndex /*device_index*/,
+      const c10::EventFlag /*flag*/) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
@@ -155,7 +182,7 @@ struct C10_API DeviceGuardImplInterface {
    * When the stream reaches this command it will stop processing
    * additional commands until that version of the event is marked as recorded.
    */
-  virtual void block(void* event, const Stream& stream) const {
+  virtual void block(void* /*event*/, const Stream& /*stream*/) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
@@ -165,7 +192,7 @@ struct C10_API DeviceGuardImplInterface {
    *  (2) the current version is marked as recorded.
    * Returns false otherwise.
    */
-  virtual bool queryEvent(void* event) const {
+  virtual bool queryEvent(void* /*event*/) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
@@ -177,11 +204,71 @@ struct C10_API DeviceGuardImplInterface {
   virtual DeviceIndex deviceCount() const noexcept = 0;
 
   /**
+   * Get the following capabilities of the current device:
+   * (1) Data type support
+   * Returns DeviceCapability object.
+   */
+  virtual DeviceCapability getDeviceCapability(Device /*unused*/) const {
+    TORCH_CHECK(false, "Backend doesn't support getting device capabilities.");
+  }
+
+  /**
+   * Return true if all the work previously enqueued on the stream for
+   * asynchronous execution has completed running on the device.
+   */
+  virtual bool queryStream(const Stream& /*stream*/) const {
+    TORCH_CHECK(false, "Backend doesn't support querying streams.");
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the stream has completed running on the device.
+   */
+  virtual void synchronizeStream(const Stream& /*stream*/) const {
+    TORCH_CHECK(false, "Backend doesn't support synchronizing streams.");
+  }
+
+  /**
+   * Return true if this stream is currently recording work for graph capture.
+   */
+  virtual bool isStreamCapturing(const Stream& /*stream*/) const {
+    return false;
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * recorded on the event has completed running on the device.
+   */
+  virtual void synchronizeEvent(void* /*event*/) const {
+    TORCH_CHECK(false, "Backend doesn't support synchronizing events.");
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the device has been completed.
+   */
+  virtual void synchronizeDevice(const DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support synchronizing all streams on device.");
+  }
+
+  /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
    */
-  virtual void recordDataPtrOnStream(const c10::DataPtr&, const Stream&) const {
+  virtual void recordDataPtrOnStream(
+      const c10::DataPtr& /*unused*/,
+      const Stream& /*unused*/) const {}
+
+  /**
+   * Fetch the elapsed time between two recorded events.
+   */
+  virtual double elapsedTime(
+      void* /*event1*/,
+      void* /*event2*/,
+      const DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
   }
 
   /**
@@ -195,29 +282,36 @@ struct C10_API DeviceGuardImplInterface {
 // for devices that don't actually have a concept of device index.  Prominent
 // examples are CPU and Meta.
 template <DeviceType D>
-struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
-  NoOpDeviceGuardImpl() {}
+struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
+  NoOpDeviceGuardImpl() = default;
   DeviceType type() const override {
     return D;
   }
-  Device exchangeDevice(Device) const override {
+  Device exchangeDevice(Device /*unused*/) const override {
     return Device(D, -1); // no-op
   }
   Device getDevice() const override {
     return Device(D, -1);
   }
-  void setDevice(Device) const override {
+  void setDevice(Device /*unused*/) const override {
     // no-op
   }
-  void uncheckedSetDevice(Device d) const noexcept override {
+  void uncheckedSetDevice(Device /*unused*/) const noexcept override {
     // no-op
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device /*unused*/) const noexcept override {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
+
+  Stream getNewStream(Device /*unused*/, int priority = 0) const override {
+    // no-op
+    (void)priority;
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream /*unused*/) const noexcept override {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
@@ -225,22 +319,47 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
     return 1;
   }
 
+  DeviceCapability getDeviceCapability(Device /*unused*/) const override {
+    DeviceCapability cap;
+    if constexpr (D == DeviceType::Meta) {
+      cap.capability_data.capability_bits = 0;
+      // Meta only supports basic types for shape inference
+      // Byte, Char, Short, Int, Long, Float, Double,
+      // Bool, ComplexFloat, ComplexDouble
+      cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+          (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
+          (1ULL << kIndex_Int) | (1ULL << kIndex_Long) |
+          (1ULL << kIndex_Float) | (1ULL << kIndex_Double) |
+          (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_ComplexDouble) |
+          (1ULL << kIndex_Bool);
+    }
+    return cap;
+  }
+
   // Event-related functions
   void record(
-      void** event,
-      const Stream& stream,
-      const DeviceIndex device_index,
-      const EventFlag flag) const override {
+      void** /*event*/,
+      const Stream& /*stream*/,
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.");
   }
-  void block(void* event, const Stream& stream) const override {
+  void block(void* /*event*/, const Stream& /*stream*/) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.")
   }
-  bool queryEvent(void* event) const override {
+  bool queryEvent(void* /*event*/) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.")
   }
-  void destroyEvent(void* event, const DeviceIndex device_index)
+  void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept override {}
+
+  // Stream-related functions
+  bool queryStream(const Stream& /*stream*/) const override {
+    return true;
+  }
+  void synchronizeStream(const Stream& /*stream*/) const override {
+    // Don't wait for anything.
+  }
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so
@@ -257,9 +376,10 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
 // in a Meyer singleton), it implies that you must *leak* objects when
 // putting them in the registry.  This is done by deleting the destructor
 // on DeviceGuardImplInterface.
-extern C10_API std::atomic<const DeviceGuardImplInterface*>
-    device_guard_impl_registry[static_cast<size_t>(
-        DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+extern C10_API std::array<
+    std::atomic<const DeviceGuardImplInterface*>,
+    static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    device_guard_impl_registry;
 
 // I can't conveniently use c10/util/Registry.h for the following reason:
 // c10/util/Registry.h gives me a slow way of Create'ing a object of some
@@ -271,7 +391,9 @@ extern C10_API std::atomic<const DeviceGuardImplInterface*>
 
 class C10_API DeviceGuardImplRegistrar {
  public:
-  DeviceGuardImplRegistrar(DeviceType, const DeviceGuardImplInterface*);
+  DeviceGuardImplRegistrar(
+      DeviceType /*type*/,
+      const DeviceGuardImplInterface* /*impl*/);
 };
 
 #define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl)              \
@@ -295,9 +417,14 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   return p;
 }
 
+void C10_API
+registerDeviceGuard(DeviceType type, const DeviceGuardImplInterface* impl);
+
 inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
+
+void C10_API ensureCUDADeviceGuardSet();
 
 } // namespace impl
 } // namespace c10

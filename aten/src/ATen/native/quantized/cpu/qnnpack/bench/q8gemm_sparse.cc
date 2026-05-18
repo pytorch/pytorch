@@ -65,7 +65,7 @@ class Q8GEMM : public benchmark::Fixture {
   inline Q8GEMM(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : mr_(mr), nr_(nr), np_(np), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -109,7 +109,7 @@ class Q8GEMM : public benchmark::Fixture {
         requantization_scales.data(), 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -205,7 +205,7 @@ class Q8GEMM_Op : public Q8GEMM {
  public:
   inline Q8GEMM_Op() : Q8GEMM(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -228,7 +228,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
         row_block_size_(rbs),
         col_block_size_(cbs){}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -254,14 +254,13 @@ class Q8GEMMSparse : public benchmark::Fixture {
         colBlockSize(),
         sparsity(),
         kernel_zero_points.data());
-    bcsr_matrix_ =
-      qnnpack::generateBlockCSRMatrix(
-          k_.data(),
-          nc(),
-          kc(),
-          rowBlockSize(),
-          colBlockSize(),
-          kernel_zero_points.data());
+    bcsr_matrix_ = qnnpack::generateBlockCSRMatrix<uint32_t>(
+        k_.data(),
+        nc(),
+        kc(),
+        rowBlockSize(),
+        colBlockSize(),
+        kernel_zero_points.data());
     std::vector<float> dequantization_scales(num_zero_points_kernel, 0.75f);
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
@@ -273,7 +272,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
     };
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -370,7 +369,7 @@ class Q8GEMMSparse_Op : public Q8GEMMSparse {
  public:
   inline Q8GEMMSparse_Op() : Q8GEMMSparse(MR, NR, KR, RBS, CBS) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -466,13 +465,14 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data() + n,
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()) +
+                n,
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -512,13 +512,14 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c8x1_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data() + (n >> 3),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()) +
+                (n >> 3),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -585,13 +586,13 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -630,13 +631,13 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c8x1_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),

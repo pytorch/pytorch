@@ -5,9 +5,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Forward declarations.
 class DistAutogradContext;
@@ -21,9 +19,9 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
  public:
   explicit RecvRpcBackward(
       const AutogradMetadata& autogradMetadata,
-      std::shared_ptr<DistAutogradContext> autogradContext,
+      const std::shared_ptr<DistAutogradContext>& autogradContext,
       rpc::worker_id_t fromWorkerId,
-      std::unordered_map<c10::Device, c10::Device> deviceMap);
+      rpc::DeviceMap deviceMap);
 
   torch::autograd::variable_list apply(
       torch::autograd::variable_list&& grads) override;
@@ -41,9 +39,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
   rpc::worker_id_t fromWorkerId_;
 
   // Device mapping for tensors sent over RPC.
-  const std::unordered_map<c10::Device, c10::Device> deviceMap_;
+  const rpc::DeviceMap deviceMap_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

@@ -1,15 +1,14 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #include <ATen/metal/Context.h>
 #include <torch/script.h>
 
 namespace at {
-namespace native {
-namespace metal {
+namespace native::metal {
 
-at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& copy_from_metal_(Tensor& dst, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
@@ -26,13 +25,15 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       dst.is_contiguous(),
       "copy_from_metal is implemented only for contiguous output tensor");
-
+  if(dst.numel() == 0){
+    return dst;
+  }
   MetalTensorImplStorage& tensorImplStorage = getTensorImplStorage(src);
   tensorImplStorage.copy_data_to_host(dst.data_ptr<float>());
   return dst;
 }
 
-at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& copy_to_metal_(Tensor& dst, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
@@ -52,7 +53,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
   return dst;
 }
 
-at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
+static Tensor& metal_copy_impl_(Tensor& dst, const Tensor& src) {
   if (src.device().type() == at::kMetal && dst.device().type() == at::kCPU) {
     return copy_from_metal_(dst, src);
   }
@@ -67,13 +68,14 @@ at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
 
 #pragma mark - ATen Ops
 
-Tensor empty(
-    IntArrayRef size,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory,
-    c10::optional<MemoryFormat> memory_format) {
+static Tensor empty(
+    c10::SymIntArrayRef sym_size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<MemoryFormat> memory_format) {
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   TORCH_CHECK(
       !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Metal tensor");
@@ -85,13 +87,13 @@ Tensor empty(
       std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
-at::Tensor empty_strided(
+static Tensor empty_strided(
     IntArrayRef size,
     IntArrayRef stride,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_CHECK(
       !pin_memory.has_value() || !pin_memory.value(),
       "'pin_memory' argument is incompatible with Metal tensor");
@@ -102,17 +104,16 @@ at::Tensor empty_strided(
 
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("empty.memory_format", empty);
-  m.impl("empty_strided", TORCH_FN(empty_strided));
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), empty);
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(empty_strided));
 }
 
-} // namespace metal
-} // namespace native
+} // namespace native::metal
 
 struct MetalImpl : public at::metal::MetalInterface {
   bool is_metal_available() const override {
 #if defined(USE_PYTORCH_METAL)
-    return [[MPSCNNContext sharedInstance] available];
+    return [[MetalContext sharedInstance] available];
 #else
     return false;
 #endif

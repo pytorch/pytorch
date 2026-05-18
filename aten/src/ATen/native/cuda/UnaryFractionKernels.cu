@@ -1,14 +1,14 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload ceil because std::ceil does not work with std::complex types.
 template <typename scalar_t>
@@ -22,19 +22,25 @@ __host__ __device__ static inline std::complex<T> ceil_wrapper(std::complex<T> v
 }
 
 void ceil_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "ceil_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ceil_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "ceil_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ceil_wrapper(a);
+        });
+      });
 }
 
 void frac_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a - ::trunc(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "frac_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return a - ::trunc(a);
+        });
+      });
 }
 
 // We manually overload floor because std::floor does not work with std::complex types.
@@ -49,11 +55,14 @@ __host__ __device__ static inline std::complex<T> floor_wrapper(std::complex<T> 
 }
 
 void floor_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "floor_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return floor_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "floor_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return floor_wrapper(a);
+        });
+      });
 }
 
 template <typename scalar_t>
@@ -88,11 +97,14 @@ __host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::comple
 }
 
 void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "reciprocal_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return reciprocal_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "reciprocal_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return reciprocal_wrapper(a);
+        });
+      });
 }
 
 // We manually overload nearbyint because std::nearbyint does not work with std::complex types and ROCm.
@@ -105,24 +117,46 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
+#pragma push
+#pragma nv_diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
   return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
 }
 
-#pragma push
-#pragma diag_suppress 177   // Function was declared but never referenced
 __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
   return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
 }
 #pragma pop
 
 void round_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "round_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // We do not use std::round because we would like to round midway numbers to the nearest even integer.
-      return nearbyint_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "round_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // We do not use std::round because we would like to round midway numbers to the nearest even integer.
+          return nearbyint_wrapper(a);
+        });
+      });
+}
+
+void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "round_cuda",
+      [&]() {
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        gpu_kernel(iter, [ten_pow_decimals, neg_flag]GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+        });
+      });
 }
 
 // We manually overload trunc because std::trunc does not work with std::complex types and ROCm.
@@ -144,18 +178,22 @@ __host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::comple
 }
 
 void trunc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "trunc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return trunc_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "trunc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return trunc_wrapper(a);
+        });
+      });
 }
 
-REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
-REGISTER_DISPATCH(frac_stub, &frac_kernel_cuda);
-REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
-REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda);
-REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
-REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
+REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda)
+REGISTER_DISPATCH(frac_stub, &frac_kernel_cuda)
+REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda)
+REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda)
+REGISTER_DISPATCH(round_stub, &round_kernel_cuda)
+REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda)
+REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda)
 
-}} // namespace at::native
+} // namespace at::native

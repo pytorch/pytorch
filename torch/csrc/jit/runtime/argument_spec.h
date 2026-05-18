@@ -3,30 +3,32 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
+namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
 
-inline static at::Device ConvertIntToCPUOrCUDA(int device) {
-  return device < 0 ? at::kCPU : at::Device(DeviceType::CUDA, device);
-}
 struct ArgumentInfo {
   friend struct ArgumentSpec;
-  using plain_data_type = uint32_t;
+  using plain_data_type = uint64_t;
 
   bool defined() const {
     return defined_;
   }
-  int device() const {
-    return device_;
+  at::Device device() const {
+    return at::Device(DeviceType(dev_type_), device_);
   }
   // XXX: It is guaranteed that this will return false when called on non-tensor
   // arguments
@@ -34,7 +36,6 @@ struct ArgumentInfo {
     return requires_grad_;
   }
   int dim() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return dim_;
   }
   at::ScalarType type() const {
@@ -45,10 +46,7 @@ struct ArgumentInfo {
       return TensorType::get();
 
     return TensorType::create(
-        type(),
-        ConvertIntToCPUOrCUDA(device()),
-        c10::optional<size_t>(dim()),
-        requires_grad());
+        type(), device(), std::optional<size_t>(dim()), requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -59,22 +57,24 @@ struct ArgumentInfo {
   unsigned requires_grad_ : 1;
   unsigned : 5;
   unsigned dim_ : 8;
-  int device_ : 8; // NOTE: this needs to be signed because we use -1 to
-                   // represent CPU
+  unsigned device_ : 8;
   unsigned type_ : 8;
+  unsigned dev_type_ : 16;
+  unsigned : 16;
 };
 
 static_assert(
-    std::is_pod<ArgumentInfo>::value,
+    std::is_standard_layout_v<ArgumentInfo>,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code =
-        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
+      : hash_code(c10::hash_combine(
+            num_flat_tensor_inputs,
+            num_flat_optional_inputs)) {
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
@@ -99,19 +99,23 @@ struct ArgumentSpec {
     // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
     // show overhead in extra refcounting along this path
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
-    if ((arg.defined_ = t->defined())) {
-      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+    arg.defined_ = t->defined();
+    if (arg.defined_) {
+      arg.requires_grad_ = with_grad && t->requires_grad();
       arg.dim_ = t->dim();
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      arg.device_ = t->is_cuda() ? t->get_device() : -1;
+      at::Device device = t->device();
+      arg.dev_type_ =
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          static_cast<std::underlying_type_t<DeviceType>>(device.type());
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
     combineHash(arg);
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ArgumentInfo::plain_data_type arg_data;
+    ArgumentInfo::plain_data_type arg_data = 0;
     std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
     hash_code = c10::hash_combine(hash_code, arg_data);
   }
@@ -127,7 +131,7 @@ struct ArgumentSpec {
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (tensor_args.size() == 0)
+    if (tensor_args.empty())
       return true;
     return std::memcmp(
                tensor_args.data(),
@@ -149,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -217,7 +221,9 @@ struct CompleteArgumentInfoPOD {
   unsigned defined : 1;
   unsigned requires_grad : 1;
   signed device : 14;
-  uint32_t total_dims; // all TensorInfoPODs are in CompleteArgumentSpec's
+  unsigned dev_type : 16;
+  unsigned
+      total_dims : 16; // all TensorInfoPODs are in CompleteArgumentSpec's
                        // tensor_info() array. total_dims is the total number of
                        // dimensions seen so far in all previous members of
                        // tensor_info(), including this tensor 2*total_dims
@@ -234,10 +240,10 @@ struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
-      : hash_code(0), ninputs(inputs.size()) {
-    int32_t all_dims = 0;
-    const int32_t num_inputs = inputs.size();
-    for (int32_t i = 0; i < num_inputs; i++) {
+      : ninputs(inputs.size()) {
+    int64_t all_dims = 0;
+    const auto num_inputs = inputs.size();
+    for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
         continue;
       auto& tensor = inputs[i].toTensor();
@@ -250,7 +256,7 @@ struct CompleteArgumentSpec {
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
-    for (int32_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       auto& pod = pods[i];
       pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
       if (pod.is_tensor) {
@@ -258,8 +264,12 @@ struct CompleteArgumentSpec {
         pod.defined = t.defined();
         if (pod.defined) {
           pod.type = static_cast<int>(t.scalar_type());
-          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-          pod.device = (!t.is_cuda()) ? -1 : t.get_device();
+          at::Device device = t.device();
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          pod.dev_type =
+              static_cast<std::underlying_type_t<DeviceType>>(device.type());
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();
           auto sizes = t.sizes();
@@ -271,6 +281,10 @@ struct CompleteArgumentSpec {
         }
       }
       // each POD has a running tally of all dimensions including its own
+      TORCH_CHECK(
+          total_dims < std::numeric_limits<uint16_t>::max(),
+          "The number of dims cannot be packed into CompleteArgumentSpec:",
+          total_dims);
       pod.total_dims = total_dims;
     }
     // we precompute the hash_code to minimize the time inside of hash
@@ -294,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -311,7 +325,7 @@ struct CompleteArgumentSpec {
   int64_t* sizes_strides() {
     return data.data() + ninputs;
   }
-  size_t hash_code; // precomputed on construction
+  size_t hash_code{0}; // precomputed on construction
   size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:
@@ -336,8 +350,10 @@ struct CompleteArgumentInfo {
   bool requires_grad() const {
     return pod(i).requires_grad;
   }
-  int device() const {
-    return pod(i).device;
+  at::Device device() const {
+    return at::Device(
+        DeviceType(pod(i).dev_type),
+        static_cast<c10::DeviceIndex>(pod(i).device));
   }
   int ndimension() const {
     // See [valid range], it is always valid to ask for offset for (i + 1)
@@ -357,7 +373,7 @@ struct CompleteArgumentInfo {
       return TensorType::get();
     return TensorType::create(
         type(),
-        ConvertIntToCPUOrCUDA(device()),
+        device(),
         c10::VaryingShape<int64_t>{sizes()},
         c10::VaryingShape<int64_t>{strides()},
         requires_grad());
@@ -371,7 +387,6 @@ struct CompleteArgumentInfo {
   int sizes_strides_offset(int j) const {
     if (j == 0)
       return 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 2 * pod(j - 1).total_dims;
   }
   const CompleteArgumentInfoPOD& pod(int j) const {
@@ -387,24 +402,24 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad() << ", dims=" << info.dim()
-      << ")";
+      << ')';
   return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
-  out << "{";
-  for (size_t i = 0; i < spec.numTensors(); ++i) {
+  out << '{';
+  for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
     out << spec.tensorAt(i);
   }
   out << "; ";
-  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+  for (const auto i : c10::irange(spec.numOptionals())) {
     if (i > 0)
       out << ", ";
     out << spec.isPresent(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -416,20 +431,20 @@ inline std::ostream& operator<<(
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad()
-      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ')';
   return out;
 }
 
 inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
-  out << "{";
-  for (size_t i = 0; i < spec.size(); ++i) {
+  out << '{';
+  for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -437,14 +452,13 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
 }
 
-inline c10::optional<int8_t> convertOptional(
-    c10::optional<c10::ScalarType> const& from) {
-  return (from) ? c10::optional<int8_t>(static_cast<int8_t>(*from))
-                : c10::optional<int8_t>{};
+inline std::optional<int8_t> convertOptional(
+    std::optional<c10::ScalarType> const& from) {
+  return from ? std::optional<int8_t>(static_cast<int8_t>(*from))
+              : std::optional<int8_t>{};
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 
@@ -453,7 +467,7 @@ struct hash<c10::VaryingShape<T>> {
   size_t operator()(const c10::VaryingShape<T>& vs) const {
     return c10::get_hash(
         vs.size(),
-        vs.size() ? vs.sizes().value() : std::vector<c10::optional<T>>());
+        vs.size() ? vs.sizes().value() : std::vector<std::optional<T>>());
   }
 };
 
@@ -461,10 +475,10 @@ template <>
 struct hash<c10::TensorType> {
   size_t operator()(const c10::TensorType& ptt) const {
     return c10::get_hash<
-        c10::optional<int8_t>,
+        std::optional<int8_t>,
         c10::VaryingShape<int64_t>,
         c10::VaryingShape<int64_t>,
-        c10::optional<bool>>(
+        std::optional<bool>>(
         torch::jit::convertOptional(ptt.scalarType()),
         ptt.sizes(),
         ptt.strides(),
@@ -474,14 +488,17 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 } // namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

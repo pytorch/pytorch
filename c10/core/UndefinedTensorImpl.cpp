@@ -5,16 +5,22 @@ namespace c10 {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
-    : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
+    : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), std::nullopt) {
   set_storage_access_should_throw();
+  // TODO: accessing the sizes on an undefined tensor is not meaningful
+  // and should error too, but empirically it does not!
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
-int64_t UndefinedTensorImpl::size(int64_t d) const {
-  TORCH_CHECK(false, "size(dim) called on an undefined Tensor");
+c10::SymBool UndefinedTensorImpl::sym_is_contiguous_custom(
+    MemoryFormat format) const {
+  return is_contiguous_default(format);
 }
-
-int64_t UndefinedTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "stride(dim) called on an undefined Tensor");
+IntArrayRef UndefinedTensorImpl::strides_custom() const {
+  TORCH_CHECK(false, "strides() called on an undefined Tensor");
+}
+SymIntArrayRef UndefinedTensorImpl::sym_strides_custom() const {
+  TORCH_CHECK(false, "sym_strides() called on an undefined Tensor");
 }
 
 #ifdef DEBUG
@@ -25,19 +31,21 @@ bool UndefinedTensorImpl::has_storage() const {
 }
 #endif
 
-void UndefinedTensorImpl::set_storage_offset(int64_t) {
+void UndefinedTensorImpl::set_storage_offset(int64_t /*storage_offset*/) {
   TORCH_CHECK(false, "set_storage_offset() called on an undefined Tensor");
-}
-
-IntArrayRef UndefinedTensorImpl::strides() const {
-  TORCH_CHECK(false, "strides() called on undefined Tensor");
 }
 
 const char* UndefinedTensorImpl::tensorimpl_type_name() const {
   return "UndefinedTensorImpl";
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+#ifdef _WIN32
+UndefinedTensorImpl& UndefinedTensorImpl::getInstance() {
+  static UndefinedTensorImpl instance;
+  return instance;
+}
+#else
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
+#endif
 
 } // namespace c10

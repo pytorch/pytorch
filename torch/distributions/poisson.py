@@ -1,9 +1,14 @@
-from numbers import Number
+# mypy: allow-untyped-defs
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
+from torch.types import _Number, Number
+
+
+__all__ = ["Poisson"]
 
 
 class Poisson(ExponentialFamily):
@@ -17,6 +22,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +SKIP("poisson_cpu not implemented for 'Long'")
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
         tensor([ 3.])
@@ -24,24 +30,34 @@ class Poisson(ExponentialFamily):
     Args:
         rate (Number, Tensor): the rate parameter
     """
-    arg_constraints = {'rate': constraints.positive}
+
+    # pyrefly: ignore [bad-override]
+    arg_constraints = {"rate": constraints.nonnegative}
     support = constraints.nonnegative_integer
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.rate
 
     @property
-    def variance(self):
+    def mode(self) -> Tensor:
+        return self.rate.floor()
+
+    @property
+    def variance(self) -> Tensor:
         return self.rate
 
-    def __init__(self, rate, validate_args=None):
-        self.rate, = broadcast_all(rate)
-        if isinstance(rate, Number):
+    def __init__(
+        self,
+        rate: Tensor | Number,
+        validate_args: bool | None = None,
+    ) -> None:
+        (self.rate,) = broadcast_all(rate)
+        if isinstance(rate, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.rate.size()
-        super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Poisson, _instance)
@@ -60,11 +76,12 @@ class Poisson(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
-        return (rate.log() * value) - rate - (value + 1).lgamma()
+        return value.xlogy(rate) - rate - (value + 1).lgamma()
 
     @property
-    def _natural_params(self):
-        return (torch.log(self.rate), )
+    def _natural_params(self) -> tuple[Tensor]:
+        return (torch.log(self.rate),)
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x):
         return torch.exp(x)

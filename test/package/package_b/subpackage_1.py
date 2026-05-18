@@ -1,5 +1,6 @@
 result = "subpackage_1"
 
+
 class PackageBSubpackage1Object_0:
     __slots__ = ["obj"]
 

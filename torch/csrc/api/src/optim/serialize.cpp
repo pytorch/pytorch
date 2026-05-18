@@ -1,16 +1,10 @@
 #include <torch/optim/serialize.h>
 
-#include <torch/serialize/archive.h>
-#include <torch/types.h>
-
-#include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
@@ -50,5 +44,4 @@ void serialize(
     steps.push_back(step.item<int64_t>());
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

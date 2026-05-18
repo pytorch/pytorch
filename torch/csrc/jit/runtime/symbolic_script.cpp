@@ -3,10 +3,8 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
@@ -28,10 +26,12 @@ const std::vector<std::string> functions = {
 
         def AD_sum_backward(grad,
                             sizes: List[int],
-                            dims: List[int],
+                            dims: Optional[List[int]],
                             keepdim: bool):
             if not keepdim and len(sizes) > 0:
-                if len(dims) == 1:
+                if dims is None:
+                    return grad.expand(sizes)
+                elif len(dims) == 1:
                     return grad.unsqueeze(dims[0]).expand(sizes)
                 else:
                     res = AD_unsqueeze_multiple(grad, dims, len(sizes))
@@ -58,7 +58,7 @@ const std::vector<std::string> functions = {
             return torch.mean(self, dtype=dtype), backward
 
         def mean_1(self,
-                   dim: List[int],
+                   dim: Optional[List[int]],
                    keepdim: bool,
                    *,
                    dtype: Optional[int]):
@@ -89,26 +89,32 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, correction: int):
+        def AD_var_backward_0(grad, self, correction: number):
             # FIXME: torchscript: div(float, float)
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
-                         dims: List[int]):
+                         dims: Optional[List[int]]):
             if len(sizes) == 0:
                 return 1
 
             size = 1
-            for i in range(len(dims)):
-                d = dims[i]
-                size *= sizes[d]
+
+            if dims is None:
+              for s in sizes:
+                size *= s
+
+            else:
+              for i in range(len(dims)):
+                  d = dims[i]
+                  size *= sizes[d]
 
             return size
 
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              correction: int,
+                              correction: number,
                               keepdim: bool):
             if self.dim() == 0:
                 return AD_var_backward_0(grad, self, correction)
@@ -122,7 +128,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_2(grad,
                               self,
                               dim: Optional[List[int]],
-                              correction: Optional[int],
+                              correction: Optional[number],
                               keepdim: bool):
             if correction is None:
                 correction = 1
@@ -142,13 +148,13 @@ const std::vector<std::string> functions = {
             return std_out, backward
 
         def std_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -156,7 +162,7 @@ const std::vector<std::string> functions = {
         def std_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
             def backward(grad_output):
@@ -175,12 +181,12 @@ const std::vector<std::string> functions = {
             return torch.var(self, unbiased), backward
 
         def var_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
@@ -188,7 +194,7 @@ const std::vector<std::string> functions = {
         def var_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             def backward(grad_output):
                 grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
@@ -396,7 +402,7 @@ const std::vector<std::string> functions = {
 
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
-        # whice potentially uses large intermediate of size b*m*p,
+        # which potentially uses large intermediate of size b*m*p,
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):
@@ -479,6 +485,24 @@ const std::vector<std::string> functions = {
                 grad_tensor2 = (grad * tensor1)._grad_sum_to_size(tensor2_size)
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
+
+        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None
+
+            return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
+
+        def _autocast_to_reduced_precision(self,
+                                          cuda_enabled : bool,
+                                          cpu_enabled : bool,
+                                          cuda_dtype : int,
+                                          cpu_dtype : int):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None, None, None
+
+            return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
 
         def _dim_arange(like,
                         dim: int):
@@ -613,7 +637,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -883,13 +907,46 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
+        def leaky_relu(self, negative_slope: number):
+            result = torch.leaky_relu(self, negative_slope)
+            def backward(grad_output):
+                return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
+            return result, backward
+
+        def gelu(self : Tensor, *, approximate : str):
+            result = torch.gelu(self, approximate=approximate)
+            def backward(grad_output):
+                return torch.gelu_backward(grad_output, self, approximate=approximate), None
+            return result, backward
+
+        def silu(self):
+            result = torch.silu(self)
+            def backward(grad_output):
+                input_sigmoid = torch.sigmoid(self)
+                return grad_output * (input_sigmoid * (1 + self * (1 - input_sigmoid)))
+            return result, backward
+
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (result > 3.).type_as(result)
-                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                m = (self >= 3.).type_as(result)
+                m = torch.where((self > -3.) & (self < 3.),  self / 3. + .5, m)
                 return grad_output * m
+            return result, backward
 
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                m = (self > -3.) & (self < 3.)
+                lhs = grad_output * (1.0 / 6.0)
+                return torch.where(m, lhs, m.type_as(self))
             return result, backward
 
         def erfc(self):
@@ -1020,11 +1077,12 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self, *, memory_format: Optional[int]):
-            def backward(grad_output):
-                return None
+        # TODO: Fix rand_like to match expected format
+        # def rand_like(self, *, memory_format: Optional[int]):
+        #    def backward(grad_output):
+        #        return None
 
-            return torch.rand_like(self, memory_format=memory_format), backward
+        #    return torch.rand_like(self, memory_format=memory_format), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
@@ -1086,7 +1144,7 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
-        def batch_norm_disabled(input : Tensor,
+        def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        running_mean : Optional[Tensor],
@@ -1110,100 +1168,31 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
-        def layer_norm_disabled(input : Tensor,
+        def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
                        cudnn_enable : bool):
 
-            input_ndim = input.dim()
-            normalized_ndim = len(normalized_shape)
-            n = 1
-            for i in range(input_ndim - normalized_ndim):
-                n *= input.size(i)
-
-            input_reshape = input.contiguous().view(1, n, -1)
-
-            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
-                input_reshape, None, None, None, None, True,
-                0.0, eps, cudnn_enable)
-
-            bn_out = bn_out.view(input.size())
-            if weight is not None and bias is not None:
-                output = bias.addcmul(bn_out, weight, value=1)
-            elif weight is not None:
-                output = bn_out.mul(weight)
-            elif bias is not None:
-                output = bn_out.add(bias)
-            else:
-                output = bn_out
+            output, mean, rstd = torch.native_layer_norm(input, normalized_shape, weight, bias, eps)
 
             def backward(grad_output):
-                if weight is not None and bias is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                elif weight is not None:
-                    grad_bn_out = grad_output * weight
-                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
-                    grad_bias = None
-                elif bias is not None:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = grad_output._grad_sum_to_size(bias.size())
-                else:
-                    grad_bn_out = grad_output
-                    grad_weight= None
-                    grad_bias = None
-
-
-                grad_bn_out = grad_bn_out.contiguous().view(1, n, -1)
-
-                grad_input, _, _ = torch._batch_norm_impl_index_backward(
-                    impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False], reserve)
-
-                grad_input = grad_input.view(input.size())
+                output_mask = [True, weight is not None, bias is not None]
+                grad_input, grad_weight, grad_bias = torch.native_layer_norm_backward(grad_output, input, normalized_shape, mean, rstd, weight, bias, output_mask)
                 return grad_input, None, grad_weight, grad_bias, None, None
-
             return output, backward
-
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
 
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            # if `train == false` we need to set `p1m` to 0 so `scale == 1`
+            p1m = (1. - p) * float(train)
+            scale = 1. / (float(p1m == 0.) + p1m)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
                 return grad_input, None, None
             return res, backward
 
@@ -1222,7 +1211,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1236,7 +1225,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1382,6 +1371,15 @@ const std::vector<std::string> functions = {
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
 
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
+
         def fmod(self,
                  other: number):
             def backward(grad_output):
@@ -1440,6 +1438,18 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
+        def hardshrink(self, lambd: number):
+          def backward(grad_output):
+            mask = ((self > lambd) | (self < -lambd))
+            return grad_output * mask, None
+          return torch.hardshrink(self, lambd=lambd), backward
+
+        def hardtanh(self, min_val: number, max_val: number):
+          def backward(grad_output):
+            mask = ((self >= min_val) * (self <= max_val))
+            return grad_output * mask, None, None
+          return torch.hardtanh(self, min_val=min_val, max_val=max_val), backward
+
         def clamp_1(self,
                     min: Optional[number],
                     max: Optional[number]):
@@ -1475,21 +1485,19 @@ const std::vector<std::string> functions = {
           return torch.clamp(self, min=min, max=max), backward
     )"};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
-std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
+static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
+    Value* closure) {
   TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
@@ -1502,7 +1510,7 @@ std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
-Argument originalReturnType(const TupleTypePtr& tup) {
+static Argument originalReturnType(const TupleTypePtr& tup) {
   TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
@@ -1515,7 +1523,7 @@ Argument originalReturnType(const TupleTypePtr& tup) {
 // overloaded functions of `func`.
 // Remove the suffix before adding the schema string to map
 // schema_to_graphs.
-std::string overloadedSchemaString(const FunctionSchema& schema) {
+static std::string overloadedSchemaString(const FunctionSchema& schema) {
   const auto& schema_name = schema.name();
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
@@ -1531,31 +1539,42 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   return schema_string;
 }
 
-bool isHelperFunction(const std::string& method_name) {
+static bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
-  return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
+  return method_name.starts_with(helper_prefix);
 }
 
-void loadModule(const CompilationUnit& module) {
+static void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
+      throw(
+          ErrorReport(forward_tuple->sourceRange())
+          << "gradient must return literal a tuple");
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* context;
+    Value* context = nullptr;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
+
+    // checks that num forward graph inputs equals num backward graph outputs
+    TORCH_CHECK(
+        pair.forward->inputs().size() ==
+            unpackOutputs(pair.backward->outputs().vec()).size(),
+        "The autodiff implementation of ",
+        method->name(),
+        " backward() returns an incorrect number of values: ",
+        unpackOutputs(pair.backward->outputs().vec()).size(),
+        " instead of ",
+        pair.forward->inputs().size());
 
     // do surgery on the forward function to remove the closure tuple and
     // replace it with the context variable:
@@ -1588,17 +1607,17 @@ void loadModule(const CompilationUnit& module) {
   }
 }
 
-void loadFunctions() {
+static void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
+    compilation_unit.define(std::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }
 
-c10::optional<GradientPair> gradientInfoForSchema(
+std::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_graphs.size() == 0) {
+  if (schema_to_graphs.empty()) {
     loadFunctions();
   }
   auto cache_it = cached_gradient_pairs.find(&schema);
@@ -1608,7 +1627,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {
@@ -1617,12 +1635,11 @@ c10::optional<GradientPair> gradientInfoForSchema(
       return sym_script_it->second;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {
   return gradientInfoForSchema(schema).has_value();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

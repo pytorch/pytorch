@@ -1,6 +1,5 @@
 #include <atomic>
 
-#include <ATen/Tensor.h>
 #include <ATen/vulkan/Context.h>
 
 #ifdef USE_VULKAN_API
@@ -10,7 +9,6 @@
 namespace at {
 namespace vulkan {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<const VulkanImplInterface*> g_vulkan_impl_registry;
 
 VulkanImplRegistrar::VulkanImplRegistrar(VulkanImplInterface* impl) {
@@ -22,7 +20,7 @@ at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
   if (p) {
     return p->vulkan_copy_(self, src);
   }
-  AT_ERROR("Vulkan backend was not linked to the build");
+  TORCH_CHECK(false, "Vulkan backend was not linked to the build");
 }
 } // namespace vulkan
 

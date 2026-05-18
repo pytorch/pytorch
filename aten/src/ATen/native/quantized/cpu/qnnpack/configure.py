@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -31,7 +31,6 @@ def main(args):
         ],
         extra_include_dirs="src",
     ):
-
         requantization_objects = [
             build.cc("requantization/precise-scalar.c"),
             build.cc("requantization/fp32-scalar.c"),
@@ -115,6 +114,7 @@ def main(args):
                     build.cc("q8conv/4x8-neon.c"),
                     build.cc("q8conv/8x8-neon.c"),
                     build.cc("q8dwconv/mp8x25-neon.c"),
+                    build.cc("q8dwconv/mp8x27-neon.c"),
                     build.cc("q8dwconv/up8x9-neon.c"),
                     build.cc("q8gavgpool/mp8x7p7q-neon.c"),
                     build.cc("q8gavgpool/up8x7-neon.c"),
@@ -157,6 +157,7 @@ def main(args):
                         build.cc("q8avgpool/up8xm-sse2.c"),
                         build.cc("q8conv/4x4c2-sse2.c"),
                         build.cc("q8dwconv/mp8x25-sse2.c"),
+                        build.cc("q8dwconv/mp8x27-sse2.c"),
                         build.cc("q8dwconv/up8x9-sse2.c"),
                         build.cc("q8gavgpool/mp8x7p7q-sse2.c"),
                         build.cc("q8gavgpool/up8x7-sse2.c"),
@@ -190,7 +191,6 @@ def main(args):
         },
         extra_include_dirs=["src", "test"],
     ):
-
         build.unittest("hgemm-test", build.cxx("hgemm.cc"))
         build.unittest("q8avgpool-test", build.cxx("q8avgpool.cc"))
         build.unittest("q8conv-test", build.cxx("q8conv.cc"))
@@ -250,7 +250,6 @@ def main(args):
         isa=benchmark_isa,
         extra_include_dirs="src",
     ):
-
         build.benchmark("add-bench", build.cxx("add.cc"))
         build.benchmark("average-pooling-bench", build.cxx("average-pooling.cc"))
         build.benchmark("channel-shuffle-bench", build.cxx("channel-shuffle.cc"))

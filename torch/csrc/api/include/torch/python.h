@@ -8,24 +8,25 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_tuples.h>
 
 #include <iterator>
 #include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
-namespace torch {
-namespace python {
+namespace torch::python {
 namespace detail {
 inline Device py_object_to_device(py::object object) {
   PyObject* obj = object.ptr();
   if (THPDevice_Check(obj)) {
     return reinterpret_cast<THPDevice*>(obj)->device;
   }
-  throw TypeError("Expected device");
+  TORCH_CHECK_TYPE(false, "Expected device");
 }
 
 inline Dtype py_object_to_dtype(py::object object) {
@@ -33,7 +34,7 @@ inline Dtype py_object_to_dtype(py::object object) {
   if (THPDtype_Check(obj)) {
     return reinterpret_cast<THPDtype*>(obj)->scalar_type;
   }
-  throw TypeError("Expected dtype");
+  TORCH_CHECK_TYPE(false, "Expected dtype");
 }
 
 template <typename ModuleType>
@@ -45,7 +46,7 @@ using PyModuleClass =
 /// to which it delegates all calls.
 template <typename ModuleType>
 void bind_cpp_module_wrapper(
-    py::module module,
+    const py::module& module,
     PyModuleClass<ModuleType> cpp_class,
     const char* name) {
   // Grab the `torch.nn.cpp.ModuleWrapper` class, which we'll subclass
@@ -79,7 +80,9 @@ void bind_cpp_module_wrapper(
   // which replaces its methods with those of the C++ module.
   wrapper_class.attr("__init__") = py::cpp_function(
       [cpp_module, cpp_class](
-          py::object self, py::args args, py::kwargs kwargs) {
+          const py::object& self,
+          const py::args& args,
+          const py::kwargs& kwargs) {
         cpp_module.attr("__init__")(self, cpp_class(*args, **kwargs));
       },
       py::is_method(wrapper_class));
@@ -137,7 +140,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
-           [](ModuleType& module, py::object /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
+           [](ModuleType& module, const py::object& /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),
@@ -159,8 +162,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
           py::arg("non_blocking") = false)
       .def("to",
           [](ModuleType& module,
-             py::object device,
-             py::object dtype,
+             const py::object& device,
+             const py::object& dtype,
              bool non_blocking) {
               if (device.is_none()) {
                 module.to(detail::py_object_to_dtype(dtype), non_blocking);
@@ -208,8 +211,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
 ///  }
 /// \endrst
 template <typename ModuleType, bool force_enable = false>
-torch::disable_if_t<
-    torch::detail::has_forward<ModuleType>::value && !force_enable,
+std::enable_if_t<
+    !torch::detail::has_forward<ModuleType>::value || force_enable,
     detail::PyModuleClass<ModuleType>>
 bind_module(py::module module, const char* name) {
   py::module cpp = module.def_submodule("cpp");
@@ -245,8 +248,7 @@ bind_module(py::module module, const char* name) {
 /// \endrst
 template <
     typename ModuleType,
-    typename =
-        torch::enable_if_t<torch::detail::has_forward<ModuleType>::value>>
+    typename = std::enable_if_t<torch::detail::has_forward<ModuleType>::value>>
 detail::PyModuleClass<ModuleType> bind_module(
     py::module module,
     const char* name) {
@@ -254,5 +256,4 @@ detail::PyModuleClass<ModuleType> bind_module(
       .def("forward", &ModuleType::forward)
       .def("__call__", &ModuleType::forward);
 }
-} // namespace python
-} // namespace torch
+} // namespace torch::python

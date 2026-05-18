@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 from torch.nn import functional as F
 
@@ -18,7 +20,7 @@ class TestMetalRewritePass(TestCase):
         scripted_model = torch.jit.script(module_instance)
         scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
-        ref_result = scripted_model(input_data)
+        scripted_model(input_data)
         torch._C._jit_pass_metal_insert_prepacked_ops(scripted_model._c)
         if fuse_clamping_ops or prepack_removal:
             scripted_model._c = torch._C._freeze_module(scripted_model._c)
@@ -53,7 +55,6 @@ class TestMetalRewritePass(TestCase):
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
@@ -61,8 +62,8 @@ class TestMetalRewritePass(TestCase):
         conv_bias_shape = (output_channels)
 
         class Conv2D(torch.nn.Module):
-            def __init__(self):
-                super(Conv2D, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
@@ -81,8 +82,8 @@ class TestMetalRewritePass(TestCase):
         TestMetalRewritePass.validate_transformed_module(Conv2D(), pattern_count_map, data_shape)
 
         class Conv2DRelu(torch.nn.Module):
-            def __init__(self):
-                super(Conv2DRelu, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
@@ -120,8 +121,8 @@ class TestMetalRewritePass(TestCase):
 
 
         class Conv2DHardtanh(torch.nn.Module):
-            def __init__(self):
-                super(Conv2DHardtanh, self).__init__()
+            def __init__(self) -> None:
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides

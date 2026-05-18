@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
@@ -7,6 +8,7 @@ from unittest import skipIf
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -14,26 +16,25 @@ except ImportError:
     from common import PackageTestCase
 
 
-@skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
 class TestResources(PackageTestCase):
     """Tests for access APIs for packaged resources."""
 
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")
@@ -75,6 +76,7 @@ class TestResources(PackageTestCase):
 
         self.assertIsNone(importer.get_resource_reader("nonexistent_package"))
 
+    @skipIf(version_info >= (3, 13), "https://github.com/python/cpython/issues/127012")
     def test_package_resource_access(self):
         """Packaged modules should be able to use the importlib.resources API to access
         resources saved in the package.
@@ -89,7 +91,7 @@ class TestResources(PackageTestCase):
             """
         )
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
@@ -101,9 +103,9 @@ class TestResources(PackageTestCase):
 
     def test_importer_access(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             he.save_text("main", "main", "my string")
-            he.save_binary("main", "main_binary", "my string".encode("utf-8"))
+            he.save_binary("main", "main_binary", b"my string")
             src = dedent(
                 """\
                 import importlib
@@ -118,7 +120,30 @@ class TestResources(PackageTestCase):
         hi = PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
-        self.assertEqual(m.b, "my string".encode("utf-8"))
+        self.assertEqual(m.b, b"my string")
+
+    def test_resource_access_by_path(self):
+        """
+        Tests that packaged code can used importlib.resources.path.
+        """
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.save_binary("string_module", "my_string", b"my string")
+            src = dedent(
+                """\
+                import importlib.resources
+                import string_module
+
+                with importlib.resources.path(string_module, 'my_string') as path:
+                    with open(path, mode='r', encoding='utf-8') as f:
+                        s = f.read()
+                """
+            )
+            he.save_source_string("main", src, is_package=True)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        m = hi.import_module("main")
+        self.assertEqual(m.s, "my string")
 
 
 if __name__ == "__main__":

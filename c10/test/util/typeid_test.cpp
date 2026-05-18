@@ -10,12 +10,11 @@ class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
 } // namespace
 
-CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestBar);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::ItemSize<int>(), sizeof(int));
   EXPECT_EQ(TypeMeta::ItemSize<float>(), sizeof(float));
@@ -28,17 +27,15 @@ TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::Id<TypeMetaTestFoo>(), TypeMeta::Id<TypeMetaTestFoo>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
   EXPECT_EQ("nullptr (uninitialized)", null_meta.name());
   TypeMeta int_meta = TypeMeta::Make<int>();
   EXPECT_EQ("int", int_meta.name());
   TypeMeta string_meta = TypeMeta::Make<string>();
-  EXPECT_TRUE(c10::string_view::npos != string_meta.name().find("string"));
+  EXPECT_TRUE(std::string_view::npos != string_meta.name().find("string"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMeta) {
   TypeMeta int_meta = TypeMeta::Make<int>();
   TypeMeta float_meta = TypeMeta::Make<float>();
@@ -69,34 +66,34 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_EQ(bar_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestBar>());
   EXPECT_EQ(int_meta.name(), "int");
   EXPECT_EQ(float_meta.name(), "float");
-  EXPECT_NE(foo_meta.name().find("TypeMetaTestFoo"), c10::string_view::npos);
-  EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
+  EXPECT_NE(foo_meta.name().find("TypeMetaTestFoo"), std::string_view::npos);
+  EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), std::string_view::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassAllowAssignment {
  public:
-  ClassAllowAssignment() : x(42) {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
+  ClassAllowAssignment() = default;
+  ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
-  int x;
+  int x{42};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassNoAssignment {
  public:
-  ClassNoAssignment() : x(42) {}
+  ClassNoAssignment() = default;
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
-  int x;
+  int x{42};
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE(ClassNoAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassNoAssignment);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();
   EXPECT_EQ(fundamental_meta.placementNew(), nullptr);
@@ -126,7 +123,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }

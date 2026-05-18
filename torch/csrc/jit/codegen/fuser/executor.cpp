@@ -1,31 +1,23 @@
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 
-#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <optional>
 
-#include <algorithm>
-#include <iostream> // TODO: remove, debugging only
-#include <map>
-#include <stdexcept>
-#include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Returns the "map size" for this run, which is the common size for all
 // intermediate tensors.
-static c10::optional<std::vector<int64_t>> getMapSize(
+static std::optional<std::vector<int64_t>> getMapSize(
     const KernelSpec& spec,
     at::TensorList args,
     at::IntArrayRef arg_subset) {
@@ -33,7 +25,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
   // should be straightforward.
-  // Note: left unitialized since empty shape is broadcastable to any shape
+  // Note: left uninitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
   map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
@@ -43,7 +35,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
       try {
         map_size = at::infer_size(map_size, arg.sizes());
       } catch (...) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } else {
       auto tensor_sizes = arg.sizes().vec();
@@ -51,13 +43,13 @@ static c10::optional<std::vector<int64_t>> getMapSize(
       const auto dim =
           at::maybe_wrap_dim(chunk_desc.dim(), tensor_sizes.size());
       if (tensor_sizes[dim] % num_chunks != 0) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       tensor_sizes[dim] /= num_chunks;
       try {
         map_size = at::infer_size(map_size, tensor_sizes);
       } catch (...) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }
@@ -66,7 +58,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
 }
 
 // Tries to determine a map size for the instantiated kernel (see above)
-static c10::optional<std::vector<int64_t>> canRunKernel(
+static std::optional<std::vector<int64_t>> canRunKernel(
     const KernelSpec& spec,
     at::TensorList args) {
   // Short-circuits on size mismatch
@@ -77,17 +69,17 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
       " arguments, but got ",
       args.size());
 
-  c10::optional<std::vector<int64_t>> map_size;
+  std::optional<std::vector<int64_t>> map_size;
   for (const auto& broadcast_group : spec.inputBroadcastGroups()) {
     if (!map_size) {
       map_size = getMapSize(spec, args, broadcast_group);
       if (!map_size)
-        return c10::nullopt;
+        return std::nullopt;
     } else {
       const auto group_map_size = getMapSize(spec, args, broadcast_group);
       // Note: this checks that group_map_size is defined AND equal to map_size
       if (map_size != group_map_size)
-        return c10::nullopt;
+        return std::nullopt;
     }
   }
 
@@ -189,7 +181,7 @@ static void compressContiguous(
 
 // Launches the requested fusion on the given device with the given inputs.
 // Output pointers are stored in outputs (to be put on the stack later).
-void launchFusion(
+static void launchFusion(
     const FusedKernel& fusion,
     const at::Device device,
     const at::ArrayRef<at::Tensor>& inputs,
@@ -206,7 +198,7 @@ void launchFusion(
   for (const auto& c : fusion.concatDesc())
     flat_outputs_size += c.nSubTensors();
 
-  // Fails if the elements of the first (any) tensor are not expressable as
+  // Fails if the elements of the first (any) tensor are not expressible as
   // a 32-bit integer.
   // Note: this code assumes that inputs are 32-bit addressable
   // Note: this code assumes that all inputs are of the same size
@@ -214,8 +206,7 @@ void launchFusion(
 
   // Computes map_size, numel from the first input
   at::IntArrayRef map_size;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint32_t numel;
+  uint32_t numel = 0;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
     map_size = inputs[0].sizes();
@@ -327,7 +318,7 @@ void launchFusion(
 
 bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Short-circuits if fusion isn't enabled
-  if (!canFuseOnCPU() && !canFuseOnGPU())
+  if (!canFuseOnCPULegacy() && !canFuseOnGPU())
     return false;
 
   // Acquires the FusionSpec
@@ -362,7 +353,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Attempts to run fallback if device fusion is disabled
   if (device.is_cuda() && !canFuseOnGPU())
     return false;
-  if (device.is_cpu() && !canFuseOnCPU())
+  if (device.is_cpu() && !canFuseOnCPULegacy())
     return false;
   if (device.is_xpu())
     return false;
@@ -408,6 +399,4 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   return true;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

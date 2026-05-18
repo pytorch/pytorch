@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
+
+#include <ATen/TensorOperators.h>
 
 namespace torch {
 namespace jit {
@@ -19,7 +23,7 @@ class TopologicalMoveTest : public ::testing::Test {
  protected:
   TopologicalMoveTest() {
     createGraph();
-    aliasDb = torch::make_unique<AliasDb>(graph);
+    aliasDb = std::make_unique<AliasDb>(graph);
   }
 
   // Nodes are named after their output.
@@ -157,7 +161,6 @@ class TopologicalMoveTest : public ::testing::Test {
   std::unordered_map<std::string, Node*> nodes;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, SplitsDeps) {
   // Check that we are removing `this`'s deps properly when we need to split
   // `this` and deps (see code for what the hell that means)
@@ -166,47 +169,40 @@ TEST_F(TopologicalMoveTest, SplitsDeps) {
 }
 
 // Move after
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardSimple) {
   // Simple move backward
   EXPECT_TRUE(moveAfterTopologicallyValid("c", "a"));
   checkPostCondition("c", "a", true);
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardInvalid) {
   // simple invalid move backward
   EXPECT_FALSE(moveAfterTopologicallyValid("d", "a"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterNoOp) {
   // doesn't actually move anything
   EXPECT_TRUE(moveAfterTopologicallyValid("f", "e"));
   checkPostCondition("f", "e", true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardMultipleDeps) {
   // move backward with multiple dependencies
   EXPECT_TRUE(moveAfterTopologicallyValid("e", "c"));
   checkPostCondition("e", "c", true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardNonZeroWorkingSet) {
   // Move backward with non-zero working set
   EXPECT_TRUE(moveAfterTopologicallyValid("k", "f"));
   checkPostCondition("k", "f", true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterForwardSimple) {
   // Simple move forward
   EXPECT_TRUE(moveAfterTopologicallyValid("c", "d"));
   checkPostCondition("c", "d", true);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterForwardNonZeroWorkingSet) {
   // Move forward with non-zero working set
   EXPECT_TRUE(moveAfterTopologicallyValid("f", "l"));
@@ -214,35 +210,30 @@ TEST_F(TopologicalMoveTest, MoveAfterForwardNonZeroWorkingSet) {
 }
 
 // Move before
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeForwardSimple) {
   // Simple move forward
   EXPECT_TRUE(moveBeforeTopologicallyValid("b", "d"));
   checkPostCondition("b", "d", false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeBackwardSimple) {
   // Simple move backward
   EXPECT_TRUE(moveBeforeTopologicallyValid("c", "a"));
   checkPostCondition("c", "a", false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeNoOp) {
   // doesn't actually move anything
   EXPECT_TRUE(moveBeforeTopologicallyValid("a", "b"));
   checkPostCondition("a", "b", false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeForwardWithDeps) {
   // move forward with deps
   EXPECT_TRUE(moveBeforeTopologicallyValid("f", "m"));
   checkPostCondition("f", "m", false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeBackwardWithDeps) {
   // move backward with deps
   EXPECT_TRUE(moveBeforeTopologicallyValid("l", "f"));
@@ -250,7 +241,6 @@ TEST_F(TopologicalMoveTest, MoveBeforeBackwardWithDeps) {
 }
 
 // check that dependencies in blocks are recognized
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, DepsDisallowMove) {
   EXPECT_FALSE(moveAfterTopologicallyValid("l", "m"));
   EXPECT_FALSE(moveBeforeTopologicallyValid("m", "l"));
@@ -262,7 +252,6 @@ TEST_F(TopologicalMoveTest, DepsDisallowMove) {
 // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
 // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
 // `p`)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBeforeWithDeps) {
   EXPECT_FALSE(moveAfterTopologicallyValid("n", "o"));
   EXPECT_TRUE(moveBeforeTopologicallyValid("o", "p"));
@@ -309,7 +298,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   } catch (const Exception& e) {
     if (std::string(e.what()).find(expectMessageContains) ==
         std::string::npos) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "Expected error message to contain \"",
           expectMessageContains,
           "\" but error message was: ",
@@ -317,7 +307,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
     }
     return;
   }
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Expected to throw exception containing \"",
       expectMessageContains,
       "\" but didn't throw");
@@ -325,7 +316,6 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
   auto graph = std::make_shared<Graph>();
   auto a = graph->addInput();
@@ -355,7 +345,6 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
   graph->lint();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
   auto graph = std::make_shared<Graph>();
   auto a = graph->addInput();
@@ -376,7 +365,6 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
       usesB->node(), mutatesAliasOfB->node()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, SideEffectsBlockMoves) {
   // Test moves across side effectful nodes
   auto graph = std::make_shared<Graph>();
@@ -413,7 +401,6 @@ TEST(AliasAnalysisTest, SideEffectsBlockMoves) {
   EXPECT_FALSE(aliasDb2.moveBeforeTopologicallyValid(print1, print2));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
   // Test moves across inner blocks
 
@@ -446,7 +433,6 @@ TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, NoneHasNoWriters) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -465,7 +451,6 @@ TEST(AliasAnalysisTest, NoneHasNoWriters) {
   EXPECT_FALSE(aliasDb.hasWriters(vmap["opt"]->node()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -502,11 +487,139 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+class BatchAndInstanceNormFixture
+    : public ::testing::TestWithParam<std::tuple<std::string, NodeKind, bool>> {
+};
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n) == isTraining);
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNormTrainingUnknown) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor, %training : bool):
+      %none : NoneType = prim::Constant()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n));
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %none, %none, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_FALSE(aliasDb.hasWriters(n));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AliasAnalysisTest,
+    BatchAndInstanceNormFixture,
+    ::testing::Values(
+        std::make_tuple("aten::batch_norm", aten::batch_norm, false),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, false),
+        std::make_tuple("aten::batch_norm", aten::batch_norm, true),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, true)));
+
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](Stack* s) {},
+      [](Stack&) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   auto graph = std::make_shared<Graph>();
@@ -538,7 +651,6 @@ TEST(WriteTrackingTest, Basic) {
       writingNode, std::unordered_set<const Value*>{aAlias}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, IsMutable) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -554,7 +666,6 @@ TEST(WriteTrackingTest, IsMutable) {
   EXPECT_TRUE(aliasDb.isMutable(relu));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, IsImmutable) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -570,7 +681,6 @@ TEST(WriteTrackingTest, IsImmutable) {
   EXPECT_FALSE(aliasDb.isMutable(mul));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, HasWriters) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -589,7 +699,6 @@ TEST(WriteTrackingTest, HasWriters) {
   EXPECT_TRUE(aliasDb.isMutable(add));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MayContainAlias) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -621,11 +730,49 @@ TEST(ContainerAliasingTest, MayContainAlias) {
   EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->inputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(local_var, graph->inputs()));
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(
+      at::ArrayRef<Value*>{ten_output}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(str_output, graph->outputs()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ContainerAliasingTest, MayContainAlias_cast) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+  graph(%input.1 : Tensor):
+    %2 : NoneType = prim::Constant()
+    %3 : bool = prim::Constant[value=0]()
+    %4 : int = prim::Constant[value=6]()
+    %5 : int = prim::Constant[value=1]()
+    %a.1 : Tensor = aten::add(%input.1, %input.1, %5)
+    %b.1 : Tensor = aten::to(%a.1, %4, %3, %3, %2)
+    %c.1 : Tensor = aten::mul(%b.1, %b.1)
+    return (%c.1)
+    )IR",
+      &*graph,
+      vmap);
+
+  auto a = vmap["a.1"];
+  auto b = vmap["b.1"];
+  auto c = vmap["c.1"];
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(graph->outputs().size() == 1);
+  for (auto out : graph->outputs()) {
+    EXPECT_TRUE(aliasDb.mayContainAlias(c, out));
+  }
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
+  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->inputs()));
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(c, graph->outputs()));
+  EXPECT_TRUE(
+      aliasDb.mayContainAlias(at::ArrayRef<Value*>{c}, graph->outputs()));
+  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
+}
+
 TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -652,7 +799,31 @@ TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ContainerAliasingTest, UnionAliasing) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+  graph(%a : Dict(str, Tensor),
+        %b : Tensor[],
+        %c : Union(Dict(str, Tensor), Tensor[])):
+    return (%a, %b, %c)
+    )IR",
+      &*graph);
+
+  AliasDb aliasDb(graph);
+  auto a = graph->outputs().at(0);
+  auto b = graph->outputs().at(1);
+  auto c = graph->outputs().at(2);
+
+  EXPECT_TRUE(aliasDb.mayAlias(a, c));
+  EXPECT_TRUE(aliasDb.mayAlias(b, c));
+  EXPECT_TRUE(aliasDb.mayAlias(c, c));
+  EXPECT_FALSE(aliasDb.mayAlias(a, b));
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, c));
+  EXPECT_TRUE(aliasDb.mayContainAlias(b, c));
+}
+
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
   // Test input aliasing
   auto graph = std::make_shared<Graph>();
@@ -675,7 +846,6 @@ TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
 }
 
 // Test tuple that doesn't come from construct
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, NestedTupleConstruct) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -708,7 +878,6 @@ graph(%x : int,
 }
 
 // test nested types
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, NestedTypes) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -736,7 +905,6 @@ graph():
 }
 
 // simple example
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Simple) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -767,7 +935,6 @@ graph():
   EXPECT_FALSE(aliasDb.mayContainAlias(second_st, tup_st));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Lists) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -795,7 +962,6 @@ TEST(ContainerAliasingTest, Lists) {
   EXPECT_TRUE(aliasDb.mayContainAlias(c, d));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Lists2) {
   // Test list container aliasing
   auto graph = std::make_shared<Graph>();
@@ -836,7 +1002,6 @@ graph():
   EXPECT_FALSE(aliasDb.mayAlias(z, fresh));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Conservative) {
   // test "conservative" analysis writes to the inside of a container.
   auto ops = torch::RegisterOperators(
@@ -864,14 +1029,12 @@ graph():
   EXPECT_TRUE(aliasDb.writesToAlias(conservativeOp, ValueSet{tensor}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MovesAcrossContainedWrites) {
   auto ops = torch::RegisterOperators().op(
       "uses::list",
       torch::RegisterOperators::options()
-          .catchAllKernel([](torch::List<at::Tensor> in) {
-            return torch::rand({2, 3});
-          })
+          .catchAllKernel(
+              [](torch::List<at::Tensor> in) { return torch::rand({2, 3}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
@@ -904,15 +1067,13 @@ graph():
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(listUse, internalWrite));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MovesAcrossContainedWritesNested) {
   // The same as above, but with a nested list
   auto ops = torch::RegisterOperators().op(
       "uses::list",
       torch::RegisterOperators::options()
-          .catchAllKernel([](torch::List<at::Tensor> in) {
-            return torch::rand({2, 3});
-          })
+          .catchAllKernel(
+              [](torch::List<at::Tensor> in) { return torch::rand({2, 3}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
@@ -946,16 +1107,15 @@ graph():
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(listUse, internalWrite));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, Basic) {
   RegisterOperators reg(
       {Operator(
            "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-           [](Stack* stack) {},
+           [](Stack&) {},
            aliasAnalysisFromSchema()),
        Operator(
            "prim::writes(Tensor(z!) a) -> Tensor(a)",
-           [](Stack* stack) {},
+           [](Stack&) {},
            aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");
@@ -1003,7 +1163,6 @@ TEST(WildcardsTest, Basic) {
 }
 
 // test that wildcards are correctly divided by type
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, TypeIsolation) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -1040,7 +1199,6 @@ TEST(WildcardsTest, TypeIsolation) {
 // test invariant container aliasing
 // the containers of different type cannot alias each other,
 // however they may contain elements which alias each other
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, InvariantContainerAliasing) {
   {
     auto graph = std::make_shared<Graph>();
@@ -1093,14 +1251,12 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand1",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand1");
   auto graph = std::make_shared<Graph>();
@@ -1111,14 +1267,12 @@ TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand2(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand2");
   auto graph = std::make_shared<Graph>();
@@ -1129,14 +1283,12 @@ TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
 
   const auto rand_op = Symbol::fromQualString("foo::rand3");
@@ -1148,17 +1300,15 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand3(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand4");
   auto graph = std::make_shared<Graph>();
@@ -1169,32 +1319,28 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand4(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
   expectThrows<c10::Error>(
       [] {
         torch::RegisterOperators().op(
             "foo::rand5",
             torch::RegisterOperators::options()
-                .catchAllKernel([](at::Tensor) -> at::Tensor {
-                  return at::rand({2, 2});
-                })
+                .catchAllKernel(
+                    [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
       },
-      "Tried to register operator foo::rand5(Tensor _0) -> (Tensor _0) with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
+      "Tried to register operator foo::rand5(Tensor _0) -> Tensor _0 with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaInferredPure) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand6(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
   const auto rand_op = Symbol::fromQualString("foo::rand6");
   auto graph = std::make_shared<Graph>();
@@ -1206,7 +1352,6 @@ TEST(AliasRegistrationTest, FromSchemaInferredPure) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaAliased) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand7(Tensor(a) arg1) -> Tensor(a)",
@@ -1223,7 +1368,6 @@ TEST(AliasRegistrationTest, FromSchemaAliased) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaPure) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand8(Tensor(a) arg1) -> Tensor(b)",
@@ -1239,14 +1383,12 @@ TEST(AliasRegistrationTest, FromSchemaPure) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureNoSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand9",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand9");
   auto graph = std::make_shared<Graph>();
@@ -1257,14 +1399,12 @@ TEST(AliasRegistrationTest, PureNoSchema) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureWithSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand10(Tensor arg1) -> Tensor",
       torch::RegisterOperators::options()
-          .catchAllKernel([](at::Tensor) -> at::Tensor {
-            return at::rand({2, 2});
-          })
+          .catchAllKernel(
+              [](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand10");
   auto graph = std::make_shared<Graph>();
@@ -1275,7 +1415,6 @@ TEST(AliasRegistrationTest, PureWithSchema) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
@@ -1291,10 +1430,9 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand11(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -1321,7 +1459,129 @@ TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
       vmap["y"]->node(), vmap["9"]->node()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(
+    AliasRegistrationTest,
+    AliasMoveForTupleConstructWithSingleUseAsGraphOutput) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+}
+
+TEST(AliasRegistrationTest, RecursiveSubgraphTupleContainment) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor, Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  auto node = vmap["z"]->node();
+  auto subgraph =
+      SubgraphUtils::createSingletonSubgraph(node, prim::FunctionalGraph);
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
+}
+
+TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %a : (Tensor) = prim::TupleConstruct(%x, %y)
+    %b : (Tensor) = prim::TupleConstruct(%z)
+    %c : Tensor = prim::TupleIndex(%a, %0)
+    %d : Tensor = prim::TupleIndex(%b, %0)
+    return (%c, %d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["z"]));
+}
+
+TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : int = prim::Constant[value=1]()
+    %2 : int = prim::Constant[value=2]()
+    %y : Tensor = aten::add(%x, %x, %0)
+    %lengths_list : int[] = prim::tolist(%1, %2)
+    %a : Tensor[] = aten::split(%y, %lengths_list, %0)
+    %b : Tensor, %c : Tensor = prim::ListUnpack(%a)
+    %b1 : Tensor = aten::flatten(%b, %0, %1)
+    %c1 : Tensor = aten::flatten(%c, %0, %1)
+    %d : Tensor = aten::add(%b1, %c1, %0)
+    return (%d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b1"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c1"]));
+}
+
+TEST(AliasRegistrationTest, ATenSplitIntAliasCheck) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : int = prim::Constant[value=1]()
+    %2 : int = prim::Constant[value=2]()
+    %y : Tensor = aten::add(%x, %x, %0)
+    %a : Tensor[] = aten::split(%y, %2, %0)
+    %b : Tensor, %c : Tensor = prim::ListUnpack(%a)
+    %b1 : Tensor = aten::flatten(%b, %0, %1)
+    %c1 : Tensor = aten::flatten(%c, %0, %1)
+    %d : Tensor = aten::add(%b1, %c1, %0)
+    return (%d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b1"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c1"]));
+}
+
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
@@ -1337,7 +1597,110 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
+
+TEST(IRNonDeterminismTest, Basic) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : NoneType = prim::Constant()
+    %2 : Tensor = aten::bernoulli(%x, %1)
+    %3 : Tensor = aten::add(%x, %2, %0)
+    return (%3))IR";
+  parseIR(graph_string, graph.get());
+
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::bernoulli) {
+      ASSERT_TRUE(n->isNondeterministic());
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
+TEST(IRNonDeterminismTest, DropoutSpecialCase) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : bool = prim::Constant[value=0]()
+    %1 : bool = prim::Constant[value=1]()
+    %3 : int = prim::Constant[value=1]()
+    %3 : float = prim::Constant[value=1.0]()
+    %4 : Tensor = aten::dropout(%x, %3, %0)
+    %5 : Tensor = aten::dropout(%x, %3, %1)
+    %6 : Tensor = aten::add(%4, %5, %3)
+    return (%6))IR";
+  parseIR(graph_string, graph.get());
+
+  bool train = false;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::dropout) {
+      if (!train) {
+        ASSERT_FALSE(n->isNondeterministic());
+        train = true;
+      } else {
+        ASSERT_TRUE(n->isNondeterministic());
+      }
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
+TEST(NonDeterminismBackwardsCompatibility, BackwardsCompatibility) {
+  static const std::vector<std::string> nondeterministic_ops = {
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
+      "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
+      "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
+      "aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal.float_Tensor(float mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal.Tensor_float(Tensor mean, float std, *, Generator? generator) -> Tensor",
+      "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
+      "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::rand_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.generator(Tensor self, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.Tensor(Tensor self, Tensor high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.Tensor_generator(Tensor self, Tensor high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.low_dtype(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.low_generator_dtype(Tensor self, int low, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
+  for (const std::string& op : nondeterministic_ops) {
+    const c10::FunctionSchema& schema = torch::jit::parseSchema(op);
+    const auto& op_handle = c10::Dispatcher::singleton().findOp(
+        c10::OperatorName(schema.name(), schema.overload_name()));
+    ASSERT_TRUE(op_handle->hasTag(at::Tag::nondeterministic_seeded));
+  }
+}
+
+TEST(TypeHashing, HashTypes) {
+  HashType hasher;
+
+  const TypePtr int_type = IntType::get();
+  const TypePtr float_type = FloatType::get();
+  ASSERT_NE(hasher(int_type), hasher(float_type));
+
+  const TypePtr int2_type = TupleType::create({int_type, int_type});
+  const TypePtr int3_type = TupleType::create({int_type, int_type, int_type});
+  ASSERT_NE(hasher(int2_type), hasher(int3_type));
+}
+
 } // namespace jit
 } // namespace torch

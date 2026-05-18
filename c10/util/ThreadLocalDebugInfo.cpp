@@ -1,11 +1,39 @@
+#include <c10/util/Exception.h>
+#include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+
+#include <ostream>
+#include <string_view>
+#include <utility>
 
 namespace c10 {
 
-namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
-} // namespace
+std::ostream& operator<<(std::ostream& os, const DebugInfoKind& kind) {
+  return os << (kind.value_ == nullptr ? "<uninitialized>" : *kind.value_);
+}
+
+// Names for predefined DebugInfoKinds.
+constexpr std::string_view kProducerInfoName = "PRODUCER_INFO";
+constexpr std::string_view kMobileRuntimeInfoName = "MOBILE_RUNTIME_INFO";
+constexpr std::string_view kProfilerStateName = "PROFILER_STATE";
+constexpr std::string_view kInferenceContextName = "INFERENCE_CONTEXT";
+constexpr std::string_view kParamCommsInfoName = "PARAM_COMMS_INFO";
+constexpr std::string_view kTestInfoName = "TEST_INFO";
+constexpr std::string_view kTestInfo2Name = "TEST_INFO_2";
+
+C10_API const DebugInfoKind DebugInfoKind::PRODUCER_INFO(&kProducerInfoName);
+C10_API const DebugInfoKind
+    DebugInfoKind::MOBILE_RUNTIME_INFO(&kMobileRuntimeInfoName);
+C10_API const DebugInfoKind DebugInfoKind::PROFILER_STATE(&kProfilerStateName);
+C10_API const DebugInfoKind
+    DebugInfoKind::INFERENCE_CONTEXT(&kInferenceContextName);
+C10_API const DebugInfoKind
+    DebugInfoKind::PARAM_COMMS_INFO(&kParamCommsInfoName);
+C10_API const DebugInfoKind DebugInfoKind::TEST_INFO(&kTestInfoName);
+C10_API const DebugInfoKind DebugInfoKind::TEST_INFO_2(&kTestInfo2Name);
+
+C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
+#define debug_info (tls_debug_info.get())
 
 /* static */
 DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
@@ -26,8 +54,8 @@ std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::current() {
 
 /* static */
 void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
-    const std::shared_ptr<ThreadLocalDebugInfo>& info) {
-  debug_info = info;
+    std::shared_ptr<ThreadLocalDebugInfo> info) {
+  debug_info = std::move(info);
 }
 
 /* static */
@@ -38,7 +66,7 @@ void ThreadLocalDebugInfo::_push(
   debug_info = std::make_shared<ThreadLocalDebugInfo>();
   debug_info->parent_info_ = prev_info;
   debug_info->kind_ = kind;
-  debug_info->info_ = info;
+  debug_info->info_ = std::move(info);
 }
 
 /* static */
@@ -46,7 +74,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
       "Expected debug info of type ",
-      (size_t)kind);
+      kind);
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
   return res->info_;
@@ -57,7 +85,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
       "Expected debug info of type ",
-      (size_t)kind);
+      kind);
   return debug_info->info_;
 }
 
@@ -68,7 +96,7 @@ DebugInfoGuard::DebugInfoGuard(
     return;
   }
   prev_info_ = debug_info;
-  ThreadLocalDebugInfo::_push(kind, info);
+  ThreadLocalDebugInfo::_push(kind, std::move(info));
   active_ = true;
 }
 
@@ -85,8 +113,8 @@ DebugInfoGuard::DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info) {
   if (!info) {
     return;
   }
-  prev_info_ = debug_info;
-  debug_info = info;
+  prev_info_ = std::move(debug_info);
+  debug_info = std::move(info);
   active_ = true;
 }
 

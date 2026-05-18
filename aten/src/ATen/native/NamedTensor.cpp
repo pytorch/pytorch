@@ -1,20 +1,42 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/align_as_native.h>
+#include <ATen/ops/align_tensors_native.h>
+#include <ATen/ops/align_to_native.h>
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
+#include <ATen/ops/index_fill.h>
+#include <ATen/ops/index_fill_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/refine_names_native.h>
+#include <ATen/ops/rename_native.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <c10/util/irange.h>
 
 #include <bitset>
 
-namespace at { namespace native {
+namespace at::native {
 
-Tensor& rename_(Tensor& self, optional<DimnameList> names) {
+Tensor& rename_(Tensor& self, std::optional<DimnameList> names) {
   at::internal_set_names_inplace(self, names);
   return self;
 }
 
-Tensor rename(const Tensor& self, optional<DimnameList> names) {
+Tensor rename(const Tensor& self, std::optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -38,8 +60,10 @@ static void report_moving_unnamed_dim_error(
 static void report_not_a_subsequence_error(
     DimnameList names, DimnameList other, bool is_aligning_two_tensors) {
   if (is_aligning_two_tensors) {
+#ifndef STRIP_ERROR_MESSAGES
     auto shorter = names.size() > other.size() ? other : names;
     auto longer = names.size() > other.size() ? names : other;
+#endif
     TORCH_CHECK(false,
         "Could not align Tensor", shorter, " and Tensor", longer,
         " because ", shorter, " is not a subsequence of ", longer, ". ");
@@ -60,8 +84,8 @@ static std::vector<int64_t> aligned_size(
     DimnameList aligned_names,
     bool is_aligning_two_tensors) {
   std::vector<int64_t> expanded_sizes(aligned_names.size(), 1);
-  ptrdiff_t dim = (ptrdiff_t)tensor_sizes.size() - 1;
-  ptrdiff_t idx = (ptrdiff_t)aligned_names.size() - 1;
+  ptrdiff_t dim = static_cast<ptrdiff_t>(tensor_sizes.size()) - 1;
+  ptrdiff_t idx = static_cast<ptrdiff_t>(aligned_names.size()) - 1;
   for (; idx >= 0 && dim >= 0; --idx) {
     if (tensor_names[dim] != aligned_names[idx]) {
       continue;
@@ -100,7 +124,7 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
       self_names.size(), " and ", names.size(), " respectively).");
   check_names_valid_for(self, names);
 
-  for (size_t idx = 0; idx < self_names.size(); idx++) {
+  for (const auto idx : c10::irange(self_names.size())) {
     const auto& self_name = self_names[idx];
     const auto& out_name = names[idx];
     if (self_name == out_name || self_name.isWildcard()) {
@@ -139,7 +163,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.rename(nullopt).view(expanded_sizes);
+  auto result = tensor.rename(std::nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }
@@ -221,7 +245,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   };
 
   // Fill in the non-ellipsis dimensions
-  for (auto order_idx = 0U; order_idx < order.size(); ++order_idx) {
+  for (const auto order_idx : c10::irange(static_cast<int64_t>(order.size()))) {
     auto out_idx = order_idx;
     if (order_idx >= ellipsis_idx) {
       out_idx = order_idx + num_ellipsis_names;
@@ -317,9 +341,6 @@ Tensor& gather_out(const Tensor& self, Dimname dim, const Tensor& index, bool sp
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
-  reportNYIDimnameOverload("index_add");
-}
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
@@ -347,28 +368,19 @@ Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("scatter");
-}
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
-  reportNYIDimnameOverload("scatter");
-}
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
-Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("scatter_add");
-}
-std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
+std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, std::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   reportNYIDimnameOverload("sort");
 }
-std::tuple<Tensor, Tensor> sort(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim) {
+std::tuple<Tensor, Tensor> sort(const Tensor& self, std::optional<bool> stable, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {
@@ -382,4 +394,4 @@ Tensor squeeze(const Tensor& self, Dimname dim) {
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

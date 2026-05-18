@@ -1,22 +1,24 @@
-from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
+# mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
+from __future__ import annotations
+
+from typing import cast, Generic, TYPE_CHECKING, TypeVar
 
 import torch
-from torch._six import PY37
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+__all__ = ["Future", "collect_all", "wait_all"]
+
 
 T = TypeVar("T")
 S = TypeVar("S")
 
-if not PY37:
-    # Workaround for https://github.com/python/typing/issues/449 in Python 3.6
-    from typing import GenericMeta
 
-    class _PyFutureMeta(type(torch._C.Future), GenericMeta):   # type: ignore[misc]
-        pass
-else:
-    class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
-        pass
-
-class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
+class Future(torch._C.Future, Generic[T]):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
@@ -25,7 +27,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     .. warning:: GPU support is a beta feature, subject to changes.
     """
 
-    def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
+    def __init__(self, *, devices: list[int | str | torch.device] | None = None):
         r"""
         Create an empty unset ``Future``. If the future is intended to hold
         values containing CUDA tensors, (a superset of) their CUDA devices must
@@ -98,8 +100,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().value()
 
-    # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def then(self, callback):  # type: (Callable[[Future[T]], S]) -> Future[S]
+    def then(self, callback: Callable[[Future[T]], S]) -> Future[S]:
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
@@ -147,28 +148,24 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             on those futures independently.
 
         Example::
-            >>> import torch
-            >>>
+
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
-            >>>     print(f"RPC return value is {fut.wait()}.")
-            >>>
+            ...     print(f"RPC return value is {fut.wait()}.")
             >>> fut = torch.futures.Future()
             >>> # The inserted callback will print the return value when
             >>> # receiving the response from "worker1"
             >>> cb_fut = fut.then(callback)
             >>> chain_cb_fut = cb_fut.then(
-            >>>     lambda x : print(f"Chained cb done. {x.wait()}")
-            >>> )
+            ...     lambda x : print(f"Chained cb done. {x.wait()}")
+            ... )
             >>> fut.set_result(5)
-            >>>
-            >>> # Outputs are:
-            >>> # RPC return value is 5.
-            >>> # Chained cb done. None
+            RPC return value is 5.
+            Chained cb done. None
         """
         return cast(Future[S], super().then(callback))
 
-    # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
+    def add_done_callback(self, callback: Callable[[Future[T]], None]) -> None:
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
@@ -189,7 +186,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
 
         Args:
             callback(``Future``): a ``Callable`` that takes in one argument,
-            which is the reference to this ``Future``.
+                which is the reference to this ``Future``.
 
         .. note:: Note that if the callback function throws, either
             through the original future being completed with an exception and
@@ -200,19 +197,16 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             for handling completion/waiting on those futures independently.
 
         Example::
-            >>> import torch
-            >>>
+
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
-            >>>     print(f"This will run after the future has finished.")
-            >>>     print(fut.wait())
-            >>>
+            ...     print("This will run after the future has finished.")
+            ...     print(fut.wait())
             >>> fut = torch.futures.Future()
             >>> fut.add_done_callback(callback)
             >>> fut.set_result(5)
-            >>>
-            >>> # Outputs are:
-            >>> This will run after the future has finished.
-            >>> 5
+            This will run after the future has finished.
+            5
         """
         super().add_done_callback(callback)
 
@@ -237,22 +231,21 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (object): the result object of this ``Future``.
 
         Example::
+
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> import threading
             >>> import time
-            >>> import torch
-            >>>
             >>> def slow_set_future(fut, value):
-            >>>     time.sleep(0.5)
-            >>>     fut.set_result(value)
-            >>>
+            ...     time.sleep(0.5)
+            ...     fut.set_result(value)
             >>> fut = torch.futures.Future()
             >>> t = threading.Thread(
-            >>>     target=slow_set_future,
-            >>>     args=(fut, torch.ones(2) * 3)
-            >>> )
+            ...     target=slow_set_future,
+            ...     args=(fut, torch.ones(2) * 3)
+            ... )
             >>> t.start()
-            >>>
-            >>> print(fut.wait())  # tensor([3., 3.])
+            >>> print(fut.wait())
+            tensor([3., 3.])
             >>> t.join()
         """
         super().set_result(result)
@@ -268,17 +261,19 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (BaseException): the exception for this ``Future``.
 
         Example::
-            >>> import torch
-            >>>
+
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> fut = torch.futures.Future()
             >>> fut.set_exception(ValueError("foo"))
             >>> fut.wait()
-            >>>
-            >>> # Output:
-            >>> # This will run after the future has finished.
-            >>> ValueError: foo
+            Traceback (most recent call last):
+            ...
+            ValueError: foo
         """
-        assert isinstance(result, Exception), f"{result} is of type {type(result)}, not an Exception."
+        if not isinstance(result, Exception):
+            raise AssertionError(
+                f"{result} is of type {type(result)}, not an Exception."
+            )
 
         def raise_error(fut_result):
             raise fut_result
@@ -287,7 +282,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         self.set_result(result)  # type: ignore[arg-type]
 
 
-def collect_all(futures: List[Future]) -> Future[List[Future]]:
+def collect_all(futures: list[Future]) -> Future[list[Future]]:
     r"""
     Collects the provided :class:`~torch.futures.Future` objects into a single
     combined :class:`~torch.futures.Future` that is completed when all of the
@@ -301,27 +296,25 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         in Futures.
 
     Example::
-        >>> import torch
-        >>>
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
         >>> fut0 = torch.futures.Future()
         >>> fut1 = torch.futures.Future()
-        >>>
         >>> fut = torch.futures.collect_all([fut0, fut1])
-        >>>
         >>> fut0.set_result(0)
         >>> fut1.set_result(1)
-        >>>
         >>> fut_list = fut.wait()
         >>> print(f"fut0 result = {fut_list[0].wait()}")
+        fut0 result = 0
         >>> print(f"fut1 result = {fut_list[1].wait()}")
-        >>> # outputs:
-        >>> # fut0 result = 0
-        >>> # fut1 result = 1
+        fut1 result = 1
     """
-    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
+    return cast(
+        Future[list[Future]],
+        torch._C._collect_all(cast(list[torch._C.Future], futures)),
+    )
 
 
-def wait_all(futures: List[Future]) -> List:
+def wait_all(futures: list[Future]) -> list:
     r"""
     Waits for all provided futures to be complete, and returns
     the list of completed values. If any of the futures encounters an error,
@@ -336,4 +329,7 @@ def wait_all(futures: List[Future]) -> List:
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]
+    return [
+        fut.wait()
+        for fut in torch._C._collect_all(cast(list[torch._C.Future], futures)).wait()
+    ]

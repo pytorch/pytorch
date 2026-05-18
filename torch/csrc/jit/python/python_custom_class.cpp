@@ -1,16 +1,16 @@
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
-
-#include <torch/csrc/jit/frontend/sugared_value.h>
 
 #include <fmt/format.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct CustomMethodProxy;
 struct CustomObjectProxy;
 
-py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
+py::object ScriptClass::__call__(
+    const py::args& args,
+    const py::kwargs& kwargs) {
   auto instance =
       Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
   Function* init_fn = instance.type()->findMethod("__init__");
@@ -21,8 +21,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
           "Did you forget to add '.def(torch::init<...>)' to its registration?",
           instance.type()->repr_str()));
   Method init_method(instance._ivalue(), init_fn);
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
+  invokeScriptMethodFromPython(init_method, args, kwargs);
   return py::cast(instance);
 }
 
@@ -65,7 +64,7 @@ void initPythonCustomClassBindings(PyObject* module) {
               return ScriptClassFunctionPtr(fn);
             }
 
-            throw AttributeError("%s does not exist", name.c_str());
+            throw AttributeError(fmt::format("{} does not exist", name));
           })
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
         return self.class_type_.type_->expectRef<ClassType>().doc_string();
@@ -98,5 +97,4 @@ void initPythonCustomClassBindings(PyObject* module) {
       });
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

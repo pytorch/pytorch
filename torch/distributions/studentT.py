@@ -1,10 +1,15 @@
+# mypy: allow-untyped-defs
 import math
 
 import torch
-from torch._six import inf, nan
+from torch import inf, nan, Tensor
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
+from torch.types import _size
+
+
+__all__ = ["StudentT"]
 
 
 class StudentT(Distribution):
@@ -14,6 +19,7 @@ class StudentT(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
         tensor([ 0.1046])
@@ -23,29 +29,49 @@ class StudentT(Distribution):
         loc (float or Tensor): mean of the distribution
         scale (float or Tensor): scale of the distribution
     """
-    arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
+
+    # pyrefly: ignore [bad-override]
+    arg_constraints = {
+        "df": constraints.positive,
+        "loc": constraints.real,
+        "scale": constraints.positive,
+    }
     support = constraints.real
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         m = self.loc.clone(memory_format=torch.contiguous_format)
         m[self.df <= 1] = nan
         return m
 
     @property
-    def variance(self):
+    def mode(self) -> Tensor:
+        return self.loc
+
+    @property
+    def variance(self) -> Tensor:
         m = self.df.clone(memory_format=torch.contiguous_format)
-        m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
+        m[self.df > 2] = (
+            self.scale[self.df > 2].pow(2)
+            * self.df[self.df > 2]
+            / (self.df[self.df > 2] - 2)
+        )
         m[(self.df <= 2) & (self.df > 1)] = inf
         m[self.df <= 1] = nan
         return m
 
-    def __init__(self, df, loc=0., scale=1., validate_args=None):
+    def __init__(
+        self,
+        df: Tensor | float,
+        loc: Tensor | float = 0.0,
+        scale: Tensor | float = 1.0,
+        validate_args: bool | None = None,
+    ) -> None:
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
-        super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(StudentT, _instance)
@@ -58,7 +84,7 @@ class StudentT(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
         # parameters seems to help.
@@ -76,16 +102,26 @@ class StudentT(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         y = (value - self.loc) / self.scale
-        Z = (self.scale.log() +
-             0.5 * self.df.log() +
-             0.5 * math.log(math.pi) +
-             torch.lgamma(0.5 * self.df) -
-             torch.lgamma(0.5 * (self.df + 1.)))
-        return -0.5 * (self.df + 1.) * torch.log1p(y**2. / self.df) - Z
+        Z = (
+            self.scale.log()
+            + 0.5 * self.df.log()
+            + 0.5 * math.log(math.pi)
+            + torch.lgamma(0.5 * self.df)
+            - torch.lgamma(0.5 * (self.df + 1.0))
+        )
+        return -0.5 * (self.df + 1.0) * torch.log1p(y**2.0 / self.df) - Z
 
     def entropy(self):
-        lbeta = torch.lgamma(0.5 * self.df) + math.lgamma(0.5) - torch.lgamma(0.5 * (self.df + 1))
-        return (self.scale.log() +
-                0.5 * (self.df + 1) *
-                (torch.digamma(0.5 * (self.df + 1)) - torch.digamma(0.5 * self.df)) +
-                0.5 * self.df.log() + lbeta)
+        lbeta = (
+            torch.lgamma(0.5 * self.df)
+            + math.lgamma(0.5)
+            - torch.lgamma(0.5 * (self.df + 1))
+        )
+        return (
+            self.scale.log()
+            + 0.5
+            * (self.df + 1)
+            * (torch.digamma(0.5 * (self.df + 1)) - torch.digamma(0.5 * self.df))
+            + 0.5 * self.df.log()
+            + lbeta
+        )

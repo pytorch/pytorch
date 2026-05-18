@@ -1,11 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sigmoid_native.h>          // for mkldnn_sigmoid, mkldnn_...
+#include <ATen/ops/tanh_native.h>             // for mkldnn_tanh, mkldnn_tanh_
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
   TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with MKLDNN support");
@@ -23,15 +30,14 @@ Tensor& mkldnn_tanh_(Tensor& self) {
   TORCH_CHECK(false, "mkldnn_tanh_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
@@ -65,7 +71,6 @@ Tensor& mkldnn_tanh_(Tensor& self) {
   return self;
 }
 
-} // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

@@ -3,15 +3,30 @@
 #include <functional>
 #include <memory>
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
-using hooks_list = std::vector<std::function<Variable(const Variable&)>>;
+using hooks_list =
+    std::vector<std::function<at::TensorBase(const at::TensorBase&)>>;
 
-struct CppFunctionPreHook : public FunctionPreHook {
-  CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks, int value_idx);
+struct CppFunctionTensorPreHook : public FunctionPreHook {
+  CppFunctionTensorPreHook(std::shared_ptr<hooks_list> hooks, size_t value_idx);
   variable_list operator()(const variable_list& values) override;
 
   std::shared_ptr<hooks_list> hooks_;
-  int value_idx_;
+  size_t value_idx_;
 };
-}} // namespace torch::autograd
+
+struct CppFunctionSingleTensorPreHook : public FunctionPreHook {
+  CppFunctionSingleTensorPreHook(
+      std::function<at::TensorBase(const at::TensorBase&)> hook,
+      size_t value_idx);
+  variable_list operator()(const variable_list& values) override;
+
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
+
+  std::function<at::TensorBase(const at::TensorBase&)> hook_;
+  size_t value_idx_;
+};
+
+} // namespace torch::autograd

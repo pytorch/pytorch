@@ -1,14 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/Randperm.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/randperm_native.h>
+#endif
 
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // [Algorithm of randperm]
 //
@@ -27,7 +37,7 @@ namespace native {
 // threshold probability for having non-duplicate keys, then it can be proved that[1]
 // the number of bits required is: ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
 //
-// Then after sort, we lauch a separate kernel that additionally shuffles any islands
+// Then after sort, we launch a separate kernel that additionally shuffles any islands
 // of values whose keys matched. The algorithm of this kernel is as follows:
 // Each thread reads its key and the keys of its neighbors to tell if it's part of an island.
 // For each island, the first thread in the island sees a key match at index i+1 but not index i-1.
@@ -39,11 +49,15 @@ namespace native {
 // Reference
 // [1] https://osf.io/af2hy/
 
-Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+// The kernels are templated on an opaque, self-aligned type of the correct
+// size to avoid redundant kernels for different types of the same size.
+namespace {
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
+}
+
+Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
-  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
-    "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
@@ -67,49 +81,26 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
 
-  constexpr bool is_reduced_bits = true;
   int bits = std::min(64,
     static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
 
   if (n == 0) {
     return result;
-  } else if (bits <= 8) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kByte)).random_(generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<uint8_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<uint8_t, scalar_t>(
-        keys.data_ptr<uint8_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
-  } else if (bits <= 16) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
-      std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max(), generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int16_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int16_t, scalar_t>(
-        keys.data_ptr<int16_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
   } else if (bits <= 32) {
+    // For asserting device type match of the generator and result,
+    // we deligate that to the 'random_' function below.
+
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
       std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int>();
+    auto keys_out = keys_tmp.mutable_data_ptr<int>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int, scalar_t>(
-        keys.data_ptr<int>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
+      auto* range_data = reinterpret_cast<const dtype*>(range.const_data_ptr());
+      at::cuda::cub::radix_sort_pairs<int, dtype>(
+        keys.const_data_ptr<int>(), keys_out,
+        range_data, shuffled_data_,
         n, false, 0, bits);
 
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
@@ -118,12 +109,14 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
       std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int64_t>();
+    auto keys_out = keys_tmp.mutable_data_ptr<int64_t>();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int64_t, scalar_t>(
-        keys.data_ptr<int64_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
+      auto* range_data = reinterpret_cast<const dtype*>(range.const_data_ptr());
+      at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
+        keys.const_data_ptr<int64_t>(), keys_out,
+        range_data, shuffled_data_,
         n, false, 0, bits);
 
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
@@ -137,4 +130,4 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

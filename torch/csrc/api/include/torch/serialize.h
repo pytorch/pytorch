@@ -1,8 +1,9 @@
 #pragma once
 
+#include <c10/util/irange.h>
+#include <torch/csrc/Export.h>
 #include <torch/serialize/archive.h>
 #include <torch/serialize/tensor.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <utility>
 
@@ -27,7 +28,7 @@ namespace torch {
 ///   torch::nn::Linear model(3, 4);
 ///   torch::save(model, "model.pt");
 ///
-///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   torch::optim::SGD sgd(model->parameters(), 0.9); // 0.9 is learning rate
 ///   std::ostringstream stream;
 ///   // Note that the same stream cannot be used in multiple torch::save(...)
 ///   // invocations, otherwise the header will be corrupted.
@@ -38,8 +39,7 @@ namespace torch {
 /// \endrst
 template <typename Value, typename... SaveToArgs>
 void save(const Value& value, SaveToArgs&&... args) {
-  serialize::OutputArchive archive(
-      std::make_shared<jit::CompilationUnit>());
+  serialize::OutputArchive archive(std::make_shared<jit::CompilationUnit>());
   archive << value;
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
@@ -53,22 +53,21 @@ void save(const Value& value, SaveToArgs&&... args) {
 /// \rst
 /// .. code-block:: cpp
 ///
-///   std::vector<torch::Tensor> tensor_vec = { torch::randn({1, 2}), torch::randn({3, 4}) };
-///   torch::save(tensor_vec, "my_tensor_vec.pt");
+///   std::vector<torch::Tensor> tensor_vec = { torch::randn({1, 2}),
+///   torch::randn({3, 4}) }; torch::save(tensor_vec, "my_tensor_vec.pt");
 ///
-///   std::vector<torch::Tensor> tensor_vec = { torch::randn({5, 6}), torch::randn({7, 8}) };
-///   std::ostringstream stream;
+///   std::vector<torch::Tensor> tensor_vec = { torch::randn({5, 6}),
+///   torch::randn({7, 8}) }; std::ostringstream stream;
 ///   // Note that the same stream cannot be used in multiple torch::save(...)
 ///   // invocations, otherwise the header will be corrupted.
 ///   torch::save(tensor_vec, stream);
 /// \endrst
 template <typename... SaveToArgs>
 void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
-  serialize::OutputArchive archive(
-      std::make_shared<jit::CompilationUnit>());
-  for (size_t i = 0; i < tensor_vec.size(); i++) {
+  serialize::OutputArchive archive(std::make_shared<jit::CompilationUnit>());
+  for (const auto i : c10::irange(tensor_vec.size())) {
     auto& value = tensor_vec[i];
-    archive.write(c10::to_string(i), value);
+    archive.write(std::to_string(i), value);
   }
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
@@ -95,7 +94,7 @@ TORCH_API torch::IValue pickle_load(const std::vector<char>& data);
 ///   torch::nn::Linear model(3, 4);
 ///   torch::load(model, "model.pt");
 ///
-///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   torch::optim::SGD sgd(model->parameters(), 0.9); // 0.9 is learning rate
 ///   std::istringstream stream("...");
 ///   torch::load(sgd, stream);
 ///
@@ -136,7 +135,7 @@ void load(std::vector<torch::Tensor>& tensor_vec, LoadFromArgs&&... args) {
   // the serialized `std::vector<torch::Tensor>`.
   size_t index = 0;
   torch::Tensor value;
-  while (archive.try_read(c10::to_string(index), value)) {
+  while (archive.try_read(std::to_string(index), value)) {
     tensor_vec.push_back(std::move(value));
     value = torch::Tensor();
     index++;

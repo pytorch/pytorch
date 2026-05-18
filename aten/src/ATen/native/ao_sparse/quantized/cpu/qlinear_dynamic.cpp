@@ -1,18 +1,25 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <c10/util/accumulate.h>
 
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/library.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 
-namespace ao {
-namespace sparse {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/empty.h>
+#endif
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+namespace ao::sparse {
 
 #ifdef USE_PYTORCH_QNNPACK
 template <>
@@ -22,7 +29,6 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<true>(
       false,
       "Sparse quantized dynamic linear with fused relu is not yet "
       "supported on qnnpack backend.");
-  return at::Tensor();
 }
 
 template <>
@@ -32,30 +38,21 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       input.dim() >= 2,
       "quantized_sparse_linear(): Input tensor rank should be >= 2");
 
-  size_t rows_input = 1;
-  size_t cols_input = input.size(input.dim() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < input.dim() - 1; ++i) {
-    rows_input *= input.size(i);
-  }
+  const auto rows_input = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
+  const auto cols_input = input.size(input.dim() - 1);
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      cols_input == orig_weight_.size(1),
-      "quantized_sparse_lienar: Input tensor's last and weight tensor's"
+      cols_input == input_channels_,
+      "quantized_sparse_linear: Input tensor's last and weight tensor's"
       " second dimension must match.");
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  // On empty input, no output data will be generated,
+  // so use arbitrary qparams.
+  float x_min = 0;
+  float x_max = 0;
+  // Otherwise...
   if (input.numel() > 0) {
     x_min = input.min().item<float>();
     x_max = input.max().item<float>();
-  } else {
-    // On empty input, no output data will be generated,
-    // so use arbitrary qparams.
-    x_min = 0;
-    x_max = 0;
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
@@ -79,15 +76,16 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
     pytorch_qnnp_operator_t sparse_linear_op{nullptr};
     pytorch_qnnp_status status =
         pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
-            orig_weight_.size(1),
-            orig_weight_.size(0),
+            input_channels_,
+            output_channels_,
             q_input_contig.q_zero_point(),
             w_zero_points_.data(),
-            bcsr_matrix_->col_indices.data(),
-            bcsr_matrix_->row_values.data(),
+            bcsr_matrix_->col_indices_data_ptr(),
+            bcsr_matrix_->row_values_data_ptr(),
             bcsr_matrix_->values.data(),
             bcsr_matrix_->row_block_size, /* out_features_block_size */
             bcsr_matrix_->col_block_size, /* in_features_block_size */
+            bcsr_matrix_->indices_dtype,
             0, /* output zero point: not used */
             std::numeric_limits<uint8_t>::min(),
             std::numeric_limits<uint8_t>::max(),
@@ -119,8 +117,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       requantization_scales_.data();
 
   std::vector<int64_t> out_sizes = input.sizes().vec();
-  size_t rows_w = orig_weight_.size(0);
-  out_sizes.back() = rows_w;
+  out_sizes.back() = output_channels_;
 
   auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
 
@@ -128,11 +125,11 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
           sparse_linear_op_.get(),
           rows_input, /* batch size */
-          reinterpret_cast<uint8_t*>(q_input_contig.data_ptr<c10::quint8>()),
+          reinterpret_cast<const uint8_t*>(q_input_contig.const_data_ptr<c10::quint8>()),
           cols_input, /* num input channels */
-          bias_.data_ptr<float>(),
+          bias_.const_data_ptr<float>(),
           output.data_ptr<float>(),
-          rows_w /* num output channels */);
+          output_channels_);
   TORCH_CHECK(
       status == pytorch_qnnp_status_success,
       "Failed to setup sparse linear operator on"
@@ -195,4 +192,4 @@ TORCH_LIBRARY_IMPL(sparse, CPU, m) {
 }
 
 } // namespace
-}} // namespace ao::sparse
+} // namespace ao::sparse

@@ -156,7 +156,7 @@ macro(cuda_execute_process status command)
     # copy and paste a runnable command line.
     set(cuda_execute_process_string)
     foreach(arg ${ARGN})
-      # If there are quotes, excape them, so they come through.
+      # If there are quotes, escape them, so they come through.
       string(REPLACE "\"" "\\\"" arg ${arg})
       # Args with spaces need quotes around them to get them to be parsed as a single argument.
       if(arg MATCHES " ")
@@ -182,10 +182,6 @@ cuda_execute_process(
 # for dependency generation and hope for the best.
 set(depends_CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}")
 set(CUDA_VERSION @CUDA_VERSION@)
-if(CUDA_VERSION VERSION_LESS "3.0")
-  # Note that this will remove all occurrences of -G.
-  list(REMOVE_ITEM depends_CUDA_NVCC_FLAGS "-G")
-endif()
 
 # nvcc doesn't define __CUDACC__ for some reason when generating dependency files.  This
 # can cause incorrect dependencies when #including files based on this macro which is

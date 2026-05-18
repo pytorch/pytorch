@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-CHANGES=$(git status --porcelain)
+
+set -eux
+
+CHANGES=$(git status --porcelain "$1")
 echo "$CHANGES"
-git diff
+# NB: Use --no-pager here to avoid git diff asking for a prompt to continue
+git --no-pager diff "$1"
 [ -z "$CHANGES" ]

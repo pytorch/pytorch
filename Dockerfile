@@ -1,18 +1,14 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
+
+# NOTE: Building this image require's docker version >= 23.0.
 #
-# NOTE: To build this you will need a docker version > 18.06 with
-#       experimental enabled and DOCKER_BUILDKIT=1
-#
-#       If you do not use buildkit you are not going to have a good time
-#
-#       For reference:
-#           https://docs.docker.com/develop/develop-images/build_enhancements/
-ARG BASE_IMAGE=ubuntu:18.04
-ARG PYTHON_VERSION=3.8
+# For reference:
+# - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
+
+ARG BASE_IMAGE=ubuntu:24.04
 
 FROM ${BASE_IMAGE} as dev-base
-RUN --mount=type=cache,id=apt-dev,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         ccache \
@@ -20,62 +16,112 @@ RUN --mount=type=cache,id=apt-dev,target=/var/cache/apt \
         curl \
         git \
         libjpeg-dev \
-        libpng-dev && \
+        libpng-dev \
+        python3 \
+        python3-pip \
+        python-is-python3 \
+        python3-dev && \
     rm -rf /var/lib/apt/lists/*
+# Remove PEP 668 restriction (safe in containers)
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 RUN /usr/sbin/update-ccache-symlinks
 RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
-ENV PATH /opt/conda/bin:$PATH
 
-FROM dev-base as conda
-ARG PYTHON_VERSION=3.8
-RUN curl -fsSL -v -o ~/miniconda.sh -O  https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
-    chmod +x ~/miniconda.sh && \
-    ~/miniconda.sh -b -p /opt/conda && \
-    rm ~/miniconda.sh && \
-    /opt/conda/bin/conda install -y python=${PYTHON_VERSION} conda-build pyyaml numpy ipython&& \
-    /opt/conda/bin/conda clean -ya
+FROM dev-base as python-deps
+COPY requirements.txt requirements-build.txt .
+# Install Python packages to system Python
+RUN pip3 install --upgrade --ignore-installed pip setuptools wheel && \
+    pip3 install cmake pyyaml numpy ipython -r requirements.txt
 
 FROM dev-base as submodule-update
 WORKDIR /opt/pytorch
 COPY . .
 RUN git submodule update --init --recursive
 
-FROM conda as build
-WORKDIR /opt/pytorch
-COPY --from=conda /opt/conda /opt/conda
-COPY --from=submodule-update /opt/pytorch /opt/pytorch
-RUN --mount=type=cache,target=/opt/ccache \
-    TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX 8.0" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
-    python setup.py install
+FROM python-deps as pytorch-installs
+ARG CUDA_PATH=cu121
+ARG INSTALL_CHANNEL=whl/nightly
+# Automatically set by buildx
+ARG TARGETPLATFORM
 
-FROM conda as conda-installs
-ARG PYTHON_VERSION=3.8
-ARG CUDA_VERSION=11.1
-ARG CUDA_CHANNEL=nvidia
-ARG INSTALL_CHANNEL=pytorch-nightly
-ENV CONDA_OVERRIDE_CUDA=${CUDA_VERSION}
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y python=${PYTHON_VERSION} pytorch torchvision torchtext "cudatoolkit=${CUDA_VERSION}" && \
-    /opt/conda/bin/conda clean -ya
-RUN /opt/conda/bin/pip install torchelastic
+# torchaudio does not publish wheels against the CUDA 13.2 index yet,
+# so skip it when CUDA_PATH=cu132 to keep this Dockerfile building.
+RUN case ${TARGETPLATFORM} in \
+         "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
+         *) \
+             if [ "${CUDA_PATH}" = "cu132" ]; then \
+                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision; \
+             else \
+                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision torchaudio; \
+             fi \
+             ;; \
+    esac
+RUN pip3 install torchelastic
+RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
+    echo "Is torch compiled with cuda: ${IS_CUDA}"; \
+    if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
+        exit 1; \
+    fi
 
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION
+ARG TRITON_VERSION
+ARG TARGETPLATFORM
+ARG CUDA_VERSION
 LABEL com.nvidia.volumes.needed="nvidia_driver"
-RUN --mount=type=cache,id=apt-final,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         libjpeg-dev \
-        libpng-dev && \
-    rm -rf /var/lib/apt/lists/*
-COPY --from=conda-installs /opt/conda /opt/conda
-ENV PATH /opt/conda/bin:$PATH
+        libpng-dev \
+        python-is-python3 \
+        python3 \
+        python3-dev \
+        python3-pip \
+        && rm -rf /var/lib/apt/lists/*
+# Copy Python packages from pytorch-installs stage
+COPY --from=pytorch-installs /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=pytorch-installs /usr/local/bin /usr/local/bin
+RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
+        apt-get update -qq && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 
 FROM official as dev
+ARG CUDA_VERSION
+ARG BUILD_TYPE
+
+# Install CUDA toolkit for devel images
+# Only runs when building devel-image target (BUILD_TYPE != official)
+RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        wget gnupg2 ca-certificates && \
+    # Add NVIDIA repository
+    NVARCH=$(uname -m | sed 's/x86_64/x86_64/' | sed 's/aarch64/sbsa/') && \
+    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/3bf863cc.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH} /" > /etc/apt/sources.list.d/cuda.list && \
+    # Install CUDA toolkit
+    CUDA_PKG_VERSION=$(echo ${CUDA_VERSION} | cut -d'.' -f1,2 | tr '.' '-') && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        cuda-toolkit-${CUDA_PKG_VERSION} && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    # Configure LD
+    echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/cuda.conf && \
+    ldconfig; \
+fi
+
+# Set CUDA environment (always set, needed even if CUDA already in base)
+ENV PATH=/usr/local/cuda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV CUDA_HOME=/usr/local/cuda
+
 # Should override the already installed version from the official-image stage
-COPY --from=build /opt/conda /opt/conda
+COPY --from=python-deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=python-deps /usr/local/bin /usr/local/bin
+COPY --from=submodule-update /opt/pytorch /opt/pytorch

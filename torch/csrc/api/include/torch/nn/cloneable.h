@@ -10,8 +10,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 /// The `clone()` method in the base `Module` class does not have knowledge of
 /// the concrete runtime type of its subclasses. Therefore, `clone()` must
 /// either be called from within the subclass, or from a base class that has
@@ -21,7 +20,7 @@ namespace nn {
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class Cloneable : public virtual Module {
+class Cloneable : public Module {
  public:
   using Module::Module;
 
@@ -33,7 +32,7 @@ class Cloneable : public virtual Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      const optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
@@ -42,51 +41,44 @@ class Cloneable : public virtual Module {
     copy->buffers_.clear();
     copy->children_.clear();
     copy->reset();
-    // [[this pointer note]]
-    // Don't remove 'this' pointer, nvcc needs it to be explicitly given in some envs.
-    // eg. ubuntu 16.04 + gcc 5.x + cuda 9.2
-    //     ubuntu 16.04 + gcc 7.x + cuda 9.2
     TORCH_CHECK(
-        copy->parameters_.size() == this->parameters_.size(),
+        copy->parameters_.size() == parameters_.size(),
         "The cloned module does not have the same number of "
         "parameters as the original module after calling reset(). "
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
     for (const auto& parameter : named_parameters(/*recurse=*/false)) {
       auto& tensor = *parameter;
-      auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device ? tensor.to(*device)
+                                                       : tensor.clone();
       copy->parameters_[parameter.key()].set_data(data);
     }
-    // Don't remove 'this' pointer. See [[this pointer note]]
     TORCH_CHECK(
-        copy->buffers_.size() == this->buffers_.size(),
+        copy->buffers_.size() == buffers_.size(),
         "The cloned module does not have the same number of "
         "buffers as the original module after calling reset(). "
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
     for (const auto& buffer : named_buffers(/*recurse=*/false)) {
       auto& tensor = *buffer;
-      auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device ? tensor.to(*device)
+                                                       : tensor.clone();
       copy->buffers_[buffer.key()].set_data(data);
     }
-    // Don't remove 'this' pointer. See [[this pointer note]]
     TORCH_CHECK(
-        copy->children_.size() == this->children_.size(),
+        copy->children_.size() == children_.size(),
         "The cloned module does not have the same number of "
         "child modules as the original module after calling reset(). "
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
-    // Don't remove 'this' pointer. See [[this pointer note]]
-    for (const auto& child : this->children_) {
+    for (const auto& child : children_) {
       copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;
   }
 
  private:
-  void clone_(Module& other, const optional<Device>& device) final {
+  void clone_(Module& other, const std::optional<Device>& device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.
@@ -95,9 +87,8 @@ class Cloneable : public virtual Module {
         clone != nullptr,
         "Attempted to clone submodule, but it is of a "
         "different type than the submodule it was to be cloned into");
-    static_cast<Derived&>(*this) = std::move(*clone);
+    static_cast<Derived&>(*this) = *clone;
   }
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

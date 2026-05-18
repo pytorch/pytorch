@@ -1,11 +1,10 @@
 #pragma once
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * class ScriptTypeParser
@@ -21,7 +20,7 @@ class TORCH_API ScriptTypeParser {
 
   c10::TypePtr parseTypeFromExpr(const Expr& expr) const;
 
-  c10::optional<std::pair<c10::TypePtr, int32_t>> parseBroadcastList(
+  std::optional<std::pair<c10::TypePtr, int32_t>> parseBroadcastList(
       const Expr& expr) const;
 
   c10::TypePtr parseType(const std::string& str);
@@ -33,7 +32,7 @@ class TORCH_API ScriptTypeParser {
  private:
   c10::TypePtr parseTypeFromExprImpl(const Expr& expr) const;
 
-  c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
+  std::optional<std::string> parseBaseTypeName(const Expr& expr) const;
   at::TypePtr subscriptToType(
       const std::string& typeName,
       const Subscript& subscript) const;
@@ -46,6 +45,9 @@ class TORCH_API ScriptTypeParser {
   std::vector<Argument> parseReturnFromDecl(const Decl& decl);
 
   ResolverPtr resolver_ = nullptr;
+
+  // Need to use `evaluateDefaults` in serialization
+  friend struct ConstantTableValue;
+  friend struct SourceImporterImpl;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

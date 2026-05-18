@@ -61,13 +61,27 @@ In foo.cc, do:
 //    we use cpuinfo to identify cpu support and run the proper functions.
 
 #pragma once
-
+#if defined(CAFFE2_PERF_WITH_SVE) || defined(CAFFE2_PERF_WITH_AVX512) || \
+    defined(CAFFE2_PERF_WITH_AVX2) || defined(CAFFE2_PERF_WITH_AVX)
 #include <cpuinfo.h>
+#endif
 
 // DO macros: these should be used in your entry function, similar to foo()
 // above, that routes implementations based on CPU capability.
 
 #define BASE_DO(funcname, ...) return funcname##__base(__VA_ARGS__);
+
+#ifdef CAFFE2_PERF_WITH_SVE
+#define SVE_DO(funcname, ...)                                               \
+  {                                                                         \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_arm_sve(); \
+    if (isDo) {                                                             \
+      return funcname##__sve(__VA_ARGS__);                                  \
+    }                                                                       \
+  }
+#else // CAFFE2_PERF_WITH_SVE
+#define SVE_DO(funcname, ...)
+#endif // CAFFE2_PERF_WITH_SVE
 
 #ifdef CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)                                   \
@@ -105,12 +119,12 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_AVX2
 
 #ifdef CAFFE2_PERF_WITH_AVX
-#define AVX_DO(funcname, ...)                  \
-  {                                            \
+#define AVX_DO(funcname, ...)                                               \
+  {                                                                         \
     static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx(); \
-    if (isDo) {                                \
-      return funcname##__avx(__VA_ARGS__);     \
-    }                                          \
+    if (isDo) {                                                             \
+      return funcname##__avx(__VA_ARGS__);                                  \
+    }                                                                       \
   }
 #define AVX_F16C_DO(funcname, ...)                                            \
   {                                                                           \

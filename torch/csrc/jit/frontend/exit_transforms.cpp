@@ -1,14 +1,12 @@
 #include <torch/csrc/jit/frontend/exit_transforms.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/frontend/error_report.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // WILL states that a node/block must hit the exit, MIGHT that it may happen,
 // WONT that it will not happen. THROWS states that a node/block always throws,
@@ -76,7 +74,7 @@ struct ExitTransformer {
     // this value will never be used, since we will always throw before it is
     // accessed
     throws_val_ = getUnitValue(BoolType::get());
-  };
+  }
 
   void transformReturnStmts() {
     current_exit_kind_ = prim::ReturnStmt;
@@ -125,7 +123,7 @@ struct ExitTransformer {
   }
 
   static void removeOutputs(Block* b) {
-    while (b->outputs().size() > 0) {
+    while (!b->outputs().empty()) {
       b->eraseOutput(0);
     }
   }
@@ -148,9 +146,11 @@ struct ExitTransformer {
     IfView if_view(n);
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
-    for (size_t i = 0; i < true_outs.size(); ++i) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+    for (const auto i : c10::irange(true_outs.size())) {
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }
@@ -289,8 +289,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* has_exited;
+    Value* has_exited = nullptr;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
       // then we have exited.
@@ -334,7 +333,7 @@ struct ExitTransformer {
     std::vector<Value*> exit_block_vals;
     // after an exit, the only values that will get used
     // are the hasExited() and exitValues(), so we match the existing
-    // block outputs with unitialized
+    // block outputs with uninitialized
     exit_block_vals = matchValuesWithUnitialized(block->outputs());
 
     // Set the new if to have the same outputs of the original block,
@@ -345,7 +344,7 @@ struct ExitTransformer {
       new_if->addOutput()->setType(block->outputs().at(i)->type());
     }
 
-    while (block->outputs().size() > 0) {
+    while (!block->outputs().empty()) {
       block->eraseOutput(0);
     }
     for (auto out : new_if->outputs()) {
@@ -363,10 +362,10 @@ struct ExitTransformer {
   //    break
   //    j = j + 1
   // where the j + 1 value will be a block output, but since they will
-  // never be used, it is safe to replace them with unitialized value
+  // never be used, it is safe to replace them with uninitialized value
   void destroyNodeAfterExit(Node* n) {
     for (auto output : n->outputs()) {
-      if (output->uses().size() > 0) {
+      if (!output->uses().empty()) {
         output->replaceAllUsesWith(getUnitValue(output->type()));
       }
     }
@@ -520,7 +519,7 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph_;
 };
 
-bool inlineConsecutiveIfs(Node* node) {
+static bool inlineConsecutiveIfs(Node* node) {
   if (node->kind() != prim::If || node->next()->kind() != prim::If) {
     return false;
   }
@@ -550,11 +549,9 @@ bool inlineConsecutiveIfs(Node* node) {
   bool then_value = maybe_then_value->toBool();
   bool else_value = maybe_else_value->toBool();
 
-  for (auto i = 0; i < 2; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* first_if_block;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* second_if_block;
+  for (const auto i : c10::irange(2)) {
+    Block* first_if_block = nullptr;
+    Block* second_if_block = nullptr;
 
     if (i == 0) {
       first_if_block = first_if.thenBlock();
@@ -603,7 +600,7 @@ bool inlineConsecutiveIfs(Node* node) {
 //   return 1
 // else:
 //   return 2
-void inlineConsecutiveIfs(Block* block) {
+static void inlineConsecutiveIfs(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     for (Block* b : it->blocks()) {
@@ -666,8 +663,7 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     node = it.next();
   }
 
-  // The stack should not be empty; an Exit should have been found for every
-  // Enter.
+  // The stack should be empty; an Exit should have been found for every Enter.
   TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
 
   // Now, add a With block for each Enter-Exit pair. The innermost pairs were
@@ -844,5 +840,5 @@ void TransformExits(std::shared_ptr<Graph>& graph) {
   inlineConsecutiveIfs(graph->block());
   convertWithBlocksToEnterExitNodes(graph);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

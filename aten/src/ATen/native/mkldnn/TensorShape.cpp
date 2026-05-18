@@ -1,12 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_mkldnn_reshape_native.h>
+#include <ATen/ops/_mkldnn_transpose_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/view_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
@@ -16,7 +26,7 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(false, "mkldnn_clone: ATen not compiled with MKLDNN support");
 }
 
@@ -28,15 +38,14 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false,
@@ -55,7 +64,7 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
                                  self.options().device_opt());
 }
 
-Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
@@ -68,6 +77,9 @@ Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optiona
 }
 
 Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   std::vector<int> axes(x.ndims());
@@ -82,7 +94,6 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: in-place mkldnn operations are not supported yet");
 }
 
-} // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

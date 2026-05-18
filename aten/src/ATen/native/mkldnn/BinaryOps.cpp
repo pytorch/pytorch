@@ -1,12 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/ExpandUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/mul_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& mkldnn_add_out(
     const Tensor& self,
@@ -37,17 +45,16 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-#else // AT_MKLDNN_EBABLED
+
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
+static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   if (!self.requires_grad() && !other.requires_grad()) {
     auto out_size = infer_size(self.sizes(), other.sizes());
     auto out_dtype = promoteTypes(
@@ -147,7 +154,6 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
   return native::mkldnn_mul_out(self, other, self);
 }
 
-} // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

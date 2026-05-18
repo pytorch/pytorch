@@ -2,10 +2,11 @@
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
 
-using c10::string_view;
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
+using std::string_view;
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
 
 static_assert(get_type_index<int>() == get_type_index<int>(), "");
@@ -54,12 +55,11 @@ static_assert(
     "");
 
 namespace test_top_level_name {
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
+
 static_assert(
     string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, TopLevelName) {
   EXPECT_NE(
       string_view::npos, get_fully_qualified_type_name<Dummy>().find("Dummy"));
@@ -69,13 +69,11 @@ TEST(TypeIndex, TopLevelName) {
 namespace test_nested_name {
 struct Dummy final {};
 
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, NestedName) {
   EXPECT_NE(
       string_view::npos,
@@ -88,7 +86,6 @@ template <class T>
 struct Outer final {};
 struct Inner final {};
 
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Outer<Inner>>().find(
@@ -99,8 +96,7 @@ static_assert(
         get_fully_qualified_type_name<Outer<Inner>>().find(
             "test_type_template_parameter::Inner"),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, TypeTemplateParameter) {
   EXPECT_NE(
       string_view::npos,
@@ -117,13 +113,11 @@ namespace test_nontype_template_parameter {
 template <size_t N>
 struct Class final {};
 
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, NonTypeTemplateParameter) {
   EXPECT_NE(
       string_view::npos,
@@ -137,51 +131,49 @@ struct Type final {
   using type = const T*;
 };
 
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<typename Type<int>::type>().find("int"),
     "");
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<typename Type<int>::type>().find("*"),
+        get_fully_qualified_type_name<typename Type<int>::type>().find('*'),
     "");
 
 // but with remove_pointer applied, there is no '*' in the type name anymore
 static_assert(
     string_view::npos ==
         get_fully_qualified_type_name<
-            typename std::remove_pointer<typename Type<int>::type>::type>()
-            .find("*"),
+            std::remove_pointer_t<typename Type<int>::type>>()
+            .find('*'),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, TypeComputationsAreResolved) {
   EXPECT_NE(
       string_view::npos,
       get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
   EXPECT_NE(
       string_view::npos,
-      get_fully_qualified_type_name<typename Type<int>::type>().find("*"));
+      get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
   // but with remove_pointer applied, there is no '*' in the type name anymore
   EXPECT_EQ(
       string_view::npos,
       get_fully_qualified_type_name<
-          typename std::remove_pointer<typename Type<int>::type>::type>()
-          .find("*"));
+          std::remove_pointer_t<typename Type<int>::type>>()
+          .find('*'));
 }
 
 struct Functor final {
   std::string operator()(int64_t a, const Type<int>& b) const;
 };
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
+
 static_assert(
+    // NOLINTNEXTLINE(misc-redundant-expression)
     get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>() ==
         get_fully_qualified_type_name<
             typename c10::guts::infer_function_traits_t<Functor>::func_type>(),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
   EXPECT_EQ(
       get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
@@ -193,7 +185,6 @@ TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
 namespace test_function_arguments_and_returns {
 class Dummy final {};
 
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Dummy(int)>().find(
@@ -204,8 +195,7 @@ static_assert(
         get_fully_qualified_type_name<void(Dummy)>().find(
             "test_function_arguments_and_returns::Dummy"),
     "");
-#endif
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+
 TEST(TypeIndex, FunctionArgumentsAndReturns) {
   EXPECT_NE(
       string_view::npos,
@@ -218,3 +208,4 @@ TEST(TypeIndex, FunctionArgumentsAndReturns) {
 }
 } // namespace test_function_arguments_and_returns
 } // namespace
+// NOLINTEND(modernize-unary-static-assert)

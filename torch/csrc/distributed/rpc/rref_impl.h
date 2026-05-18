@@ -3,16 +3,14 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Event.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <optional>
 
 #include <atomic>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 class RRef;
 class RRefContext;
@@ -31,10 +29,15 @@ constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
 
 // Represents fork of an RRef to be sent over the wire.
 struct TORCH_API RRefForkData {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t ownerId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const RRefId rrefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ForkId forkId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t parent_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string typeStr_;
 
   RRefForkData(
@@ -196,8 +199,7 @@ class TORCH_API RRef : public RRefInterface {
   explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~RRef() = default;
+  ~RRef() override = default;
 
   // returns the worker id of the owner
   inline worker_id_t owner() const override {
@@ -325,9 +327,8 @@ class TORCH_API UserRRef final : public RRef {
   // Will be called when both refcount and weakcount reach 0. See
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
-  // and it's data members. We don't need to implement anything here.
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UserRRef() = default;
+  // and its data members.
+  ~UserRRef() override;
 
  private:
   friend class RRefContext;
@@ -339,7 +340,7 @@ class TORCH_API UserRRef final : public RRef {
 
   const ForkId forkId_;
 
-  // Indicates if this user has sent delete message to it's owner.
+  // Indicates if this user has sent delete message to its owner.
   // Note, thread safety is needed because delete message could be sent by
   // either the destructor called by Python garbage collection or RRefContext
   // proactive cleanup on RPC graceful shutdown.
@@ -368,7 +369,7 @@ class TORCH_API OwnerRRef final : public RRef {
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      c10::optional<IValue> value,
+      std::optional<IValue> value,
       std::vector<c10::Device> devices);
 
   inline bool isOwner() const override {
@@ -401,19 +402,6 @@ class TORCH_API OwnerRRef final : public RRef {
   friend class RRefContext;
 
   c10::intrusive_ptr<JitFuture> future_;
-
- public:
-  // Records an event per each stream in the context and stores them in
-  // the current OwnerRRef instance.
-  void recordAllStreams(const std::shared_ptr<LazyStreamContext>& ctx);
-
-  // Blocks all streams in the context on all events previously stored in
-  // the current OwnerRRef instance.
-  void blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx);
-
- private:
-  // a storage for device events for synchronization.
-  std::vector<c10::Event> events_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
@@ -430,6 +418,4 @@ inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

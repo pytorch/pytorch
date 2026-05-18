@@ -4,12 +4,13 @@
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-#include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
 
@@ -23,16 +24,17 @@ constexpr auto kDefaultInitMethod = "env://";
 constexpr float kSecToMsConversion = 1000;
 constexpr auto kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
+constexpr auto kDefaultNumWorkerThreads = 16;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 // Input is qualified name string, output is JIT StrongTypePtr
 // Same as jit::TypeResolver, did not import jit::TypeResolver to here
-// because it could instroduce cyclic dependencies.
+// because it could introduce cyclic dependencies.
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
-struct RpcBackendOptions {
+struct TORCH_API RpcBackendOptions {
   RpcBackendOptions()
       : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
@@ -48,31 +50,9 @@ struct RpcBackendOptions {
 
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo : torch::CustomClassHolder {
-  WorkerInfo(std::string name, int64_t id)
-      : WorkerInfo(std::move(name), (worker_id_t)id) {
-    TORCH_CHECK(
-        id <= std::numeric_limits<worker_id_t>::max(),
-        "RPC worker id ",
-        id,
-        " out of bound of int16_t.");
-  }
+  WorkerInfo(std::string name, int64_t id);
 
-  WorkerInfo(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {
-    bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
-    bool validChar =
-        std::find_if(name_.begin(), name_.end(), [](char c) {
-          return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
-        }) == name_.end();
-    TORCH_CHECK(
-        validSize && validChar,
-        "Worker name must match ^[A-Za-z0-9-_:]*$, "
-        "and must be non-empty and shorter than ",
-        MAX_NAME_LEN,
-        " chars, "
-        "but got ",
-        name_);
-  }
+  WorkerInfo(std::string name, worker_id_t id);
 
   bool operator==(const WorkerInfo& rhs) {
     return (id_ == rhs.id_) && (name_ == rhs.name_);
@@ -80,8 +60,14 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
 
   static constexpr size_t MAX_NAME_LEN = 128;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string name_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t id_;
+};
+
+struct TORCH_API RegisterWorkerInfoOnce {
+  RegisterWorkerInfoOnce();
 };
 
 TORCH_API std::ostream& operator<<(
@@ -107,18 +93,19 @@ struct TORCH_API RpcRetryOptions {
 struct TORCH_API RpcRetryInfo {
   RpcRetryInfo(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       c10::intrusive_ptr<JitFuture> originalFuture,
       int retryCount,
       RpcRetryOptions options)
       : to_(to),
-        message_(message),
+        message_(std::move(message)),
         originalFuture_(std::move(originalFuture)),
         retryCount_(retryCount),
         options_(options) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const WorkerInfo& to_;
-  Message message_;
+  c10::intrusive_ptr<Message> message_;
   // Future that is returned to the caller of sendWithRetries().
   c10::intrusive_ptr<JitFuture> originalFuture_;
   // Number of send attempts completed so far.
@@ -162,12 +149,12 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
-      const std::unordered_map<c10::Device, c10::Device>& deviceMap = {}) = 0;
+      const DeviceMap& deviceMap = {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
-  // receieved. The duration between consecutive sends is increased over
+  // received. The duration between consecutive sends is increased over
   // time using an exponential backoff algorithm.
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
@@ -180,11 +167,11 @@ class TORCH_API RpcAgent {
   // are idempotent.
   c10::intrusive_ptr<JitFuture> sendWithRetries(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
-  // NB: not using ``c10::optional<const std::string&>`` here because we might
+  // NB: not using ``std::optional<const std::string&>`` here because we might
   // need to create a separate RPC API lib and avoid forcing all ``RpcAgent``
   // implementations to depend on libtorch.
   const WorkerInfo& getWorkerInfo() const;
@@ -209,9 +196,9 @@ class TORCH_API RpcAgent {
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
-  virtual void join(bool shutdown = false) = 0;
+  virtual void join(bool shutdown = false, float timeout = 0) = 0;
 
-  // Synchronize the this process with other ``RpcAgent`` processes. Block until
+  // Synchronize this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
@@ -246,14 +233,14 @@ class TORCH_API RpcAgent {
   // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
-  // Retrive debug info in addition to metrics as KV map
+  // Retrieve debug info in addition to metrics as KV map
   virtual std::unordered_map<std::string, std::string> getDebugInfo();
 
   // Flag to control whether GIL wait times
   // should be profiled or not.
   void enableGILProfiling(bool flag);
 
-  // Retrieve wheher we should profile GIL wait times or not.
+  // Retrieve whether we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr
@@ -340,9 +327,7 @@ class TORCH_API RpcAgent {
   std::mutex rpcRetryMutex_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 namespace std {
 template <>

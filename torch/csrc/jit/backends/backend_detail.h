@@ -6,12 +6,21 @@
 
 #include <functional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
+
+using DebugHandleType = int64_t;
+
+using NodeToDebugHandle = std::unordered_map<Node*, DebugHandleType>;
+
+using BackendDebugHandleGenerator =
+    std::function<NodeToDebugHandle(const std::shared_ptr<Graph>&)>;
+
 namespace detail {
 
-using BackendPreprocessFunction =
-    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>;
+using BackendPreprocessFunction = std::function<c10::IValue(
+    const Module&,
+    const c10::Dict<IValue, IValue>&,
+    const BackendDebugHandleGenerator& generate_debug_handles)>;
 
 TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,
@@ -27,5 +36,4 @@ TORCH_API Module codegen_backend_module(
     const c10::Dict<IValue, IValue>& method_compile_spec,
     const c10::DictTypePtr& any_dict_ty);
 } // namespace detail
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

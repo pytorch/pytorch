@@ -1,19 +1,15 @@
 #pragma once
 
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <ATen/code_template.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 /*with type_as not checking type of its input, a fusion group can have non-fp32
 tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto type_declarations_template = CodeTemplate(R"(
+static auto type_declarations_template = at::jit::CodeTemplate(R"(
 
 #define POS_INFINITY INFINITY
 #define NEG_INFINITY -INFINITY
@@ -31,8 +27,7 @@ struct TensorInfo<T, 0> {
 };
 )");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto cpu_compilation_unit_template = CodeTemplate(R"(
+static auto cpu_compilation_unit_template = at::jit::CodeTemplate(R"(
 #include <math.h>
 #include <cstddef>
 #include <cstdint>
@@ -103,7 +98,4 @@ JIT_API void ${kernelName}(IndexType totalElements, void ** args) {
 }
 )");
 
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

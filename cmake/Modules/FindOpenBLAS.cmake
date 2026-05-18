@@ -11,6 +11,7 @@ SET(Open_BLAS_INCLUDE_SEARCH_PATHS
   /opt/OpenBLAS/include
   $ENV{OpenBLAS_HOME}
   $ENV{OpenBLAS_HOME}/include
+  $ENV{OpenBLAS_HOME}/include/openblas
 )
 
 SET(Open_BLAS_LIB_SEARCH_PATHS
@@ -28,10 +29,15 @@ SET(Open_BLAS_LIB_SEARCH_PATHS
         $ENV{OpenBLAS}/lib
         $ENV{OpenBLAS_HOME}
         $ENV{OpenBLAS_HOME}/lib
- )
+)
+
+SET(Open_BLAS_LIB_NAME openblas)
+IF(DEFINED ENV{OpenBLAS_LIB_NAME})
+  SET(Open_BLAS_LIB_NAME $ENV{OpenBLAS_LIB_NAME})
+ENDIF()
 
 FIND_PATH(OpenBLAS_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS})
-FIND_LIBRARY(OpenBLAS_LIB NAMES openblas PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
+FIND_LIBRARY(OpenBLAS_LIB NAMES ${Open_BLAS_LIB_NAME} PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
 
 SET(OpenBLAS_FOUND ON)
 
@@ -57,6 +63,32 @@ ELSE (OpenBLAS_FOUND)
     MESSAGE(FATAL_ERROR "Could not find OpenBLAS")
   ENDIF (OpenBLAS_FIND_REQUIRED)
 ENDIF (OpenBLAS_FOUND)
+
+IF(OpenBLAS_LIB)
+ # Run ldd on the OpenBLAS library
+execute_process(
+  COMMAND ldd "${OpenBLAS_LIB}"
+  OUTPUT_VARIABLE LDD_OUTPUT
+  ERROR_VARIABLE LDD_ERROR
+  RESULT_VARIABLE LDD_RESULT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(NOT LDD_RESULT EQUAL 0)
+  message(WARNING "ldd failed on ${OpenBLAS_LIB}: ${LDD_ERROR}")
+endif()
+
+# Check if the output contains "libgomp"
+string(FIND "${LDD_OUTPUT}" "libgomp" LIBGOMP_FOUND_INDEX)
+if(LIBGOMP_FOUND_INDEX GREATER -1)
+  message(STATUS "OpenBLAS is directly linked against libgomp")
+  set(OPENBLAS_USES_LIBGOMP TRUE CACHE BOOL "OpenBLAS uses libgomp")
+else()
+  message(STATUS "OpenBLAS is not directly linked against libgomp")
+  set(OPENBLAS_USES_LIBGOMP FALSE CACHE BOOL "OpenBLAS uses libgomp")
+endif()
+
+ENDIF(OpenBLAS_LIB)
 
 MARK_AS_ADVANCED(
     OpenBLAS_INCLUDE_DIR

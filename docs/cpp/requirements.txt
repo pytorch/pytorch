@@ -1,8 +1,0 @@
-sphinx==3.1.2
-breathe==4.25.0
-exhale==0.2.3
-docutils==0.16
--e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
-bs4
-lxml
-six

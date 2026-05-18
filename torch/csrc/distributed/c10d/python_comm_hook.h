@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
@@ -15,7 +15,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
   // The state is passed to the hook in runHook method, and it can be used to
   // maintain and update any state information during the execution of the hook.
   // The hook performs user-specified processing and returns a future indicating
-  // asychronous communication of gradients.
+  // asynchronous communication of gradients.
   PythonCommHook(py::object state, py::object hook)
       : state_(std::move(state)), hook_(std::move(hook)) {}
 
@@ -23,7 +23,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 
-  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override;
+  at::Tensor parseHookResult(const c10::IValue& result) override;
 
  private:
   // Only needed for stateful communication.

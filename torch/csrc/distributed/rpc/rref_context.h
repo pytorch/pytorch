@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -8,10 +7,9 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <atomic>
+#include <optional>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
@@ -38,6 +36,9 @@ class TORCH_API RRefContext {
       bool ignoreRRefLeak = true);
 
   static void handleException(const JitFuture& jitFuture);
+
+  // handle exception without throw ::c10::Error again
+  static void handleExceptionSilent(const JitFuture& jitFuture);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
@@ -177,7 +178,7 @@ class TORCH_API RRefContext {
   // been confirmed (i.e. is no longer in the pendingUsers_ map).
   c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
 
-  // Start recroding new pending UserRRefs. All pending UserRRefs introduced
+  // Start recording new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
   // then be consumed and cleared in waitForThreadLocalPendingRRefs().
   void recordThreadLocalPendingRRefs();
@@ -224,7 +225,7 @@ class TORCH_API RRefContext {
     c10::intrusive_ptr<JitFuture> confirmationFuture_;
   };
 
-  RRefContext(std::shared_ptr<RpcAgent>);
+  RRefContext(std::shared_ptr<RpcAgent> /*agent*/);
 
   c10::intrusive_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,
@@ -261,7 +262,7 @@ class TORCH_API RRefContext {
       RRefId::Hash>
       forks_;
 
-  // This cond var is used by deleteAllUsers(), a event notificaton is sent if
+  // This cond var is used by deleteAllUsers(), a event notification is sent if
   // number of pending UserRRef or UserRRef children is reduced, or
   // number of owned OwnerRRef is reduced.
   std::condition_variable deleteAllUsersCV_;
@@ -300,7 +301,7 @@ class TORCH_API RRefContext {
   std::atomic<int64_t> numPendingFutures_{0};
 
   std::mutex destroyedMutex_;
-  bool destroyed_;
+  bool destroyed_{false};
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.
@@ -317,7 +318,7 @@ class TORCH_API RRefContext {
   //     RRef is forwarded to the callee as new UserRRefs (if the callee is not
   //     the owner). In this case, we block running the user function until all
   //     UserRRefs are confirmed by the owner.
-  // This contract gurantees that no UserRRefs can be used remotely without
+  // This contract guarantees that no UserRRefs can be used remotely without
   // confirmation. Note that, however, the UserRRef created by rpc.remote can
   // still be passed to local functions as arguments and used there. This is by
   // design, because this feature is especially useful when, say a master node
@@ -331,6 +332,4 @@ class TORCH_API RRefContext {
   static thread_local bool recording_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

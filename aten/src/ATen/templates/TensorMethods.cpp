@@ -1,85 +1,61 @@
 #include <c10/core/Scalar.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/QScheme.h>
-#include <c10/core/Stream.h>
-#include <c10/macros/Macros.h>
-#include <c10/core/TensorOptions.h>
-#include <c10/util/intrusive_ptr.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/NamedTensor.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/op_registration/adaption.h>
-#include <ATen/quantized/Quantizer.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/core/TensorBody.h>
 
-${static_dispatch_extra_headers}
+#include <string_view>
 
 namespace at {
 
-using Stream = c10::Stream;
+namespace {
 
-Tensor Tensor::cpu() const {
-  return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+// Verifies the requested type is the same as the Tensor's type.
+void check_type(const TensorBase& tensor, ScalarType type) {
+  TORCH_CHECK(
+      tensor.scalar_type() == type
+      || (isQIntType(tensor.scalar_type())
+          && toUnderlying(tensor.scalar_type()) == type),
+      "expected scalar type ", type, " but found ", tensor.scalar_type());
 }
 
-// TODO: The Python version also accepts arguments
-Tensor Tensor::cuda() const {
-  return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+} // namespace
+
+template <typename T>
+const T* TensorBase::const_data_ptr() const {
+  using NonConstT = std::remove_const_t<T>;
+  check_type(*this, c10::CppTypeToScalarType<NonConstT>());
+  return this->unsafeGetTensorImpl()->data_ptr_impl<NonConstT>();
 }
 
-Tensor Tensor::hip() const {
-  return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+template <typename T>
+T* TensorBase::mutable_data_ptr() const {
+  check_type(*this, c10::CppTypeToScalarType<T>());
+  return this->unsafeGetTensorImpl()->mutable_data_ptr_impl<T>();
 }
 
-Tensor Tensor::vulkan() const {
-  return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+template <typename T>
+T* TensorBase::data_ptr() const {
+  return this->mutable_data_ptr<T>();
 }
 
-Tensor Tensor::metal() const {
-  return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
-}
+#define DEFINE_CAST(T, name)                                                \
+   template TORCH_API const T* TensorBase::const_data_ptr<T>() const;       \
+   template TORCH_API const T* TensorBase::const_data_ptr<const T>() const; \
+   template TORCH_API T* TensorBase::mutable_data_ptr() const;              \
+   template TORCH_API T* TensorBase::data_ptr() const;
 
-Tensor Tensor::toType(ScalarType t) const {
-  return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
-}
+ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
+ AT_FORALL_QINT_TYPES(DEFINE_CAST)
+ DEFINE_CAST(uint16_t, UInt16)
+ DEFINE_CAST(uint32_t, UInt32)
+ DEFINE_CAST(uint64_t, UInt64)
+ #undef DEFINE_CAST
 
-// TODO: Deprecate me
-Tensor Tensor::toBackend(Backend b) const {
-  return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
-}
+ #define DEFINE_ITEM(T, name)      \
+   template <>                     \
+   TORCH_API T Tensor::item() const { \
+     return item().to##name();     \
+   }
 
-TensorOptions Tensor::options() const {
-  return TensorOptions().dtype(dtype())
-                        .device(device())
-                        .layout(layout());
-}
+ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ITEM)
+ #undef DEFINE_ITEM
 
-${tensor_method_definitions}
-
-#define DEFINE_CAST(T, name)                                        \
-  template <>                                                       \
-  TORCH_API T* Tensor::data_ptr() const {                           \
-    TORCH_CHECK(                                                    \
-        scalar_type() == ScalarType::name,                          \
-        "expected scalar type "                                     \
-        #name                                                       \
-        " but found ",                                              \
-        scalar_type());                                             \
-    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
-AT_FORALL_QINT_TYPES(DEFINE_CAST)
-#undef DEFINE_CAST
-
-#define DEFINE_ITEM(T, name)      \
-  template <>                     \
-  TORCH_API T Tensor::item() const { \
-    return item().to##name();     \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
-#undef DEFINE_ITEM
-
-} //namespace at
+ } //namespace at

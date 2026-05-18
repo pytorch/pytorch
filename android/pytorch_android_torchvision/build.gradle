@@ -42,7 +42,6 @@ android {
 dependencies {
     implementation project(':pytorch_android')
 
-    implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
     implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 
     testImplementation 'junit:junit:' + rootProject.junitVersion

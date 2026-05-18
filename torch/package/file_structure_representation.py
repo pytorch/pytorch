@@ -1,20 +1,22 @@
-# -*- coding: utf-8 -*-
-from typing import Dict, List
+# mypy: allow-untyped-defs
 
-from .glob_group import GlobPattern, GlobGroup
+from .glob_group import GlobGroup, GlobPattern
+
+
+__all__ = ["Directory"]
 
 
 class Directory:
     """A file structure representation. Organized as Directory nodes that have lists of
     their Directory children. Directories for a package are created by calling
-    :meth:`PackageExporter.file_structure` or :meth:`PackageImporter.file_structure`."""
+    :meth:`PackageImporter.file_structure`."""
 
     def __init__(self, name: str, is_dir: bool):
         self.name = name
         self.is_dir = is_dir
-        self.children: Dict[str, Directory] = {}
+        self.children: dict[str, Directory] = {}
 
-    def _get_dir(self, dirs: List[str]) -> 'Directory':
+    def _get_dir(self, dirs: list[str]) -> "Directory":
         """Builds path of Directories if not yet built and returns last directory
         in list.
 
@@ -43,17 +45,17 @@ class Directory:
         dir.children[file] = Directory(file, False)
 
     def has_file(self, filename: str) -> bool:
-        """Checks if a file is present in a Directory.
+        """Checks if a file is present in a :class:`Directory`.
 
         Args:
             filename (str): Path of file to search for.
         Returns:
-            bool: if a Directory contains the specified file.
+            bool: If a :class:`Directory` contains the specified file.
         """
         lineage = filename.split("/", maxsplit=1)
         child = lineage[0]
         grandchildren = lineage[1] if len(lineage) > 1 else None
-        if child in self.children.keys():
+        if child in self.children:
             if grandchildren is None:
                 return True
             else:
@@ -61,18 +63,21 @@ class Directory:
         return False
 
     def __str__(self):
-        str_list: List[str] = []
+        str_list: list[str] = []
         self._stringify_tree(str_list)
         return "".join(str_list)
 
     def _stringify_tree(
-        self, str_list: List[str], preamble: str = "", dir_ptr: str = "─── "
+        self,
+        str_list: list[str],
+        preamble: str = "",
+        dir_ptr: str = "\u2500\u2500\u2500 ",
     ):
         """Recursive method to generate print-friendly version of a Directory."""
         space = "    "
-        branch = "│   "
-        tee = "├── "
-        last = "└── "
+        branch = "\u2502   "
+        tee = "\u251c\u2500\u2500 "
+        last = "\u2514\u2500\u2500 "
 
         # add this directory's representation
         str_list.append(f"{preamble}{dir_ptr}{self.name}\n")
@@ -83,8 +88,8 @@ class Directory:
         else:
             preamble = preamble + space
 
-        file_keys: List[str] = []
-        dir_keys: List[str] = []
+        file_keys: list[str] = []
+        dir_keys: list[str] = []
         for key, val in self.children.items():
             if val.is_dir:
                 dir_keys.append(key)
@@ -103,11 +108,11 @@ class Directory:
 
 def _create_directory_from_file_list(
     filename: str,
-    file_list: List[str],
+    file_list: list[str],
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ) -> Directory:
-    """ Return a :class:`Directory` file structure representation created from a list of files.
+    """Return a :class:`Directory` file structure representation created from a list of files.
 
     Args:
         filename (str): The name given to the top-level directory that will be the
@@ -115,10 +120,10 @@ def _create_directory_from_file_list(
 
         file_list (List[str]): List of files to add to the top-level directory.
 
-        include (Union[List[str], str]): An optional pattern that limits what is included from the file_list to
+        include (list[str] | str): An optional pattern that limits what is included from the file_list to
             files whose name matches the pattern.
 
-        exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+        exclude (list[str] | str): An optional pattern that excludes files whose name match the pattern.
 
     Returns:
             :class:`Directory`: a :class:`Directory` file structure representation created from a list of files.

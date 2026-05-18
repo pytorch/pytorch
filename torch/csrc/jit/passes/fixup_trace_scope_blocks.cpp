@@ -1,15 +1,12 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 
-#include <algorithm>
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -154,7 +151,7 @@ struct ConvertTracedAttrReferences {
         for (Value* v : sub_unresolved) {
           n->addInput(v);
         }
-      } else if (n->blocks().size()) {
+      } else if (!n->blocks().empty()) {
         for (Block* sub_block : n->blocks()) {
           auto sub_unresolved =
               convertAttrReferencesToLocalGetAttrs(sub_block, prefix, self);
@@ -200,14 +197,14 @@ struct ConvertTracedAttrReferences {
         // the proper attribute.
         auto attr_atoms = attr_qualname.atoms();
         Value* replaced_value = self;
-        for (size_t i = 0; i < attr_atoms.size(); i++) {
+        for (const auto i : c10::irange(attr_atoms.size())) {
           if (i < prefix_atoms.size()) {
             TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
           } else {
             replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
                 replaced_value, attr_atoms[i]);
           } // if (i < prefix_atoms.size())
-        } // for (size_t i = 0; i < attr_atoms.size(); i++)
+        } // for(const auto i : c10::irange(attr_atoms.size()))
         n->replaceInput(inp_idx, replaced_value);
         local_remaps[inp] = replaced_value;
       } else {
@@ -258,21 +255,23 @@ struct MakeDefsDominateUses {
 
       // Already lifted to this level by a previously processed Use, switch to
       // remapped value
-      if (remap.count(inp)) {
-        n->replaceInput(i, remap[inp]);
-        inp = remap[inp];
+      Value* inp_remapped = inp;
+      if (remap.count(inp_remapped)) {
+        n->replaceInput(i, remap[inp_remapped]);
+        inp_remapped = remap[inp_remapped];
       }
 
       // This conditional isn't strictly necessary, but saves a lot of
       // computation in the common case that we're using a local value.
-      if (inp->node()->owningBlock() != b) {
+      if (inp_remapped->node()->owningBlock() != b) {
         // Find the common ancestor block between this node and the node that
         // produced this input. For this input Use to be valid, the Value's
         // def must be present in this common ancestor node.
-        Block* common_ancestor = n->findCommonAncestorBlockWith(inp->node());
+        Block* common_ancestor =
+            n->findCommonAncestorBlockWith(inp_remapped->node());
 
-        Value* v_itr = inp;
-        Block* b_itr = inp->node()->owningBlock();
+        Value* v_itr = inp_remapped;
+        Block* b_itr = inp_remapped->node()->owningBlock();
 
         // Starting from the initial def for this input, iterate to
         // wider and wider blocks, adding Block outputs and Node outputs
@@ -287,7 +286,7 @@ struct MakeDefsDominateUses {
           b_itr = b_itr->owningNode()->owningBlock();
         }
         // From now on, references to `inp` will be replaced with
-        // references to `v_iter`, the lifted Value
+        // references to `v_itr`, the lifted Value
         remap[inp] = v_itr;
         n->replaceInput(i, remap[inp]);
       }
@@ -325,7 +324,7 @@ void convertReturnsToTuples(Block* b) {
           WithInsertPoint guard(sub_block->return_node());
           Node* return_tup =
               g->insertNode(g->createTuple(sub_block->outputs()));
-          while (sub_block->outputs().size()) {
+          while (!sub_block->outputs().empty()) {
             sub_block->eraseOutput(0);
           }
           sub_block->registerOutput(return_tup->output());
@@ -343,7 +342,7 @@ void convertReturnsToTuples(Block* b) {
           n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(rev_idx));
           n->eraseOutput(rev_idx);
         }
-      } else if (sub_block->outputs().size() == 0) {
+      } else if (sub_block->outputs().empty()) {
         WithInsertPoint guard(sub_block->return_node());
         sub_block->registerOutput(g->insertNode(g->createNone())->output());
         n->addOutput()->setType(NoneType::get());
@@ -385,7 +384,7 @@ std::string mangleMethodName(
   for (size_t method_idx = 0;; method_idx++) {
     auto mangled = method_name;
     if (method_idx != 0) {
-      mangled += c10::to_string(method_idx);
+      mangled += std::to_string(method_idx);
     }
     bool found = false;
     for (Function* fn : mod_type->methods()) {
@@ -458,7 +457,7 @@ void inlineScopeBlocks(Block* b) {
       const auto& old_outputs = n->outputs();
 
       AT_ASSERT(new_outputs.size() == old_outputs.size());
-      for (size_t i = 0; i < old_outputs.size(); ++i) {
+      for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }
       n->destroy();
@@ -548,5 +547,4 @@ void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 import contextlib
 import enum
@@ -18,9 +18,9 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
 )
-from torch.testing._internal.dist_utils import INIT_METHOD_TEMPLATE, dist_init
+from torch.testing._internal.dist_utils import dist_init, INIT_METHOD_TEMPLATE
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -68,7 +68,7 @@ gLogger = init_logger()
 
 
 class FeatureSet(NamedTuple):
-    """ A feature set has 2 types of features"""
+    """A feature set has 2 types of features"""
 
     dense_features: torch.Tensor
     sparse_features: torch.LongTensor
@@ -91,8 +91,8 @@ def _remote_method_async(method, rref, *args, **kwargs):
 
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
-        gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
-        super(RemoteEM, self).__init__()
+        gLogger.info("Initing RemoteEM with %s %s", num_embeddings, embedding_dim)
+        super().__init__()
         init_em = [0.5] * embedding_dim
         self.em = nn.EmbeddingBag(
             num_embeddings,
@@ -101,7 +101,7 @@ class RemoteEM(nn.Module):
         )
 
     def forward(self, input: torch.Tensor):
-        gLogger.debug(f"Running RemoteEM.forward() on: {input}")
+        gLogger.debug("Running RemoteEM.forward() on: %s", input)
         return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 
 
@@ -117,13 +117,13 @@ def getLinear(d_in, d_out):
 
 class RemoteNet(nn.Module):
     def __init__(self, d_in: int, d_out: int):
-        gLogger.info(f"Initing RemoteNet with {d_in} {d_out}")
-        super(RemoteNet, self).__init__()
+        gLogger.info("Initing RemoteNet with %s %s", d_in, d_out)
+        super().__init__()
         self.fc = getLinear(d_in, d_out)
         self.relu = nn.ReLU()
 
     def forward(self, input: torch.Tensor):
-        gLogger.debug(f"Running RemoteNet.forward() on: {input}")
+        gLogger.debug("Running RemoteNet.forward() on: %s", input)
         return self.relu(self.fc(input))
 
 
@@ -134,7 +134,7 @@ class HybridModel(nn.Module):
         remote_net_rref: rpc.RRef,
         process_group_for_ddp: dist.ProcessGroup = None,
     ):
-        super(HybridModel, self).__init__()
+        super().__init__()
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.fc1 = getLinear(D_DENSE, D_DENSE)
@@ -156,19 +156,23 @@ class HybridModel(nn.Module):
             )
 
         gLogger.info(
-            f"HybridModel has {len(list(self.parameters()))} groups of parameters."
+            "HybridModel has %s groups of parameters.", len(list(self.parameters()))
         )
 
     def forward(self, input: FeatureSet):
-        gLogger.debug(f"Running HybridModel.forward on {input}")
+        gLogger.debug("Running HybridModel.forward on %s", input)
         sparse = _remote_method(
             RemoteEM.forward, self.remote_em_rref, input.sparse_features
         )
         # The same size of mini batch.
-        assert sparse.shape[0] == input.dense_features.shape[0]
+        if sparse.shape[0] != input.dense_features.shape[0]:
+            raise AssertionError(
+                f"Expected sparse.shape[0] == input.dense_features.shape[0], "
+                f"got {sparse.shape[0]} != {input.dense_features.shape[0]}"
+            )
         dense = self.fc1(input.dense_features)
         x = torch.cat((dense, sparse), 1)
-        gLogger.debug(f"Concatenated feature: {x}")
+        gLogger.debug("Concatenated feature: %s", x)
         x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
         return self.fc2(x)
 
@@ -192,7 +196,7 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.trainer_group if ddp_mode in (DdpMode.INSIDE,) else None,
+            self.trainer_group if ddp_mode == DdpMode.INSIDE else None,
         )
         self.ddp_params, self.non_ddp_params = (
             self.hybrid_module.ddp_params,
@@ -208,9 +212,10 @@ class Trainer:
                 process_group=self.trainer_group,
             )
         gLogger.info(
-            f"Succeeded in creating a HybridModel instance with "
-            f"{len(self.ddp_params)} ddp params and {len(self.non_ddp_params)} "
-            f"other local params."
+            "Succeeded in creating a HybridModel instance with "
+            "%s ddp params and %s other local params.",
+            len(self.ddp_params),
+            len(self.non_ddp_params),
         )
 
     def destroy_pg(self):
@@ -237,20 +242,28 @@ class Trainer:
             sparse_microbatch = torch.split(sparse_features, 2)
             values_microbatch = torch.split(values, 2)
             batches = []
-            for d, s, v in zip(dense_microbatch, sparse_microbatch, values_microbatch):
+            for d, s, v in zip(
+                dense_microbatch, sparse_microbatch, values_microbatch, strict=True
+            ):
                 feature_set = FeatureSet(dense_features=d, sparse_features=s, values=v)
                 batches.append(feature_set)
 
             if trainer_has_less_inputs:
                 input_batches = batches[: len(batches) // 2]
                 gLogger.info(
-                    f"""Trainer reduced input patches from {len(batches)}
-                    to {len(input_batches)} to simulate uneven inputs."""
+                    "Trainer reduced input patches from %s "
+                    "to %s to simulate uneven inputs.",
+                    len(batches),
+                    len(input_batches),
                 )
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
+        with (
+            self.hybrid_module.join()
+            if simulate_uneven_inputs
+            else contextlib.nullcontext()
+        ):
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
@@ -258,8 +271,11 @@ class Trainer:
                     dist_autograd.backward(context_id, [loss])
                     grads_dict = dist_autograd.get_gradients(context_id)
                     gLogger.info(
-                        f"Loss is {loss} for mini batch: {mini_batch}. "
-                        f"Grads dict has {len(grads_dict)} entries: {grads_dict}"
+                        "Loss is %s for mini batch: %s. Grads dict has %s entries: %s",
+                        loss,
+                        mini_batch,
+                        len(grads_dict),
+                        grads_dict,
                     )
         return (
             tuple(grads_dict[param] for param in self.ddp_params),
@@ -287,7 +303,10 @@ def get_training_examples():
                     idx += 1
 
     # Split the examples among NUM_TRAINERS trainers
-    assert 0 == (n % NUM_TRAINERS)
+    if n % NUM_TRAINERS != 0:
+        raise AssertionError(
+            f"Expected n % NUM_TRAINERS == 0, got {n} % {NUM_TRAINERS} = {n % NUM_TRAINERS}"
+        )
     examples_per_trainer = int(n / NUM_TRAINERS)
     return [
         FeatureSet(
@@ -345,9 +364,11 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         dist.destroy_process_group()
 
     def _trainer_process(self, rank: int):
-        gLogger.info(f"Running the trainer #{rank}...")
+        gLogger.info("Running the trainer #%s...", rank)
         gLogger.info(
-            f"Initing trainer process group by trainer #{rank} with ranks {TRAINER_RANKS}"
+            "Initing trainer process group by trainer #%s with ranks %s",
+            rank,
+            TRAINER_RANKS,
         )
         dist.init_process_group(
             backend="gloo",
@@ -356,12 +377,12 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             rank=self.rank,
         )
 
-        gLogger.info(f"Waiting for shutdown signal on trainer #{rank}...")
+        gLogger.info("Waiting for shutdown signal on trainer #%s...", rank)
 
         global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
-        gLogger.info(f"Exiting the trainer #{rank}...")
+        gLogger.info("Exiting the trainer #%s...", rank)
         dist.destroy_process_group()
 
     def _master_process(self, ddp_mode: DdpMode, simulate_uneven_inputs: bool):
@@ -451,7 +472,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     )
 
         # Destroy process groups
-        for idx, trainer_rref in enumerate(trainer_rrefs):
+        for trainer_rref in trainer_rrefs:
             _remote_method_async(Trainer.destroy_pg, trainer_rref).wait()
 
         # Send shutdown signals.
@@ -469,7 +490,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         elif self.rank in TRAINER_RANKS:
             self._trainer_process(self.rank)
         else:
-            raise RuntimeError(f"Unknow process rank: {self.rank}")
+            raise RuntimeError(f"Unknown process rank: {self.rank}")
 
     @requires_gloo()
     @dist_init
@@ -509,7 +530,7 @@ class CommonDdpComparisonTest(RpcAgentTestFixture):
 
 class DdpComparisonTest(CommonDdpComparisonTest):
     def _run_test_ddp_comparision(self, simulate_uneven_inputs=False):
-        gLogger.info(f"Running trainer rank: {self.rank}")
+        gLogger.info("Running trainer rank: %s", self.rank)
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
@@ -517,7 +538,8 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            # Postfix file_name with "pg" since file_name is also used by RPC agent
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=f"{self.file_name}_pg"),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -532,7 +554,9 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         inputs_list = [torch.rand((3, 2)) for _ in range(num_inputs)]
 
         if simulate_uneven_inputs:
-            gLogger.info(f"Rank {self.rank} training with {len(inputs_list)} inputs.")
+            gLogger.info(
+                "Rank %s training with %s inputs.", self.rank, len(inputs_list)
+            )
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
@@ -542,7 +566,7 @@ class DdpComparisonTest(CommonDdpComparisonTest):
                     loss = ddp_net(inputs).norm()
                     dist_autograd.backward(context_id, [loss])
                     grads_dict = dist_autograd.get_gradients(context_id)
-                gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+                gLogger.info("Trainer #%s got grad dict: %s", self.rank, grads_dict)
 
                 # Use local autograd. The gradients will be in each variable's '.grad'.
                 ddp_net.zero_grad()
@@ -660,7 +684,7 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_ddp_dist_autograd_local_vs_remote_gpu(self):
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and

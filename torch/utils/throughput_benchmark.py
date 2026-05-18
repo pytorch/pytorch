@@ -1,9 +1,12 @@
+# mypy: allow-untyped-defs
 
 import torch._C
 
-def format_time(time_us=None, time_ms=None, time_s=None):
-    '''Defines how to format time'''
-    assert sum([time_us is not None, time_ms is not None, time_s is not None]) == 1
+
+def format_time(time_us=None, time_ms=None, time_s=None) -> str:
+    """Define time formatting."""
+    if sum([time_us is not None, time_ms is not None, time_s is not None]) != 1:
+        raise AssertionError("Expected only one of time_us, time_ms, time_s is given.")
 
     US_IN_SECOND = 1e6
     US_IN_MS = 1e3
@@ -17,14 +20,14 @@ def format_time(time_us=None, time_ms=None, time_s=None):
             raise AssertionError("Shouldn't reach here :)")
 
     if time_us >= US_IN_SECOND:
-        return '{:.3f}s'.format(time_us / US_IN_SECOND)
+        return f'{time_us / US_IN_SECOND:.3f}s'
     if time_us >= US_IN_MS:
-        return '{:.3f}ms'.format(time_us / US_IN_MS)
-    return '{:.3f}us'.format(time_us)
+        return f'{time_us / US_IN_MS:.3f}ms'
+    return f'{time_us:.3f}us'
 
 
-class ExecutionStats(object):
-    def __init__(self, c_stats, benchmark_config):
+class ExecutionStats:
+    def __init__(self, c_stats, benchmark_config) -> None:
         self._c_stats = c_stats
         self.benchmark_config = benchmark_config
 
@@ -38,9 +41,7 @@ class ExecutionStats(object):
 
     @property
     def iters_per_second(self):
-        '''
-        Returns total number of iterations per second across all calling threads
-        '''
+        """Return total number of iterations per second across all calling threads."""
         return self.num_iters / self.total_time_seconds
 
     @property
@@ -48,24 +49,24 @@ class ExecutionStats(object):
         return self.num_iters * (
             self.latency_avg_ms / 1000.0) / self.benchmark_config.num_calling_threads
 
-
-    def __str__(self):
+    def __str__(self) -> str:
         return '\n'.join([
             "Average latency per example: " + format_time(time_ms=self.latency_avg_ms),
-            "Total number of iterations: {}".format(self.num_iters),
-            "Total number of iterations per second (across all threads): {:.2f}".format(self.iters_per_second),
+            f"Total number of iterations: {self.num_iters}",
+            f"Total number of iterations per second (across all threads): {self.iters_per_second:.2f}",
             "Total time: " + format_time(time_s=self.total_time_seconds)
         ])
 
 
-class ThroughputBenchmark(object):
-    '''
-    This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark
-    responsible for executing a PyTorch module (nn.Module or ScriptModule)
-    under an inference server like load. It can emulate multiple calling threads
-    to a single module provided. In the future we plan to enhance this component
-    to support inter and intra-op parallelism as well as multiple models
-    running in a single process.
+class ThroughputBenchmark:
+    """
+    This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark.
+
+    This wrapper on the throughput_benchmark::ThroughputBenchmark component is responsible
+    for executing a PyTorch module (nn.Module or ScriptModule) under an inference
+    server like load. It can emulate multiple calling threads to a single module
+    provided. In the future we plan to enhance this component to support inter and
+    intra-op parallelism as well as multiple models running in a single process.
 
     Please note that even though nn.Module is supported, it might incur an overhead
     from the need to hold GIL every time we execute Python code or pass around
@@ -75,45 +76,47 @@ class ThroughputBenchmark(object):
 
     Example::
 
+        >>> # xdoctest: +SKIP("undefined vars")
         >>> from torch.utils import ThroughputBenchmark
         >>> bench = ThroughputBenchmark(my_module)
         >>> # Pre-populate benchmark's data set with the inputs
         >>> for input in inputs:
-                # Both args and kwargs work, same as any PyTorch Module / ScriptModule
-                bench.add_input(input[0], x2=input[1])
-        >>> Inputs supplied above are randomly used during the execution
+        ...     # Both args and kwargs work, same as any PyTorch Module / ScriptModule
+        ...     bench.add_input(input[0], x2=input[1])
+        >>> # Inputs supplied above are randomly used during the execution
         >>> stats = bench.benchmark(
-                num_calling_threads=4,
-                num_warmup_iters = 100,
-                num_iters = 1000,
-            )
+        ...     num_calling_threads=4,
+        ...     num_warmup_iters = 100,
+        ...     num_iters = 1000,
+        ... )
         >>> print("Avg latency (ms): {}".format(stats.latency_avg_ms))
         >>> print("Number of iterations: {}".format(stats.num_iters))
+    """
 
-    '''
-
-    def __init__(self, module):
+    def __init__(self, module) -> None:
         if isinstance(module, torch.jit.ScriptModule):
             self._benchmark = torch._C.ThroughputBenchmark(module._c)
         else:
             self._benchmark = torch._C.ThroughputBenchmark(module)
 
     def run_once(self, *args, **kwargs):
-        '''
+        """
         Given input id (input_idx) run benchmark once and return prediction.
+
         This is useful for testing that benchmark actually runs the module you
         want it to run. input_idx here is an index into inputs array populated
         by calling add_input() method.
-        '''
+        """
         return self._benchmark.run_once(*args, **kwargs)
 
-    def add_input(self, *args, **kwargs):
-        '''
-        Store a single input to a module into the benchmark memory and keep it
-        there. During the benchmark execution every thread is going to pick up a
+    def add_input(self, *args, **kwargs) -> None:
+        """
+        Store a single input to a module into the benchmark memory and keep it there.
+
+        During the benchmark execution every thread is going to pick up a
         random input from the all the inputs ever supplied to the benchmark via
         this function.
-        '''
+        """
         self._benchmark.add_input(*args, **kwargs)
 
     def benchmark(
@@ -122,7 +125,9 @@ class ThroughputBenchmark(object):
             num_warmup_iters=10,
             num_iters=100,
             profiler_output_path=""):
-        '''
+        """
+        Run a benchmark on the module.
+
         Args:
             num_warmup_iters (int): Warmup iters are used to make sure we run a module
                 a few times before actually measuring things. This way we avoid cold
@@ -136,7 +141,7 @@ class ThroughputBenchmark(object):
                 iterations might be slightly larger. Which is reported as
                 stats.num_iters where stats is the result of this function
 
-            profiler_output_path (string): Location to save Autograd Profiler trace.
+            profiler_output_path (str): Location to save Autograd Profiler trace.
                 If not empty, Autograd Profiler will be enabled for the main benchmark
                 execution (but not the warmup phase). The full trace will be saved
                 into the file path provided by this argument
@@ -146,7 +151,7 @@ class ThroughputBenchmark(object):
         It currently has two fields:
             - num_iters - number of actual iterations the benchmark have made
             - avg_latency_ms - average time it took to infer on one input example in milliseconds
-        '''
+        """
         config = torch._C.BenchmarkConfig()
         config.num_calling_threads = num_calling_threads
         config.num_warmup_iters = num_warmup_iters

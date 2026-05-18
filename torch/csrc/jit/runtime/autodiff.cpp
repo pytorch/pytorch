@@ -1,11 +1,9 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -15,17 +13,10 @@
 #include <algorithm>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
-
-void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
-  if (dim < 0) {
-    dim += sizes.size();
-  }
-}
 
 // need_trim_grad_ops contains functions that return multiple outputs in
 // forward, but only the first one requires grad.
@@ -33,7 +24,7 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
 // kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
 // supports at most one output that requires grad. Thus we need to remove
 // the grad for index that doesn't require grad.
-bool needTrimGrad(Node* n) {
+static bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
       "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
@@ -48,7 +39,7 @@ bool needTrimGrad(Node* n) {
 bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
-      "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
+      "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
@@ -59,7 +50,7 @@ bool isDifferentiable(const Node* n) {
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::profile)
+      n->kind() == prim::profile || n->kind() == prim::profile_ivalue)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -131,22 +122,22 @@ bool isDifferentiable(Graph& g) {
 //
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
-// We run LowerSimpleTuples afterwards to elmininate all tuples generated in
+// We run LowerSimpleTuples afterwards to eliminate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
 // in this file.
-static c10::optional<std::vector<Value*>> build_script_grad(
+static std::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
   auto maybe_schema = node->maybeSchema();
   if (!maybe_schema) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto compiled_graphs = gradientInfoForSchema(*maybe_schema);
   if (!compiled_graphs) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Use forward graph to replace node in grad_desc.f
   value_list new_outputs;
@@ -157,7 +148,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       new_outputs.at(i)->setType(outputs[i]->type());
       outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
@@ -175,7 +166,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto grad_inputs = insertGraph(*graph, *bw_graph, grad);
   grad_inputs = unpackOutputs(grad_inputs);
   return grad_inputs;
-};
+}
 
 namespace {
 class GradientHelper {
@@ -214,10 +205,9 @@ class GradientHelper {
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* input_list;
+      Value* input_list = nullptr;
       if (grad_values.size() == 1 &&
-          grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
+          grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
       } else {
         input_list =
@@ -235,18 +225,16 @@ class GradientHelper {
       return {};
     } else if (
         node->matches(
-            "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
+            "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor")) {
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
-          aten::thnn_conv2d_backward,
+          aten::_slow_conv2d_backward,
           {grad_values.at(0),
            inputs.at(0),
            inputs.at(1),
            node->namedInput(attr::kernel_size),
            node->namedInput(attr::stride),
            node->namedInput(attr::padding),
-           outputs.at(1),
-           outputs.at(2),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
@@ -305,7 +293,7 @@ class GradientHelper {
 // If we have a function y = f(x) with jacobian J, the backwards of f is dx =
 // J^t dy. Note that because the backwards always implements this matrix
 // multiply, we know that it maps an input vector of zeros to an output vector
-// of zero regardless of what operations it choses to do inside to actually
+// of zero regardless of what operations it chooses to do inside to actually
 // implement the matrix multiply (most use some optimized form and never
 // generate J^t). More generally, we know that all of the backward computations
 // are linear and can use this property to do more aggressive optimizations
@@ -357,6 +345,28 @@ static Value* createAutogradAdd(Value* a, Value* b) {
   return graph->insertNode(graph->create(prim::AutogradAdd, {a, b}))->output();
 }
 
+namespace {
+bool outputRequiresGrad(Value* output) {
+  if (output->type()->castRaw<TensorType>() == nullptr) {
+    return output->requires_grad();
+  }
+  std::optional<bool> requiresGrad =
+      output->type()->expectRef<TensorType>().requiresGrad();
+  if (requiresGrad.has_value()) {
+    return *requiresGrad;
+  }
+
+  Node* n = output->node();
+  if (n->kind() != prim::profile) {
+    return true;
+  }
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return true;
+  }
+  return n->ty(attr::profiled_type)->requires_grad();
+}
+} // namespace
+
 // Before:
 //   - grad_desc has field f initialized to the original 0-stage graph
 // After:
@@ -368,7 +378,7 @@ static Value* createAutogradAdd(Value* a, Value* b) {
 static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto& graph = *grad_desc.f;
   // note: reverse_node is intentionally not inserted to avoid
-  // accidentally acting on it (e.g. in elminate dead code),
+  // accidentally acting on it (e.g. in eliminate dead code),
   // std::cout << *reverse_node << to view its state.
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
@@ -379,7 +389,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
       auto autograd_zero = graph.insertNode(graph.createAutogradZero());
-      std::tie(it, std::ignore) = grad_map.emplace(v, autograd_zero->output());
+      it = grad_map.emplace(v, autograd_zero->output()).first;
     }
     return it->second;
   };
@@ -396,7 +406,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value* output = outputs[i];
-    if (!output->requires_grad())
+    if (!outputRequiresGrad(output))
       continue;
     Value* output_grad = reverse_block->addInput()->setType(output->type());
     GRAPH_DEBUG(
@@ -563,8 +573,7 @@ static void foldSizeIfNotEqual(Node* node) {
     // insert in front of _grad_sum_to_size
     WithInsertPoint guard(node);
     IValue ival{};
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* size;
+    Value* size = nullptr;
     if (input_size != output_size) {
       size = node->owningGraph()->insertConstant(*input_size);
     } else {
@@ -731,7 +740,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
       // an output
     } else {
       // we need to create a new temporary output for this capture because it
-      // wasn't availiable.
+      // wasn't available.
 
       auto out_index = graph.registerOutput(capture_val);
       GRAPH_DEBUG(
@@ -814,7 +823,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
+static void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
   auto returnNode = graph->block()->return_node();
   WithInsertPoint wip(returnNode);
   auto tuple = graph->insertNode(graph->createTuple(returnNode->inputs()));
@@ -853,5 +862,4 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   UpdateDifferentiableGraphRequiresGrad(grad_desc.f, false);
   return grad_desc;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

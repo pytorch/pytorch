@@ -1,10 +1,11 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
+
 #include <regex>
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 
 /**
@@ -217,11 +218,6 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
   return true;
 }
 
-static bool endsWith(const std::string& str, const std::string& suffix) {
-  return str.size() >= suffix.size() &&
-      0 == str.compare(str.size() - suffix.size(), suffix.size(), suffix);
-}
-
 /**
  * Compare two Nodes. N1 is from pattern, N2 is from the actual graph.
  *
@@ -268,11 +264,11 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
       auto t = n2->output()->type()->expect<ClassType>();
       auto real_typename = t->name()->qualifiedName();
       auto pattern_typename = n1->s(attr::name);
-      if (!endsWith(real_typename, pattern_typename)) {
+      if (!real_typename.ends_with(pattern_typename)) {
         GRAPH_DEBUG(
             "Nodes did not match because expected module type is different:\n");
-        GRAPH_DEBUG("  actualtype:    ", real_typename, "\n");
-        GRAPH_DEBUG("  expected type: ", pattern_typename, "\n");
+        GRAPH_DEBUG("  actualtype:    ", real_typename, '\n');
+        GRAPH_DEBUG("  expected type: ", pattern_typename, '\n');
         GRAPH_DEBUG("Nodes:", *n1, *n2);
         return false;
       }
@@ -295,12 +291,12 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Add nodes to the map before calling matchValues to avoid infinite
   // recursion.
   nodes_map_[n1] = n2;
-  for (size_t i = 0; i < n1->outputs().size(); i++) {
+  for (const auto i : c10::irange(n1->outputs().size())) {
     if (!matchValues(n1->outputs()[i], n2->outputs()[i])) {
       return false;
     }
   }
-  for (size_t i = 0; i < n1->inputs().size(); i++) {
+  for (const auto i : c10::irange(n1->inputs().size())) {
     if (!matchValues(n1->inputs()[i], n2->inputs()[i])) {
       return false;
     }
@@ -365,5 +361,4 @@ std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
   return matches;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,14 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_bicubic2d_native.h>
+#include <ATen/ops/upsample_bicubic2d_backward_native.h>
+#endif
+
+namespace at::native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
@@ -18,7 +27,7 @@ __global__ void upsample_bicubic2d_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 4> idata,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -85,6 +94,81 @@ __global__ void upsample_bicubic2d_out_frame(
   }
 }
 
+// Parallelized across batch*channels via blockIdx.z.
+// Faster than upsample_bicubic2d_out_frame when the output spatial size is
+// small (e.g. Kimi K2.5 position embeddings: 64x64 to 74x74 with 1152 channels).
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_bicubic2d_out_frame_parallel(
+    const int num_elements,
+    const accscalar_t height_scale,
+    const accscalar_t width_scale,
+    const bool align_corners,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
+    PackedTensorAccessor64<scalar_t, 4> odata) {
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int input_height = idata.size(2);
+  const int input_width = idata.size(3);
+  const int output_height = odata.size(2);
+  const int output_width = odata.size(3);
+
+  if (index >= num_elements) {
+    return;
+  }
+
+  const int output_x = index % output_width;
+  const int output_y = index / output_width;
+
+  if (input_height == output_height && input_width == output_width) {
+    for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+      int n = i / channels;
+      int c = i % channels;
+      const scalar_t val = idata[n][c][output_y][output_x];
+      odata[n][c][output_y][output_x] = val;
+    }
+    return;
+  }
+
+  accscalar_t real_x = area_pixel_compute_source_index(
+      width_scale, output_x, align_corners, /*cubic=*/true);
+  int in_x = floorf(real_x);
+  accscalar_t t_x = real_x - in_x;
+
+  accscalar_t real_y = area_pixel_compute_source_index(
+      height_scale, output_y, align_corners, /*cubic=*/true);
+  int in_y = floorf(real_y);
+  accscalar_t t_y = real_y - in_y;
+
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    accscalar_t coefficients[4];
+
+    for (const auto k : c10::irange(4)) {
+      coefficients[k] = cubic_interp1d(
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x - 1),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 0),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 1),
+          upsample_get_value_bounded<scalar_t>(
+              idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 2),
+          t_x);
+    }
+
+    odata[n][c][output_y][output_x] = static_cast<scalar_t>(cubic_interp1d(
+        coefficients[0],
+        coefficients[1],
+        coefficients[2],
+        coefficients[3],
+        t_y));
+  }
+}
+
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -94,7 +178,7 @@ __global__ void upsample_bicubic2d_backward_out_frame(
     const accscalar_t width_scale,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 4> idata,
-    const PackedTensorAccessor64<scalar_t, 4> odata) {
+    const PackedTensorAccessor64<const scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -162,16 +246,14 @@ static void upsample_bicubic2d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_bicubic2d_out", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_height = input.size(2);
   int input_width = input.size(3);
 
@@ -184,11 +266,12 @@ static void upsample_bicubic2d_out_cuda_template(
   // Launch kernel
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_bicubic2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 4>();
+        auto idata = input.packed_accessor64<const scalar_t, 4>();
         auto odata = output.packed_accessor64<scalar_t, 4>();
 
         // Get scaling factors
@@ -197,17 +280,38 @@ static void upsample_bicubic2d_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-        upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_output_elements, max_threads),
-               max_threads,
-               0,
-               stream>>>(
-                num_output_elements,
-                rheight,
-                rwidth,
-                align_corners,
-                idata,
-                odata);
+        const int num_blocks = ceil_div(num_output_elements, max_threads);
+
+        // For small output spatial sizes the original kernel underutilizes
+        // the GPU because it loops over batch*channels sequentially.
+        // The parallel variant spreads that work across blockIdx.z instead.
+        // Threshold of 18432 covers all VLM position embedding resizing
+        // shapes (up to ~130x130 grids from 2048x2048 images) while
+        // staying well below the crossover point where the original
+        // kernel catches up (~65k+ output elements).
+        if (num_output_elements <= 18432 && input.size(0) * input.size(1) > 0) {
+          int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+          int grid_z = std::min<int>(maxGridSize[2],
+                                     input.size(0) * input.size(1));
+          dim3 grid(num_blocks, 1, grid_z);
+          upsample_bicubic2d_out_frame_parallel<scalar_t, accscalar_t>
+              <<<grid, max_threads, 0, stream>>>(
+                  num_output_elements,
+                  rheight,
+                  rwidth,
+                  align_corners,
+                  idata,
+                  odata);
+        } else {
+          upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
+              <<<num_blocks, max_threads, 0, stream>>>(
+                  num_output_elements,
+                  rheight,
+                  rwidth,
+                  align_corners,
+                  idata,
+                  odata);
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
@@ -218,19 +322,15 @@ static void upsample_bicubic2d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
-  checkAllSameGPU(
-      "upsample_bicubic2d_backward_out_cuda",
-      {grad_output_arg, grad_input_arg});
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_height = input_size[2];
   int input_width = input_size[3];
 
@@ -243,12 +343,13 @@ static void upsample_bicubic2d_backward_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_bicubic2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 4>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 4>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 4>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);
@@ -256,7 +357,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(
@@ -271,8 +372,8 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_bicubic2d_out_cuda_template(output, input, output_size, align_corners, scales_h, scales_w);
 }
@@ -282,8 +383,8 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -292,5 +393,4 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

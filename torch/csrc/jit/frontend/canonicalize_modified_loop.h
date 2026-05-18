@@ -1,10 +1,9 @@
 #pragma once
 #include <memory>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 
@@ -12,5 +11,4 @@ struct Graph;
 // for or while loops
 TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

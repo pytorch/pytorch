@@ -36,10 +36,8 @@ static inline size_t compute_output_dimension(
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t adjustment_height,
     uint32_t adjustment_width,
     uint32_t kernel_height,
@@ -181,10 +179,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   deconvolution->zero_buffer = zero_buffer;
   deconvolution->zero_pointer = (void*)((uintptr_t)zero_buffer + zero_offset);
 
-  deconvolution->input_padding_top = input_padding_top;
-  deconvolution->input_padding_right = input_padding_right;
-  deconvolution->input_padding_bottom = input_padding_bottom;
-  deconvolution->input_padding_left = input_padding_left;
+  deconvolution->input_padding_height = input_padding_height;
+  deconvolution->input_padding_width = input_padding_width;
   deconvolution->adjustment_height = adjustment_height;
   deconvolution->adjustment_width = adjustment_width;
 
@@ -211,6 +207,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
 
   deconvolution->ukernel_type = pytorch_qnnp_ukernel_type_conv;
   deconvolution->format = pytorch_qnnp_format_quint8;
+  deconvolution->transpose = true;
 
   *deconvolution_out = deconvolution;
   return pytorch_qnnp_status_success;
@@ -265,8 +262,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
   const size_t output_height = deconvolution->output_height =
       compute_output_dimension(
           input_height,
-          deconvolution->input_padding_top +
-              deconvolution->input_padding_bottom,
+          deconvolution->input_padding_height * 2,
           deconvolution->adjustment_height,
           kernel_height,
           deconvolution->dilation_height,
@@ -274,8 +270,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
   const size_t output_width = deconvolution->output_width =
       compute_output_dimension(
           input_width,
-          deconvolution->input_padding_left +
-              deconvolution->input_padding_right,
+          deconvolution->input_padding_width * 2,
           deconvolution->adjustment_width,
           kernel_width,
           deconvolution->dilation_width,

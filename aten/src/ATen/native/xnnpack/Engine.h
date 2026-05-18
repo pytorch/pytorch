@@ -1,10 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <limits>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 //
 // Convolution
@@ -13,7 +12,7 @@ namespace xnnpack {
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -93,6 +92,4 @@ bool use_hardswish(const Tensor& input);
 Tensor hardswish(const Tensor& input);
 Tensor& hardswish_(Tensor& input);
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack

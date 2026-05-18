@@ -3,21 +3,19 @@
 #import <ATen/native/metal/MetalPrepackOpContext.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNFullyConnectedOp.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
-API_AVAILABLE(ios(10.0), macos(10.13))
-Tensor addmm(
+API_AVAILABLE(ios(11.0), macos(10.13))
+static Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
@@ -28,6 +26,9 @@ Tensor addmm(
   TORCH_CHECK(bias.device() == kCPU);
   TORCH_CHECK(beta.toFloat() == 1.0f);
   TORCH_CHECK(alpha.toFloat() == 1.0f);
+  if(input.numel() == 0 || weight.numel() == 0){
+    return makeTensor({{input.size(0), weight.size(0)}}, input.options());
+  }
   // Here we treat the matrix multiplication as convolution
   auto weight_ =
       weight.t().view({weight.size(1), weight.size(0), 1, 1}).contiguous();
@@ -39,14 +40,13 @@ Tensor addmm(
   params.OC = weight_.size(0);
   params.IC = weight_.size(1);
   params.KH = params.KW = 1, params.H = params.W = 1;
-  auto packedWeights =
-      permuteWeights(weight_.data_ptr<float>(), weight_.sizes().vec());
+  auto packedWeights = weight_.contiguous(c10::MemoryFormat::ChannelsLast);
   MetalTensorImplStorage mt{{params.N, params.OC}};
   SmallVector<int64_t, 4> textureSize = {params.N, params.OC, 1, 1};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input_);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
-  float* w = packedWeights.data();
+  float* w = packedWeights.data_ptr<float>();
   float* b = bias.data_ptr<float>();
   MPSCNNFullyConnectedOp* fc = [MPSCNNFullyConnectedOp linear:params
                                                       weights:w
@@ -61,10 +61,13 @@ Tensor addmm(
 
 namespace prepack {
 
-Tensor linear(const Tensor& input, LinearOpContext& context) {
+static Tensor linear(const Tensor& input, LinearOpContext& context) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(context.get_weight().device() == kCPU);
   TORCH_CHECK(context.get_weight().dim() == 4);
+  if(input.numel() == 0 || context.get_weight().numel() == 0){
+    return makeTensor({{input.size(0), context.get_weight().size(0)}}, input.options());
+  }
   // Reshape the input tensor to {N, C, 1, 1}
   auto input_ = input.view({input.size(0), input.size(1), 1, 1});
   MPSImage* X = imageFromTensor(input_);
@@ -96,9 +99,15 @@ Tensor linear(const Tensor& input, LinearOpContext& context) {
   }
   MetalTensorImplStorage mt{{params.N, params.OC}};
   SmallVector<int64_t, 4> textureSize = {params.N, params.OC, 1, 1};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input_);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
+  // HACK alert:
+  // Here we force X to become static before encoding.
+  // We've seen weird crashes in the MaskRCNN model complaining about
+  // a "sub-image" was released before its readCount was zero.
+  // TODO[T93395421]: Figure out the root cause and remove this line.
+  X = createStaticImage((MPSTemporaryImage* )X, commandBuffer, NO);
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
   if (nt == NeuronType::Clamp) {
     MPSImage* Y2 = createTemporaryImage(commandBuffer, [Y1 sizes]);
@@ -115,7 +124,7 @@ Tensor linear(const Tensor& input, LinearOpContext& context) {
   return output;
 }
 
-Tensor linear_run(
+static Tensor linear_run(
     const Tensor& input,
     const c10::intrusive_ptr<LinearOpContext>& op_context) {
   return linear(input, *op_context);
@@ -124,13 +133,11 @@ Tensor linear_run(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("addmm", TORCH_FN(addmm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN(addmm));
 };
 
 TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
-  m.impl("linear_run", TORCH_FN(prepack::linear_run));
+  m.impl(TORCH_SELECTIVE_NAME("metal_prepack::linear_run"), TORCH_FN(prepack::linear_run));
 }
 
-}
-}
-}
+} // namespace at::native::metal

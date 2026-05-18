@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 
-namespace torch {
-namespace jit {
+#include <utility>
+
+namespace torch::jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -16,8 +18,7 @@ using AtenFuncArgs = std::vector<FuncArg>;
 using CallFuncArgs = std::vector<FuncArg>;
 
 // Lists of allowed quantizable operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _static_quantizable_call_funcs = {
+static std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
@@ -30,8 +31,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "embedding_bag",
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _static_quantizable_aten_funcs = {
+static std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv1d",
     "conv2d",
     "conv3d",
@@ -51,22 +51,18 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "embedding_bag",
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _dynamic_quantizable_call_funcs = {
+static std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _dynamic_quantizable_aten_funcs = {
+static std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _static_weight_only_quant_aten_funcs = {
+static std::vector<std::string> _static_weight_only_quant_aten_funcs = {
     "embedding_bag",
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _static_weight_only_quant_call_funcs = {
+static std::vector<std::string> _static_weight_only_quant_call_funcs = {
     "embedding_bag",
 };
 
@@ -77,8 +73,7 @@ std::vector<std::string> _static_weight_only_quant_call_funcs = {
 // output of the `prim::CallFunction`
 // Also these ops doesn't do computation on the value of Tensor, the
 // operation only depends on the shape of the Tensor
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _single_input_general_shape_call_funcs = {
+static std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool1d",
     "_max_pool2d",
     "_max_pool3d",
@@ -91,8 +86,7 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
 // Also these ops doesn't do computation on the value of Tensor, the
 // operation only depends on the shape of the Tensor
 // e.g. `aten::flatten(%input_tensor, ...)`
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _single_input_general_shape_aten_funcs = {
+static std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "max_pool1d",
     "max_pool2d",
     "max_pool3d",
@@ -122,13 +116,12 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "__getitem__",
 };
 
-// Theses are prim::CallFunctions for ops that doesn't require observation and
+// These are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 // TODO: [Need verify] looks like we can quantize simple functionals that just
 // call into aten functions
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _single_input_general_value_call_funcs = {
+static std::vector<std::string> _single_input_general_value_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
@@ -143,12 +136,11 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "leaky_relu",
 };
 
-// Theses are aten functions for ops that doesn't require observation and
+// These are aten functions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 // e.g. `aten::avg_pool2d(%input_tensor, ...)`
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _single_input_general_value_aten_funcs = {
+static std::vector<std::string> _single_input_general_value_aten_funcs = {
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
@@ -171,8 +163,7 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu_",
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _clamp_funcs = {
+static std::vector<std::string> _clamp_funcs = {
     "hardtanh",
     "hardtanh_",
     "clamp",
@@ -185,8 +176,7 @@ const float _sym_scale = 2.0f / 256.0f;
 const int _sym_zero_point = 128;
 // quantization parameters for ops with range 0 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
+static std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
     std::make_tuple(
         c10::kPerTensorAffine,
         QParamVector(
@@ -194,20 +184,19 @@ std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
              std::make_pair(".zero_point", IValue(_asym_zero_point)),
              std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
-// quantization parrameters for ops with range -1 to 1
+// quantization parameters for ops with range -1 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
-    c10::kPerTensorAffine,
-    QParamVector(
-        {std::make_pair(".scale", IValue(_sym_scale)),
-         std::make_pair(".zero_point", IValue(_sym_zero_point)),
-         std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
+static std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam =
+    std::make_tuple(
+        c10::kPerTensorAffine,
+        QParamVector(
+            {std::make_pair(".scale", IValue(_sym_scale)),
+             std::make_pair(".zero_point", IValue(_sym_zero_point)),
+             std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
 // Map from aten op symbol to the quantization parameters
 // for the ops with fixed quantization parameters
-std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
     _fixed_qparams_map = {
         {Symbol::aten("hardsigmoid"), _per_tensor_asym_qparam},
         {Symbol::aten("hardsigmoid_"), _per_tensor_asym_qparam},
@@ -220,27 +209,26 @@ std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
 // Special checks for ops that do not require observers for all input tensors.
 // For each operator in this list observers are inserted for the input based
 // on the index specified.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-AtenFuncArgs _observe_inputs_aten_func = {};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
+static AtenFuncArgs _observe_inputs_aten_func = {};
+static CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 // Aten functions for getting tensor information
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim", "numel"};
+static std::vector<std::string> _tensor_info_funcs = {
+    "size",
+    "len",
+    "dim",
+    "numel"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _propagate_quant_single_input_ops = {"cat"};
+static std::vector<std::string> _propagate_quant_single_input_ops = {"cat"};
 
 // Rules are slightly different for binary ops like `aten::add`, for these ops,
 // if both of the inputs are Tensor, we'll quantize the output only if both of
 // the inputs are quantized
 // if the second input is a Scalar, we'll only look at the first input to decide
 // if we need to quantize the output
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::vector<std::string> _propagate_quant_binary_ops = {
+static std::vector<std::string> _propagate_quant_binary_ops = {
     "add",
     "add_",
     "mul",
@@ -251,27 +239,25 @@ std::vector<std::string> _propagate_quant_binary_ops = {
 bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      (!n.has_value() || n.value() == use.offset);
+      (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
 }
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
-bool matchArgPattern(
+static bool matchArgPattern(
     Value* v,
     const AtenFuncArgs& aten_func_args,
     const CallFuncArgs& call_func_args) {
@@ -334,7 +320,7 @@ bool isEmbeddingBagNonInput(Value* v) {
   return result;
 }
 
-c10::optional<Use> getClampScalarInputUse(Value* v) {
+std::optional<Use> getClampScalarInputUse(Value* v) {
   for (const auto& use : v->uses()) {
     for (const auto& aten_func : _clamp_funcs) {
       if (matchAtenFuncToUse(use, aten_func, 1) ||
@@ -343,7 +329,22 @@ c10::optional<Use> getClampScalarInputUse(Value* v) {
       }
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
+}
+
+void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name) {
+  const Function& method = module.get_method(orig_method_name).function();
+  auto graph = toGraphFunction(method).graph()->copy();
+  const auto& schema = method.getSchema();
+  const auto this_method_name =
+      c10::QualifiedName(*module.type()->name(), new_method_name);
+  auto copied = module._ivalue()->compilation_unit()->create_function(
+      this_method_name, std::move(graph));
+  module.type()->addMethod(copied);
+  copied->setSchema(schema);
 }
 
 std::vector<Value*> getPassThroughInputs(Value* v) {
@@ -366,14 +367,14 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     // only propagate dequantize for Tensor
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       return {n->input(0)};
     } else {
       return {};
     }
   } else if (
       n->kind() == prim::ListConstruct &&
-      v->type()->isSubtypeOf(ListType::ofTensors())) {
+      v->type()->isSubtypeOf(*ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -382,7 +383,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   } else if (n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* input : n->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
+      if (input->type()->isSubtypeOf(*TensorType::get())) {
         inputs.push_back(input);
       }
     }
@@ -398,7 +399,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+static std::vector<NodeKind> toAtenSymbol(
+    const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),
@@ -408,18 +410,18 @@ std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
   return symbols;
 }
 
-bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+static bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   const auto& symbols = toAtenSymbol(aten_funcs);
   return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
-bool isFunctionNode(
+static bool isFunctionNode(
     Node* n,
     const std::vector<std::string>& call_funcs,
     const std::vector<std::string>& aten_funcs) {
@@ -495,7 +497,7 @@ bool isBinaryOpWithScalarInput(Node* n) {
   return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
-c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
+std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   static std::vector<NodeKind> fixed_qparam_funcs;
   std::transform(
       _fixed_qparams_map.begin(),
@@ -505,7 +507,7 @@ c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   if (isAtenFunc(n, fixed_qparam_funcs)) {
     return _fixed_qparams_map.at(n->kind());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool userDefinedCallFunction(Node* n) {
@@ -536,16 +538,14 @@ bool nodeQuantizable(Node* n, QuantType quant_type) {
 bool useQuantizable(const Use& use, QuantType quant_type) {
   if (quant_type == QuantType::STATIC) {
     for (const auto& func_input : _observe_inputs_aten_func) {
-      if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        return use.offset == func_input.arg_index;
+      if (matchAtenFuncToUse(use, func_input.func_name, std::nullopt)) {
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
 
     for (const auto& func_input : _observe_inputs_call_func) {
-      if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        return use.offset == func_input.arg_index;
+      if (matchCallFuncToUse(use, func_input.func_name, std::nullopt)) {
+        return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
   }
@@ -556,9 +556,9 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
   auto* func_node = n->input(0)->node();
   auto func = func_node->output()->type()->expectRef<FunctionType>().function();
-  TORCH_CHECK(
-      func->isGraphFunction(), "Quantization only works for graph function");
-  return func->graph();
+  auto graphFunc = tryToGraphFunction(*func);
+  TORCH_CHECK(graphFunc, "Quantization only works for graph function");
+  return graphFunc->graph();
 }
 
 // Block helper functions
@@ -583,8 +583,8 @@ bool alwaysRaisesException(Block* block) {
 // Check if a value in the graph is a Scalar value
 bool isScalar(Value* v) {
   auto iv = toIValue(v);
-  return v->type()->isSubtypeOf(NumberType::get()) ||
-      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+  return v->type()->isSubtypeOf(*NumberType::get()) ||
+      (v->type()->isSubtypeOf(*TensorType::get()) && iv && iv->isTensor() &&
        iv->toTensor().dim() == 0);
 }
 
@@ -646,7 +646,7 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
-c10::optional<Module> getInvokedModuleOpt(
+std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
     Value* self) {
@@ -657,7 +657,7 @@ c10::optional<Module> getInvokedModuleOpt(
     if (m.attr(p).isModule()) {
       m = m.attr(p).toModule();
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   return m;
@@ -674,7 +674,7 @@ bool is_int_constant(
   return v && v->isInt() && v->toInt() == value;
 }
 
-bool is_functional(
+static bool is_functional(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -690,15 +690,15 @@ std::string removeTorchMangle(const std::string& orig_name) {
   return qualified_name;
 }
 
-c10::optional<std::string> getModuleName(Value* value) {
+std::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
     return removeTorchMangle(type->name()->qualifiedName());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-bool is_module(
+static bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -710,7 +710,7 @@ bool is_module(
     return module_name.value() == module_qualified_name;
   }
   return false;
-};
+}
 
 bool aten_add_alpha_is_one(
     const Match& match,
@@ -729,12 +729,6 @@ bool is_relu_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
-}
-
-bool is_functional_linear(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return is_functional(match, vmap, "linear", "linear");
 }
 
 bool is_linear_module(
@@ -805,5 +799,4 @@ bool is_batchnorm3d_module(
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

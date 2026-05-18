@@ -2,20 +2,18 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 // Split the input tensor into two on channel dimension
 // TODO: [T87567124] Fully implement chunk in Metal shader
-std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
+static std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks == 2 && dim == 1);
   TORCH_CHECK(input.dim() == 4);
   TORCH_CHECK(input.size(0) == 1);
@@ -28,7 +26,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   auto outputSize1 = {input.size(0), split_size, input.size(2), input.size(3)};
   auto outputSize2 = {input.size(0), last_split_size, input.size(2), input.size(3)};
   MetalTensorImplStorage mt1(outputSize1);
@@ -37,7 +35,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   mt2.texture()->allocateTemporaryStorage(outputSize2, commandBuffer);
   MPSImage* Y1 = mt1.texture()->image();
   MPSImage* Y2 = mt2.texture()->image();
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:"split_channels"
                      Constants:@[
                          @(X.featureChannels),
@@ -54,18 +52,13 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
-  [Y1 markRead];
-  [Y2 markRead];
   auto output1 = makeTensor(std::move(mt1), input.options());
   auto output2 = makeTensor(std::move(mt2), input.options());
   return {output1, output2};
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("chunk", TORCH_FN(chunk));
-};
+  m.impl(TORCH_SELECTIVE_NAME("aten::chunk"), TORCH_FN(chunk));
+}
 
-}
-}
-}
+} // namespace at::native::metal

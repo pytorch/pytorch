@@ -1,18 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Distance.h>
 
-#include <numeric>
-#include <iterator>
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/cpu/vec/functional.h>
+#include <c10/util/irange.h>
 
-namespace at { namespace native { namespace {
+namespace at::native {
+namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -31,7 +34,7 @@ struct Dist {
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).
   //     backward : This is the gradient for that norm. Arguments are pretty
-  //                self explanitory.
+  //                self explanatory.
   //
   // There are a few cases where these aren't used. The 0 norm has no backward,
   // because it's always 0, so that's shortcircuited earlier. There's a special
@@ -39,10 +42,10 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vec256.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
-    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
-      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
+    return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   static inline Vec abs(Vec val) {
@@ -62,7 +65,7 @@ struct Dist {
   }
 
   static inline Vec min(Vec val, scalar_t other) {
-    return vec256::minimum(val, Vec(other));
+    return vec::minimum(val, Vec(other));
   }
 
   static inline scalar_t min(scalar_t val, scalar_t other) {
@@ -70,7 +73,7 @@ struct Dist {
   }
 
   static inline Vec max(Vec val, Vec other) {
-    return vec256::maximum(val, other);
+    return vec::maximum(val, other);
   }
 
   static inline scalar_t max(scalar_t val, scalar_t other) {
@@ -90,7 +93,7 @@ struct Dist {
   struct zdist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
   };
 
   // One norm
@@ -98,8 +101,8 @@ struct Dist {
   struct odist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t /*dist*/, const Vec& /*p*/) { return Vec(grad) * sign(diff); }
   };
 
   // Special general pnorm derivative if p is less than two
@@ -136,14 +139,14 @@ struct Dist {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return max(agg, up); }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
-    // TODO This backward pass uses a very complext expression to compute (diff
+    // TODO This backward pass uses a very complex expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
   static void run_parallel_pdist(Tensor& result, const Tensor& self, const scalar_t p) {
-    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.const_data_ptr<scalar_t>();
     const scalar_t * const self_end = self_start + self.numel();
     int64_t n = self.size(0);
     int64_t m = self.size(1);
@@ -157,10 +160,9 @@ struct Dist {
     // value of k.
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
-      double n2 = n - .5;
+      double n2 = static_cast<double>(n) - .5;
       // The -1 accounts for floating point truncation issues
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
+      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2.0 * static_cast<double>(k) - 1.0)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
       const scalar_t * self_i = self_start + i * m;
@@ -169,7 +171,7 @@ struct Dist {
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+        *res = F::finish(vec::map2_reduce_all<scalar_t>(
           [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
           F::red, self_i, self_j, m), p);
 
@@ -200,8 +202,8 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
     int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);
@@ -227,7 +229,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (int x = 0; x < m; x++) {
+        for (const auto x : c10::irange(m)) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -264,7 +266,7 @@ struct Dist {
 
   // This does a backward pass down a Vec column of the input
   template <typename F>
-  inline static void backward_down_column_pdist(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
+  static void backward_down_column_pdist(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
     for (const scalar_t * const self_end = self_i + m * n; self_i != self_end - m; self_i += m, res_i += m) {
 
       const Vec self_vec_i = Vec::loadu(self_i, count);
@@ -293,14 +295,14 @@ struct Dist {
     const int64_t m = self.size(1);
     const int64_t gs = grad.stride(0);
 
-    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
-    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
-    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    const scalar_t * const grad_start = grad.const_data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.const_data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.const_data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
-    // first section of each vector independentaly of the second section, etc.
+    // first section of each vector independently of the second section, etc.
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
@@ -364,10 +366,10 @@ struct Dist {
     //don't use grad.stride(-1), because if last dimension is 1, stride can be bogus.
     const int64_t gs = 1;
 
-    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
-    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
-    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    const scalar_t * const grad_start = grad.const_data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.const_data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {
@@ -388,11 +390,11 @@ struct Dist {
   }
 
   template <typename F>
-  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
+  static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (int64_t l = 0; l < d; l++) {
+    for ([[maybe_unused]] const auto l : c10::irange(d)) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -419,19 +421,19 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double 
   });
 }
 
-static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     Dist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
   });
 }
 
-static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
+void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     Dist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }
 
-static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
+void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_backward", [&] {
     Dist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
   });
@@ -440,13 +442,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl)
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl)
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl)
+REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl)
 
-}}  // namespace at::native
+}  // namespace at::native

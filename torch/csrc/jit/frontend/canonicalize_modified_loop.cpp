@@ -1,19 +1,16 @@
-#include <functional>
 #include <memory>
 #include <string>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Transforms a Loop that has both a trip count specified and a loop
 // body condition so that the iter count is no longer specified
 // and it is recognizable as a python while loop.
-void canonicalizeModifiedLoop(Node* n) {
+static void canonicalizeModifiedLoop(Node* n) {
   LoopView loop(n);
   if (loop.loopType() != LoopView::ModifiedLoop) {
     return;
@@ -29,7 +26,7 @@ void canonicalizeModifiedLoop(Node* n) {
       g->insertConstant(std::numeric_limits<int64_t>::max()));
 
   auto inp_condition = toIValue(loop.inputCond());
-  if (inp_condition == c10::nullopt || inp_condition->toBool() == false) {
+  if (inp_condition == std::nullopt || inp_condition->toBool() == false) {
     condition = g->insert(aten::__and__, {condition, loop.inputCond()});
   }
   loop.replaceInputCondition(condition);
@@ -49,7 +46,7 @@ void canonicalizeModifiedLoop(Node* n) {
   loop.bodyBlock()->insertOutput(0, new_condition);
 }
 
-void canonicalizeModifiedLoops(Block* block) {
+static void canonicalizeModifiedLoops(Block* block) {
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       canonicalizeModifiedLoops(b);
@@ -66,5 +63,4 @@ TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph) {
   canonicalizeModifiedLoops(graph->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

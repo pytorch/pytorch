@@ -1,17 +1,18 @@
-#include <c10/test/util/complex_test_common.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/test/util/complex_test_common.h>
 
 __global__ void test_thrust_kernel() {
   // thrust conversion
   {
-  constexpr float num1 = float(1.23);
-  constexpr float num2 = float(4.56);
+  [[maybe_unused]] constexpr float num1 = float(1.23);
+  [[maybe_unused]] constexpr float num2 = float(4.56);
   assert(c10::complex<float>(thrust::complex<float>(num1, num2)).real() == num1);
   assert(c10::complex<float>(thrust::complex<float>(num1, num2)).imag() == num2);
   }
   {
-  constexpr double num1 = double(1.23);
-  constexpr double num2 = double(4.56);
+  [[maybe_unused]] constexpr double num1 = double(1.23);
+  [[maybe_unused]] constexpr double num2 = double(4.56);
   assert(c10::complex<double>(thrust::complex<double>(num1, num2)).real() == num1);
   assert(c10::complex<double>(thrust::complex<double>(num1, num2)).imag() == num2);
   }
@@ -45,11 +46,11 @@ __global__ void test_reinterpret_cast() {
   assert(zzzz.real() == double(1));
   assert(zzzz.imag() == double(2));
 
-  cuComplex cuComplex_zz = *reinterpret_cast<cuComplex*>(&zz);
+  [[maybe_unused]] cuComplex cuComplex_zz = *reinterpret_cast<cuComplex*>(&zz);
   assert(cuComplex_zz.x == float(1));
   assert(cuComplex_zz.y == float(2));
 
-  cuDoubleComplex cuDoubleComplex_zzzz = *reinterpret_cast<cuDoubleComplex*>(&zzzz);
+  [[maybe_unused]] cuDoubleComplex cuDoubleComplex_zzzz = *reinterpret_cast<cuDoubleComplex*>(&zzzz);
   assert(cuDoubleComplex_zzzz.x == double(1));
   assert(cuDoubleComplex_zzzz.y == double(2));
 }
@@ -75,6 +76,7 @@ TEST(DeviceTests, ThrustConversion) {
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   cudaDeviceSynchronize();
   test_thrust_kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
@@ -83,6 +85,7 @@ TEST(DeviceTests, StdFunctions) {
   SKIP_IF_NO_GPU();
   cudaDeviceSynchronize();
   test_std_functions_kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
@@ -91,6 +94,7 @@ TEST(DeviceTests, ReinterpretCast) {
   SKIP_IF_NO_GPU();
   cudaDeviceSynchronize();
   test_reinterpret_cast<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }

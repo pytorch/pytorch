@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
+import _warnings
 import os.path
 
-import _warnings
 
 # note: implementations
 # copied from cpython's import code
@@ -17,6 +18,7 @@ _zip_searchorder = (
     (".py", False),
 )
 
+
 # Replace any occurrences of '\r\n?' in the input string with '\n'.
 # This converts DOS and Mac line endings to Unix line endings.
 def _normalize_line_endings(source):
@@ -31,22 +33,20 @@ def _resolve_name(name, package, level):
     if len(bits) < level:
         raise ValueError("attempted relative import beyond top-level package")
     base = bits[0]
-    return "{}.{}".format(base, name) if name else base
+    return f"{base}.{name}" if name else base
 
 
 def _sanity_check(name, package, level):
     """Verify arguments are "sane"."""
     if not isinstance(name, str):
-        raise TypeError("module name must be str, not {}".format(type(name)))
+        raise TypeError(f"module name must be str, not {type(name)}")
     if level < 0:
         raise ValueError("level must be >= 0")
     if level > 0:
         if not isinstance(package, str):
             raise TypeError("__package__ not set to a string")
         elif not package:
-            raise ImportError(
-                "attempted relative import with no known parent " "package"
-            )
+            raise ImportError("attempted relative import with no known parent package")
     if not name and level == 0:
         raise ValueError("Empty module name")
 
@@ -63,7 +63,7 @@ def _calc___package__(globals):
     if package is not None:
         if spec is not None and package != spec.parent:
             _warnings.warn(
-                "__package__ != __spec__.parent " f"({package!r} != {spec.parent!r})",
+                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
                 ImportWarning,
                 stacklevel=3,
             )
@@ -90,6 +90,6 @@ def _normalize_path(path):
     """
     parent, file_name = os.path.split(path)
     if parent:
-        raise ValueError("{!r} must be only a file name".format(path))
+        raise ValueError(f"{path!r} must be only a file name")
     else:
         return file_name

@@ -4,10 +4,9 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
+// NOLINTNEXTLINE(performance-enum-size)
 enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
 
 // Python wrapper of an RRef shared_ptr that supports Python
@@ -18,6 +17,7 @@ class PYBIND11_EXPORT PyRRef {
   // for more explanations.
   explicit PyRRef(const py::object& value, const py::object& type_hint);
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
+  PyRRef(const PyRRef&) = default;
   ~PyRRef();
 
   bool isOwner() const;
@@ -66,12 +66,16 @@ class PYBIND11_EXPORT PyRRef {
       bool retainGraph,
       const c10::intrusive_ptr<RRef>& rref);
 
+  // Specialization of backward if the rref is an OwnerRRef.
+  static void backwardOwnerRRef(
+      int64_t autogradContextId,
+      bool retainGraph,
+      IValue value);
+
  private:
   c10::intrusive_ptr<RRef> rref_;
-  c10::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;
-  c10::optional<py::object> type_;
+  std::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;
+  std::optional<py::object> type_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
