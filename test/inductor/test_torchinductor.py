@@ -6316,6 +6316,50 @@ class CommonTemplate:
             (torch.randint(10, [2, 8]),),
         )
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_embedding_out_of_bounds_indices(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU bounds check regression")
+
+        def fn(indices, weight):
+            return F.embedding(indices, weight)
+
+        weight = torch.tensor(
+            [
+                [10.0, 20.0],
+                [30.0, 40.0],
+                [50.0, 60.0],
+                [70.0, 80.0],
+                [90.0, 100.0],
+            ],
+            device=self.device,
+        )
+        valid_indices = torch.tensor([0, 2, 4], device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(valid_indices, weight), fn(valid_indices, weight))
+
+        for bad_index in (-1, -2, -5, 5):
+            indices = torch.tensor([2, bad_index, 4], device=self.device)
+            with self.assertRaisesRegex(IndexError, "index out of range in self"):
+                fn(indices, weight)
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                compiled_fn(indices, weight)
+
+        def computed_negative_fn(weight):
+            indices = torch.arange(3, device=weight.device) - 1
+            return F.embedding(indices, weight)
+
+        compiled_computed_negative_fn = torch.compile(
+            computed_negative_fn, backend="inductor", fullgraph=True
+        )
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            computed_negative_fn(weight)
+        with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+            compiled_computed_negative_fn(weight)
+
     def test_embedding_sparse(self):
         # Fix https://github.com/pytorch/pytorch/issues/150656
         def fn(weight, indices):
