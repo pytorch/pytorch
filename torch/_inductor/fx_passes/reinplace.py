@@ -215,16 +215,15 @@ def _decode_view_ops(view_ops: EncodedViewOps) -> tuple[ViewOp, ...]:
     return tuple(decoded_view_ops)
 
 
-def _inplace_generalized_scatter_impl(
+def _apply_view_ops(
     inp: torch.Tensor,
-    src: torch.Tensor,
     view_codes: Sequence[int],
     view_args: Sequence[Any],
     view_arg_counts: Sequence[int],
     view_arg_none: Sequence[bool],
 ) -> torch.Tensor:
     tmp = inp
-    fake_mode = detect_fake_mode((inp, src, view_args))
+    fake_mode = detect_fake_mode((inp, view_args))
     with fake_mode if fake_mode else nullcontext():
         for view in _decode_view_ops(
             (
@@ -248,12 +247,127 @@ def _inplace_generalized_scatter_impl(
                 else nullcontext()
             ):
                 tmp = view.target(tmp, *fake_args, **fake_kwargs)
-        try:
-            tmp.copy_(src)
-        except RuntimeError as e:
-            raise RuntimeError(
-                f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
-            ) from e
+    return tmp
+
+
+def _canonicalize_view_dim(rank: int, dim: int) -> int:
+    orig_dim = dim
+    dim = int(dim)
+    if dim < 0:
+        dim += rank
+    if dim < 0 or dim >= rank:
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of "
+            f"[{-rank}, {rank - 1}], but got {orig_dim})"
+        )
+    return dim
+
+
+def _slice_view_length(
+    dim_size: Any, start: Any, end: Any, step: Any
+) -> int | torch.SymInt:
+    def wrap_negative_bound(val: Any) -> Any:
+        if isinstance(val, int):
+            return val + dim_size if val < 0 else val
+        if isinstance(val, torch.SymInt):
+            return torch.sym_ite(val < 0, val + dim_size, val)
+        return val
+
+    start = 0 if start is None else wrap_negative_bound(start)
+    end = dim_size if end is None else wrap_negative_bound(end)
+    step = 1 if step is None else step
+
+    if isinstance(step, int) and step <= 0:
+        raise ValueError(f"slice step must be positive, got {step}")
+
+    start = torch.sym_min(torch.sym_max(start, 0), dim_size)
+    end = torch.sym_min(torch.sym_max(end, start), dim_size)
+
+    return (end - start + (step - 1)) // step
+
+
+def _diagonal_view_length(
+    dim1_size: Any, dim2_size: Any, offset: int
+) -> int | torch.SymInt:
+    offset = int(offset)
+    if offset >= 0:
+        diag_size = torch.sym_min(dim1_size, dim2_size - offset)
+    else:
+        diag_size = torch.sym_min(dim1_size + offset, dim2_size)
+    return torch.sym_max(0, diag_size)
+
+
+def _view_ops_shape(
+    inp: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
+) -> tuple[Any, ...]:
+    shape = tuple(inp.shape)
+    for view in _decode_view_ops(
+        (
+            tuple(view_codes),
+            tuple(view_args),
+            tuple(view_arg_counts),
+            tuple(view_arg_none),
+        )
+    ):
+        if view.target is aten.diagonal.default:
+            offset, dim1, dim2 = view.args
+            rank = len(shape)
+            dim1 = _canonicalize_view_dim(rank, dim1)
+            dim2 = _canonicalize_view_dim(rank, dim2)
+            if dim1 == dim2:
+                raise RuntimeError("diagonal dimensions cannot be identical")
+            diag_size = _diagonal_view_length(shape[dim1], shape[dim2], offset)
+            shape = tuple(
+                size for idx, size in enumerate(shape) if idx not in (dim1, dim2)
+            ) + (diag_size,)
+        elif view.target is aten.select.int:
+            dim = _canonicalize_view_dim(len(shape), view.args[0])
+            shape = shape[:dim] + shape[dim + 1 :]
+        elif view.target is aten.slice.Tensor:
+            dim, start, end, step = view.args
+            dim = _canonicalize_view_dim(len(shape), dim)
+            new_shape = list(shape)
+            new_shape[dim] = _slice_view_length(shape[dim], start, end, step)
+            shape = tuple(new_shape)
+        elif view.target is aten.as_strided.default:
+            size, _stride, _storage_offset = view.args
+            shape = tuple(size)
+        else:
+            raise AssertionError(f"unsupported view op {view.target}")
+    return shape
+
+
+def _validate_scatter_src_shape(src: torch.Tensor, dst: Sequence[Any]) -> None:
+    dst_shape = torch.Size(dst)
+    try:
+        broadcast_shape = torch.broadcast_shapes(src.shape, dst_shape)
+        if broadcast_shape != dst_shape:
+            raise RuntimeError
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"shape error in scatter op, can not broadcast {src.shape} to {dst_shape}"
+        ) from e
+
+
+def _inplace_generalized_scatter_impl(
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_codes: Sequence[int],
+    view_args: Sequence[Any],
+    view_arg_counts: Sequence[int],
+    view_arg_none: Sequence[bool],
+) -> torch.Tensor:
+    tmp = _apply_view_ops(inp, view_codes, view_args, view_arg_counts, view_arg_none)
+    try:
+        tmp.copy_(src)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
+        ) from e
     return inp
 
 
@@ -279,6 +393,10 @@ def _generalized_scatter_meta(
     view_arg_counts: Sequence[int],
     view_arg_none: Sequence[bool],
 ) -> torch.Tensor:
+    tmp_shape = _view_ops_shape(
+        inp, view_codes, view_args, view_arg_counts, view_arg_none
+    )
+    _validate_scatter_src_shape(src, tmp_shape)
     return torch.empty_strided(
         inp.size(), inp.stride(), dtype=inp.dtype, device=inp.device
     )
@@ -292,6 +410,10 @@ def _inplace_generalized_scatter_meta(
     view_arg_counts: Sequence[int],
     view_arg_none: Sequence[bool],
 ) -> torch.Tensor:
+    tmp_shape = _view_ops_shape(
+        inp, view_codes, view_args, view_arg_counts, view_arg_none
+    )
+    _validate_scatter_src_shape(src, tmp_shape)
     return inp
 
 

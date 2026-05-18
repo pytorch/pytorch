@@ -531,6 +531,36 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         fake_result = node.target(*fake_args, **fake_kwargs)
         self.assertEqual(fake_result.shape, fake_args[0].shape)
 
+    def test_generalized_scatter_dynamic_clamped_slice(self):
+        def fn(x, y):
+            z = x.sin()
+            z[:9223372036854775807].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(4, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
+    def test_generalized_scatter_dynamic_negative_slice(self):
+        def fn(x, y):
+            z = x.sin()
+            z[-y.shape[0] :].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
     def test_generalized_scatter_ignores_unrelated_view_ops(self):
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
