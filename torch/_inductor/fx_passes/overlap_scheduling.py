@@ -16,6 +16,7 @@ from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprin
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
     _get_collective_node_from_wait,
+    _resolve_group_name,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -108,6 +109,7 @@ class WhyNoOverlap:
             )
 
 
+@functools.cache
 def get_group_name(n: fx.Node) -> str:
     """Extract the group name from a collective operation node."""
     opt_args_kwargs = normalize_function(
@@ -118,7 +120,7 @@ def get_group_name(n: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    return kwargs["group_name"]
+    return _resolve_group_name(kwargs["group_name"])
 
 
 def get_custom_estimation(
@@ -161,15 +163,22 @@ def estimate_collective_time(
     )
 
 
+def _get_flop_registry_key(target: Any) -> Any | None:
+    """Return the flop_registry key for a node target, or None if not registered."""
+    key = getattr(target, "overloadpacket", None)
+    if key in torch.utils.flop_counter.flop_registry:
+        return key
+    if target in torch.utils.flop_counter.flop_registry:
+        return target
+    return None
+
+
 def is_compute_node(n: fx.Node) -> bool:
     """
     Should we consider this node computationally expensive ?
     Currently uses flop registration, but we could expand more generally.
     """
-    return (
-        getattr(n.target, "overloadpacket", None)
-        in torch.utils.flop_counter.flop_registry
-    )
+    return _get_flop_registry_key(n.target) is not None
 
 
 def estimate_roofline_runtime_ms(node: fx.Node) -> float:
@@ -182,7 +191,6 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
     from torch._inductor.fx_passes.fusion_regions import is_view_node
     from torch.utils._pytree import tree_flatten, tree_map
     from torch.utils._runtime_estimation import get_compute_time, get_transfer_time
-    from torch.utils.flop_counter import flop_registry
 
     if is_view_node(node):
         return 0.0
@@ -204,12 +212,22 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
     out_dtypes = OrderedSet([t.dtype for t in flat_outs if isinstance(t, torch.Tensor)])
 
     # Compute time (FLOPs-based, only if op is in flop_registry)
-    # May return SymFloat if shapes are symbolic (after flop division)
     compute_ns: float = 0.0
-    func_packet = getattr(node.target, "overloadpacket", None)
-    if func_packet in flop_registry and len(out_dtypes) == 1:
-        compute_ns = get_compute_time(func_packet, args, kwargs, out, out_dtypes.copy())
-        # Extract hint from symbolic value if needed
+    flop_key = _get_flop_registry_key(node.target)
+    if flop_key is not None and len(out_dtypes) >= 1:
+        # Use a single dtype for peak-flops lookup. For mixed-dtype outputs
+        # (e.g. flex_attention returns bf16 out + fp32 logsumexp), use the
+        # first output tensor's dtype as the compute dtype.
+        compute_dtypes = (
+            OrderedSet(out_dtypes)
+            if len(out_dtypes) == 1
+            else OrderedSet(
+                [next(t.dtype for t in flat_outs if isinstance(t, torch.Tensor))]
+            )
+        )
+        compute_ns = get_compute_time(
+            flop_key, args, kwargs, out, compute_dtypes, node_meta=node.meta
+        )
         if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
             compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
 
@@ -245,6 +263,12 @@ def benchmark_node_with_cache_key(
 ) -> tuple[float, str | None]:
     """Benchmark a compute node and return (runtime, cache_key)."""
     assert is_compute_node(n)
+
+    # HOPs can't be benchmarked standalone (args include subgraphs) — use analytical
+    from torch._ops import HigherOrderOperator
+
+    if isinstance(n.target, HigherOrderOperator):
+        return estimate_roofline_runtime_ms(n), None
 
     from torch._dynamo.testing import rand_strided
 
@@ -446,23 +470,22 @@ class OverlapScheduler:
                 num_device_put_converted,
             )
 
-        # Build fusion regions (mutates gm.graph) and compute initial node runtime
-        # estimates. Compute nodes use roofline model here; the alignment step in
-        # run() replaces them with benchmarked + cross-rank-aligned values.
-        self.node_estimations, self.region_of = gather_node_runtime_estimations(
+        # Compute initial node runtime estimates. Compute nodes use roofline model
+        # here; the alignment step in run() replaces them with benchmarked +
+        # cross-rank-aligned values.
+        self.node_estimations = gather_node_runtime_estimations(
             gm,
             custom_runtime_estimation,
             enable_fusion_regions=enable_fusion_regions,
             log_estimations=True,
         )
-        if self.region_of:
-            # fuse_by_partitions replaces gm.graph, so we need to update our reference
-            self.graph = gm.graph
-
         # Build structures
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
+        self._parent_lists: list[list[fx.Node]] = [
+            list(n._input_nodes) for n in self.nodes
+        ]
         self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
             self._collect_node_ancestors()
         )
@@ -475,37 +498,36 @@ class OverlapScheduler:
         self.compute_nodes = [n for n in self.nodes if is_compute_node(n)]
         self.current_compute_index = 0
 
-        # Compute baseline memory profile from original schedule
         self.original_mem_before_compute_index: list[int] = []
-        self.original_peak_memory = self._compute_baseline_memory()
-
-        # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
-        # When both limits are specified, use the more permissive one
-        memory_increase_bytes = None
-        if max_memory_increase_gb is not None:
-            memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
-        if max_memory_increase_ratio is not None:
-            ratio_increase = int(self.original_peak_memory * max_memory_increase_ratio)
-            memory_increase_bytes = (
-                max(memory_increase_bytes, ratio_increase)
-                if memory_increase_bytes is not None
-                else ratio_increase
-            )
-        if memory_increase_bytes is None:
-            memory_increase_bytes = 0
-
-        self.allowed_peak_memory_bytes = (
-            self.original_peak_memory + memory_increase_bytes
+        needs_memory_tracking = (
+            max_memory_increase_gb is not None or max_memory_increase_ratio is not None
         )
+        if needs_memory_tracking:
+            self.original_peak_memory = self._compute_baseline_memory()
+            memory_increase_bytes = None
+            if max_memory_increase_gb is not None:
+                memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
+            if max_memory_increase_ratio is not None:
+                ratio_increase = int(
+                    self.original_peak_memory * max_memory_increase_ratio
+                )
+                memory_increase_bytes = (
+                    max(memory_increase_bytes, ratio_increase)
+                    if memory_increase_bytes is not None
+                    else ratio_increase
+                )
+            self.allowed_peak_memory_bytes = self.original_peak_memory + (
+                memory_increase_bytes or 0
+            )
+            self.memory_tracker = MemoryTracker(self.graph)
+        else:
+            self.original_peak_memory = 0
+            self.allowed_peak_memory_bytes = sys.maxsize
+            self.memory_tracker = None  # type: ignore[assignment]
 
-        # Track cumulative prefetch memory at each compute index
-        # When we prefetch a collective at compute index i that will be used at index j,
-        # it adds memory from i to j, so we need to track this cumulative effect
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
         ]
-
-        self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
@@ -523,11 +545,6 @@ class OverlapScheduler:
             self.reduce_scatter_nodes
         )
 
-        # Scheduling state
-        self.potentially_hidden_collectives = (
-            self.compute_potential_hidden_collectives()
-        )
-        self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
 
         # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
@@ -700,9 +717,10 @@ class OverlapScheduler:
         For each node, returns the minimum index of target nodes it blocks/dominates.
         Returns sys.maxsize if the node doesn't block any target nodes.
         """
+        target_set = OrderedSet(target_nodes)
         target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if node in target_nodes:
+            if node in target_set:
                 target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
@@ -1004,7 +1022,7 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        # Finalize: bucket collectives (if enabled), inline fusions, apply deps
+        # Finalize: bucket collectives (if enabled), apply deps
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             finalize_overlap_scheduling,
         )
@@ -1017,7 +1035,6 @@ class OverlapScheduler:
             insert_overlap_deps=self.insert_overlap_deps,
             max_bucket_memory_gb=2.0,
             max_coll_distance=self.max_node_distance,
-            region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
             bucket_mode=self.bucket_mode,
@@ -1078,6 +1095,9 @@ class OverlapScheduler:
         # using these nodes for overlap prevents bucketing. potentially if chain time < latency
         if runtime_estimate is None:
             assert not is_compute_node(node), "should have estimate for compute nodes"
+            self._schedule(node)
+            return
+        if runtime_estimate == 0 and not is_compute_node(node):
             self._schedule(node)
             return
 
@@ -1249,8 +1269,6 @@ class OverlapScheduler:
         ):
             return
 
-        overlap_node_ancestors = self.node_ancestors[overlap_node]
-
         # Compile candidates - limit by distance to bound compile time
         candidates = []
         for i, collective in enumerate(self.unscheduled_collectives):
@@ -1329,7 +1347,7 @@ class OverlapScheduler:
             info = self.collective_info[collective]
 
             if (
-                collective in overlap_node_ancestors
+                collective in self.node_ancestors[overlap_node]
                 or overlap_node in self.node_ancestors[collective]
             ):
                 why("dependency conflict")
@@ -1393,8 +1411,21 @@ class OverlapScheduler:
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
-        # Get unscheduled ancestors
-        unscheduled_ancestors = self.node_ancestors[target] - self.scheduled
+        # Backward BFS from target; stops at scheduled nodes.
+        unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
+        seen: OrderedSet[fx.Node] = OrderedSet()
+        parent_lists = self._parent_lists
+        node_idx = self.node_idx
+        target_idx = node_idx[target]
+        stack = parent_lists[target_idx][:]
+        scheduled = self.scheduled
+        while stack:
+            n = stack.pop()
+            if n in seen or n in scheduled:
+                continue
+            seen.add(n)
+            unscheduled_ancestors.add(n)
+            stack.extend(parent_lists[node_idx[n]])
 
         # only schedule non distributed, non compute nodes
         for node in unscheduled_ancestors:
@@ -1597,7 +1628,7 @@ class OverlapScheduler:
         return self.compute_potential_hidden_nodes(self.collective_info.keys())
 
     def compute_potential_hidden_waits(self) -> dict[fx.Node, fx.Node]:
-        """Compute which wait operations could be hidden by compte."""
+        """Compute which wait operations could be hidden by compute."""
         wait_nodes = [info.wait_node for info in self.collective_info.values()]
         return self.compute_potential_hidden_nodes(wait_nodes)
 
@@ -1609,16 +1640,16 @@ def gather_node_runtime_estimations(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     enable_fusion_regions: bool = False,
     log_estimations: bool = False,
-) -> tuple[dict[fx.Node, float], dict[fx.Node, Any]]:
+) -> dict[fx.Node, float]:
     """Gather initial runtime estimations for all nodes without scheduling.
 
-    Uses analytical models (roofline) for compute nodes — the alignment step
+    Uses analytical models (roofline) for compute nodes -- the alignment step
     in OverlapScheduler.run() replaces these with benchmarked + cross-rank-aligned
     values. Collectives use bandwidth formulas or CUDA events depending on
     collective_estimator.
 
-    When enable_fusion_regions is True, builds and collapses fusion regions
-    (mutating gm's graph), then includes their costs in the estimations.
+    When enable_fusion_regions is True, builds fusion regions and corrects
+    per-node I/O costs to account for fusion (no graph mutation).
 
     Args:
         collective_estimator: "analytical" uses bandwidth formulas,
@@ -1626,21 +1657,18 @@ def gather_node_runtime_estimations(
         log_estimations: When True, log compute and collective estimations
             via trace_structured for tlparse.
 
-    Returns (estimations, fusion_region_of) where estimations maps fx.Node to
-    runtime in ms, and fusion_region_of maps call_module nodes to FusionRegion
-    objects (empty dict if fusion regions are disabled).
+    Returns estimations mapping fx.Node to runtime in ms.
     """
-    # Build and collapse fusion regions first (mutates gm)
-    fusion_region_of: dict[fx.Node, Any] = {}
+    fused_costs: dict[fx.Node, float] = {}
     if enable_fusion_regions:
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
-            collapse_fusion_regions,
+            estimate_fused_node_costs,
         )
 
-        fusion_region_of = build_fusion_regions(gm)
-        if fusion_region_of:
-            fusion_region_of = collapse_fusion_regions(gm, fusion_region_of)
+        raw_regions = build_fusion_regions(gm)
+        if raw_regions:
+            fused_costs = estimate_fused_node_costs(raw_regions)
 
     estimations: dict[fx.Node, float] = {}
     nodes = list(gm.graph.nodes)
@@ -1685,9 +1713,8 @@ def gather_node_runtime_estimations(
                 if est > 0:
                     estimations[node] = est
 
-    # Fusion region costs (call_module nodes from collapse_fusion_regions)
-    for node, region in fusion_region_of.items():
-        estimations[node] = region.cost_ms  # pyrefly: ignore[missing-attribute]
+    # Apply fused costs: replace individual I/O estimates with fusion-aware ones
+    estimations.update(fused_costs)
 
     # Logging
     if log_estimations and compute_nodes:
@@ -1701,7 +1728,11 @@ def gather_node_runtime_estimations(
             compute_analytical,
         )
 
-    if log_estimations and collective_nodes:
+    # Skip analytical logging when a custom estimator is provided: the
+    # analytical estimates weren't used for scheduling, and the logging
+    # path calls into NCCL estimation which can crash when group_name
+    # is an FX Node (compile-on-one-rank graphs).
+    if log_estimations and collective_nodes and custom_runtime_estimation is None:
         from torch._inductor.fx_passes.node_runtime_estimation import (
             _log_collective_benchmarks,
         )
@@ -1711,7 +1742,7 @@ def gather_node_runtime_estimations(
             artifact_name="fx_collectives_analytical_estimation",
         )
 
-    return estimations, fusion_region_of
+    return estimations
 
 
 def align_estimations_across_ranks(

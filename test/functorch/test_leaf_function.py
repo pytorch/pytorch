@@ -2,7 +2,9 @@
 
 """Tests for @leaf_function with make_fx, aot_function, and torch.compile."""
 
+import contextlib
 import copy
+import io
 import re
 from functools import partial
 from unittest.mock import patch
@@ -2509,6 +2511,8 @@ class TestLeafFunctionRegisterHook(TestCase):
         self.assertEqual(hook_grads[0], torch.full((3,), 2.0))
 
     def test_hook_with_non_tensor_args(self):
+        # Hook receives only grads of requires_grad tensors. Non-tensor args
+        # in the leaf signature do not flow into the hook.
         hook_grads = []
 
         @leaf_function
@@ -2529,6 +2533,57 @@ class TestLeafFunctionRegisterHook(TestCase):
 
         self.assertEqual(len(hook_grads), 1)
         self.assertEqual(hook_grads[0], torch.full((3,), 5.0))
+
+    def test_hook_closure_captures_external_state(self):
+        # Recommended pattern for threading non-tensor context into the hook:
+        # capture it via closure at hook-registration time. Verify the captured
+        # tag actually reaches printed output (mirrors the docstring example).
+        tag = "intermediate"
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_multi_grad_hook
+        def my_fn_hook(x_grad):
+            print(f"[{tag}][bwd] norm={x_grad.norm().item():.4f}")
+
+        buf = io.StringIO()
+        x = torch.randn(4, requires_grad=True)
+        with contextlib.redirect_stdout(buf):
+            my_fn(x)[0].sum().backward()
+
+        output = buf.getvalue()
+        self.assertIn("[intermediate][bwd]", output)
+        self.assertIn("norm=", output)
+
+    def test_hook_extra_signature_arg_raises_at_backward(self):
+        # Capability limit: hooks must accept exactly N grad tensors, where N
+        # is the number of requires_grad tensor inputs to the leaf function.
+        # Declaring extra positional args crashes when the hook fires.
+        @leaf_function
+        def my_fn(x, tag):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, tag):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_multi_grad_hook
+        def my_fn_hook(x_grad, tag):  # extra `tag` arg — never supplied
+            pass
+
+        x = torch.randn(3, requires_grad=True)
+        out = my_fn(x, "label")[0]
+        with self.assertRaisesRegex(
+            TypeError,
+            r"missing 1 required positional argument.*'tag'",
+        ):
+            out.sum().backward()
 
     def test_hook_multiple_tensor_inputs(self):
         hook_calls = []
@@ -2555,6 +2610,8 @@ class TestLeafFunctionRegisterHook(TestCase):
         self.assertEqual(hook_calls[0][1], torch.full((3,), 3.0))
 
     def test_hook_only_fires_for_requires_grad_inputs(self):
+        # No-grad tensors are filtered out: hook receives grads only for the
+        # requires_grad inputs, in order.
         hook_calls = []
 
         @leaf_function

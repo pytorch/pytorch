@@ -720,10 +720,13 @@ def deduce_output_dtype_by_name(
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
-    backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if config.test_configs.runtime_triton_dtype_assert and getattr(
+        var, "supports_runtime_triton_dtype_assert", False
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
-    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
+    elif config.test_configs.static_cpp_dtype_assert and getattr(
+        var, "supports_static_cpp_dtype_assert", False
+    ):
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
         assert isinstance(var, CppCSEVariable), type(var)
@@ -745,9 +748,10 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if config.test_configs.runtime_triton_shape_assert and getattr(
+        var, "supports_runtime_triton_shape_assert", False
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -1907,6 +1911,10 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
+    supports_runtime_triton_dtype_assert = False
+    supports_runtime_triton_shape_assert = False
+    supports_static_cpp_dtype_assert = False
+
     def __init__(
         self,
         name: str,
@@ -2713,14 +2721,19 @@ class CSEProxy(DefaultHandler):
 
             if (
                 config.test_configs.runtime_triton_dtype_assert
-                or config.test_configs.static_cpp_dtype_assert
+                and csevar.supports_runtime_triton_dtype_assert
+            ) or (
+                config.test_configs.static_cpp_dtype_assert
+                and csevar.supports_static_cpp_dtype_assert
             ):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and var_shape is not None
+            ):
+                check_shape(V.kernel.compute, csevar, var_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
@@ -2799,9 +2812,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond
