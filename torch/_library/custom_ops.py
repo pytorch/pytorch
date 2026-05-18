@@ -2,7 +2,6 @@
 import collections
 import inspect
 import logging
-import threading
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -218,9 +217,6 @@ class CustomOpDef:
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
     """
-
-    # Per-thread slot holding the backend function that backend_dispatch calls
-    _fast_dispatch_tls = threading.local()
 
     def __init__(
         self,
@@ -766,38 +762,10 @@ class CustomOpDef:
         if has_tensorlist:
             return
 
-        is_mutable = schema.is_mutable
         raw_fns = self._raw_fns
-        op = self._opoverload
-        op_name = self._name
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
-        fast_tls = CustomOpDef._fast_dispatch_tls
         keyset_cache: dict[str, _C.DispatchKeySet] = {}
-
-        def backend_dispatch(keyset, *args, **kwargs):
-            fn = fast_tls.fn
-            result = fn(*args, **kwargs)
-            utils._c_check_aliasing_constraint(op_name, args, kwargs, result)
-            return result
-
-        if is_mutable:
-            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
-
-            def fast_adinplaceorview(keyset, *args, **kwargs):
-                for idx in mutated_idxs:
-                    if idx < len(args) and args[idx] is not None:
-                        increment_version(args[idx])
-                for key in mutated_keys:
-                    if key in kwargs and kwargs[key] is not None:
-                        increment_version(kwargs[key])
-                return op.redispatch(
-                    keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
-                )
-
-            chain = (fast_adinplaceorview, backend_dispatch)
-        else:
-            chain = (backend_dispatch,)
 
         def fast_call(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -828,40 +796,25 @@ class CustomOpDef:
                 key_name = _C._dispatch_key_for_device(device_type)
                 keyset = _C.DispatchKeySet(getattr(_C.DispatchKey, key_name))
                 keyset_cache[device_type] = keyset
-            fast_tls.fn = fn
-            try:
-                with _ops._enable_fast_dispatch(op, chain):
-                    return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
-            finally:
-                fast_tls.fn = None
+            return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
 
         self._fast_call = fast_call
 
-        # Install the fast path on both the OpOverloadPacket's `_op`
-        # (read by `torch.ops.ns.name(x)`) and the OpOverload's `_op`
-        # (read by `torch.ops.ns.name.default(x)`). Save the original
-        # entries once so repeated `_install_fast_call` invocations (e.g.
-        # registering kernels for different devices) don't nest wrappers.
-        packet = self._opoverload._overloadpacket
+        # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
+        # Save the original entry once so repeated `_install_fast_call` invocations
+        # (e.g. registering kernels for different devices) don't nest wrappers.
+        # Note that OpOverload's `_op` (read by `torch.ops.ns.name(x)`) does not hit the fast path.
         overload = self._opoverload
-        if not hasattr(packet, "_orig_op"):
-            packet._orig_op = packet._op  # pyrefly: ignore[missing-attribute]
         if not hasattr(overload, "_orig_op"):
             overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
 
-        def make_fast_op(target):
-            def fast_op(*args, **kwargs):
-                result = fast_call(*args, **kwargs)
-                if result is not _FAST_CALL_FALLBACK:
-                    return result
-                return target._orig_op(
-                    *args, **kwargs
-                )  # pyrefly: ignore[missing-attribute]
+        def fast_op(*args, **kwargs):
+            result = fast_call(*args, **kwargs)
+            if result is not _FAST_CALL_FALLBACK:
+                return result
+            return overload._orig_op(*args, **kwargs)  # pyrefly: ignore[missing-attribute]
 
-            return fast_op
-
-        packet._op = make_fast_op(packet)
-        overload._op = make_fast_op(overload)
+        overload._op = fast_op
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
