@@ -111,7 +111,6 @@ DEBUG = False
 if TYPE_CHECKING:
     import concurrent
 
-    from torch._inductor.autotune_process import BenchmarkRequest
     from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
 
     from .codegen.common import CSE
@@ -133,9 +132,21 @@ class BenchmarkTensors:
 
     input_tensors: list[torch.Tensor]
     output_tensor: torch.Tensor | None
+    input_names: list[str] | None = None
 
     def unpack(self):
         return self.input_tensors, self.output_tensor
+
+    def for_input_names(self, input_names: list[str]) -> "BenchmarkTensors":
+        if self.input_names is None or self.input_names == input_names:
+            return self
+
+        name_to_tensor = dict(zip(self.input_names, self.input_tensors))
+        return BenchmarkTensors(
+            [name_to_tensor[name] for name in input_names],
+            self.output_tensor,
+            input_names,
+        )
 
 
 @dataclasses.dataclass
@@ -151,10 +162,20 @@ class AutotuneArgs:
     triton: BenchmarkTensors
     extern: BenchmarkTensors
     expected: torch.Tensor | None = None
+    default_input_names: list[str] | None = None
+    default_input_names_extern: list[str] | None = None
 
-    def get_benchmark_tensors(self, extern=False) -> BenchmarkTensors:
+    def get_benchmark_tensors(
+        self, extern=False, input_names: list[str] | None = None
+    ) -> BenchmarkTensors:
         """Returns the inputs and output tensors for a given choice."""
         bench_tensors = self.extern if extern else self.triton
+        if input_names is None:
+            input_names = (
+                self.default_input_names_extern if extern else self.default_input_names
+            )
+        if input_names is not None:
+            bench_tensors = bench_tensors.for_input_names(input_names)
         return bench_tensors
 
     @classmethod
@@ -165,12 +186,20 @@ class AutotuneArgs:
         out: torch.Tensor,
         out_extern: torch.Tensor,
         expected: torch.Tensor | None = None,
+        input_names: list[str] | None = None,
+        input_names_extern: list[str] | None = None,
+        default_input_names: list[str] | None = None,
+        default_input_names_extern: list[str] | None = None,
     ) -> Self:
         """Factory method to create AutotuneInputs from separate inputs/outputs"""
         return cls(
-            triton=BenchmarkTensors(example_inputs, out),
-            extern=BenchmarkTensors(example_inputs_extern, out_extern),
+            triton=BenchmarkTensors(example_inputs, out, input_names),
+            extern=BenchmarkTensors(
+                example_inputs_extern, out_extern, input_names_extern
+            ),
             expected=expected,
+            default_input_names=default_input_names,
+            default_input_names_extern=default_input_names_extern,
         )
 
     def verify(self, **kwargs):
@@ -3244,6 +3273,20 @@ class ExternKernelCaller(ChoiceCaller):
     Caller for external kernel implementations
     """
 
+    @staticmethod
+    def _realize_tensor_kwarg(value: Any) -> ir.Buffer | ir.ReinterpretView | None:
+        if not isinstance(value, (ir.TensorBox, ir.StorageBox, ir.IRNode)):
+            return None
+
+        try:
+            realized = ir.ExternKernel.realize_input(value)
+            unwrapped = ir.InputsKernel.unwrap_storage_for_input(realized)
+        except AssertionError:
+            return None
+        if isinstance(unwrapped, (ir.Buffer, ir.ReinterpretView)):
+            return unwrapped
+        return None
+
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -3253,25 +3296,53 @@ class ExternKernelCaller(ChoiceCaller):
         *,
         has_out_variant=True,
     ) -> None:
-        super().__init__(choice.name, input_nodes, layout, description="")
+        # Generated extern calls use only positional inputs here; tensor kwargs are
+        # added separately to benchmark inputs so autotune receives real tensors.
+        self.call_input_nodes = list(input_nodes)
+        raw_kwargs = kwargs or {}
+        self.kwargs: dict[str, Any] = {}
+        self.tensor_kwarg_nodes: dict[str, ir.Buffer | ir.ReinterpretView] = {}
+        self.static_kwargs: dict[str, Any] = {}
+        benchmark_input_nodes = list(self.call_input_nodes)
+        benchmark_input_name_to_idx = {
+            node.get_name(): i for i, node in enumerate(benchmark_input_nodes)
+        }
+
+        for name, value in raw_kwargs.items():
+            tensor_kwarg_node = self._realize_tensor_kwarg(value)
+            if tensor_kwarg_node is None:
+                self.kwargs[name] = value
+                self.static_kwargs[name] = value
+                continue
+
+            self.kwargs[name] = tensor_kwarg_node
+            self.tensor_kwarg_nodes[name] = tensor_kwarg_node
+            if tensor_kwarg_node.get_name() not in benchmark_input_name_to_idx:
+                benchmark_input_name_to_idx[tensor_kwarg_node.get_name()] = len(
+                    benchmark_input_nodes
+                )
+                benchmark_input_nodes.append(tensor_kwarg_node)
+
+        super().__init__(choice.name, benchmark_input_nodes, layout, description="")
         self.choice = choice
-        self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
-        self.bmreq: BenchmarkRequest | None = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
             ExternKernelCPUBenchmarkRequest,
             ExternKernelGPUBenchmarkRequest,
+            TensorKwargMeta,
         )
+
+        self.bmreq: ExternKernelBenchmarkRequest | None = None
 
         # Determine if this is a GPU or CPU kernel
         if self.layout:
             device = self.layout.device
         else:
             device = None
-            for inp_node in self.input_nodes:
+            for inp_node in self.call_input_nodes:
                 dev = inp_node.get_device()
                 if dev and dev.type != "cpu":
                     device = dev
@@ -3283,7 +3354,22 @@ class ExternKernelCaller(ChoiceCaller):
         self.input_tensor_meta: list[TensorMeta] | TensorMeta
         self.output_tensor_meta: list[TensorMeta] | TensorMeta
         self.input_tensor_meta, self.output_tensor_meta = [], []
+        tensor_kwarg_meta: dict[str, TensorKwargMeta] = {}
+        for name, node in self.tensor_kwarg_nodes.items():
+            tensor_kwarg_meta[name] = TensorKwargMeta(
+                tensor_meta=cast(TensorMeta, TensorMeta.from_irnodes(cast(Any, node))),
+                source=node.get_name(),
+                input_index=benchmark_input_name_to_idx.get(node.get_name()),
+            )
         if device.type == "cpu":
+            if self.tensor_kwarg_nodes:
+                try:
+                    self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+                    self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+                except Exception:
+                    log.warning(
+                        "Constructing input/output tensor meta failed for Extern Choice"
+                    )
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
             try:
@@ -3302,7 +3388,9 @@ class ExternKernelCaller(ChoiceCaller):
             output_tensor_meta=self.output_tensor_meta,
             extra_args=(),
             callable_path=self.choice.call_name(),
-            kwargs=self.kwargs,
+            kwargs=self.static_kwargs,
+            tensor_kwargs=tensor_kwarg_meta,
+            call_arg_count=len(self.call_input_nodes),
             has_out_variant=self.has_out_variant,
         )
 
@@ -3322,11 +3410,13 @@ class ExternKernelCaller(ChoiceCaller):
         if out.numel() == 0:
             return
 
-        algo = self.to_callable()
+        assert self.bmreq is not None
+        input_args, kwargs = self.bmreq.call_args_and_kwargs(args)
+        algo = self.bmreq.to_callable(kwargs)
         if self.has_out_variant:
-            algo(*args, out=out)
+            algo(*input_args, out=out)
         else:
-            algo(*args)
+            algo(*input_args)
 
     def to_callable(self):
         # pyrefly: ignore [missing-attribute]
@@ -3337,7 +3427,9 @@ class ExternKernelCaller(ChoiceCaller):
             [
                 self.choice.name,
                 *[
-                    f"{kwarg}={repr(self.kwargs[kwarg])}"
+                    f"{kwarg}=<tensor>"
+                    if kwarg in self.tensor_kwarg_nodes
+                    else f"{kwarg}={repr(self.kwargs[kwarg])}"
                     for kwarg in sorted(self.kwargs.keys())
                 ],
                 self.choice.hash_key(),
@@ -3350,15 +3442,15 @@ class ExternKernelCaller(ChoiceCaller):
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
             inner: ir.IRNode = ir.FallbackKernel.create(
-                self.choice.op_overload, *self.input_nodes, **self.kwargs
+                self.choice.op_overload, *self.call_input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
-            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
+            inner = self.choice.kernel_creator(*self.call_input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
             inner = cls(
                 layout=self.layout,
-                inputs=self.input_nodes,
+                inputs=self.call_input_nodes,
                 python_kernel_name=self.choice.call_name(),
                 cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
@@ -3543,6 +3635,22 @@ def get_num_workers() -> int:
 
 def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+
+
+def add_choice_input_nodes(input_nodes, choices: Sequence[ChoiceCaller]):
+    benchmark_input_nodes = list(input_nodes)
+    input_names = OrderedSet([node.get_name() for node in benchmark_input_nodes])
+
+    for choice in choices:
+        if not isinstance(choice, ExternKernelCaller):
+            continue
+        for node in choice.input_nodes:
+            if node.get_name() in input_names:
+                continue
+            benchmark_input_nodes.append(node)
+            input_names.add(node.get_name())
+
+    return benchmark_input_nodes
 
 
 def create_precompile_key(
@@ -3833,7 +3941,8 @@ class AlgorithmSelectorCache(PersistentCache):
             node = choice.output_node()
             return node, choice
 
-        inputs_key = create_inputs_key(input_nodes)
+        benchmark_input_nodes = add_choice_input_nodes(input_nodes, choices)
+        inputs_key = create_inputs_key(benchmark_input_nodes)
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
@@ -4581,6 +4690,10 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
+        default_input_names = list(OrderedSet(node.get_name() for node in input_nodes))
+        default_input_names_extern = [node.get_name() for node in input_nodes]
+        benchmark_input_nodes = add_choice_input_nodes(input_nodes, choices)
+
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
@@ -4588,12 +4701,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
                 # pyrefly: ignore [bad-argument-type]
             )(x)
-            for i, x in enumerate(input_nodes)
+            for i, x in enumerate(benchmark_input_nodes)
         }
+        example_input_names = list(unique_example_inputs.keys())
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
+        example_input_names_extern = []
 
-        for i, input_node in enumerate(input_nodes):
+        for i, input_node in enumerate(benchmark_input_nodes):
+            example_input_names_extern.append(input_node.get_name())
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
                     unique_example_inputs[input_node.get_name()]
@@ -4688,28 +4804,44 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         out_extern = torch.as_strided(out_base, out.size(), out.stride(), out_offset)
-        expected = None
-        if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
-            expected = out_extern.clone()
-
-        return AutotuneArgs.from_choice_args(
+        autotune_args = AutotuneArgs.from_choice_args(
             example_inputs,
             example_inputs_extern,
             out,
             out_extern,
-            expected,
+            input_names=example_input_names,
+            input_names_extern=example_input_names_extern,
+            default_input_names=default_input_names,
+            default_input_names_extern=default_input_names_extern,
         )
+        if VERIFY:
+            input_names = cls.benchmark_input_names(choices[0])
+            benchmark_tensors = autotune_args.get_benchmark_tensors(
+                cls._is_extern(choices[0]), input_names
+            )
+            expected_inputs, expected_output = benchmark_tensors.unpack()
+            choices[0].benchmark(*expected_inputs, out=expected_output)
+            autotune_args.expected = expected_output.clone()
+
+        return autotune_args
 
     @staticmethod
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    @staticmethod
+    def benchmark_input_names(choice: ChoiceCaller) -> list[str] | None:
+        if isinstance(choice, ExternKernelCaller) and choice.tensor_kwarg_nodes:
+            return [node.get_name() for node in choice.input_nodes]
+        return None
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._is_extern(choice), cls.benchmark_input_names(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         result = choice.benchmark(*inputs, out=output)
@@ -4795,7 +4927,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._is_extern(choice), cls.benchmark_input_names(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()

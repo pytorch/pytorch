@@ -15,7 +15,9 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
+    ExternKernelCPUBenchmarkRequest,
     ExternKernelGPUBenchmarkRequest,
+    TensorKwargMeta,
     TensorMeta,
     TritonBenchmarkRequest,
 )
@@ -78,6 +80,46 @@ def patches(fn):
         return fn(*args, **kwargs)
 
     return wrapped
+
+
+def _test_extern_tensor_kwarg_add(x, *, bias, out):
+    if not isinstance(bias, torch.Tensor):
+        raise TypeError(f"bias must be Tensor, not {type(bias).__name__}")
+    torch.add(x, bias, out=out)
+
+
+def _test_extern_tensor_kwarg_alias(x, *, bias, out):
+    if bias is not x:
+        raise TypeError("bias should alias positional input")
+    out.copy_(x)
+
+
+def _test_extern_tensor_kwarg_non_out(*, bias):
+    if not isinstance(bias, torch.Tensor):
+        raise TypeError(f"bias must be Tensor, not {type(bias).__name__}")
+    return torch.ones_like(bias)
+
+
+def _test_extern_second_tensor_kwarg(x, *, first=None, second=None, out):
+    if first is not None:
+        raise TypeError("first should be None")
+    if not isinstance(second, torch.Tensor):
+        raise TypeError(f"second must be Tensor, not {type(second).__name__}")
+    torch.add(x, second, out=out)
+
+
+def _get_test_extern_tensor_kwarg_choice(name):
+    choice = ExternKernelChoice.lookup(name)
+    if choice is not None:
+        return choice
+    return ExternKernelChoice(_test_extern_tensor_kwarg_add, name=name)
+
+
+def _get_test_extern_kernel_choice(name, kernel, *, has_out_variant=True):
+    choice = ExternKernelChoice.lookup(name)
+    if choice is not None:
+        return choice
+    return ExternKernelChoice(kernel, name=name, has_out_variant=has_out_variant)
 
 
 class TestSelectAlgorithm(TestCase):
@@ -797,6 +839,215 @@ class TestExternKernelCaller(TestCase):
             timing = request_profiling.benchmark(a, b, out=out)
             self.assertIsInstance(timing, float)
             self.assertGreaterEqual(timing, 0.0)
+
+
+class TestExternKernelTensorKwargs(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        V.choices_handler = None
+        select_algorithm.clear_preprocessing_fns()
+        torch._dynamo.reset()
+
+    def test_extern_kernel_benchmark_materializes_tensor_kwargs(self):
+        import torch._inductor.lowering as inductor_lowering
+
+        choice_a = _get_test_extern_tensor_kwarg_choice(
+            "_test_extern_tensor_kwarg_add_a"
+        )
+        choice_b = _get_test_extern_tensor_kwarg_choice(
+            "_test_extern_tensor_kwarg_add_b"
+        )
+        orig_add = inductor_lowering.lowerings[aten.add.Tensor]
+
+        def skip_cache(self, choices, name, key, benchmark, hint_override=None):
+            if benchmark is None:
+                return {}
+            return benchmark(choices)
+
+        def patched_add(x, y, *, alpha=1):
+            if alpha != 1:
+                return orig_add(x, y, alpha=alpha)
+
+            layout = FixedLayout(
+                x.get_device(), x.get_dtype(), x.get_size(), x.get_stride()
+            )
+            choices = [
+                choice_a.bind([x], layout, bias=y),
+                choice_b.bind([x], layout, bias=y),
+            ]
+            return autotune_select_algorithm(
+                "test_extern_tensor_kwarg_add", choices, [x], layout
+            )[0]
+
+        def fn(x, y):
+            return x + y
+
+        counters.clear()
+        torch._dynamo.reset()
+        with (
+            patch.dict(inductor_lowering.lowerings, {aten.add.Tensor: patched_add}),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+            patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
+        ):
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+            result = torch.compile(fn)(x, y)
+
+        torch.testing.assert_close(result, fn(x, y))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    def test_extern_kernel_benchmark_materializes_later_tensor_kwarg(self):
+        import torch._inductor.lowering as inductor_lowering
+
+        choice_a = _get_test_extern_kernel_choice(
+            "_test_extern_second_tensor_kwarg_a",
+            _test_extern_second_tensor_kwarg,
+        )
+        choice_b = _get_test_extern_kernel_choice(
+            "_test_extern_second_tensor_kwarg_b",
+            _test_extern_second_tensor_kwarg,
+        )
+        orig_add = inductor_lowering.lowerings[aten.add.Tensor]
+
+        def skip_cache(self, choices, name, key, benchmark, hint_override=None):
+            if benchmark is None:
+                return {}
+            return benchmark(choices)
+
+        def patched_add(x, y, *, alpha=1):
+            if alpha != 1:
+                return orig_add(x, y, alpha=alpha)
+
+            layout = FixedLayout(
+                x.get_device(), x.get_dtype(), x.get_size(), x.get_stride()
+            )
+            choices = [
+                choice_a.bind([x], layout, second=y),
+                choice_b.bind([x], layout, second=y),
+            ]
+            return autotune_select_algorithm(
+                "test_extern_second_tensor_kwarg", choices, [x], layout
+            )[0]
+
+        def fn(x, y):
+            return x + y
+
+        counters.clear()
+        torch._dynamo.reset()
+        with (
+            patch.dict(inductor_lowering.lowerings, {aten.add.Tensor: patched_add}),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+            patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
+        ):
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+            result = torch.compile(fn)(x, y)
+
+        torch.testing.assert_close(result, fn(x, y))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    def test_extern_kernel_codegen_realizes_computed_tensor_kwargs(self):
+        import torch._inductor.lowering as inductor_lowering
+
+        choice = _get_test_extern_tensor_kwarg_choice(
+            "_test_extern_tensor_kwarg_add_computed"
+        )
+        orig_add = inductor_lowering.lowerings[aten.add.Tensor]
+
+        def skip_cache(self, choices, name, key, benchmark, hint_override=None):
+            if benchmark is None:
+                return {}
+            return benchmark(choices)
+
+        def patched_add(x, y, *, alpha=1):
+            if alpha != 1:
+                return orig_add(x, y, alpha=alpha)
+
+            layout = FixedLayout(
+                x.get_device(), x.get_dtype(), x.get_size(), x.get_stride()
+            )
+            choices = [choice.bind([x], layout, bias=y)]
+            return autotune_select_algorithm(
+                "test_extern_tensor_kwarg_add_computed", choices, [x], layout
+            )[0]
+
+        def fn(x):
+            y = torch.sin(x)
+            return x + y
+
+        counters.clear()
+        torch._dynamo.reset()
+        with (
+            patch.dict(inductor_lowering.lowerings, {aten.add.Tensor: patched_add}),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+        ):
+            x = torch.randn(4, 4)
+            result = torch.compile(fn)(x)
+
+        torch.testing.assert_close(result, fn(x))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+
+    def test_extern_kernel_benchmark_request_tensor_kwargs_alias_input(self):
+        choice = _get_test_extern_kernel_choice(
+            "_test_extern_tensor_kwarg_alias",
+            _test_extern_tensor_kwarg_alias,
+        )
+        tensor_meta = TensorMeta(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            sizes=(4, 4),
+            strides=(4, 1),
+            offset=0,
+        )
+        request = ExternKernelCPUBenchmarkRequest(
+            kernel_name=choice.name,
+            input_tensor_meta=[tensor_meta],
+            output_tensor_meta=tensor_meta,
+            extra_args=[],
+            callable_path=choice.call_name(),
+            tensor_kwargs={
+                "bias": TensorKwargMeta(
+                    tensor_meta=tensor_meta, source="arg0", input_index=0
+                )
+            },
+            has_out_variant=True,
+        )
+
+        timing = request.benchmark(out=None)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+
+    def test_extern_kernel_benchmark_request_non_out_tensor_kwargs_only(self):
+        choice = _get_test_extern_kernel_choice(
+            "_test_extern_tensor_kwarg_non_out",
+            _test_extern_tensor_kwarg_non_out,
+            has_out_variant=False,
+        )
+        tensor_meta = TensorMeta(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            sizes=(4, 4),
+            strides=(4, 1),
+            offset=0,
+        )
+        request = ExternKernelCPUBenchmarkRequest(
+            kernel_name=choice.name,
+            input_tensor_meta=[],
+            output_tensor_meta=tensor_meta,
+            extra_args=[],
+            callable_path=choice.call_name(),
+            tensor_kwargs={
+                "bias": TensorKwargMeta(tensor_meta=tensor_meta, source="bias")
+            },
+            call_arg_count=0,
+            has_out_variant=False,
+        )
+        out = torch.empty(4, 4)
+
+        timing = request.benchmark(out=out)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+        torch.testing.assert_close(out, torch.ones_like(out))
 
 
 @contextlib.contextmanager

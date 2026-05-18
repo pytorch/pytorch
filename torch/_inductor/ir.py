@@ -6974,6 +6974,24 @@ class ExternKernel(InputsKernel):
             x, FlexibleLayout.contiguous_strides(x.get_size())
         )
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+        reads = OrderedSet[dependencies.Dep]()
+
+        def add_tensor_read(x: Any) -> None:
+            while isinstance(x, (TensorBox, StorageBox)):
+                x = x.data
+            if isinstance(x, (Buffer, ReinterpretView)):
+                reads.add(dependencies.StarDep(x.get_name()))
+            elif isinstance(x, (list, tuple)):
+                for item in x:
+                    add_tensor_read(item)
+
+        for arg in self.kwargs.values():
+            add_tensor_read(arg)
+
+        return read_writes.with_read(reads)
+
     def apply_constraint(self) -> None:
         pass
 
