@@ -89,6 +89,11 @@ NodeOrConstant = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
+_PYTREE_CONTAINER_TYPE_MAPPING: dict[type, type] = {
+    immutable_list: tuple,
+    list: tuple,
+    immutable_dict: dict,
+}
 
 _debug_nodes_cache: bool | OrderedSet[str] | None = None
 _debug_nodes_env_value_cache: str | None = None
@@ -192,35 +197,29 @@ def _node_meta_val(node: torch.fx.Node) -> Any:
 def _convert_fake_tensors_to_fake_mode(
     example_vals: Any, fake_mode: FakeTensorMode
 ) -> Any:
-    def convert(it):
+    def convert(it: Any) -> Any:
         if isinstance(it, FakeTensor):
             return fake_mode.from_tensor(it)
         return it
 
-    return torch.fx.node.map_aggregate(example_vals, convert)
+    return pytree.tree_map(convert, example_vals)
 
 
 def _normalize_pytree_container_types(tree: Any) -> Any:
-    type_mapping: dict[type, type] = {
-        immutable_list: tuple,
-        list: tuple,
-        immutable_dict: dict,
-    }
-
     def convert_type(x: Any) -> Any:
-        convert_fn = type_mapping.get(type(x))
+        convert_fn = _PYTREE_CONTAINER_TYPE_MAPPING.get(type(x))
         if convert_fn is None:
             return x
         return pytree.tree_map(
             convert_type,
             convert_fn(x),
-            is_leaf=lambda x: type(x) in type_mapping,
+            is_leaf=lambda x: type(x) in _PYTREE_CONTAINER_TYPE_MAPPING,
         )
 
     return pytree.tree_map(
         convert_type,
         tree,
-        is_leaf=lambda x: type(x) in type_mapping,
+        is_leaf=lambda x: type(x) in _PYTREE_CONTAINER_TYPE_MAPPING,
     )
 
 
@@ -1749,7 +1748,7 @@ def register_replacement(
                     if not _copy_eager_input_vals(
                         graph_with_eager_vals, replacement_graph
                     ):
-                        log.debug(
+                        log.info(
                             "Unable to propagate eager_input_vals for replacement %s",
                             getattr(replace_fn, "__name__", repr(replace_fn)),
                         )
