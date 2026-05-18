@@ -303,7 +303,3 @@ at::Tensor abs(const at::Tensor & self)
 
 """,
         )
-
-
-if __name__ == "__main__":
-    unittest.main()
