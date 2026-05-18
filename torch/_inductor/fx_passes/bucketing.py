@@ -429,11 +429,8 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    # Build forward adjacency list for incremental descendant tracking
-    children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
-    for node in g.nodes:
-        for inp in node._input_nodes:
-            children[inp].append(node)
+    # TODO: pearce kelly algorithm for detecting cycles
+    node_descendents = collect_node_descendants(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -454,16 +451,6 @@ def greedy_bucket_collective_by_mb(
 
     if len(cur_group) > 1:
         nodes_groups.append(cur_group)
-
-    def _add_descendants(node: torch.fx.Node, desc: OrderedSet[torch.fx.Node]) -> None:
-        """Forward BFS from node, adding all reachable nodes to desc."""
-        stack = [node]
-        while stack:
-            n = stack.pop()
-            for child in children[n]:
-                if child not in desc:
-                    desc.add(child)
-                    stack.append(child)
 
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
@@ -494,7 +481,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            _add_descendants(node, cur_bucket_descendents)
+            cur_bucket_descendents |= node_descendents[node]
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
@@ -965,29 +952,14 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     with dynamo_timed("fx.bucketing._trace", log_pt2_compile_event=True):
         fake_mode = detect_fake_mode(inps)
         assert fake_mode is not None
-        shape_env = fake_mode.shape_env
-        pending_unbacked = None
-        ignorable_unbacked = None
-        if shape_env is not None:
-            pending_unbacked = list(shape_env.pending_fresh_unbacked_symbols)
-            ignorable_unbacked = list(shape_env.ignorable_fresh_unbacked_symbols)
-            shape_env.pending_fresh_unbacked_symbols.clear()
-            shape_env.ignorable_fresh_unbacked_symbols.clear()
-        try:
-            with fake_mode, enable_python_dispatcher():
-                out = make_fx(fn)(*inps)
-        finally:
-            if shape_env is not None:
-                assert pending_unbacked is not None
-                assert ignorable_unbacked is not None
-                shape_env.pending_fresh_unbacked_symbols[:] = pending_unbacked
-                shape_env.ignorable_fresh_unbacked_symbols[:] = ignorable_unbacked
-        for node in out.graph.find_nodes(
-            op="call_function", target=torch.ops.aten.detach.default
-        ):
-            node.replace_all_uses_with(node.args[0])
-            out.graph.erase_node(node)
-        return out
+        with fake_mode, enable_python_dispatcher():
+            out = make_fx(fn)(*inps)
+            for node in out.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.detach.default
+            ):
+                node.replace_all_uses_with(node.args[0])
+                out.graph.erase_node(node)
+            return out
 
 
 def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]

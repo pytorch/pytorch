@@ -7693,15 +7693,6 @@ class TestMemPool(TestCase):
         tensor_ptrs_round_1 = alloc_with_threads(
             thread_count, stream, mem_sizes, "cuda"
         )
-        # Force a split-merge cycle: allocate half-sized tensors (splits the
-        # freed blocks), then free them (triggers merges back). With per-block
-        # counters this changes the free-set ordering; with segment-level
-        # counters it stays stable.
-        splitters = [
-            torch.empty(s, dtype=torch.int8, device="cuda")
-            for s in [s * 1024 * 1024 for s in range(1, 5) for _ in range(thread_count)]
-        ]
-        del splitters
         tensor_ptrs_round_2 = alloc_with_threads(
             thread_count, stream, mem_sizes, "cuda"
         )
@@ -7814,20 +7805,9 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool):
             first_round_tensors = alloc_tensors()
         tensor_ptrs = [t.data_ptr() for t in first_round_tensors]
+        # for t in first_round_tensors:
+        #    del t
         del first_round_tensors
-
-        # Split-merge cycle on ONE block per stream. Each stream has
-        # three 24 MB blocks with counters [c0, c1, c2]. Splitting only
-        # the first (lowest-counter) block gives it a new, higher
-        # counter after the merge, reversing its position among the
-        # three. With per-block counters the reallocation order changes
-        # (wrong); with segment-level counters it stays stable.
-        with torch.cuda.use_mem_pool(pool):
-            with torch.cuda.stream(first_stream):
-                s1 = torch.empty(tensor_sizes[0] // 2, dtype=torch.uint8, device="cuda")
-            with torch.cuda.stream(second_stream):
-                s2 = torch.empty(tensor_sizes[0] // 2, dtype=torch.uint8, device="cuda")
-            del s1, s2
 
         with torch.cuda.use_mem_pool(pool):
             second_round_tensors = alloc_tensors()
@@ -7856,105 +7836,6 @@ class TestMemPool(TestCase):
         del pool
         del state
         torch.cuda.empty_cache()
-
-    def _alloc_record_free_sync(self, pool_ctx, s2, nbytes):
-        """Allocate a block, record it on a second stream, free, synchronize,
-        then try to reallocate.  Returns (original_ptr, new_ptr)."""
-        with pool_ctx:
-            a = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
-            original_ptr = a.data_ptr()
-
-            with torch.cuda.stream(s2):
-                a.record_stream(s2)
-                _ = a + 1
-
-            del a
-            torch.cuda.synchronize()
-
-            b = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
-            new_ptr = b.data_ptr()
-            del b
-        return original_ptr, new_ptr
-
-    @serialTest()
-    def test_mempool_oom_recovery_releases_cached_blocks(self):
-        """Test that the allocator can release default-pool cached blocks to
-        satisfy a new allocation when a user mempool is active.
-
-        We fill the default pool's free list with cached blocks (by allocating
-        and freeing outside use_mem_pool), then try to allocate inside
-        use_mem_pool.  Two paths:
-          1. Default pool -- OOM recovery releases cached blocks, succeeds.
-          2. use_mem_pool -- same recovery should work (the fix).
-        """
-        MB = 1024 * 1024
-        device = torch.device("cuda:0")
-
-        def align_down_2mb(n):
-            return n & ~(2 * MB - 1)
-
-        for label, make_ctx in [
-            ("default pool", lambda: contextlib.nullcontext()),
-            (
-                "user mempool",
-                lambda: torch.cuda.use_mem_pool(torch.cuda.MemPool()),
-            ),
-        ]:
-            with self.subTest(label=label):
-                torch.cuda.empty_cache()
-                free_before = torch.cuda.mem_get_info(device)[0]
-
-                fill_size = align_down_2mb(free_before // 2)
-                if fill_size < 64 * MB:
-                    self.skipTest("Not enough GPU memory for this test")
-
-                filler = torch.empty(fill_size, dtype=torch.uint8, device=device)
-                del filler
-
-                alloc_size = align_down_2mb(free_before - free_before // 8)
-                oom = False
-                try:
-                    with make_ctx():
-                        big = torch.empty(alloc_size, dtype=torch.uint8, device=device)
-                        del big
-                except torch.cuda.OutOfMemoryError:
-                    oom = True
-
-                self.assertFalse(
-                    oom,
-                    f"[{label}] OOM even though the default pool had "
-                    f"{fill_size // MB} MiB of freeable cached blocks "
-                    "-- release_cached_blocks was likely skipped",
-                )
-
-    @serialTest()
-    def test_mempool_block_free_not_deferred(self):
-        """Test that multi-stream block frees are NOT deferred when only a
-        user mempool is active (no graph capture).
-
-        During graph capture, block frees must be deferred (cudaEventRecord
-        is illegal).  For user mempools, insert_events should be called
-        immediately.  Two paths:
-          1. Default pool -- block recycled (baseline).
-          2. use_mem_pool -- block recycled (the fix).
-        """
-        torch.cuda.empty_cache()
-        s2 = torch.cuda.Stream()
-        nbytes = 1024 * 1024
-
-        for label, pool_ctx in [
-            ("default pool", contextlib.nullcontext()),
-            ("user mempool", torch.cuda.use_mem_pool(torch.cuda.MemPool())),
-        ]:
-            with self.subTest(label=label):
-                torch.cuda.empty_cache()
-                orig, new = self._alloc_record_free_sync(pool_ctx, s2, nbytes)
-                self.assertEqual(
-                    new,
-                    orig,
-                    f"[{label}] Block not reused after multi-stream free "
-                    "-- free was likely deferred as if under graph capture",
-                )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

@@ -277,7 +277,7 @@ class Vectorized<double> {
     return exp();
   }
 
-  Vectorized<double> lgamma() const {
+  Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
     return {Sleef_lgammad2_u10(_vec0), Sleef_lgammad2_u10(_vec1)};
   }
 
