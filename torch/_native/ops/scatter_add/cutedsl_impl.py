@@ -1,7 +1,8 @@
 """CuTeDSL override registrations for ``aten::scatter_add``.
 
 Two kernels for the ``index.unsqueeze(-1).expand(-1, ...)`` expanded-1D
-pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
+pattern (same shape for self/src/index, inner-contiguous after permuting
+``dim`` to axis 0), tried in order:
 
 1. **TMA** (``tma_kernel.py``, sm_90+): uses ``cp.reduce.async.bulk`` to
    offload the whole reduction to the TMA unit, 3-7x faster than aten on
@@ -11,7 +12,15 @@ pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
    pre-sm_90, and sm_90+ shapes where the TMA alignment constraint isn't
    met.
 
-Anything else (non-expanded index, dim != 0, non-contiguous inputs,
+Both kernels assume the scatter axis is dim=0 and the inner dims pack
+contiguously. We accept any ``dim`` whose post-``movedim(dim, 0)`` layout
+satisfies that constraint -- in particular, default-contiguous tensors
+with ``dim=0`` and pre-permuted views like ``x.permute(1, 0, 2)`` with
+``dim=1``. ``_permute_to_dim0`` validates the permuted operand triple via
+``TensorIteratorConfig`` (cross-device / shape / overlap checks) before
+the path-specific support check runs.
+
+Anything else (non-expanded index, post-permute non-contiguous inputs,
 deterministic mode) falls through to aten. Aten is competitive or better
 on those shapes, so we intentionally don't override them.
 
@@ -26,6 +35,7 @@ import importlib.util
 import math
 
 import torch
+from torch._tensor_iterator import binary_op as _ti_binary_op
 
 from ... import cutedsl_utils as cu
 from ...registry import _OpCondFn, _OpImplFn
@@ -101,14 +111,63 @@ def _inner_contiguous(t: torch.Tensor) -> bool:
     return t.select(0, 0).is_contiguous()
 
 
-def _expanded_1d_inner_size(
+def _normalize_dim(dim: int, ndim: int) -> int:
+    return dim + ndim if dim < 0 else dim
+
+
+def _permute_to_dim0(
     self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+    """Move ``dim`` to axis 0 on all three operands and validate.
+
+    The downstream pipeline (``_expanded_1d_inner_size``,
+    ``_flatten_for_expanded_1d``, the kernels) hard-codes dim=0 and
+    inner-contiguous nD tensors. ``movedim(dim, 0)`` is a view, so writes
+    through the permuted ``self`` view land in the correct storage cells of
+    the user's original tensor.
+
+    Per-slice validation via TensorIterator mirrors aten's
+    ``index_func_meta_impl`` trick (TensorAdvancedIndexing.cpp:441-444): the
+    full (self, src) pair has different sizes along axis 0, but
+    ``select(0, 0)`` of each gives matching shapes that TI can sanity-check
+    for cross-device, dtype, and overlap. Aten itself doesn't run TI on the
+    full triple either -- it uses the dedicated ``scatter_shape_check``
+    helper, which is the analog of our ``_expanded_1d_inner_size`` checks
+    downstream. Permutation alone is not enough: the post-permute ``self``
+    and ``src`` must still pass ``_inner_contiguous`` for the kernel's
+    2D-view flattening to be valid -- that's checked downstream.
+    """
+    if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim < 2:
+        return None
+    d = _normalize_dim(dim, self.ndim)
+    if d < 0 or d >= self.ndim:
+        return None
+    if self.shape[d] == 0 or src.shape[d] == 0:
+        return None
+    self_p = self.movedim(d, 0)
+    src_p = src.movedim(d, 0)
+    index_p = index.movedim(d, 0)
+
+    # Per-slice TensorIterator check: build a binary_op on the first slice
+    # of each post-permute operand. The slice shapes match by
+    # construction, so TI's broadcast / device / overlap rules apply
+    # cleanly -- this catches cross-device operands and inner-shape
+    # mismatches before the kernel-specific checks run.
+    try:
+        _ti_binary_op(self_p.select(0, 0), self_p.select(0, 0), src_p.select(0, 0))
+    except RuntimeError:
+        return None
+    return self_p, src_p, index_p
+
+
+def _expanded_1d_inner_size(
+    self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> int | None:
     """Return ``prod(src.shape[1:])`` when the ``index.unsqueeze(-1)
-    .expand(-1, ...)`` fast-path pattern applies, else ``None``.
+    .expand(-1, ...)`` fast-path pattern applies on (already permuted to
+    dim=0) operands, else ``None``.
 
     Requirements:
-      - dim == 0
       - self, src, index have the same rank (>= 2) and shape
       - self, src have inner-dim stride 1 (outer row stride can differ
         from prod(shape[1:]) -- e.g. a slice like ``X[:, :K]`` of a
@@ -117,14 +176,14 @@ def _expanded_1d_inner_size(
       - dtype in ``_SUPPORTED_DTYPES`` and self.dtype == src.dtype
       - index.dtype in {int32, int64} (int32 is cast to int64 on the
         host before the kernel launches)
+
+    Caller is responsible for the dim=0 invariant: see ``_permute_to_dim0``.
     """
     if self.dtype not in _SUPPORTED_DTYPES or self.dtype != src.dtype:
         return None
     if index.dtype not in (torch.int32, torch.int64):
         return None
-    if dim != 0:
-        return None
-    if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim < 2:
+    if self.ndim < 2:
         return None
     # Inner-dim stride 1, plus ensure inner dims pack contiguously so we
     # can flatten shape[1:] into a single N. A simple sufficient check:
@@ -186,11 +245,12 @@ def _flatten_for_expanded_1d(
 
 
 def _is_tma_supported(
-    self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
+    self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> bool:
+    """Eligibility check on (self, index, src) ALREADY permuted to dim=0."""
     if not _has_sm90_plus():
         return False
-    N = _expanded_1d_inner_size(self, dim, index, src)
+    N = _expanded_1d_inner_size(self, index, src)
     if N is None:
         return False
     # TMA transfer size is baked in at compile time (chunk_bytes =
@@ -202,13 +262,14 @@ def _is_tma_supported(
 
 
 def _is_vec_scatter_supported(
-    self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
+    self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> bool:
+    """Eligibility check on (self, index, src) ALREADY permuted to dim=0."""
     # ``red.global.add.noftz.bf16x2`` requires sm_90+. fp16x2 (sm_70+)
     # and scalar fp32 atomicAdd (sm_60+) work everywhere we care about.
     if self.dtype is torch.bfloat16 and not _has_sm90_plus():
         return False
-    N = _expanded_1d_inner_size(self, dim, index, src)
+    N = _expanded_1d_inner_size(self, index, src)
     if N is None:
         return False
     # Each lane owns vec_elems consecutive elements; the loop is either
@@ -233,7 +294,13 @@ def _make_cond(
 ) -> _OpCondFn:
     """Build a cond function that runs ``support_check`` behind the shared
     boilerplate (cutedsl availability, non-deterministic mode, CUDA tensors,
-    non-COW, dtype/shape match on ``out`` when present)."""
+    non-COW, dtype/shape match on ``out`` when present).
+
+    ``support_check`` is invoked on the operands AFTER ``movedim(dim, 0)``;
+    if the permutation can't be validated by TensorIterator (cross-device,
+    shape mismatch, etc.) we reject without running the path-specific
+    check.
+    """
     if requires_out:
 
         def _cond(self, dim, index, src, *, out):
@@ -243,19 +310,27 @@ def _make_cond(
                 return False
             if out.ndim == 0:
                 return False
-            # Kernels read/write ``out`` with inner-dim stride 1; outer
-            # stride can differ from prod(shape[1:]) (same relaxation as
-            # self/src). Inner dims must be packed for the 2D view.
-            if not _inner_contiguous(out):
+            # ``out`` is structurally a clone of ``self`` from the user's
+            # perspective; permute it the same way for the inner-contig
+            # check on the post-permute view.
+            permuted = _permute_to_dim0(out, dim, index, src)
+            if permuted is None:
                 return False
-            return support_check(self, dim, index, src)
+            out_p, src_p, index_p = permuted
+            if not _inner_contiguous(out_p):
+                return False
+            return support_check(out_p, index_p, src_p)
 
         return _cond
 
     def _cond(self, dim, index, src, *args, **kwargs):
         if not _base_cond_ok(self, index, src):
             return False
-        return support_check(self, dim, index, src)
+        permuted = _permute_to_dim0(self, dim, index, src)
+        if permuted is None:
+            return False
+        self_p, src_p, index_p = permuted
+        return support_check(self_p, index_p, src_p)
 
     return _cond
 
@@ -273,23 +348,31 @@ def _make_impls(kernel_getter):
     that lazily imports and returns the ``*_scatter_add_into`` kernel; we
     defer the import so the DSL runtime isn't pulled in at registration
     time.
+
+    Each impl ``movedim(dim, 0)``s the operands before kernel dispatch.
+    The permuted ``dst`` is a view of the original storage, so the kernel's
+    writes land in the correct cells of the user's tensor.
     """
 
-    def _run(dst: torch.Tensor, index, src) -> torch.Tensor:
-        # Caller guarantees dst/src/index pass _expanded_1d_inner_size.
-        dst_2d, index_1d, src_2d = _flatten_for_expanded_1d(dst, index, src)
+    def _run(dst: torch.Tensor, dim: int, index, src) -> torch.Tensor:
+        # Cond guarantees the permuted views pass _expanded_1d_inner_size.
+        d = _normalize_dim(dim, dst.ndim)
+        dst_p = dst.movedim(d, 0)
+        src_p = src.movedim(d, 0)
+        index_p = index.movedim(d, 0)
+        dst_2d, index_1d, src_2d = _flatten_for_expanded_1d(dst_p, index_p, src_p)
         kernel_getter()(dst_2d, index_1d, src_2d)
         return dst
 
     def impl(self, dim, index, src, *args, **kwargs):
-        return _run(self.clone(), index, src)
+        return _run(self.clone(), dim, index, src)
 
     def out_impl(self, dim, index, src, *, out):
         _copy_if_distinct(out, self)
-        return _run(out, index, src)
+        return _run(out, dim, index, src)
 
     def inplace_impl(self, dim, index, src, *args, **kwargs):
-        return _run(self, index, src)
+        return _run(self, dim, index, src)
 
     return impl, out_impl, inplace_impl
 
