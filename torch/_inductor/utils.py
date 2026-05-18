@@ -4547,7 +4547,14 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
         [*args, *snode.node.constant_args],  # type: ignore[union-attr]
         snode.node.kwargs,  # type: ignore[union-attr]
     )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    kwargs = dict(snode.node.kwargs)  # type: ignore[union-attr]
+    op_overload = getattr(snode.node, "op_overload", None)
+    if isinstance(op_overload, torch._ops.OpOverload):
+        positional_arg_names = [
+            arg.name for arg in op_overload._schema.arguments if not arg.kwarg_only
+        ]
+        for arg_name in positional_arg_names[: len(args)]:
+            kwargs.pop(arg_name, None)
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
