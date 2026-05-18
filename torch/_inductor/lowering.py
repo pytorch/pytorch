@@ -1013,6 +1013,9 @@ def _is_explicit_dtype_cast(
     return not (isinstance(src_val, torch.Tensor) and src_val.dtype == dtype)
 
 
+_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY = "_inductor_explicit_lowp_cast_source"
+
+
 def _has_explicit_lowp_cast_source(
     node: torch.fx.Node | None, source_dtype: torch.dtype
 ) -> bool:
@@ -1026,23 +1029,52 @@ def _has_explicit_lowp_cast_source(
     if not isinstance(node, torch.fx.Node):
         return False
 
-    visited: OrderedSet[torch.fx.Node] = OrderedSet()
-    stack = [node]
+    def cached_result(node: torch.fx.Node) -> bool | None:
+        cache = node.meta.get(_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY)
+        if not isinstance(cache, dict) or source_dtype not in cache:
+            return None
+        return cache[source_dtype]
+
+    def cache_result(node: torch.fx.Node, result: bool) -> None:
+        cache = node.meta.setdefault(_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY, {})
+        if isinstance(cache, dict):
+            cache[source_dtype] = result
+
+    # Explicit casts can remain semantically visible across long fused lowp
+    # expressions, so keep the search exact and cache per-node results to avoid
+    # repeated ancestry walks at promotion/widening sites.
+    stack = [(node, False)]
     while stack:
-        cur = stack.pop()
-        if cur in visited:
+        cur, expanded = stack.pop()
+        if cached_result(cur) is not None:
             continue
-        visited.add(cur)
         if not produces_source_dtype(cur):
+            cache_result(cur, False)
             continue
         if _is_explicit_dtype_cast(cur, source_dtype):
-            return True
-        stack.extend(
+            cache_result(cur, True)
+            continue
+
+        input_nodes = [
             input_node
             for input_node in cur.all_input_nodes
             if produces_source_dtype(input_node)
+        ]
+        if expanded:
+            has_explicit_cast_source = any(
+                cached_result(input_node) is True for input_node in input_nodes
+            )
+            cache_result(cur, has_explicit_cast_source)
+            continue
+
+        stack.append((cur, True))
+        stack.extend(
+            (input_node, False)
+            for input_node in input_nodes
+            if cached_result(input_node) is None
         )
-    return False
+
+    return cached_result(node) is True
 
 
 def _to_dtype_preserving_explicit_lowp_source(
@@ -3571,8 +3603,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
+            size = x.get_size()
+            if len(size) == 0:
+                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
@@ -7972,7 +8007,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )

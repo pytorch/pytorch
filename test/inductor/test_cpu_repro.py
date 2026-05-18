@@ -221,6 +221,18 @@ class CPUReproTests(TestCase):
         self._check_conv_stride_constraints([torch.contiguous_format])
 
     @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_bias_flattened_view(self):
+        def fn(x):
+            bias = x.to(torch.bool).float().flatten()
+            return F.conv2d(x, x, bias, stride=1, padding=0)
+
+        x = torch.ones(1, 1, 1, 1)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        self.assertEqual(compiled(x), expected)
+
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1064,6 +1076,38 @@ class CPUReproTests(TestCase):
                     _x = x.to(dtype)
                     self.common(fn, (_x,))
                     check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_asinh_large_float32_inplace(self):
+        # https://github.com/pytorch/pytorch/issues/152299
+
+        def fn(input):
+            return input.asinh_()
+
+        x = torch.tensor(
+            [
+                [
+                    -1e30,
+                    1e30,
+                    -5e28,
+                    5e28,
+                    -7.5e29,
+                    7.5e29,
+                    -2e30,
+                    2e30,
+                    0.0,
+                ]
+            ],
+            dtype=torch.float32,
+        ).repeat(3, 1)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for simdlen in bit_widths:
+            with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x.clone(),))
+                check_metrics_vec_kernel_count(1)
 
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
@@ -4097,6 +4141,39 @@ class CPUReproTests(TestCase):
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
 
+    @requires_vectorization
+    def test_vertical_reduction_tail_store_uses_tail_width(self):
+        def fn(x, y, z, residual, weight, bias):
+            x = F.leaky_relu(x * y + z)
+            x = x.permute(1, 0).unsqueeze(1)
+            return F.layer_norm(x + residual, (14,), weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(14, 2)
+        y = torch.randn(14, 2)
+        z = torch.randn(14, 2)
+        residual = torch.randn(2, 2, 14)
+        weight = torch.randn(14)
+        bias = torch.randn(14)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        actual, code = run_and_get_cpp_code(opt_fn, x, y, z, residual, weight, bias)
+
+        self.assertTrue(same(fn(x, y, z, residual, weight, bias), actual))
+        self.assertIn("sum_masked_reduce", code)
+        self.assertIn(
+            "tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>(2L));",
+            code,
+        )
+        self.assertIn(
+            "out_ptr0[static_cast<int64_t>(x1 + 2L*x0 + 2L*x0_inner)] = tmpbuf[x0_inner];",
+            code,
+        )
+        self.assertNotIn(
+            ".store(tmpbuf.data(), static_cast<int64_t>(16));",
+            code,
+        )
+
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
             b = a[[0]]
@@ -4728,6 +4805,34 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    def test_group_norm_sum_conv1d_tail_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/181618
+        torch.manual_seed(0)
+        m_norm = nn.GroupNorm(1, 9).eval()
+        m_conv1 = nn.Conv1d(9, 1, 3)
+        m_conv2 = nn.Conv1d(1, 7, 3)
+        x = torch.randn(8, 9, 14, 12)
+
+        def model():
+            out = m_norm(x)
+            out = out.sum(dim=3)
+            out = m_conv1(out)
+            return m_conv2(out)
+
+        expected = model()
+        actual, code = run_and_get_cpp_code(torch.compile(model, backend="inductor"))
+
+        torch.testing.assert_close(actual, expected, atol=2e-4, rtol=1e-3)
+        self.assertIn("sum_masked_reduce", code)
+        vec_width = cpu_vec_isa.pick_vec_isa().nelements()
+        tail_width = 9 if vec_width > 9 else 9 % vec_width or vec_width
+        self.assertIn(
+            f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
+            code,
+        )
+
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
         "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
@@ -4921,6 +5026,10 @@ class CPUReproTests(TestCase):
             y = x.to(torch.float16)
             return (y * y).to(torch.float32)
 
+        def bfloat16_rounding(x):
+            y = x.to(torch.bfloat16)
+            return (y * y).to(torch.float32)
+
         def cast_chain(x):
             return x.to(torch.float16).to(torch.float32)
 
@@ -5000,6 +5109,7 @@ class CPUReproTests(TestCase):
                 for size in (1, 32):
                     check(fn, torch.full((size,), 5000.0))
 
+                check(bfloat16_rounding, torch.tensor([257.0]))
                 check(cast_chain, torch.tensor([70000.0]))
                 check(repeated_lowp_cast, torch.tensor([5001.0]))
                 check(repeated_bfloat16_cast, torch.tensor([2.0039]))
@@ -6696,6 +6806,35 @@ class CPUReproTests(TestCase):
         expected = f(buf, idx)
         actual = torch.compile(f, backend="inductor")(buf, idx)
         self.assertEqual(actual, expected)
+
+    def test_layernorm_nan_with_inf_cpu_float16(self):
+        # https://github.com/pytorch/pytorch/issues/173885
+        # LayerNorm with torch.compile on CPU produces NaN when input has Inf
+        # values due to inf - inf = NaN in Welford variance calculation.
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.ln = torch.nn.LayerNorm(4)
+
+                def forward(self, x):
+                    return self.ln(x)
+
+            mod = Model().to(dtype).eval()
+            # Create input that overflows during Welford M2 accumulation
+            x = torch.tensor(
+                [[65504.0, 65504.0, -65504.0, -65504.0]], dtype=torch.float32
+            ).to(dtype)
+
+            with torch.no_grad():
+                eager_out = mod(x)
+                compiled_mod = torch.compile(mod, backend="inductor")
+                compiled_out = compiled_mod(x)
+                # Compiled output should match eager mode (whether Eager produces
+                # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
+                self.assertEqual(eager_out, compiled_out)
 
 
 if __name__ == "__main__":
