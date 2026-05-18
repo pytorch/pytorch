@@ -534,10 +534,8 @@ class _NestedReductionBase:
             x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
             return x_fp8.view(B, D).float(), scale
 
-        # TODO: add fp32 coverage once nested and unfused schedules have a
-        # shared policy for FP8-boundary differences from materialization.
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
@@ -575,8 +573,8 @@ class _NestedReductionBase:
             scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
             return scale.float()
 
-        x = torch.randn(B, D, device=GPU_TYPE)
-        w = torch.randn(D, device=GPU_TYPE)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_numeric(f, (x, w), tol=0.01)
         self.check_fusion()
 
@@ -597,8 +595,8 @@ class _NestedReductionBase:
             x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
             return x_fp8.view(B, D).float(), scale
 
-        x = torch.randn(B, D, device=GPU_TYPE)
-        w = torch.randn(D, device=GPU_TYPE)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
@@ -612,17 +610,17 @@ class _NestedReductionBase:
             h = x.float() + residual.float()
             variance = h.pow(2).mean(dim=-1, keepdim=True)
             normed = h * torch.rsqrt(variance + 1e-6)
-            normed_bf16 = normed.to(torch.bfloat16) * weight
-            grouped = normed_bf16.view(B, D // G, G)
+            normed_fp16 = normed.to(torch.float16) * weight
+            grouped = normed_fp16.view(B, D // G, G)
             absmax = grouped.abs().amax(dim=-1, keepdim=True).float()
             scales = (absmax / fp8_max).clamp(min=fp8_min_scale)
             x_scaled = (grouped / scales).clamp(-fp8_max, fp8_max)
             x_fp8 = x_scaled.to(torch.float8_e4m3fn).view(B, D)
             return x_fp8.float(), scales.squeeze(-1)
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, residual, w))
         self.check_fusion()
 
@@ -1086,8 +1084,8 @@ def _capture_producer_scale_kernel_sources(
         scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
         return scale.float()
 
-    x = torch.randn(B, D, device=GPU_TYPE)
-    w = torch.randn(D, device=GPU_TYPE)
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
     return _run_and_capture_sources(
         f,
         (x, w),
@@ -1111,8 +1109,8 @@ def _capture_fullres_kernel_sources(
         x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
         return x_fp8.view(B, D).float(), scale
 
-    x = torch.randn(B, D, device=GPU_TYPE)
-    w = torch.randn(D, device=GPU_TYPE)
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
     return _run_and_capture_sources(
         f,
         (x, w),
