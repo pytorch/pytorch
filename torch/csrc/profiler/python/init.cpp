@@ -675,9 +675,9 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
-  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
+  PyModule_AddObject(
+      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,

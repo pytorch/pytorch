@@ -109,7 +109,6 @@ class WhyNoOverlap:
             )
 
 
-@functools.cache
 def get_group_name(n: fx.Node) -> str:
     """Extract the group name from a collective operation node."""
     opt_args_kwargs = normalize_function(
@@ -483,9 +482,6 @@ class OverlapScheduler:
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
-        self._parent_lists: list[list[fx.Node]] = [
-            list(n._input_nodes) for n in self.nodes
-        ]
         self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
             self._collect_node_ancestors()
         )
@@ -498,36 +494,37 @@ class OverlapScheduler:
         self.compute_nodes = [n for n in self.nodes if is_compute_node(n)]
         self.current_compute_index = 0
 
+        # Compute baseline memory profile from original schedule
         self.original_mem_before_compute_index: list[int] = []
-        needs_memory_tracking = (
-            max_memory_increase_gb is not None or max_memory_increase_ratio is not None
-        )
-        if needs_memory_tracking:
-            self.original_peak_memory = self._compute_baseline_memory()
-            memory_increase_bytes = None
-            if max_memory_increase_gb is not None:
-                memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
-            if max_memory_increase_ratio is not None:
-                ratio_increase = int(
-                    self.original_peak_memory * max_memory_increase_ratio
-                )
-                memory_increase_bytes = (
-                    max(memory_increase_bytes, ratio_increase)
-                    if memory_increase_bytes is not None
-                    else ratio_increase
-                )
-            self.allowed_peak_memory_bytes = self.original_peak_memory + (
-                memory_increase_bytes or 0
-            )
-            self.memory_tracker = MemoryTracker(self.graph)
-        else:
-            self.original_peak_memory = 0
-            self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+        self.original_peak_memory = self._compute_baseline_memory()
 
+        # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
+        # When both limits are specified, use the more permissive one
+        memory_increase_bytes = None
+        if max_memory_increase_gb is not None:
+            memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
+        if max_memory_increase_ratio is not None:
+            ratio_increase = int(self.original_peak_memory * max_memory_increase_ratio)
+            memory_increase_bytes = (
+                max(memory_increase_bytes, ratio_increase)
+                if memory_increase_bytes is not None
+                else ratio_increase
+            )
+        if memory_increase_bytes is None:
+            memory_increase_bytes = 0
+
+        self.allowed_peak_memory_bytes = (
+            self.original_peak_memory + memory_increase_bytes
+        )
+
+        # Track cumulative prefetch memory at each compute index
+        # When we prefetch a collective at compute index i that will be used at index j,
+        # it adds memory from i to j, so we need to track this cumulative effect
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
         ]
+
+        self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
@@ -545,6 +542,11 @@ class OverlapScheduler:
             self.reduce_scatter_nodes
         )
 
+        # Scheduling state
+        self.potentially_hidden_collectives = (
+            self.compute_potential_hidden_collectives()
+        )
+        self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
 
         # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
@@ -717,10 +719,9 @@ class OverlapScheduler:
         For each node, returns the minimum index of target nodes it blocks/dominates.
         Returns sys.maxsize if the node doesn't block any target nodes.
         """
-        target_set = OrderedSet(target_nodes)
         target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if node in target_set:
+            if node in target_nodes:
                 target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
@@ -1269,6 +1270,8 @@ class OverlapScheduler:
         ):
             return
 
+        overlap_node_ancestors = self.node_ancestors[overlap_node]
+
         # Compile candidates - limit by distance to bound compile time
         candidates = []
         for i, collective in enumerate(self.unscheduled_collectives):
@@ -1347,7 +1350,7 @@ class OverlapScheduler:
             info = self.collective_info[collective]
 
             if (
-                collective in self.node_ancestors[overlap_node]
+                collective in overlap_node_ancestors
                 or overlap_node in self.node_ancestors[collective]
             ):
                 why("dependency conflict")
@@ -1411,21 +1414,8 @@ class OverlapScheduler:
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
-        # Backward BFS from target; stops at scheduled nodes.
-        unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
-        seen: OrderedSet[fx.Node] = OrderedSet()
-        parent_lists = self._parent_lists
-        node_idx = self.node_idx
-        target_idx = node_idx[target]
-        stack = parent_lists[target_idx][:]
-        scheduled = self.scheduled
-        while stack:
-            n = stack.pop()
-            if n in seen or n in scheduled:
-                continue
-            seen.add(n)
-            unscheduled_ancestors.add(n)
-            stack.extend(parent_lists[node_idx[n]])
+        # Get unscheduled ancestors
+        unscheduled_ancestors = self.node_ancestors[target] - self.scheduled
 
         # only schedule non distributed, non compute nodes
         for node in unscheduled_ancestors:
