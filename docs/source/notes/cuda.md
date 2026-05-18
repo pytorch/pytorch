@@ -658,11 +658,11 @@ Available options:
 
 ```bash
 PYTORCH_CUDA_ALLOC_CONF=per_process_memory_fraction:0.95,throw_on_cudamalloc_oom:True
+```
 
   This is particularly useful for inference serving, where a fatal GPU OOM would crash the
-  server process. With this option, the serving framework can catch the ``OutOfMemoryError``
+  server process. With this option, the serving framework can catch the `OutOfMemoryError`
   and reject the individual request while continuing to serve subsequent requests.
-```
 
 ```{note}
 
