@@ -1821,6 +1821,38 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
     @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS mem efficient attention alignment check is CUDA-only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
+    def test_mem_efficient_attention_misaligned_data_ptr_sm80_or_later(self, device):
+        if torch.cuda.get_device_capability(device)[0] < 8:
+            self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
+
+        B, H, S, D = 6, 4, 64, 64
+        storage = torch.zeros(B * H * S * D + 4, dtype=torch.float32, device=device)
+        q = storage[1:1 + B * H * S * D].view(B, H, S, D)
+        k = storage[2:2 + B * H * S * D].view(B, H, S, D)
+        v = storage[3:3 + B * H * S * D].view(B, H, S, D)
+        alignment_bytes = 4 * q.element_size()
+        self.assertNotEqual(q.data_ptr() % alignment_bytes, 0)
+        self.assertNotEqual(k.data_ptr() % alignment_bytes, 0)
+        self.assertNotEqual(v.data_ptr() % alignment_bytes, 0)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        self.assertEqual(actual, expected)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, "storage offsets"):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No available kernel|No viable backend",
+                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
+                )
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_flash_fail_fp32(self, device):
         dtype = torch.float

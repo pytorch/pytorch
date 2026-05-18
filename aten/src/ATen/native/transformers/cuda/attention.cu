@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <cstdint>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
@@ -1734,9 +1735,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       return;
     }
     // Alignment
+    const auto is_ptr_aligned = [](const void* ptr, int64_t alignment_bytes) {
+      return uint64_t(ptr) % alignment_bytes == 0;
+    };
     if ((query.stride(2) % Kernel::kAlignmentQ) ||
         (key.stride(2) % Kernel::kAlignmentK) ||
-        (value.stride(2) % Kernel::kAlignmentV)) {
+        (value.stride(2) % Kernel::kAlignmentV) ||
+        !is_ptr_aligned(
+            query.const_data_ptr(), Kernel::kAlignmentQ * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            key.const_data_ptr(), Kernel::kAlignmentK * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            value.const_data_ptr(), Kernel::kAlignmentV * sizeof(scalar_t))) {
       return;
     }
     // Uses too much shmem
