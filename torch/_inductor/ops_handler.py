@@ -1088,6 +1088,9 @@ class OpCounterCSE(DefaultHandler):
         super().__init__()
         self.parent_handler = inner
         self.max_ops = max_ops
+        # This is a work bound, not the op-count threshold. Keep it looser so
+        # common CSE-heavy expressions can still get exact counts.
+        self.max_visits = None if max_ops is None else max_ops * 100
         self.op_count = 0
         self.visit_count = 0
         self.limit_exceeded = False
@@ -1097,9 +1100,10 @@ class OpCounterCSE(DefaultHandler):
         self._nontrivial_read_count = 0
 
     def _check_limit(self) -> None:
-        if self.max_ops is not None and (
-            self.op_count > self.max_ops or self.visit_count > self.max_ops
-        ):
+        if self.max_ops is not None and self.op_count > self.max_ops:
+            self.limit_exceeded = True
+            raise OpCountLimitExceeded
+        if self.max_visits is not None and self.visit_count > self.max_visits:
             self.limit_exceeded = True
             raise OpCountLimitExceeded
 
