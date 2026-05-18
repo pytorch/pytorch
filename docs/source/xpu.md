@@ -30,6 +30,7 @@
     is_bf16_supported
     is_initialized
     is_tf32_supported
+    memory_usage
     power_draw
     set_device
     set_stream
