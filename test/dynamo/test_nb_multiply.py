@@ -504,6 +504,14 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(torch.tensor(3.0)), 4.5)
 
+    def test_list_mul_symnode(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, y):
+            return [x] * y
+
+        self.assertEqual(f(2, 3), [2, 2, 2])
+        self.assertEqual(f(2, True), [2])
+
     # --- Error message accuracy (matches CPython exactly) ---
 
     @make_dynamo_test

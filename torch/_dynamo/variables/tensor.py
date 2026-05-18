@@ -2397,6 +2397,18 @@ class SymNodeVariable(VariableTracker):
             ),
         )
 
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymInt.__index__ / SymBool.__index__ specialize to a concrete int.
+        if not issubclass(self.python_type(), int):
+            raise AssertionError(
+                f"nb_index_impl called on SymNode with python_type {self.python_type()}; "
+                "SymFloat has no nb_index slot and shouldn't reach here."
+            )
+        return variables.ConstantVariable.create(self.evaluate_expr())
+
     def method___int__(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
