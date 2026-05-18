@@ -2202,6 +2202,196 @@ def visualize_overlap(order):
     overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
+def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+    """
+    Defensive comm/compute overlap: move collectives earlier, waits later.
+
+    Each move is verified individually against peak memory and reverted
+    if it would regress. Collectives on the same PG keep their relative order.
+    """
+    if len(snodes) < 2:
+        return snodes
+
+    collectives = [s for s in snodes if contains_async_collective(s)]
+    waits = [s for s in snodes if contains_wait(s)]
+    if not collectives and not waits:
+        return snodes
+
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    # Freeable inputs don't depend on ordering -- compute once.
+    name_to_freeable = get_freeable_input_buf(snodes, graph_inputs)
+
+    node_output_sets = _precompute_node_output_sets(snodes)
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: frozenset(d.name for d in s.unmet_dependencies if not _is_fake_dep(d))
+        for s in snodes
+    }
+
+    _prev, _next, _head = _initialize_double_linked_list(snodes)
+
+    def _node_idx() -> dict[BaseSchedulerNode, int]:
+        idx: dict[BaseSchedulerNode, int] = {}
+        n = _head
+        i = 0
+        while n is not None:
+            idx[n] = i
+            n = _next[n]
+            i += 1
+        return idx
+
+    def _to_list() -> list[BaseSchedulerNode]:
+        return _group_nodes_from_linked_list(_head, None, _next)
+
+    def _move_after(node: BaseSchedulerNode, target: BaseSchedulerNode) -> None:
+        nonlocal _head
+        if node is target or _prev[node] is target:
+            return
+        p, n = _prev[node], _next[node]
+        if p is not None:
+            _next[p] = n
+        else:
+            _head = n  # type: ignore[assignment]
+        if n is not None:
+            _prev[n] = p
+        old_next = _next[target]
+        _next[target] = node
+        _prev[node] = target
+        _next[node] = old_next
+        if old_next is not None:
+            _prev[old_next] = node
+
+    def _move_before(node: BaseSchedulerNode, target: BaseSchedulerNode) -> None:
+        nonlocal _head
+        if node is target or _next[node] is target:
+            return
+        p, n = _prev[node], _next[node]
+        if p is not None:
+            _next[p] = n
+        else:
+            _head = n  # type: ignore[assignment]
+        if n is not None:
+            _prev[n] = p
+        old_prev = _prev[target]
+        _prev[target] = node
+        _next[node] = target
+        _prev[node] = old_prev
+        if old_prev is not None:
+            _next[old_prev] = node
+        else:
+            _head = node
+
+    def _peak_memory() -> int:
+        peak, _, _, _ = estimate_peak_memory_allocfree(
+            _to_list(), name_to_freeable, graph_outputs
+        )
+        return peak
+
+    initial_peak = _peak_memory()
+    n_moved_colls = 0
+    n_moved_waits = 0
+
+    # Phase 1: move each collective earlier, verify individually
+    last_coll: BaseSchedulerNode | None = None
+    for coll in collectives:
+        idx = _node_idx()
+        coll_deps = node_dep_sets[coll]
+
+        latest: BaseSchedulerNode | None = None
+        latest_idx = -1
+        n = _head
+        while n is not None:
+            if n is coll:
+                break
+            if node_output_sets[n] & coll_deps and idx[n] > latest_idx:
+                latest_idx = idx[n]
+                latest = n
+            n = _next[n]
+
+        if last_coll is not None and idx.get(last_coll, -1) > latest_idx:
+            latest_idx = idx[last_coll]
+            latest = last_coll
+
+        if latest is not None and latest_idx < idx[coll] - 1:
+            prev_node = _prev[coll]
+            _move_after(coll, latest)
+
+            new_peak = _peak_memory()
+            if new_peak > initial_peak:
+                if prev_node is not None:
+                    _move_after(coll, prev_node)
+                else:
+                    _move_before(coll, _head)
+                log.debug(
+                    "simple_overlap: reverted collective %s (peak %d -> %d MB)",
+                    coll.get_name(),
+                    initial_peak // (1024 * 1024),
+                    new_peak // (1024 * 1024),
+                )
+            else:
+                n_moved_colls += 1
+                initial_peak = new_peak
+
+        last_coll = coll
+
+    # Phase 2: move each wait later, verify individually
+    last_wait: BaseSchedulerNode | None = None
+    for wait in waits:
+        idx = _node_idx()
+        wait_outs = node_output_sets[wait]
+
+        earliest: BaseSchedulerNode | None = None
+        n = _next.get(wait)
+        while n is not None:
+            if node_dep_sets[n] & wait_outs:
+                earliest = n
+                break
+            n = _next[n]
+
+        if earliest is None:
+            last_wait = wait
+            continue
+
+        if last_wait is not None and idx.get(last_wait, -1) >= idx[earliest] - 1:
+            last_wait = wait
+            continue
+
+        if idx[earliest] <= idx[wait] + 1:
+            last_wait = wait
+            continue
+
+        prev_node = _prev[wait]
+        _move_before(wait, earliest)
+
+        new_peak = _peak_memory()
+        if new_peak > initial_peak:
+            if prev_node is not None:
+                _move_after(wait, prev_node)
+            else:
+                _move_before(wait, _head)
+            log.debug(
+                "simple_overlap: reverted wait %s (peak %d -> %d MB)",
+                wait.get_name(),
+                initial_peak // (1024 * 1024),
+                new_peak // (1024 * 1024),
+            )
+        else:
+            n_moved_waits += 1
+            initial_peak = new_peak
+
+        last_wait = wait
+
+    if n_moved_colls or n_moved_waits:
+        log.info(
+            "simple_overlap: moved %d collectives, %d waits (peak %d MB)",
+            n_moved_colls,
+            n_moved_waits,
+            initial_peak // (1024 * 1024),
+        )
+
+    return _to_list()
+
+
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
