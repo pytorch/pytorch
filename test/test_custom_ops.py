@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_XPU,
     TestCase,
 )
@@ -108,7 +109,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.libraries.append(result)
         return result
 
@@ -222,6 +223,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             "Argument x is not defined to alias output but was aliasing",
         ):
             torch.library.opcheck(op, (x,), {})
+
+    # https://github.com/pytorch/pytorch/issues/149468
+    def test_opcheck_cpu_stride_mismatch(self, device):
+        @torch.library.custom_op("test::stride_mismatch", mutates_args=())
+        def stride_mismatch(x: torch.Tensor) -> torch.Tensor:
+            return x.clone().permute(2, 0, 1)
+
+        @stride_mismatch.register_fake
+        def _(x):
+            c, h, w = x.shape[2], x.shape[0], x.shape[1]
+            return x.new_empty(c, h, w)
+
+        x = torch.randn(4, 4, 3, device=device)
+        with self.assertRaisesRegex(optests.OpCheckError, "Stride mismatch"):
+            torch.library.opcheck(stride_mismatch, (x,))
 
     # https://github.com/pytorch/pytorch/issues/142410
     def test_opcheck_unbacked_stride(self, device):
@@ -1679,7 +1695,9 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+            @torch.library.register_fake(
+                f"{TestCustomOp.test_ns}::foo", lib=self.lib(), allow_override=False
+            )
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1884,7 +1902,9 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=False
+            )
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1899,6 +1919,34 @@ Dynamic shape operator
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
             torch.library.register_fake(qualname, foo_impl, lib=self.lib())
+
+    def test_register_fake_does_not_leak_on_failure(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        # CompositeImplicitAutograd kernel makes lib.impl(..., "Meta", ...)
+        # inside FakeImplHolder.register raise *after* the kernel has been
+        # appended to the holder's singleton kernel list.
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
+        # allow_override=True bypasses the early guard and exercises the
+        # exception-safety path in FakeImplHolder.register.
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=True
+            )
+
+        # The failed registration must not leave a dangling kernel in the
+        # process-wide FakeImplHolder; otherwise teardown leaks it and
+        # corrupts subsequent register_fake() calls for the same qualname.
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -2220,10 +2268,10 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "CPU")
+            lib.impl("foo", foo_impl2, "CPU", allow_override=False)
 
         # Override cpu impl to foo_impl2
-        lib.impl(op_name, foo_impl2, "CPU", allow_override=True)
+        lib.impl(op_name, foo_impl2, "CPU")
         self.assertEqual(op(torch.ones(3)), torch.ones(6))
 
     def test_override_fake(self):
@@ -2245,20 +2293,20 @@ Dynamic shape operator
         def foo_impl2(x):
             return torch.cat([x, x])
 
-        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
-            torch.library.register_fake(op_name, foo_impl2, lib=lib)
+        with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
+            torch.library.register_fake(
+                op_name, foo_impl2, lib=lib, allow_override=False
+            )
 
         # Override fake kernel to foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            torch.library.register_fake(
-                op_name, foo_impl1, lib=lib2, allow_override=True
-            )
+            torch.library.register_fake(op_name, foo_impl1, lib=lib2)
             with torch._subclasses.FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
@@ -2285,22 +2333,22 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "Meta")
+            lib.impl("foo", foo_impl2, "Meta", allow_override=False)
 
         # Override Meta kernel to foo_impl2
-        lib.impl("foo", foo_impl2, "Meta", allow_override=True)
+        lib.impl("foo", foo_impl2, "Meta")
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Meta kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            lib2.impl("foo", foo_impl1, "Meta", allow_override=True)
+            lib2.impl("foo", foo_impl1, "Meta")
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Meta kernel should go back to foo_impl2
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use register_fake to override Meta kernel to foo_impl1
-        torch.library.register_fake(op_name, foo_impl1, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl1, lib=lib)
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
     def test_override_cea(self):
@@ -2322,7 +2370,7 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         # Override Meta/fake kernel with foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
@@ -3475,9 +3523,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_sin", mutates_args=())
@@ -3501,9 +3549,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_low_level(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["qualname", "opoverload"]:
                 with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
                     lib.define("my_sin(Tensor x) -> Tensor")
@@ -3531,9 +3579,9 @@ with warnings.catch_warnings(record=True) as w:
                     self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_list_input(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_add_sin", mutates_args=())
@@ -3559,9 +3607,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
 
             @torch.library.custom_op("mylib::my_sin", mutates_args=())
             def my_sin(x: Tensor) -> Tensor:
@@ -3582,17 +3630,18 @@ with warnings.catch_warnings(record=True) as w:
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times_different_devices(self):
         @torch.library.custom_op("mylib::my_sin", mutates_args=())
         def my_sin(x: Tensor) -> Tensor:
             return torch.sin(x)
 
-        # Register autocast for CUDA
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register autocast for the current accelerator
+        device_type = torch.accelerator.current_accelerator().type
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        x1 = torch.randn(3, dtype=torch.float32, device="cuda")
-        with torch.autocast("cuda", dtype=torch.float16):
+        x1 = torch.randn(3, dtype=torch.float32, device=device_type)
+        with torch.autocast(device_type, dtype=torch.float16):
             y1 = my_sin(x1)
         self.assertEqual(y1.dtype, torch.float16)
 
@@ -3604,10 +3653,10 @@ with warnings.catch_warnings(record=True) as w:
             y2 = my_sin(x2)
         self.assertEqual(y2.dtype, torch.float16)
 
-        # Register CUDA autocast for the second time
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register accelerator autocast for the second time
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast(device_type, dtype=torch.float16):
             y3 = my_sin(x1)
         self.assertEqual(y3.dtype, torch.float16)
 
@@ -3617,6 +3666,16 @@ with warnings.catch_warnings(record=True) as w:
         with torch.autocast("cpu", dtype=torch.float16):
             y4 = my_sin(x2)
         self.assertEqual(y4.dtype, torch.float16)
+
+        # Nested autocast: verifies no infinite redispatch when both keys are active.
+        with (
+            torch.autocast("cpu", dtype=torch.float16),
+            torch.autocast(device_type, dtype=torch.float16),
+        ):
+            y5 = my_sin(x1)
+            y6 = my_sin(x2)
+        self.assertEqual(y5.dtype, torch.float16)
+        self.assertEqual(y6.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_autograd(self):
@@ -4548,7 +4607,6 @@ Please use `add.register_fake` to add an fake impl.""",
                     "arange.start",
                     partial(conditional_arange_cpu2, new_original_kernel),
                     "CPU",
-                    allow_override=True,
                     with_keyset=True,
                 )
 
@@ -4867,6 +4925,7 @@ class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
 
     def setUp(self):
+        super().setUp()
         self.supported_base_types = [
             int,
             float,

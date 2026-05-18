@@ -175,9 +175,9 @@ struct NodeCall {
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
   NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
-    auto it = find(function.get());
-    if (it == end()) {
-      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+    auto [it, inserted] = try_emplace(function.get(), _next_id, function);
+    if (inserted) {
+      ++_next_id;
       nodes.emplace_back(function.get());
     }
     return it->second;
@@ -1060,7 +1060,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;

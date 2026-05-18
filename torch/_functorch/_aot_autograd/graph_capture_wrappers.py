@@ -742,7 +742,7 @@ def apply_in_graph_mutations(
     # There are 3 cases:
     # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
     #     In this case, we're not really mutating the input storage of "inp";
-    #     we're mutating the storage of an intermdiate value (other),
+    #     we're mutating the storage of an intermediate value (other),
     #     and slamming that storage into the input tensor. So no data mutation is necessary.
     # (2) We mutate inp *after* the set_() call. other is a graph *input*.
     #     In this case, the data mutation will be properly handled in the runtime

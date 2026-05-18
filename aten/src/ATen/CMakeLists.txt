@@ -202,11 +202,33 @@ file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
-    message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
-    caffe2_update_option(USE_ROCM_CK_SDPA ON)
+  # Now building CK by default
+  if(USE_ROCM)
+    if(DEFINED ENV{USE_ROCM_CK_SDPA})
+        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
+          caffe2_update_option(USE_ROCM_CK_SDPA ON)
+        endif()
+    else()
+      caffe2_update_option(USE_ROCM_CK_SDPA ON)
+    endif()
+    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
+    # empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA)
+      set(_have_ck_sdpa_arch FALSE)
+      foreach(ARCH gfx942 gfx950)
+        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+          set(_have_ck_sdpa_arch TRUE)
+          break()
+        endif()
+      endforeach()
+      if(NOT _have_ck_sdpa_arch)
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
+      endif()
+    endif()
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(USE_ROCM AND USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})
       list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
       if(NUM_ARCHS GREATER 1)
@@ -222,19 +244,17 @@ if(USE_FLASH_ATTENTION)
         -fhip-new-launch-api
         -fgnuc-version=4.2.1
         -fno-implicit-modules
-        -fskip-odr-check-in-gmf
         -fcxx-exceptions
         -fexceptions
         -fcolor-diagnostics
         -faddrsig
         -fno-rounding-math
-        -mconstructor-aliases
-        -mllvm
-        -amdgpu-internalize-symbols
+        -mllvm=-amdgpu-internalize-symbols
         -fvisibility=hidden
         -Wno-float-equal
         -fgpu-flush-denormals-to-zero
-        -Wno-unused-parameter)
+        -Wno-unused-parameter
+        -Wno-unknown-warning-option)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
@@ -256,8 +276,8 @@ if(USE_FLASH_ATTENTION)
     #  list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
     #endif()
 
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-early-inline-all=true)
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-function-calls=false)
+    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-early-inline-all=true)
+    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-function-calls=false)
 
     # Additional CK compiler flags
     set(CK_SDPA_EXTRA_HIPCC_OPTIONS
@@ -288,11 +308,22 @@ if(USE_FLASH_ATTENTION)
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
-    set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-    hip_add_library(ck_sdpa STATIC
-                    ${ck_sdpa_sources_hip}
-                    HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${CK_SDPA_EXTRA_HIPCC_FLAGS})
-    set_target_properties(ck_sdpa PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
+
+    # Only build for MI3xx series architectures as building for all targets takes too long
+    # We will selectively add supported architectures when/if needed
+    set(_ck_sdpa_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _ck_sdpa_hip_arches ${ARCH})
+      endif()
+    endforeach()
+
+    add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
+    target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
+    set_target_properties(ck_sdpa PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
@@ -374,7 +405,7 @@ IF(USE_MSLK)
     foreach(cu_file ${mslk_native_cuda_cu})
       _BUILD_FOR_ADDITIONAL_ARCHS(
         "${cu_file}"
-        "100a;103a;110a")
+        "100a;103f;110a")
     endforeach()
 
     file(GLOB_RECURSE mslk_native_cuda_cpp CONFIGURE_DEPENDS
@@ -407,6 +438,21 @@ IF(USE_MSLK)
     # Add MSLK include directories for gemm_torch.h
     list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
   elseif(USE_ROCM)
+    # MSLK only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the mslk target ends up with an empty
+    # HIP_ARCHITECTURES and CMake errors out.
+    set(_mslk_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _mslk_hip_arches ${ARCH})
+      endif()
+    endforeach()
+  endif()
+  if(USE_MSLK AND USE_ROCM AND _mslk_hip_arches STREQUAL "")
+    message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+    caffe2_update_option(USE_MSLK OFF)
+  endif()
+  if(USE_MSLK AND USE_ROCM)
     # Path to vendored CK
     set(MSLK_CK_DIR "${MSLK_THIRD_PARTY}/composable_kernel")
     rocm_generate_ck_conf(
@@ -417,35 +463,22 @@ IF(USE_MSLK)
     file(GLOB_RECURSE mslk_native_rocm_hip CONFIGURE_DEPENDS
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
-    set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES LANGUAGE HIP)
 
-    # Add additional HIPCC compiler flags for performance
-    set(MSLK_EXTRA_HIPCC_FLAGS
-      -mllvm
-      -enable-post-misched=0
-      -mllvm
-      -greedy-reverse-local-assignment=1
+    # Add additional HIP compiler flags for performance
+    set(MSLK_EXTRA_HIP_FLAGS
+      -mllvm=-enable-post-misched=0
+      -mllvm=-greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
     if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
-        list(PREPEND MSLK_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+        list(PREPEND MSLK_EXTRA_HIP_FLAGS -mllvm=-amdgpu-coerce-illegal-types=1)
       endif()
 
-    # Only compile for gfx942 and gfx950.
-    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
-    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
-    foreach(ARCH gfx942 gfx950)
-      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=${ARCH})
-      endif()
-    endforeach()
-    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
-
-    hip_add_library(
-      mslk STATIC
-      ${mslk_native_rocm_hip}
-      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${MSLK_EXTRA_HIPCC_FLAGS})
-    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
-    set_target_properties(mslk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_library(mslk STATIC ${mslk_native_rocm_hip})
+    set_target_properties(mslk PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_mslk_hip_arches}")
+    target_compile_options(mslk PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${MSLK_EXTRA_HIP_FLAGS}> ${HIP_CXX_FLAGS})
     target_compile_definitions(mslk PRIVATE MSLK_NO_EXTENDED_SHAPES)
 
     target_include_directories(mslk PRIVATE
@@ -462,7 +495,9 @@ IF(USE_MSLK)
   endif()
 
   # Ensure torch_cpu is built before mslk to avoid race conditions
-  add_dependencies(mslk torch_cpu)
+  if(TARGET mslk)
+    add_dependencies(mslk torch_cpu)
+  endif()
 endif()
 
 # XNNPACK
