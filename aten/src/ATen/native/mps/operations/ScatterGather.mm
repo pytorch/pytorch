@@ -190,7 +190,7 @@ static void scatter_reduce_metal(const Tensor& self,
                                  int64_t dim,
                                  const Tensor& index,
                                  const Tensor& src,
-                                 const char* op) {
+                                 std::string_view op) {
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "scatter_reduce: expected index to be Long or Int, got ",
               index.scalar_type());
@@ -204,8 +204,7 @@ static void scatter_reduce_metal(const Tensor& self,
   // maps onto the unsigned atomic_min/max Metal exposes. Requires contiguous
   // self so we can sweep it as a flat ulong buffer. The ulong atomic_min/max
   // intrinsic is only available at runtime on macOS 15+.
-  const bool needs_signbit_xor =
-      self.scalar_type() == ScalarType::Long && (std::string_view(op) == "amin" || std::string_view(op) == "amax");
+  const bool needs_signbit_xor = self.scalar_type() == ScalarType::Long && (op == "amin" || op == "amax");
   if (needs_signbit_xor) {
     TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS),
                 "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
@@ -276,9 +275,10 @@ static void gather_metal(const Tensor& self, int64_t dim, const Tensor& index, c
       ndim <= c10::metal::max_ndim, "gather: tensor rank ", ndim, " exceeds Metal max of ", c10::metal::max_ndim);
   const int64_t input_dim_size = self.size(dim);
   const int64_t total = index.numel();
-  // Dense fast path: output/index contiguous, input.size(i) == output.size(i)
-  // for i != dim (no slicing). output.size(d) == index.size(d) for all d (gather contract).
-  bool use_dense = output.is_contiguous() && index.is_contiguous();
+  // Dense fast path: output/index/self all contiguous (the dense offset
+  // formula assumes self has row-major strides) and input.size(i) ==
+  // output.size(i) for i != dim (no slicing).
+  bool use_dense = output.is_contiguous() && index.is_contiguous() && self.is_contiguous();
   if (use_dense) {
     for (const auto i : c10::irange(self.dim())) {
       if (i != dim && self.size(i) != output.size(i)) {
@@ -365,7 +365,7 @@ static void gather_mps_kernel(const Tensor& result, const Tensor& self, int64_t 
 
 REGISTER_DISPATCH(gather_stub, &gather_mps_kernel);
 
-static const char* reduce_op_to_mps_string(const ReductionType& op) {
+static std::string_view reduce_op_to_mps_string(const ReductionType& op) {
   switch (op) {
     case ReductionType::SUM:
       return "add";
