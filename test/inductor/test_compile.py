@@ -7,10 +7,11 @@ from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
+from torch._inductor import cpu_vec_isa
 from torch._inductor.codecache import write
-from torch._inductor.cpp_builder import CppBuilder, CppOptions
+from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import gen_gm_and_inputs
+from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -182,6 +183,49 @@ class TestStandaloneInductor(TestCase):
             pass  # MacOS not sure that if it should be works.
         else:
             check_linux_debug_section(binary_path)
+
+    def test_cpp_prefix_vectorized_bool_mask_cast(self):
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+        if not vec_isa:
+            self.skipTest("requires CPU vectorization")
+
+        cpp_code = """
+        #include <torch/csrc/inductor/cpp_prefix.h>
+        int main() {
+        #if INDUCTOR_USE_VECTOR_TYPES()
+          __at_align__ bool in[at::vec::Vectorized<bool>::size()] = {};
+          __at_align__ bool out[at::vec::Vectorized<bool>::size()] = {};
+          auto mask = at::vec::Vectorized<bool>::loadu(
+              in, at::vec::Vectorized<bool>::size());
+          auto casted = inductor_vec_mask_cast<float, 1>(mask);
+          casted.store(out, at::vec::Vectorized<bool>::size());
+        #endif
+          return 0;
+        }
+        """
+
+        _, source_path = write(cpp_code, "cpp")
+        cpp_builder = CppBuilder(
+            name="test_vectorized_bool_mask_cast",
+            sources=source_path,
+            output_dir=os.path.dirname(source_path),
+            BuildOption=CppTorchOptions(vec_isa=vec_isa),
+        )
+        cpp_builder.build()
+
+    def test_cpp_codegen_bool_where_uses_mask_cast_helper(self):
+        if not cpu_vec_isa.pick_vec_isa():
+            self.skipTest("requires CPU vectorization")
+
+        def fn(a):
+            b = a > 0
+            c = a < 1
+            return torch.where(b, c, ~c)
+
+        x = torch.randn(128)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertIn("inductor_vec_mask_cast<float,1>", "".join(code).replace(" ", ""))
 
     @mock.patch.dict(os.environ, {"TORCHINDUCTOR_DEBUG_SYMBOL": "1"})
     def test_inductor_generate_debug_symbol(self):
