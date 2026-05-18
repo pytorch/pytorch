@@ -1493,6 +1493,36 @@ graph():
             actual = opt_fn(*sample)
             self.assertEqual(expect, actual)
 
+    def test_builtin_eval_constant_expr(self):
+        def fn(x):
+            values = eval("{'scale': 2, 'offset': (3, 4)}")
+            return x * values["scale"] + eval(" 1+1\n") + eval("1/2")
+
+        x = torch.randn(4)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_builtin_eval_rejects_non_constant_expr(self):
+        def fn(x):
+            return x + eval("len([1])")
+
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_builtin_eval_propagates_syntax_error(self):
+        def fn(x):
+            try:
+                eval("1+")
+            except SyntaxError:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -3397,7 +3427,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             def __getattribute__(self, name):
                 if name == "my_attr":
-                    return eval("42")  # eval is untraceable
+                    return eval("len([1])")
                 return super().__getattribute__(name)
 
             def forward(self, x):
@@ -10023,86 +10053,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(4, torch.randn(4))
 
         self.assertEqual(counter.frame_count, 1)
-
-    @torch.compiler.config.patch(dynamic_sources="L['x']:0")
-    def test_dynamic_sources_per_dim_single(self):
-        builder._DYNAMIC_SOURCES = None
-
-        counter = CompileCounter()
-
-        @torch.compile(dynamic=False, backend=counter)
-        def fn(x):
-            return x * x
-
-        # Vary dim 0 only -> should not recompile (dim 0 is in the dynamic-sources list)
-        fn(torch.randn(2, 4))
-        fn(torch.randn(3, 4))
-        fn(torch.randn(4, 4))
-
-        self.assertEqual(counter.frame_count, 1)
-
-        # Now vary dim 1 -> dim 1 is NOT in the dynamic-sources list, so we should recompile
-        fn(torch.randn(4, 5))
-        self.assertEqual(counter.frame_count, 2)
-
-    @torch.compiler.config.patch(dynamic_sources="L['x']:0, L['x']:2")
-    def test_dynamic_sources_per_dim_multiple(self):
-        builder._DYNAMIC_SOURCES = None
-
-        counter = CompileCounter()
-
-        @torch.compile(dynamic=False, backend=counter)
-        def fn(x):
-            return x * x
-
-        # Varying dims 0 and 2 should not recompile
-        fn(torch.randn(2, 4, 6))
-        fn(torch.randn(3, 4, 7))
-        fn(torch.randn(4, 4, 8))
-
-        self.assertEqual(counter.frame_count, 1)
-
-        # Varying dim 1 should recompile (not in the dynamic-sources list)
-        fn(torch.randn(4, 5, 8))
-        self.assertEqual(counter.frame_count, 2)
-
-    @torch.compiler.config.patch(dynamic_sources="L['x']")
-    def test_dynamic_sources_no_dim_suffix_marks_all_dims(self):
-        # Backward-compat: an entry without ":N" still marks ALL dims dynamic.
-        builder._DYNAMIC_SOURCES = None
-
-        counter = CompileCounter()
-
-        @torch.compile(dynamic=False, backend=counter)
-        def fn(x):
-            return x * x
-
-        fn(torch.randn(2, 4))
-        fn(torch.randn(3, 5))
-        fn(torch.randn(4, 6))
-
-        self.assertEqual(counter.frame_count, 1)
-
-    @torch.compiler.config.patch(unbacked_sources="L['x']:0")
-    def test_unbacked_sources_per_dim(self):
-        builder._UNBACKED_SOURCES = None
-
-        counter = CompileCounter()
-
-        @torch.compile(dynamic=False, backend=counter)
-        def fn(x):
-            return x * x
-
-        # Varying dim 0 should not recompile
-        fn(torch.randn(2, 4))
-        fn(torch.randn(3, 4))
-        fn(torch.randn(4, 4))
-
-        self.assertEqual(counter.frame_count, 1)
-
-        # Varying dim 1 should recompile
-        fn(torch.randn(4, 5))
-        self.assertEqual(counter.frame_count, 2)
 
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])

@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import ast
 import builtins
 import contextlib
 import functools
@@ -115,8 +116,10 @@ from .object_protocol import (
     generic_len,
     generic_neg,
     generic_pos,
+    vt_add,
     vt_getitem,
     vt_identity_compare,
+    vt_inplace_add,
 )
 from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
@@ -522,8 +525,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
-            operator.sub: (["__sub__", "__rsub__", "__isub__"], operator.isub),
             operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
             operator.truediv: (
                 ["__truediv__", "__rtruediv__", "__itruediv__"],
@@ -684,97 +685,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
-
-        list_like_addition_handlers: list[
-            tuple[
-                tuple[
-                    type[VariableTracker],
-                    _TrackersType,
-                ],
-                _HandlerCallback,
-            ]
-        ] = [
-            # NB: Prefer the tuple-specific logic over base logic because of
-            # some SizeVariable weirdness. Specifically, the tuple-specific logic
-            # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
-            (
-                (SizeVariable, SizeVariable),
-                size_add_handler,
-            ),
-            (
-                (SizeVariable, TupleVariable),
-                size_add_handler,
-            ),
-            (
-                (TupleVariable, SizeVariable),
-                size_add_handler,
-            ),
-            (
-                (TupleVariable, TupleVariable),
-                tuple_add_handler,
-            ),
-            (
-                (TupleVariable, ConstantVariable),
-                tuple_add_handler,
-            ),
-            (
-                (ConstantVariable, TupleVariable),
-                lambda tx, a, b: TupleVariable(
-                    [
-                        *a.unpack_var_sequence(tx),
-                        *b.items,
-                    ],
-                ),
-            ),
-            (
-                (
-                    ListVariable,
-                    (BaseListVariable, ConstantVariable, ListIteratorVariable),
-                ),
-                lambda tx, a, b: ListVariable(
-                    [*a.items, *b.unpack_var_sequence(tx)],
-                    mutation_type=ValueMutationNew(),
-                ),
-            ),
-            (
-                (BaseListVariable, BaseListVariable),
-                lambda tx, a, b: type(a)(
-                    [
-                        *a.items,
-                        *b.items,
-                    ]
-                ),
-            ),
-        ]
-        op_handlers[operator.add].extend(list_like_addition_handlers)
-
-        def list_iadd_handler(
-            tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
-        ) -> Any:
-            if a.is_immutable() or not b.has_unpack_var_sequence(tx):
-                # Handler doesn't apply
-                return None
-
-            seq = b.unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(a)
-            a.items.extend(seq)
-            return a
-
-        list_like_iadd_handlers: list[Any] = [
-            (
-                (ListVariable, VariableTracker),
-                list_iadd_handler,
-            ),
-            (
-                (TupleVariable, TupleVariable),
-                tuple_add_handler,
-            ),
-            (
-                (TupleVariable, ConstantVariable),
-                tuple_add_handler,
-            ),
-        ]
-        op_handlers[operator.iadd].extend(list_like_iadd_handlers)
 
         # List-like expansion (e.g. [1, 2, 3] * 3)
         def expand_list_like(
@@ -1395,6 +1305,79 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return rv
 
         return builtin_dispatch
+
+    @staticmethod
+    def _constant_eval_numeric_expr(node: ast.AST) -> bool:
+        allowed_nodes = (
+            ast.Expression,
+            ast.Constant,
+            ast.UnaryOp,
+            ast.BinOp,
+            ast.UAdd,
+            ast.USub,
+            ast.Invert,
+            ast.Add,
+            ast.Sub,
+            ast.Mult,
+            ast.Div,
+            ast.FloorDiv,
+            ast.Mod,
+            ast.BitOr,
+            ast.BitXor,
+            ast.BitAnd,
+        )
+        return all(
+            isinstance(child, allowed_nodes)
+            and (
+                not isinstance(child, ast.Constant)
+                or isinstance(child.value, (bool, int, float, complex))
+            )
+            for child in ast.walk(node)
+        )
+
+    @staticmethod
+    def _constant_eval_result(
+        tx: "InstructionTranslator", tree: ast.Expression, filename: str
+    ) -> VariableTracker | None:
+        if any(isinstance(child, ast.Call) for child in ast.walk(tree)):
+            return None
+        ast.fix_missing_locations(tree)
+        try:
+            result = ast.literal_eval(tree)
+        except ValueError:
+            if not BuiltinVariable._constant_eval_numeric_expr(tree):
+                return None
+            try:
+                result = eval(
+                    compile(tree, filename, "eval"),
+                    {"__builtins__": {}},
+                    {},
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, result)
+
+    def call_eval(
+        self,
+        tx: "InstructionTranslator",
+        source: VariableTracker,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if args or kwargs:
+            return None
+        if not source.is_python_constant():
+            return None
+        source_str = source.as_python_constant()
+        if not isinstance(source_str, str):
+            return None
+
+        try:
+            tree = ast.parse(source_str.strip(), mode="eval")
+        except SyntaxError as exc:
+            raise_observed_exception(SyntaxError, tx, args=[exc.msg])
+
+        return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
 
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
@@ -2849,16 +2832,22 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__sub__", [b], {})
-        return None
+        return binary_op(tx, a, b, "nb_subtract", "-")
 
     def call_isub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__isub__", [b], {})
-        return None
+        return binary_iop(tx, a, b, "nb_inplace_subtract", "nb_subtract", "-=")
+
+    def call_add(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return vt_add(tx, a, b)
+
+    def call_iadd(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return vt_inplace_add(tx, a, b)
 
     def call_and_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
