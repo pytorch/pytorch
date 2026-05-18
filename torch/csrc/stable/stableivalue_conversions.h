@@ -3,7 +3,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
-#include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/Layout.h>
@@ -276,8 +275,7 @@ struct FromImpl<torch::stable::Tensor> {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     AtenTensorHandle new_ath;
-    STABLE_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_new_tensor_handle(val.get(), &new_ath));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return torch::stable::detail::from(new_ath);
   }
 };
@@ -363,17 +361,17 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       [[maybe_unused]] bool is_internal) {
     StableListHandle new_list_handle;
     try {
-      STABLE_TORCH_ERROR_CODE_CHECK(
+      TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        STABLE_TORCH_ERROR_CODE_CHECK(torch_list_push_back(
+        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
             new_list_handle, torch::stable::detail::from(elem)));
       }
       return torch::stable::detail::from(new_list_handle);
     } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
-        STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
+        TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
       }
       throw;
     }
@@ -425,7 +423,7 @@ struct FromImpl<std::string> {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     StringHandle handle;
-    STABLE_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         torch_new_string_handle(val.c_str(), val.length(), &handle))
     return torch::stable::detail::from(handle);
   }
@@ -716,20 +714,19 @@ struct ToImpl<std::vector<T>> {
     auto list_handle = torch::stable::detail::to<StableListHandle>(val);
     size_t size;
     try {
-      STABLE_TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
+      TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
       std::vector<T> result;
       result.reserve(size);
       for (size_t i = 0; i < size; i++) {
         StableIValue element;
-        STABLE_TORCH_ERROR_CODE_CHECK(
-            torch_list_get_item(list_handle, i, &element));
+        TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
         result.push_back(torch::stable::detail::to<T>(element));
       }
-      STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return result;
     } catch (const std::runtime_error&) {
       // clean up memory if an exception is thrown, and rethrow
-      STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       throw;
     }
   }
@@ -764,13 +761,13 @@ struct ToImpl<std::string> {
       [[maybe_unused]] bool is_internal) {
     StringHandle handle = torch::stable::detail::to<StringHandle>(val);
     size_t length;
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
+    TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
+    TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
     auto strptr = new std::string(data, length);
 
     // delete the old string before returning new string
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
+    TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
     return *strptr;
   }
 };

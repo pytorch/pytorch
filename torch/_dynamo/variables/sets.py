@@ -622,32 +622,6 @@ class SetVariable(VariableTracker):
         self.items.update(other.items)  # type: ignore[missing-attribute]
         return self
 
-    def nb_subtract_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1801-L1812
-        self_, other_ = (other, self) if reverse else (self, other)
-
-        if not pyanyset_check(self_) or not pyanyset_check(other_):
-            return ConstantVariable.create(NotImplemented)
-
-        result = self_.call_method(tx, "copy", [], {})
-        for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
-            result.items.pop(k, None)  # type: ignore[missing-attribute]
-        return result
-
-    def nb_inplace_subtract_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1814-L1828
-        if not pyanyset_check(other):
-            return ConstantVariable.create(NotImplemented)
-
-        tx.output.side_effects.mutation(self)
-        for k in list(other.items.keys()):  # type: ignore[missing-attribute]
-            self.items.pop(k, None)
-        return self
-
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -757,25 +731,10 @@ class OrderedSetVariable(SetVariable):
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
 
-    def nb_subtract_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
-    ) -> VariableTracker:
-        self_, other_ = (other, self) if reverse else (self, other)
-        return self_.call_method(tx, "difference", [other_], {})
-
-    def nb_inplace_subtract_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker
-    ) -> VariableTracker:
-        tx.output.side_effects.mutation(self)
-        self.call_method(tx, "difference_update", [other], {})
-        return self
-
 
 class FrozensetVariable(SetVariable):
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
-
-    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def debug_repr(self) -> str:
         if not self.items:
