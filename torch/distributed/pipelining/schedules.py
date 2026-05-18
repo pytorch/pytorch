@@ -438,7 +438,7 @@ class _PipelineSchedule(ABC):
                 if torch.device(stage.device).type != "cpu"
             }
         )
-        device_type = devices[0] if devices else None
+        device_type = devices[0].type if devices else None
         with torch.random.fork_rng(devices=devices, device_type=device_type):
             if needs_fwd:
                 next_stage_args: Any = None
