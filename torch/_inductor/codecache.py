@@ -88,7 +88,7 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
-    CustomGraphPassType,
+    CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
     get_custom_graph_passes,
@@ -1006,14 +1006,14 @@ class CacheabilityValidator:
             get_custom_graph_passes(config.post_grad_custom_pre_pass),
             get_custom_graph_passes(config.post_grad_custom_post_pass),
         ):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported post grad custom pass")
         # Same with the joint custom passes
         for p in itertools.chain(
             get_custom_graph_passes(config.joint_custom_pre_pass),
             get_custom_graph_passes(config.joint_custom_post_pass),
         ):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
@@ -1107,7 +1107,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
         for custom_pass in custom_passes
         if not _custom_pass_has_uuid(custom_pass)
     ]
-    pass_name = (
+    missing_uuid_pass_names = (
         ", ".join(_custom_pass_name(custom_pass) for custom_pass in passes_missing_uuid)
         if passes_missing_uuid
         else "<none>"
@@ -1117,23 +1117,23 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
         supports_late = not passes_missing_uuid
         timing = "late" if supports_late else "early"
         if timing == "early" and custom_passes:
-            if pass_name not in _warned_pre_grad_pass_missing_uuid:
-                _warned_pre_grad_pass_missing_uuid.add(pass_name)
+            if missing_uuid_pass_names not in _warned_pre_grad_pass_missing_uuid:
+                _warned_pre_grad_pass_missing_uuid.add(missing_uuid_pass_names)
                 log.warning(
                     "pre_grad_custom_pass %s does not implement uuid(); "
                     "falling back to early timing (pre-grad pass cache will be bypassed). "
                     "Implement uuid() on your CustomGraphPass to enable caching.",
-                    pass_name,
+                    missing_uuid_pass_names,
                 )
                 CompileEventLogger.try_add_pt2_compile(
                     "backend_compile",
                     pre_grad_pass_missing_uuid=True,
-                    pre_grad_pass_name=pass_name,
+                    pre_grad_pass_name=missing_uuid_pass_names,
                 )
 
     if timing == "late" and passes_missing_uuid:
         raise RuntimeError(
-            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
+            f"pre_grad_custom_pass {missing_uuid_pass_names} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
@@ -1380,13 +1380,22 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType | CustomGraphModulePass
+        self,
+        custom_pass: (
+            CustomGraphPassCallable
+            | list[CustomGraphPassCallable]
+            | tuple[CustomGraphPassCallable, ...]
+            | CustomGraphModulePass
+            | None
+        ),
     ) -> Any | None:
         if not custom_pass:
+            # Empty custom-pass lists mean no passes, matching None.
             return None
         if isinstance(custom_pass, (list, tuple)):
             return tuple(self._get_custom_pass_detail(x) for x in custom_pass)
-        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
+        if not isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass)):
+            raise AssertionError(f"unknown custom pass type: {str(type(custom_pass))}")
         return custom_pass.uuid()
 
     def _get_custom_partitioner_fn_detail(
