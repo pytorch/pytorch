@@ -41,6 +41,8 @@ PRUNE_FUNCTIONS = {
     # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
     "cudaGetDeviceCount": PRUNE_ALL,
     "cudaGetDeviceProperties_v2": PRUNE_ALL,
+    # Tensor deallocation timing follows Python refcounts and has dedicated coverage.
+    "Tensor_dealloc": IGNORE,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We
