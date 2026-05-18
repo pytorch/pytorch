@@ -162,48 +162,6 @@ else:
         pass
 
 
-def _build_estimated_effective_users(gm: GraphModule) -> dict[Node, tuple[int, bool]]:
-    """Precompute effective users for all nodes in one linear scan.
-
-    Adjacent fusible nodes get the same span ID.  Users sharing a span
-    are counted once because they will almost certainly fuse together.
-    """
-    from torch._inductor.fx_passes.fusion_regions import is_fusible_node
-
-    span_of: dict[Node, int] = {}
-    span_id = -1
-    prev_fusible = False
-    for node in gm.graph.nodes:
-        if is_fusible_node(node):
-            if not prev_fusible:
-                span_id += 1
-            span_of[node] = span_id
-            prev_fusible = True
-        else:
-            prev_fusible = False
-
-    # map from node to (num_effective_users, has_non_fusible_user)
-    counts: dict[Node, tuple[int, bool]] = {}
-    for n in gm.graph.nodes:
-        if len(n.users) <= 1:
-            counts[n] = (len(n.users), False)
-            continue
-        seen_spans: OrderedSet[int] = OrderedSet()
-        effective = 0
-        has_non_fusible_user = False
-        for user in n.users:
-            sid = span_of.get(user)
-            if sid is None:
-                effective += 1
-                has_non_fusible_user = True
-            elif sid not in seen_spans:
-                seen_spans.add(sid)
-                effective += 1
-        counts[n] = (effective, has_non_fusible_user)
-
-    return counts
-
-
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> torch.dtype | None:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
@@ -259,6 +217,10 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
         if idx in output_node.meta["user_visible_output_idxs"]:
             ret[node] = output_node.meta["original_output_strides"][idx]
     return ret
+
+
+def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
+    return t.device.type == "cpu" and t.layout == torch.strided and t.is_pinned()
 
 
 def extend_user_visible_output_strides(
@@ -446,7 +408,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.const_module = const_module
         self.inputs_to_check = inputs_to_check
         self._defers_input_alignment = False
-        self._estimated_effective_users: dict[Node, tuple[int, bool]] | None = None
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -540,6 +501,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
         self.name_to_op: dict[str, ir.Operation] = {}
+        # Side table for CuteDSL capture nodes (may include ReinterpretViews)
+        self._cutedsl_capture_nodes: dict[str, ir.IRNode] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
@@ -625,13 +588,6 @@ class GraphLowering(torch.fx.Interpreter):
         # Cache for dep size hints to avoid expensive recomputation
         self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
 
-    def _count_effective_users(self, n: Node) -> tuple[int, bool]:
-        if self._estimated_effective_users is None:
-            self._estimated_effective_users = _build_estimated_effective_users(
-                self.orig_gm
-            )
-        return self._estimated_effective_users.get(n, (0, False))
-
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
@@ -654,7 +610,7 @@ class GraphLowering(torch.fx.Interpreter):
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
             # NB: This is using the legacy default behavior from
-            # create_symbolic_sizes_strides_storage_offset but we hope we can
+            # transfer_symbols_from_foreign_shape_env but we hope we can
             # just delete this entirely
             source = ConstantSource(
                 f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
@@ -663,8 +619,10 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
-                ex,
+            ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
+                ex.size(),
+                ex.stride(),
+                ex.storage_offset(),
                 source,
             )
 
@@ -980,8 +938,8 @@ class GraphLowering(torch.fx.Interpreter):
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
-           We need convert it to channels last layout which results in the second copy.
-        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
+           We need to convert it to channels last layout which results in the second copy.
+        With rule 2, we make sure all the tensors in the chain use channels last layout. So both copies
         can be saved.
         """
         last_conv = None
@@ -1044,6 +1002,18 @@ class GraphLowering(torch.fx.Interpreter):
     @property
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
+
+    @property
+    def is_dual_wrapper_mode(self) -> bool:
+        """True when generating dual-wrapper-mode C++ for both JIT and AOTI.
+
+        Dual-wrapper mode emits a JIT pass that drives Triton autotune/compile
+        alongside the AOTI output, so it is needed iff at least one device in
+        the graph uses the Triton backend.
+        """
+        if not self.aot_mode or config.triton.autotune_at_compile_time:
+            return False
+        return any(ir.is_triton(d) for d in self.device_types)
 
     def try_get_buffer(
         self, buffer_name: str
@@ -1222,7 +1192,10 @@ class GraphLowering(torch.fx.Interpreter):
             ir.ConstantBuffer(
                 name=new_name,
                 layout=FixedLayout(
-                    data.device, data.dtype, *self.static_sizes_strides(data)
+                    data.device,
+                    data.dtype,
+                    *self.static_sizes_strides(data),
+                    is_pinned=_is_cpu_strided_tensor_pinned(data),
                 ),
             )
         )
@@ -1488,7 +1461,9 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            if "should_fallback" in n.meta:
+            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
+                "fallback_to_eager"
+            ):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1595,7 +1570,12 @@ class GraphLowering(torch.fx.Interpreter):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
-                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(
+                    value.tolist(),
+                    dtype=value.dtype,
+                    device=value.device,
+                    pin_memory=_is_cpu_strided_tensor_pinned(value),
+                )
 
         return self.add_tensor_constant(value, target)
 
@@ -1885,7 +1865,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                n.op == "call_function"
+                is_call_function
                 # this path only for built-in operators
                 and n.target
                 and isinstance(n.target, torch._ops.OpOverload)
@@ -1968,7 +1948,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # 2: as_strided ops, we need to make sure its input has same size/stride with
             # eager model to align with eager behavior.
             as_strided_ops = [
                 torch.ops.aten.as_strided.default,
@@ -2136,16 +2116,13 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     _data = _data.data
 
-                _num_effective_users, has_non_fusible_users = (
-                    self._count_effective_users(n)
-                )
                 if isinstance(_data, StorageBox) and _data.should_realize_on_reuse(
-                    _num_effective_users, has_non_fusible_users
+                    len(n.users)
                 ):
                     result = maybe_apply_channels_last_stride_order(result, n)
 
                 # TODO(jansel): introduce a store vs inline choice
-                result.mark_reuse(_num_effective_users, has_non_fusible_users)
+                result.mark_reuse(len(n.users))
 
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
@@ -2481,9 +2458,27 @@ class GraphLowering(torch.fx.Interpreter):
         self,
     ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         """
-        For GPU, Triton kernels are autotuned and stored as cubin files
+        For GPU, Triton kernels are autotuned and stored as cubin files.
+
+        For CPU with user-defined Triton kernels, AOTI also needs the
+        same two-pass compile when `autotune_at_compile_time` is off,
+        since `CpuTritonKernelCache` is otherwise only populated by the
+        autotune block (see `DeferredCpuTritonCallWrapper` in
+        `cpp_wrapper_cpu.py`).
         """
-        if any(device in self.device_types for device in ["cuda", "xpu"]):
+        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        # CPU + user-defined Triton + AOTI + autotune block disabled is the
+        # only CPU configuration that needs the two-pass dance: the autotune
+        # block normally populates CpuTritonKernelCache, but here it doesn't run.
+        needs_cpu_triton_two_pass = (
+            "cpu" in self.device_types
+            and self.aot_mode
+            and not config.triton.autotune_at_compile_time
+            and any(
+                isinstance(op, ir.UserDefinedTritonKernel) for op in self.operations
+            )
+        )
+        if has_gpu or needs_cpu_triton_two_pass:
 
             def extract_real_inputs() -> list[int | float | torch.Tensor]:
                 def materialize(

@@ -98,7 +98,10 @@ class WrapBackendDebug:
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
     ) -> torch.fx.GraphModule:
         compiler_fn = functools.partial(self._torchdynamo_orig_backend, **kwargs)
-        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after not in ("dynamo", "aot", None):
+            raise AssertionError(
+                f"repro_after must be 'dynamo', 'aot', or None, got {config.repro_after!r}"
+            )
 
         if config.repro_after == "dynamo":
 
@@ -279,7 +282,8 @@ def dump_backend_state(
     2) If we can't convert Fx GraphModule to a string, we use to_folder to save
     the module and save a tar file.
     """
-    assert NNModuleToString.can_convert_to_string(gm)
+    if not NNModuleToString.can_convert_to_string(gm):
+        raise AssertionError("GraphModule cannot be converted to string")
     return dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy)
     # return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
@@ -487,7 +491,8 @@ def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         with torch.amp.autocast("cuda", enabled=options.autocast):
             # TODO: disable clone
             args = run_load_args(options, mod, load_args)
-            assert same_two_models(mod, mod, args), "Eager itself failed"  # type: ignore[arg-type]
+            if not same_two_models(mod, mod, args):  # type: ignore[arg-type]
+                raise AssertionError("Eager itself failed")
             if not same_two_models(
                 mod,  # type: ignore[arg-type]
                 opt_mod,  # type: ignore[arg-type]
