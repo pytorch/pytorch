@@ -6997,6 +6997,26 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_infinitely_differentiable_gelu_backward_bfloat16(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        if not SM80OrLater:
+            raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
+
+        def fn(grad, self):
+            return aten.infinitely_differentiable_gelu_backward(grad, self)
+
+        torch.manual_seed(0)
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+            ),
+            check_lowp=False,
+            reference_in_float=False,
+        )
+
     def test_clone(self):
         def fn(x):
             return aten.clone(x) + 2, aten.clone(x + 1)
@@ -11190,10 +11210,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion,
+        # and CPU Triton can emit zero initialization without a Triton kernel.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps" and self.device != "xpu":
+        if self.device != "cpu" and self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
