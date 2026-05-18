@@ -4562,7 +4562,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         compiled_func3 = torch.compile(
             fullgraph=True, backend="inductor", dynamic=True
         )(func3)
-        x = torch.rand(3, 3, 3)
+        base = torch.arange(4 * 3 * 3, dtype=torch.float32).reshape(4, 3, 3)
+        x = base[1:]
         zero = torch.tensor([0])
         pos = torch.tensor([1])
         print(compiled_func3(x, pos))
