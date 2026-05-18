@@ -808,6 +808,18 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
+        elif self.per_subkernel_blocks and self.enable_autotune:
+            # Combo with per-subkernel tuning: use its own decorator.
+            # Each subkernel is tuned individually by a standalone seed
+            # kernel; the combo only needs a placeholder config + metadata.
+            heuristics_line = f"""
+                @triton_heuristics.combo_kernel(
+                    filename=__file__,
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r}
+                )
+                @triton.jit
+            """
         elif sub_kernel.inside_reduction:
             reduction_hint = sub_kernel.features.get_reduction_hint()
             heuristics_line = f"""
@@ -1196,10 +1208,16 @@ class ComboKernel(Kernel):
                     for arg in seed_call_args
                     if isinstance(arg, str) and arg in V.graph.removed_buffers
                 ]
-                assert not stale_args, (
-                    f"Standalone autotune seed for {name} references removed "
-                    f"buffers: {stale_args}"
-                )
+                if stale_args:
+                    log.warning(
+                        "Combo standalone autotune seed %s references "
+                        "removed buffers %s; dropping seed_spec",
+                        seed_name,
+                        stale_args,
+                    )
+                    triton_autotune_seed_infos.append(None)
+                    seed_specs.append("None")
+                    continue
                 triton_autotune_seed_infos.append(
                     (seed_name, seed_call_args, seed_arg_types)
                 )
@@ -1209,13 +1227,14 @@ class ComboKernel(Kernel):
                 else:
                     seed_args_str = f"({', '.join(seed_args)})"
                 seed_specs.append(f"({seed_name}, {seed_args_str})")
-            if len(seed_specs) == 1:
-                seed_specs_str = f"({seed_specs[0]},)"
-            else:
-                seed_specs_str = f"({', '.join(seed_specs)})"
-            wrapper.writeline(
-                f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
-            )
+            if seed_specs:
+                if len(seed_specs) == 1:
+                    seed_specs_str = f"({seed_specs[0]},)"
+                else:
+                    seed_specs_str = f"({', '.join(seed_specs)})"
+                wrapper.writeline(
+                    f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+                )
 
         wrapper.generate_kernel_call(
             name,
@@ -1240,9 +1259,6 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
-            # Captured at codegen time so runtime sees the same value the
-            # source was generated with, regardless of later config changes.
-            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
         if not self.enable_autotune:
