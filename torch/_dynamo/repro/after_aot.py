@@ -1455,13 +1455,13 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
 boolean tensor even though this is not the true source of the divergence.
 However, rejecting these reductions makes it more difficult for the minifier
-to make process.  Using this option will let the minifier progress for ALL
+to make progress.  Using this option will let the minifier progress for ALL
 divergences--you just might not end up with a useful repro in the end.""",
         )
 
