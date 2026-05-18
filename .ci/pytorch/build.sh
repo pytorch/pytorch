@@ -105,7 +105,12 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
-  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+  # Restrict chown to the workspace and the cross-compile sysroot/venv we
+  # actually write into. Recursing into all of /opt fails on OSDC runners
+  # because /opt/git-cache is a read-only hostPath mount, and recursing into
+  # /var/lib/jenkins/workspace fails on OSDC because the workspace lives at
+  # ${GITHUB_WORKSPACE} (/__w/pytorch/pytorch).
+  sudo chown -R jenkins "${GITHUB_WORKSPACE:-/var/lib/jenkins/workspace}" /opt/sysroot /opt/riscv-cross-env
 
 fi
 
