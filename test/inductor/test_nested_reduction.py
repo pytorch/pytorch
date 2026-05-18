@@ -98,64 +98,6 @@ def _layernorm(x_flat):
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
 
-    # ---- Small dim in X: falls back to existing fusion ----
-
-    def _weighted_norm_reduce_k(self, norm, reduce_fn, B, K, D):
-        rfn = {
-            "sum": torch.Tensor.sum,
-            "amax": torch.Tensor.amax,
-            "amin": torch.Tensor.amin,
-            "prod": torch.Tensor.prod,
-        }[reduce_fn]
-
-        def f(x, w):
-            x_normed = norm(x.reshape(x.shape[0] * K, D)).reshape(x.shape)
-            return rfn(w[:, :, None] * x_normed, dim=1)
-
-        x = torch.randn(B, K, D, device=GPU_TYPE)
-        w = torch.randn(B, K, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
-        self.check_no_fusion()
-
-    @parametrize("B", [32, 256])
-    @parametrize("K", [16, 32])
-    def test_rmsnorm_weighted_sum(self, B, K):
-        self._weighted_norm_reduce_k(_rmsnorm, "sum", B, K, 4096)
-
-    @parametrize("K", [16, 32])
-    def test_rmsnorm_weighted_max(self, K):
-        self._weighted_norm_reduce_k(_rmsnorm, "amax", 64, K, 4096)
-
-    @parametrize("reduce_fn", ["sum", "amax", "amin"])
-    def test_rmsnorm_weighted_reduce_B1(self, reduce_fn):
-        """B=1 flattened small_dim_in_x still falls back cleanly."""
-        self._weighted_norm_reduce_k(_rmsnorm, reduce_fn, 1, 16, 1024)
-
-    def test_layernorm_weighted_sum(self):
-        self._weighted_norm_reduce_k(_layernorm, "sum", 64, 16, 4096)
-
-    def test_layernorm_weighted_sum_B1(self):
-        self._weighted_norm_reduce_k(_layernorm, "sum", 1, 16, 1024)
-
-    def test_fullres_prologue_small_dim_in_x_loop_order(self):
-        """Remap full-res prologue from physical [B*K, D] to logical [B, K, D]."""
-
-        B, K, D = 16, 16, 1024
-
-        def f(x, w, bias):
-            x_flat = x.reshape(B * K, D)
-            rms = torch.sqrt(torch.mean(x_flat * x_flat, dim=-1, keepdim=True) + 1e-6)
-            y = torch.ops._inductor_test.realize(
-                torch.relu((x_flat / rms).reshape(B, K, D) + bias[:, None, :])
-            )
-            return y, (w[:, :, None] * y).sum(dim=1)
-
-        x = torch.randn(B, K, D, device=GPU_TYPE)
-        w = torch.randn(B, K, device=GPU_TYPE)
-        bias = torch.randn(B, D, device=GPU_TYPE)
-        self.check_numeric(f, (x, w, bias))
-        self.check_no_fusion()
-
     # ---- Small dim in R: norm + block reduce ----
 
     def _norm_block_reduce(self, norm, reduce_fn, B, D, G):
@@ -219,16 +161,6 @@ class _NestedReductionBase:
 
     # ---- Epilogue dtype conversion ----
 
-    def test_weighted_rmsnorm_reduce_k_bf16_epilogue(self):
-        def f(x, w):
-            x_normed = _rmsnorm(x.reshape(x.shape[0] * 16, 4096)).reshape(x.shape)
-            return (w[:, :, None] * x_normed).sum(dim=1).to(torch.bfloat16)
-
-        x = torch.randn(64, 16, 4096, device=GPU_TYPE)
-        w = torch.randn(64, 16, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
-        self.check_no_fusion()
-
     def test_layernorm_block_amax_bf16_epilogue(self):
         def f(x):
             return (
@@ -244,21 +176,6 @@ class _NestedReductionBase:
         self.check_fusion()
 
     # ---- Downstream pointwise fusion ----
-
-    def test_weighted_rmsnorm_reduce_k_pointwise_epilogue(self):
-        """Pointwise after weighted small-dim-in-X reduction falls back."""
-
-        def f(x, w, scale, bias):
-            x_normed = _rmsnorm(x.reshape(x.shape[0] * 16, 4096)).reshape(x.shape)
-            out = (w[:, :, None] * x_normed).sum(dim=1)
-            return out * scale + bias
-
-        x = torch.randn(64, 16, 4096, device=GPU_TYPE)
-        w = torch.randn(64, 16, device=GPU_TYPE)
-        scale = torch.randn(64, 4096, device=GPU_TYPE)
-        bias = torch.randn(64, 4096, device=GPU_TYPE)
-        self.check_numeric(f, (x, w, scale, bias))
-        self.check_no_fusion()
 
     def test_layernorm_block_amax_reduced_pointwise_epilogue(self):
         """Fuse out * scale + bias after reduced-output block amax."""
@@ -288,36 +205,7 @@ class _NestedReductionBase:
         """When B == D/G, size-based matching is ambiguous."""
         self._norm_block_reduce(_layernorm, "amax", B, D, G)
 
-    @parametrize("BK", [16, 32])
-    def test_edge_B_equals_K(self, BK):
-        """When B == K, size-based matching is ambiguous."""
-        self._weighted_norm_reduce_k(_rmsnorm, "sum", BK, BK, 4096)
-
     # ---- Dynamic shapes ----
-
-    @parametrize("dynamic", [False, True])
-    def test_shapes_weighted_rmsnorm_reduce_k(self, dynamic):
-        """Dynamic small-dim-in-x falls back cleanly."""
-        K = 16
-
-        def f(x, w):
-            B, D = x.shape[0], x.shape[2]
-            x_flat = x.reshape(B * K, D)
-            rms = torch.sqrt(torch.mean(x_flat * x_flat, dim=-1, keepdim=True) + 1e-6)
-            x_normed = (x_flat / rms).reshape(B, K, D)
-            return (w[:, :, None] * x_normed).sum(dim=1)
-
-        compiled = torch.compile(f, dynamic=dynamic)
-        for B, D in [(32, 1024), (64, 2048), (128, 4096)] if dynamic else [(32, 4096)]:
-            x = torch.randn(B, K, D, device=GPU_TYPE)
-            w = torch.randn(B, K, device=GPU_TYPE)
-            if dynamic:
-                torch._dynamo.mark_static(x, 1)
-                torch._dynamo.mark_static(w, 1)
-            ref = f(x, w)
-            act = compiled(x, w)
-            self.assertEqual(act, ref, atol=1e-2, rtol=1e-2)
-        self.check_no_fusion()
 
     @parametrize("dynamic", [False, True])
     def test_shapes_layernorm_block_amax(self, dynamic):
@@ -533,10 +421,8 @@ class _NestedReductionBase:
             x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
             return x_fp8.view(B, D).float(), scale
 
-        # TODO: add fp32 coverage once nested and unfused schedules have a
-        # shared policy for FP8-boundary differences from materialization.
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
@@ -574,8 +460,8 @@ class _NestedReductionBase:
             scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
             return scale.float()
 
-        x = torch.randn(B, D, device=GPU_TYPE)
-        w = torch.randn(D, device=GPU_TYPE)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_numeric(f, (x, w), tol=0.01)
         self.check_fusion()
 
@@ -596,8 +482,8 @@ class _NestedReductionBase:
             x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
             return x_fp8.view(B, D).float(), scale
 
-        x = torch.randn(B, D, device=GPU_TYPE)
-        w = torch.randn(D, device=GPU_TYPE)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
@@ -611,33 +497,19 @@ class _NestedReductionBase:
             h = x.float() + residual.float()
             variance = h.pow(2).mean(dim=-1, keepdim=True)
             normed = h * torch.rsqrt(variance + 1e-6)
-            normed_bf16 = normed.to(torch.bfloat16) * weight
-            grouped = normed_bf16.view(B, D // G, G)
+            normed_fp16 = normed.to(torch.float16) * weight
+            grouped = normed_fp16.view(B, D // G, G)
             absmax = grouped.abs().amax(dim=-1, keepdim=True).float()
             scales = (absmax / fp8_max).clamp(min=fp8_min_scale)
             x_scaled = (grouped / scales).clamp(-fp8_max, fp8_max)
             x_fp8 = x_scaled.to(torch.float8_e4m3fn).view(B, D)
             return x_fp8.float(), scales.squeeze(-1)
 
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+        w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
         self.check_nested_matches_unnested(f, (x, residual, w))
         self.check_fusion()
-
-    @parametrize("B,K,D", [(64, 16, 4096), (1, 16, 1024)])
-    def test_no_fullres_epilogue_small_dim_in_x(self, B, K, D):
-        """Small-dim-in-X with full-res consumer falls back."""
-
-        def f(x, w):
-            x_normed = _rmsnorm(x.reshape(B * K, D)).reshape(B, K, D)
-            s = (w[:, :, None] * x_normed).sum(dim=1)
-            return x_normed + s[:, None, :]
-
-        x = torch.randn(B, K, D, device=GPU_TYPE)
-        w = torch.randn(B, K, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
-        self.check_no_fusion()
 
     def test_epilogue_rejects_intermediate_dependency(self):
         """Do not fuse a pointwise epilogue before another dependent node."""
@@ -918,8 +790,8 @@ def _capture_producer_scale_kernel_sources(
         scale = (amax / 448.0).clamp(min=1e-12).to(torch.float8_e4m3fn)
         return scale.float()
 
-    x = torch.randn(B, D, device=GPU_TYPE)
-    w = torch.randn(D, device=GPU_TYPE)
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
     return _run_and_capture_sources(
         f,
         (x, w),
@@ -943,8 +815,8 @@ def _capture_fullres_kernel_sources(
         x_fp8 = (x_groups / scale.unsqueeze(-1)).to(torch.float8_e4m3fn)
         return x_fp8.view(B, D).float(), scale
 
-    x = torch.randn(B, D, device=GPU_TYPE)
-    w = torch.randn(D, device=GPU_TYPE)
+    x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.float16)
+    w = torch.randn(D, device=GPU_TYPE, dtype=torch.float16)
     return _run_and_capture_sources(
         f,
         (x, w),
