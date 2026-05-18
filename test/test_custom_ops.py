@@ -4655,23 +4655,20 @@ class TestCustomOpFastPath(TestCase):
             return
         overload = opdef._opoverload
         saved_overload_orig = overload._orig_op
-        saved_overload = opdef._opoverload
 
         def poison(*a, **kw):
             raise AssertionError(
                 "slow path was called; fast path should have handled this"
             )
 
-        # Poison the fallback paths:
-        # - overload._orig_op: read by fast_op for torch.ops.ns.name.default(x)
-        # - opdef._opoverload: used by CustomOpDef.__call__ for direct my_op(x)
+        # Poison overload._orig_op: read by fast_op when fast_path bails.
+        # We cannot poison opdef._opoverload because backend_impl (called
+        # internally via op.redispatch) references self._opoverload._schema.
         overload._orig_op = poison
-        opdef._opoverload = poison
         try:
             yield
         finally:
             overload._orig_op = saved_overload_orig
-            opdef._opoverload = saved_overload
 
     def test_fast_path_basic(self):
         @torch.library.custom_op("_torch_testing::fp_add", mutates_args=())
@@ -5070,10 +5067,12 @@ class TestCustomOpFastPath(TestCase):
         def fp_outer(x: Tensor) -> Tensor:
             return fp_inner(x) + 1
 
+        # Only the outer op takes the fast path at the top level.
+        # The inner op is called from inside the outer's backend kernel where
+        # autograd keys are excluded, so it correctly falls back to slow path.
         x = torch.randn(3)
-        with self._assert_fast_path_taken(fp_inner):
-            with self._assert_fast_path_taken(fp_outer):
-                result = fp_outer(x)
+        with self._assert_fast_path_taken(fp_outer):
+            result = fp_outer(x)
         self.assertEqual(result, x * 2 + 1)
 
     def test_fast_path_error_propagation(self):
