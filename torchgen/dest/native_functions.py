@@ -7,18 +7,20 @@ from torchgen.context import with_native_function_and_index
 from torchgen.model import (
     BackendIndex,
     DispatchKey,
-    NativeFunction,
-    NativeFunctionsGroup,
     is_cuda_dispatch_key,
     is_xpu_dispatch_key,
+    NativeFunction,
+    NativeFunctionsGroup,
 )
 from torchgen.utils import mapMaybe
+
 
 # native_functions.yaml tag: see tags.yaml ("cpu_dll_cuda_kernel").
 _CPU_DLL_CUDA_KERNEL_TAG = "cpu_dll_cuda_kernel"
 # QuantizedCUDA dispatch implemented in torch_cpu-only TU; tag applies only to
 # QuantizedCUDA forward decl macro selection (see dll_export_macro_for_kernel).
 _CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG = "cpu_dll_quantized_cuda_kernel"
+
 
 # Dispatch key → TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
 def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
@@ -68,7 +70,11 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> str | No
     if "legacy::" in metadata.kernel:
         return None
     else:
-        prefix = "static" if backend_index.external else dll_export_macro_for_kernel(backend_index, f)
+        prefix = (
+            "static"
+            if backend_index.external
+            else dll_export_macro_for_kernel(backend_index, f)
+        )
         return f"{prefix} {sig.decl(name=metadata.kernel)};"
 
 
