@@ -680,7 +680,7 @@ def _load_cached_autotuning(
         "coordinate_descent_tuning"
     ) and best_config.pop("found_by_coordesc", False)
     found_by_combo_autotune = bool(
-        inductor_meta.get("combo_tuning_groups")
+        inductor_meta.get("combo_grid_meta")
     ) and best_config.pop("found_by_combo_autotune", False)
 
     if not found_by_coordesc:
