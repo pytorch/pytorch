@@ -3263,12 +3263,13 @@ def triton_config_reduction(
     target = conditional_product(x, *rnumels.values())
     if conditional_product(*size_hints.values()) < target:
         target //= 8
+    x = min(x, TRITON_MAX_BLOCK["X"])
 
     def total_numel() -> int:
         return conditional_product(x, *rnumels.values())
 
     # if we are below original block size, scale up where we can
-    while x < size_hints["x"] and total_numel() < target:
+    while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and total_numel() < target:
         x *= 2
     for prefix in sorted(rnumels):
         while rnumels[prefix] < size_hints[prefix] and total_numel() < target:

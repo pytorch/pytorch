@@ -54,6 +54,7 @@ from torch._inductor.runtime.triton_heuristics import (
     DEFER,
     template,
     triton_config,
+    triton_config_reduction,
 )
 from torch._inductor.test_case import run_tests, TestCase
 
@@ -96,6 +97,12 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_triton_config_reduction_caps_xblock_to_max_block(self):
+        cfg = triton_config_reduction({"x": 2**24, "r0_": 1}, 8192, 1)
+
+        self.assertEqual(cfg.kwargs["XBLOCK"], TRITON_MAX_BLOCK["X"])
+        self.assertEqual(TRITON_MAX_BLOCK["X"] % cfg.kwargs["XBLOCK"], 0)
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
