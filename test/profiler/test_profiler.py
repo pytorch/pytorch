@@ -4754,5 +4754,84 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
             )
 
 
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestMetadataJsonFormat(TestCase):
+    """Guard the format of ITraceActivity.metadataJson() for kernel events.
+
+    The Python-side chrome trace exporter splices metadataJson() verbatim
+    into the output JSON and extracts specific fields (like graph node id)
+    via string matching. These tests ensure the format stays stable so that
+    downstream consumers don't silently break.
+    """
+
+    def _get_kernel_metadata(self):
+        x = torch.randn(64, 64, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            torch.mm(x, x)
+            torch.cuda.synchronize()
+
+        activities = prof.profiler.kineto_results.trace_activities()
+        for act in activities:
+            if act.type() == "kernel":
+                return act.metadata_json()
+        self.fail("No kernel activity found in trace")
+
+    def test_metadata_json_is_valid_json_fragment(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        self.assertIsInstance(parsed, dict)
+        self.assertGreater(len(parsed), 0)
+
+    def test_kernel_metadata_has_expected_fields(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        for key in [
+            "queued",
+            "device",
+            "context",
+            "stream",
+            "correlation",
+            "registers per thread",
+            "shared memory",
+            "blocks per SM",
+            "warps per SM",
+            "grid",
+            "block",
+            "graph node id",
+        ]:
+            self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
+
+    def test_kernel_metadata_field_types(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        for key in [
+            "queued",
+            "device",
+            "context",
+            "stream",
+            "correlation",
+            "registers per thread",
+            "shared memory",
+            "graph node id",
+        ]:
+            self.assertIsInstance(
+                parsed[key],
+                int,
+                f"Expected int for '{key}', got {type(parsed[key]).__name__}",
+            )
+        for key in ["grid", "block"]:
+            self.assertIsInstance(parsed[key], list)
+            self.assertEqual(len(parsed[key]), 3)
+
+    def test_metadata_json_key_value_format(self):
+        md = self._get_kernel_metadata()
+        # Verify the ": " (colon-space) separator convention that string
+        # splicing in the export path relies on for field extraction.
+        self.assertIn('"graph node id": ', md)
+        self.assertIn('"correlation": ', md)
+        self.assertIn('"stream": ', md)
+
+
 if __name__ == "__main__":
     run_tests()
