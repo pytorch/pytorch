@@ -4803,6 +4803,37 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if x.is_tensor() and x.as_proxy() in non_differentiable_set:
                     non_differentiable_idx.append(i)
 
+        dirty_idx: list[int] = []
+        if ctx.dirty_tensors is not None:
+            dirty_tensor_set: set[Proxy] = {
+                x.as_proxy() for x in ctx.dirty_tensors if x.is_tensor()
+            }
+            matched_dirty_tensor_set: set[Proxy] = set()
+            if fwd_out.is_tensor():
+                fwd_out_proxy = fwd_out.as_proxy()
+                if fwd_out_proxy in dirty_tensor_set:
+                    dirty_idx.append(0)
+                    matched_dirty_tensor_set.add(fwd_out_proxy)
+            else:
+                if not isinstance(fwd_out, variables.BaseListVariable):
+                    raise AssertionError("Expected fwd_out to be a BaseListVariable")
+                for i, x in enumerate(fwd_out.items):
+                    if x.is_tensor():
+                        x_proxy = x.as_proxy()
+                        if x_proxy in dirty_tensor_set:
+                            dirty_idx.append(i)
+                            matched_dirty_tensor_set.add(x_proxy)
+            if dirty_tensor_set - matched_dirty_tensor_set:
+                unimplemented(
+                    gb_type="autograd.Function.apply: mark_dirty input not returned",
+                    context="",
+                    explanation="Dynamo only supports ctx.mark_dirty when each "
+                    "dirty input is also returned from forward.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+
         # See Note [Activations with no version counter checks in eager]
         # Compute which tensors in bwd_freevars came from ctx.save_for_backward.
         # This allows AOT autograd to distinguish between tensors saved via
@@ -4847,6 +4878,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
+        # Preserve the existing HOP call shape for the common no-mark_dirty case.
+        if dirty_idx:
+            kwargs_for_fn["dirty_idx"] = dirty_idx
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
