@@ -1288,7 +1288,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
         if name == "dirty_tensors":
-            return variables.TupleVariable(list(self.dirty_tensors or []))
+            if self.dirty_tensors is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
         if name == "needs_input_grad":
