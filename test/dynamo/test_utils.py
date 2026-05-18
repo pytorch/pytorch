@@ -657,6 +657,7 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
@@ -716,6 +717,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -809,6 +811,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -916,6 +919,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1009,6 +1013,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1321,6 +1326,39 @@ class TestInductorConfigParsingForLogging(TestCase):
         mocked_inductor_config.get_config_copy.return_value = None
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
+
+
+class TestFunctorchConfigParsingForLogging(TestCase):
+    def test_functorch_config_jsonify(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        self.assertIsInstance(functorch_config_json, str)
+        parsed = json.loads(functorch_config_json)
+        self.assertIn("activation_memory_budget", parsed)
+        self.assertEqual(parsed["activation_memory_budget"], 1.0)
+
+    def test_functorch_config_blocklist(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        parsed = json.loads(functorch_config_json)
+        self.assertNotIn("TYPE_CHECKING", parsed)
+        self.assertNotIn("_save_config_ignore", parsed)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_none(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = AttributeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_runtime_error(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = RuntimeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.justknobs_check", return_value=False)
+    def test_functorch_config_jk_disabled(self, mocked_jk):
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+        mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
 if __name__ == "__main__":
