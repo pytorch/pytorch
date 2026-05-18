@@ -292,6 +292,8 @@ if __name__ == "__main__":
                 torch.xpu.clock_rate()
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.power_draw()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.utilization()
 
     def test_temperature_returns_float(self):
         try:
@@ -346,6 +348,24 @@ if __name__ == "__main__":
         # Sanity check: GPU power draw should be non-negative and within a plausible range (0–1000 W)
         self.assertGreaterEqual(power, 0.0)
         self.assertLess(power, 1000.0)
+
+    def test_utilization_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            util = torch.xpu.utilization()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU utilization requires elevated privileges")
+            raise
+
+        self.assertIsInstance(util, float)
+        # Sanity check: GPU utilization should be between 0 and 100 percent
+        self.assertGreaterEqual(util, 0.0)
+        self.assertLessEqual(util, 100.0)
 
     def test_device_count_respects_affinity_mask(self):
         try:
