@@ -495,6 +495,13 @@ class ComboKernelCodegenResult(NamedTuple):
     kernel: Any
     node_group: list[BaseSchedulerNode]
     node_info_group: list[NodeInfo]
+    # Snapshot of V.graph.removed_buffers / inplaced_to_remove taken JUST BEFORE
+    # this partition's process_kernel ran. Standalone seed codegen for this
+    # partition must restore to this snapshot so the seed kernel reaches the
+    # same inplace / removed-buffer decisions the combo sub-kernel did, without
+    # leaking the cumulative state of prior partitions.
+    pre_process_removed_buffers: Any = None
+    pre_process_inplaced_to_remove: Any = None
 
 
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
@@ -2529,9 +2536,7 @@ class SIMDScheduling(BaseScheduling):
                 if only_gen_src_code:
                     # Skip code generation - caller has cached benchmark results
                     kernel_code_list.append(
-                        ComboKernelCodegenResult(
-                            None, None, node_group, [node_info]
-                        )
+                        ComboKernelCodegenResult(None, None, node_group, [node_info])
                     )
                 else:
                     # Generate regular kernel
@@ -2552,6 +2557,11 @@ class SIMDScheduling(BaseScheduling):
                     )
             else:
                 # Multi-node: create ComboKernel with combo subkernels
+                # Snapshot graph state BEFORE this partition's process_kernel
+                # so seed codegen later can restore to the same state the
+                # combo sub-kernel saw (avoids cross-partition state poisoning).
+                pre_removed = OrderedSet(V.graph.removed_buffers)
+                pre_inplaced = OrderedSet(V.graph.inplaced_to_remove)
                 kernel = ComboKernel(
                     triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
@@ -2580,7 +2590,12 @@ class SIMDScheduling(BaseScheduling):
                 # pyrefly: ignore [bad-argument-type]
                 kernel_code_list.append(
                     ComboKernelCodegenResult(
-                        src_code, kernel, node_group, node_info_group
+                        src_code,
+                        kernel,
+                        node_group,
+                        node_info_group,
+                        pre_removed,
+                        pre_inplaced,
                     )
                 )
         # pyrefly: ignore [bad-return]
@@ -2596,8 +2611,6 @@ class SIMDScheduling(BaseScheduling):
 
         per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
 
-        seed_removed_buffers = OrderedSet(V.graph.removed_buffers)
-        seed_inplaced_to_remove = OrderedSet(V.graph.inplaced_to_remove)
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes,
             custom_part_algorithm,
@@ -2606,7 +2619,14 @@ class SIMDScheduling(BaseScheduling):
             per_subkernel_blocks=per_subkernel_blocks,
         )
 
-        for src_code, kernel, node_group, node_info_group in kernel_code_list:
+        for (
+            src_code,
+            kernel,
+            node_group,
+            node_info_group,
+            pre_removed,
+            pre_inplaced,
+        ) in kernel_code_list:
             if len(node_group) > 1:
                 assert len(kernel.sub_kernels) > 1
                 assert len(node_group) == len(node_info_group)
@@ -2616,10 +2636,11 @@ class SIMDScheduling(BaseScheduling):
                         removed_buffers = V.graph.removed_buffers
                         inplaced_to_remove = V.graph.inplaced_to_remove
                         try:
-                            V.graph.removed_buffers = OrderedSet(seed_removed_buffers)
-                            V.graph.inplaced_to_remove = OrderedSet(
-                                seed_inplaced_to_remove
-                            )
+                            # Restore per-partition snapshot taken before this
+                            # combo's process_kernel ran. This isolates seed
+                            # codegen from prior partitions' graph mutations.
+                            V.graph.removed_buffers = OrderedSet(pre_removed)
+                            V.graph.inplaced_to_remove = OrderedSet(pre_inplaced)
                             seed_src_code, seed_kernel = (
                                 self.generate_kernel_code_and_kernel_from_node_info(
                                     node_info
@@ -3444,6 +3465,12 @@ class SIMDScheduling(BaseScheduling):
             features=node_info.features,
             tiling_scores=node_info.tiling_scores,
         )
+        # Seed kernels are internal autotune artifacts, not user-facing kernels
+        # that run in the final graph. They should not be counted in
+        # `metrics.generated_kernel_count`. `Kernel.__init__` already
+        # incremented the counter; back it out here (same pattern used by the
+        # ComboKernel and the C++ kernel paths).
+        metrics.generated_kernel_count -= 1
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
         with (

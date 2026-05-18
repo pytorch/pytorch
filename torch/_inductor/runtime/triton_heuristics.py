@@ -442,22 +442,19 @@ def _has_combo_standalone_autotune_seed_config(combo_kernel) -> bool:
         return True
 
     launchers = getattr(combo_kernel, "launchers", ())
-    if (
-        len(launchers) == 1
-        and getattr(launchers[0].config, "found_by_combo_autotune", False)
+    if len(launchers) == 1 and getattr(
+        launchers[0].config, "found_by_combo_autotune", False
     ):
         return True
 
     compile_results = getattr(combo_kernel, "compile_results", ())
-    if (
-        len(compile_results) == 1
-        and getattr(compile_results[0].config, "found_by_combo_autotune", False)
+    if len(compile_results) == 1 and getattr(
+        compile_results[0].config, "found_by_combo_autotune", False
     ):
         return True
     return False
 
 
-_combo_standalone_autotune_seed_apply_lock = threading.Lock()
 _combo_standalone_autotune_seed_benchmark_lock = threading.Lock()
 _MISSING_COMBO_CONFIG_KWARG = object()
 _MIXED_COMBO_CONFIG_KWARG = object()
@@ -470,8 +467,19 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
         return
     if getattr(combo_kernel, "combo_standalone_autotune_seed_attempted", False):
         return
-    if combo_kernel.combo_standalone_autotune_seed_future is not None:
+    # Detect fork: if futures were submitted in the parent process, the worker
+    # threads do not exist in this child. Reset and re-submit.
+    existing_pid = getattr(combo_kernel, "combo_standalone_autotune_seed_pid", None)
+    if (
+        combo_kernel.combo_standalone_autotune_seed_future is not None
+        and existing_pid == os.getpid()
+    ):
         return
+    if combo_kernel.combo_standalone_autotune_seed_future is not None:
+        # Futures from a different pid: parent process; orphans in this child.
+        combo_kernel.combo_standalone_autotune_seed_future = None
+        combo_kernel.combo_standalone_autotune_seed_configs = None
+        combo_kernel.combo_standalone_autotune_seed_start_time_ns = None
     if _has_combo_standalone_autotune_seed_config(combo_kernel):
         return
     if not seed_specs:
@@ -486,6 +494,7 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
     )
     pool = PrecompileThreadPool.get_instance()
     combo_kernel.combo_standalone_autotune_seed_start_time_ns = time.time_ns()
+    combo_kernel.combo_standalone_autotune_seed_pid = os.getpid()
     combo_kernel.combo_standalone_autotune_seed_future = [
         pool.submit(
             _run_combo_kernel_standalone_autotune_seed_one,
@@ -636,6 +645,15 @@ class CachingAutotuner(KernelInterface):
         self.combo_standalone_autotune_seed_configs = None
         self.combo_standalone_autotune_seed_start_time_ns = None
         self.combo_standalone_autotune_seed_attempted = False
+        # PID of the process that submitted the seed futures. After fork, the
+        # child sees inherited futures but the worker threads are dead; we
+        # detect the mismatch and re-submit instead of hanging on .result().
+        self.combo_standalone_autotune_seed_pid: int | None = None
+        # Per-instance lock so apply-phase precompile is serialized within one
+        # combo but runs in parallel across different combos. Replaces an
+        # earlier module-global lock that would have serialized every combo's
+        # first run through one mutex.
+        self.combo_standalone_autotune_seed_apply_lock = threading.Lock()
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -1023,6 +1041,8 @@ class CachingAutotuner(KernelInterface):
             "combo_standalone_autotune_seed_future": None,
             "combo_standalone_autotune_seed_configs": None,
             "combo_standalone_autotune_seed_start_time_ns": None,
+            "combo_standalone_autotune_seed_pid": None,
+            "combo_standalone_autotune_seed_apply_lock": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -1031,6 +1051,7 @@ class CachingAutotuner(KernelInterface):
         self.combo_standalone_autotune_seed_attempted = getattr(
             self, "combo_standalone_autotune_seed_attempted", False
         )
+        self.combo_standalone_autotune_seed_apply_lock = threading.Lock()
         self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
@@ -1625,16 +1646,38 @@ class CachingAutotuner(KernelInterface):
     def _consume_combo_standalone_autotune_seed_configs(self):
         futures = self.combo_standalone_autotune_seed_future
         assert futures is not None
+        # Belt-and-suspenders: if we somehow reached here in a forked child
+        # before start_* could resubmit, do not block on parent futures.
+        seed_pid = getattr(self, "combo_standalone_autotune_seed_pid", None)
+        if seed_pid is not None and seed_pid != os.getpid():
+            log.warning(
+                "Combo standalone autotune seed: future inherited from pid %s "
+                "in child %s; treating all seeds as failed",
+                seed_pid,
+                os.getpid(),
+            )
+            self.combo_standalone_autotune_seed_configs = [None] * (
+                len(futures) if isinstance(futures, list) else 1
+            )
+            return self.combo_standalone_autotune_seed_configs
         if self.combo_standalone_autotune_seed_configs is None:
             if isinstance(futures, list):
                 seed_configs = []
-                for future in futures:
+                for idx, future in enumerate(futures):
                     try:
                         seed_configs.append(future.result())
-                    except Exception:
+                    except (
+                        NoTritonConfigsError,
+                        OutOfResources,
+                        PTXASError,
+                        IntelGPUError,
+                        AssertionError,
+                    ) as e:
                         log.warning(
-                            "Combo standalone autotune seed failed; ignoring seed",
-                            exc_info=True,
+                            "Combo standalone autotune seed[%d] for %s failed (%s); ignoring seed",
+                            idx,
+                            self.fn.__name__,
+                            type(e).__name__,
                         )
                         seed_configs.append(None)
                 self.combo_standalone_autotune_seed_configs = seed_configs
@@ -1712,8 +1755,24 @@ class CachingAutotuner(KernelInterface):
             return launcher
 
         self._ensure_kernel_loaded()
-        with self.lock:
-            seeded_launcher = self._precompile_config(seed_config).make_launcher()
+        try:
+            with self.lock:
+                seeded_launcher = self._precompile_config(seed_config).make_launcher()
+        except (
+            OutOfResources,
+            PTXASError,
+            IntelGPUError,
+            torch.cuda.OutOfMemoryError,
+            NoTritonConfigsError,
+        ) as e:
+            log.warning(
+                "Combo standalone autotune seed: stitched config for %s failed "
+                "to compile (%s); falling back to base config",
+                self.fn.__name__,
+                type(e).__name__,
+            )
+            return launcher
+        counters["inductor"]["combo_autotune_seed_applied"] += 1
         log.debug(
             "Combo standalone autotune seed: selected stitched combo config %s",
             seeded_launcher.config,
@@ -2076,14 +2135,12 @@ class CachingAutotuner(KernelInterface):
         ):
             self._cancel_combo_standalone_autotune_seed()
         elif combo_tuning_groups:
-            with _combo_standalone_autotune_seed_apply_lock:
+            with self.combo_standalone_autotune_seed_apply_lock:
                 if self.combo_standalone_autotune_seed_future is not None:
                     with dynamo_timed(
                         "CachingAutotuner.combo_standalone_autotune_seed",
                         log_pt2_compile_event=False,
-                        metadata={
-                            "kernel_name": self.inductor_meta.get("kernel_name")
-                        },
+                        metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
                         dynamo_compile_column_us="runtime_triton_autotune_time_us",
                         compile_id=self.compile_id,
                         is_backward=self.is_backward,
@@ -2105,9 +2162,7 @@ class CachingAutotuner(KernelInterface):
                             self.combo_standalone_autotune_seed_start_time_ns
                             or start_time
                         )
-                        self.autotune_time_taken_ns += (
-                            time.time_ns() - seed_start_time
-                        )
+                        self.autotune_time_taken_ns += time.time_ns() - seed_start_time
                         self.combo_standalone_autotune_seed_start_time_ns = None
                         self.combo_standalone_autotune_seed_future = None
                         self.combo_standalone_autotune_seed_configs = None
@@ -3542,7 +3597,6 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
     combined_kwargs: dict[str, int] = {}
     default_warp_stage_pairs: list[tuple[int, int]] = []
-    unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
     combo_coordesc_field_minimums: dict[str, int] = {}
     signature_keys = OrderedSet(triton_meta.get("signature", ()))
@@ -3599,6 +3653,19 @@ def _handle_combo_kernel_per_subkernel_blocks(
         else:
             raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
+        if not cfgs:
+            # Heuristic rejected every candidate (e.g. persistent reduction with
+            # tiled (x, y) size_hints and rnumel beyond MAX_PERSISTENT_BLOCK_NUMEL).
+            # Skip this sub-kernel for combo metadata; combo grid still works
+            # because per-subkernel block names default to 1 when absent.
+            log.debug(
+                "Combo standalone autotune seed: sub-kernel %d (%s) heuristic "
+                "returned no configs; skipping",
+                i,
+                subkernel_heuristic,
+            )
+            continue
+
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         _update_combo_kernel_kwargs(
@@ -3622,18 +3689,17 @@ def _handle_combo_kernel_per_subkernel_blocks(
                     TRITON_MAX_BLOCK[prefix.upper()],
                     size_hints_i[prefix],
                 )
-            if key == "XBLOCK" and inductor_meta_i.get("min_xblock") is not None:
-                combo_coordesc_field_minimums[combined_key] = inductor_meta_i[
-                    "min_xblock"
-                ]
+            if key in ("XBLOCK", "YBLOCK", "ZBLOCK"):
+                min_key = f"min_{key[0].lower()}block"
+                min_val = inductor_meta_i.get(min_key)
+                if min_val is not None:
+                    combo_coordesc_field_minimums[combined_key] = min_val
             elif key.startswith("R") and "BLOCK" in key:
                 min_rblock = inductor_meta_i.get("min_rblock")
                 if min_rblock is not None:
                     combo_coordesc_field_minimums[combined_key] = min_rblock
 
         default_warp_stage_pairs.append((cfg.num_warps, cfg.num_stages))
-        for c in cfgs:
-            unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
         group_key = (
             _subkernel_fingerprint(combo_meta, i)
@@ -3650,10 +3716,9 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 "coordesc_fields": list(group_coordesc_fields),
             }
 
-    base_num_warps, base_num_stages = Counter(default_warp_stage_pairs).most_common(
-        1
-    )[0][0]
-    unique_warp_stage_pairs.add((base_num_warps, base_num_stages))
+    base_num_warps, base_num_stages = Counter(default_warp_stage_pairs).most_common(1)[
+        0
+    ][0]
 
     combo_tuning_groups = list(group_map.values())
     # Largest sub-kernels tuned first — they dominate runtime and get most freedom
@@ -3671,11 +3736,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
     ]
     inductor_meta["combo_coordesc_field_limits"] = combo_coordesc_field_limits
     inductor_meta["combo_coordesc_field_minimums"] = combo_coordesc_field_minimums
-    # Candidate warp/stage pairs from standalone sub-kernel heuristics.
-    inductor_meta["combo_warp_stage_candidates"] = list(unique_warp_stage_pairs)
 
     # Single base config: most common default warp/stage pair with all blocks at
-    # heuristic defaults. Seed apply can still retune to seed-winning pairs.
+    # heuristic defaults. Seed apply stitches the per-subkernel block winners
+    # but keeps the base (warps, stages) pair.
     return [
         triton.Config(
             combined_kwargs,

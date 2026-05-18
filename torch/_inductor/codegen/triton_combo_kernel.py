@@ -468,9 +468,7 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
-        self.standalone_autotune_seed_infos: list[
-            tuple[str, list[Any], list[Any]]
-        ] = []
+        self.standalone_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]] = []
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel

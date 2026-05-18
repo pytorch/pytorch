@@ -3591,9 +3591,7 @@ class PythonWrapperCodegen(CodeGen):
                         generate_seed_autotune_arg(arg, arg_type)
                         for arg, arg_type in zip(seed_call_args, seed_arg_types)
                     ]
-                    seed_specs.append(
-                        f"({seed_name}, {tuple_call_args(seed_args)})"
-                    )
+                    seed_specs.append(f"({seed_name}, {tuple_call_args(seed_args)})")
                 autotune_seed_call = (
                     f"start_combo_kernel_standalone_autotune("
                     f"{kernel_name}, {tuple_call_args(seed_specs)})"
