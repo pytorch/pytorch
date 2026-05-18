@@ -1856,6 +1856,47 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_duplicate_input_accumulates_grad(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a * b + a + b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output * (b + 1), grad_output * (a + 1)
+
+        def fn(x):
+            return Foo.apply(x, x).sum()
+
+        def check_fallback():
+            x = torch.tensor([0.7, -1.3, 2.1, 0.05, -0.5], requires_grad=True)
+
+            x_ref = x.detach().clone().requires_grad_(True)
+            ref = fn(x_ref)
+            ref.backward()
+
+            torch._dynamo.reset()
+            x_compiled = x.detach().clone().requires_grad_(True)
+            res = torch.compile(fn, backend="eager", fullgraph=False)(x_compiled)
+            res.backward()
+
+            self.assertEqual(ref, res)
+            self.assertEqual(x_ref.grad, x_compiled.grad)
+
+        check_fallback()
+
+        torch._dynamo.reset()
+        x = torch.randn(5, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "duplicate tensor input",
+        ):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
+
     def test_udf_output(self):
         class Foo:
             def __init__(self, a, b):
