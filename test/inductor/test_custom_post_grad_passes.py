@@ -262,7 +262,9 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                     m.target = operator.getitem
                     m.args = (split_vals, idx)
 
-        @config.patch(pre_grad_custom_pass=merge_mm_shared_rhs)
+        @config.patch(
+            pre_grad_custom_pass=merge_mm_shared_rhs, pre_grad_pass_timing="early"
+        )
         def inner_test():
             @torch.compile
             def f(W, nested_seqs):
