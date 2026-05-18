@@ -90,11 +90,12 @@ class FSDPCommContext:
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = self.device_handle.Stream(priority=high_priority)
-        # The most recent post-reduce event across all param groups, recorded on
-        # reduce_scatter_stream (FSDP) or all_reduce_stream (HSDP). Since all
-        # groups share the same stream, later events subsume earlier ones, so a
-        # single wait on this event at finalize time covers all groups.
-        self._last_post_reduce_event: torch.Event | None = None
+        # The most recent post-reduce event across all param groups, recorded
+        # on reduce_scatter_stream (FSDP) or all_reduce_stream (HSDP). Since
+        # later events subsume earlier ones on the same stream, a single wait
+        # on the last event recorded on each stream used in the post backward
+        # hook covers all groups.
+        self._last_post_reduce_events: dict[torch.Stream, torch.Event] = dict()
         # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
@@ -658,6 +659,7 @@ class FSDPParamGroup:
             (
                 reduce_scatter_input,
                 reduce_scatter_event,
+                post_reduce_stream,
                 self._post_reduce_event,
                 all_reduce_input,
                 all_reduce_event,
@@ -688,7 +690,9 @@ class FSDPParamGroup:
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
             )
-            self.comm_ctx._last_post_reduce_event = self._post_reduce_event
+            self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
+                self._post_reduce_event
+            )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
@@ -736,9 +740,9 @@ class FSDPParamGroup:
                 )
 
     def finalize_backward(self):
-        if self.comm_ctx._last_post_reduce_event is not None:
-            self.device_handle.current_stream().wait_event(self.comm_ctx._last_post_reduce_event)
-            self.comm_ctx._last_post_reduce_event = None
+        for event in self.comm_ctx._last_post_reduce_events.values():
+            self.device_handle.current_stream().wait_event(event)
+        self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
         self._all_reduce_state = None
         for fsdp_param in self.fsdp_params:
