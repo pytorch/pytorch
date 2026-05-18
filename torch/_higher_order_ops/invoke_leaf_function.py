@@ -10,6 +10,7 @@ from torch._C import DispatchKey, DispatchKeySet
 from torch._higher_order_ops.utils import register_fake
 from torch._library.opaque_object import OpaqueBase, register_opaque_type
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.nn.utils.stateless import _reparametrize_module
@@ -693,8 +694,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 for info in input_infos_for_fake
             )
 
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
         with unset_fake_temporarily():
             new_real_fn_callable = _LeafCallable(real_forward)
 
@@ -752,8 +751,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, *grads):
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
         with unset_fake_temporarily():
             real_bw_callable = _LeafCallable(ctx.real_backward)
             fake_bw_callable = _LeafCallable(ctx.fake_backward)

@@ -44,7 +44,7 @@ from torch._library.opaque_object import (
     OpaqueBase,
     register_opaque_type,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -210,11 +210,9 @@ class NestedCounters(OpaqueBase):
 
     def __getitem__(self, idx):
         counter = self.c[idx]
-        # This test helper creates a derived reference opaque from an already
-        # guarded member. Hide that intentional construction from tracing so it
-        # does not trip the general mid-trace construction guard.
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
+        # Model DeviceMesh.__getitem__: the graph records this method call, and
+        # runtime execution creates an opaque object derived from the guarded
+        # parent rather than baking in a compile-time constant.
         with unset_fake_temporarily():
             return Counter(counter.start, counter.end)
 
@@ -414,6 +412,9 @@ class Issue175968Tensor(torch.Tensor):
 
     def __init__(self, data):
         self._data = data
+
+    def __repr__(self):
+        return f"Issue175968Tensor(shape={tuple(self.shape)})"
 
     def __tensor_flatten__(self):
         return ["_data"], {}
