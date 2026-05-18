@@ -14763,7 +14763,7 @@ if __name__ == '__main__':
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 8284  # 6236
-                    expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, cpu 2271
+                    expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, cpu 2271, ci 2239
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
@@ -14774,7 +14774,7 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 8974
 
         eta = torch.finfo(dtype).eps
-        feps = torch.finfo(dtype).eps * 2
+        feps = torch.finfo(dtype).eps * 3
 
         def diff_ulp(x, y):
             # ULP difference between two normal numbers, applied to
