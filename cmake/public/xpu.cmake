@@ -26,6 +26,24 @@ set_property(
     TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
     ${SYCL_LIBRARY})
 
+# libsycl.so transitively pulls libur_loader.so.0, which has DT_NEEDED libz.so.1.
+# libz is not a SYCL toolkit artifact and has no find-module path through us, so
+# propagate an rpath-link entry to the Python prefix's lib dir (where libz lives
+# in conda envs). Conda's compat linker has a narrow sysroot view and won't find
+# libz there otherwise. ELF/GNU-ld only.
+if(NOT WIN32 AND NOT APPLE AND Python_EXECUTABLE)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.prefix)"
+    OUTPUT_VARIABLE _xpu_py_prefix
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(_xpu_py_prefix AND EXISTS "${_xpu_py_prefix}/lib")
+    set_property(TARGET torch::sycl APPEND PROPERTY
+      INTERFACE_LINK_OPTIONS "LINKER:-rpath-link,${_xpu_py_prefix}/lib")
+  endif()
+endif()
+
 # xpurt
 add_library(torch::xpurt INTERFACE IMPORTED)
 set_property(
