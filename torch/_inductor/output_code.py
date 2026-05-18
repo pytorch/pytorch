@@ -178,6 +178,41 @@ def maybe_handle_backward_generation(
         compiled_graph.current_callable = compiled_artifact
 
 
+def clone_cudagraph_backward_outputs(
+    compiled_graph: CompiledFxGraph,
+    output_clone_idxs: Sequence[int],
+) -> None:
+    if not output_clone_idxs:
+        return
+
+    assert compiled_graph.current_callable is not None
+    compiled_graph_callable = compiled_graph.current_callable
+    output_clone_idx_set = OrderedSet(output_clone_idxs)
+
+    def compiled_artifact(new_inputs: list[Any]) -> Any:
+        outputs = compiled_graph_callable(new_inputs)
+        if isinstance(outputs, tuple):
+            cloned_outputs = list(outputs)
+            return_tuple = True
+        elif isinstance(outputs, list):
+            cloned_outputs = outputs.copy()
+            return_tuple = False
+        else:
+            if 0 in output_clone_idx_set and isinstance(outputs, torch.Tensor):
+                return outputs.clone()
+            return outputs
+
+        for idx in output_clone_idx_set:
+            if idx < len(cloned_outputs) and isinstance(
+                cloned_outputs[idx], torch.Tensor
+            ):
+                cloned_outputs[idx] = cloned_outputs[idx].clone()
+
+        return tuple(cloned_outputs) if return_tuple else cloned_outputs
+
+    compiled_graph.current_callable = compiled_artifact
+
+
 def prepare_cudagraph_post_compile(
     compiled_graph: CompiledFxGraph,
     example_inputs: Sequence[InputType],
@@ -858,6 +893,13 @@ class CompiledFxGraph(OutputCode):
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
+
+        if cudagraphs and is_backward:
+            clone_cudagraph_backward_outputs(
+                self,
+                graph_kwargs.get("cudagraph_backward_output_clone_idxs", ()),
+            )
+
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens

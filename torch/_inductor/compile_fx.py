@@ -763,6 +763,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
+    cudagraph_backward_output_clone_idxs: Sequence[int]
     graph_id: int | None
     cpp_wrapper: bool
     aot_mode: bool
@@ -793,6 +794,7 @@ def compile_fx_inner(
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
+    kwargs.setdefault("cudagraph_backward_output_clone_idxs", ())
     kwargs.setdefault("graph_id", None)
     kwargs.setdefault("cpp_wrapper", False)
     kwargs.setdefault("fx_wrapper", False)
@@ -2552,6 +2554,36 @@ def compile_fx_forward(
         return result
 
 
+def get_cudagraph_backward_output_clone_idxs(gm: GraphModule) -> tuple[int, ...]:
+    from torch._functorch._aot_autograd.descriptors import AOTOutput
+
+    model_outputs_node = output_node(gm)
+    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+    output_descs = model_outputs_node.meta.get("desc")
+    if output_descs is None:
+        # Older cached/traced graphs may not have descriptors.  Clone only final
+        # backward outputs, never partition-internal CUDAGraph tree outputs.
+        return tuple(
+            idx
+            for idx, output in enumerate(model_outputs)
+            if isinstance(output, fx.Node)
+        )
+
+    flat_output_descs, _ = pytree.tree_flatten(output_descs)
+    if len(flat_output_descs) != len(model_outputs):
+        return tuple(
+            idx
+            for idx, output in enumerate(model_outputs)
+            if isinstance(output, fx.Node)
+        )
+
+    return tuple(
+        idx
+        for idx, desc in enumerate(flat_output_descs)
+        if isinstance(desc, AOTOutput) and desc.is_grad()
+    )
+
+
 def compile_fx_backward(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -2609,6 +2641,9 @@ def compile_fx_backward(
                 static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
                 is_backward=True,
+                cudagraph_backward_output_clone_idxs=get_cudagraph_backward_output_clone_idxs(
+                    gm
+                ),
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
             )
