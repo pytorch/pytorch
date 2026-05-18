@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
     skipIfXpu,
-    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
@@ -887,36 +886,33 @@ class TestFP8Lowering(TestCase):
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
-    )
+    @skipIfRocm(msg="CUDA FP8 blockwise scale layouts are not supported by hipBLAS")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
     @onlyCUDA
-    @xfailIf(
-        torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
-    )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
+    @unittest.skipIf(
+        torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0),
+        "cuBLAS 128-element blockwise scaling is only supported for CC 9.0",
+    )
     @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
         "scaling_block_sizes",
         ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
     )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
-    def test_main_loop_scaling(
+    def test_blockwise_scaling_uses_aten_choice_runtime(
         self,
         shape: tuple[int, int, int],
         use_fast_accum: bool,
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
-        # Only bf16 output type is supported for non-tensorwise scaling, not fp32
+        # Inductor intentionally uses the ATen/eager kernel for these CUDA 12.9
+        # FP8 blockwise layouts until Triton implements matching support.
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
-        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         M, N, K = shape  # Matmul Y = X [M, K] x W [N, K]
         x = torch.randn(M, K, dtype=dtype, device=device)
@@ -947,7 +943,7 @@ class TestFP8Lowering(TestCase):
             )  # 1x128 blocks need scales to be outer-dim-major
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            return torch._scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
@@ -956,40 +952,46 @@ class TestFP8Lowering(TestCase):
                 out_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
-            return y
-
-        # BlockWise1x128 and BlockWise128x128 scaling modes are not compatible with fast_accum
-        # Only take this branch on SM90 because other versions xfail everything
-        if use_fast_accum and IS_SM90:
-            with self.assertRaisesRegex(
-                RuntimeError, "scaled_gemm doesn't support fast accum"
-            ):
-                y_eager = linear(
-                    x_fp8,
-                    x_inverse_scale,
-                    w_t_fp8,
-                    w_inverse_scale,
-                    bias,
-                )
-        else:
-            y_eager = linear(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
 
         with config.patch(
             {
-                "triton.enable_persistent_tma_matmul": True,
-                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
                 "max_autotune": True,
             }
         ):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
+            )
+
+            if use_fast_accum and IS_SM90:
+                with self.assertRaisesRegex(
+                    RuntimeError, "scaled_gemm doesn't support fast accum"
+                ):
+                    linear(
+                        x_fp8,
+                        x_inverse_scale,
+                        w_t_fp8,
+                        w_inverse_scale,
+                        bias,
+                    )
+                with self.assertRaisesRegex(
+                    RuntimeError, "scaled_gemm doesn't support fast accum"
+                ):
+                    linear_compiled(
+                        x_fp8,
+                        x_inverse_scale,
+                        w_t_fp8,
+                        w_inverse_scale,
+                        bias,
+                    )
+                return
+
+            y_eager = linear(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
             )
             y_compiled, code = run_and_get_code(
                 linear_compiled,
@@ -1000,29 +1002,99 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-        # Verify that Inductor chooses the correct scaling recipes
-        check_scale_recipe_a = (
-            ScalingType.BlockWise1x128.value
-            if (am, ak) == (1, 128)
-            else ScalingType.BlockWise128x128.value
-        )
-        FileCheck().check(
-            f"SCALE_RECIPE_A : tl.constexpr = {check_scale_recipe_a}"
-        ).run(code[0])
-
-        check_scale_recipe_b = (
-            ScalingType.BlockWise1x128.value
-            if (bn, bk) == (1, 128)
-            else ScalingType.BlockWise128x128.value
-        )
-        FileCheck().check(
-            f"SCALE_RECIPE_B : tl.constexpr = {check_scale_recipe_b}"
-        ).run(code[0])
-
+        generated_code = "\n".join(code)
+        self.assertIn("extern_kernels._scaled_mm", generated_code)
+        self.assertNotIn("SCALE_RECIPE_A", generated_code)
+        self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        if not use_fast_accum:
-            self.assertEqual(y_eager.dtype, dtype)
-            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @onlyCUDA
+    @skipIfRocm(msg="CUDA FP8 blockwise scale layouts are not supported by hipBLAS")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON or not is_big_gpu(),
+        "Need CUDA Triton templates for compile-only lowering coverage",
+    )
+    @parametrize(
+        "scaling_block_sizes",
+        ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
+    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
+    def test_blockwise_scaling_uses_aten_choice_compile_only(
+        self,
+        scaling_block_sizes: tuple[int, int, int, int],
+        device,
+    ):
+        dtype: torch.dtype = torch.bfloat16
+        dtype_float8 = torch.float8_e4m3fn
+
+        M, K, N = 256, 512, 256
+        am, ak, bn, bk = scaling_block_sizes
+        m_blocks = ceil_div(M, 128)
+        k_blocks = ceil_div(K, 128)
+        n_blocks = ceil_div(N, 128)
+
+        x_fp8 = torch.randn(M, K, dtype=dtype, device=device).to(dtype_float8)
+        w_t_fp8 = (
+            torch.randn(K, N, dtype=dtype, device=device)
+            .to(dtype_float8)
+            .t()
+            .contiguous()
+            .t()
+        )
+
+        if (am, ak) == (1, 128):
+            # BlockWise1x128 lhs scales are stored outer-dim-major.
+            x_inverse_scale = torch.ones(k_blocks, M, device=device).t()
+        else:
+            x_inverse_scale = torch.ones(m_blocks, k_blocks, device=device)
+
+        if (bn, bk) == (1, 128):
+            w_inverse_scale = torch.ones(k_blocks, N, device=device)
+        else:
+            w_inverse_scale = torch.ones(n_blocks, k_blocks, device=device).t()
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
+            return torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                out_dtype=dtype,
+            )
+
+        def compile_only_backend(gm, example_inputs):
+            from torch._inductor.compile_fx import compile_fx
+
+            compile_fx(gm, example_inputs)
+            out_shape = (example_inputs[0].shape[0], example_inputs[1].shape[1])
+
+            def compiled(*args):
+                return (torch.empty(out_shape, device=args[0].device, dtype=dtype),)
+
+            return compiled
+
+        with config.patch(
+            {
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            linear_compiled = torch.compile(
+                linear, backend=compile_only_backend, fullgraph=True
+            )
+            result, code = run_and_get_code(
+                linear_compiled,
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+            )
+
+        self.assertEqual(result.shape, (M, N))
+        generated_code = "\n".join(code)
+        self.assertIn("extern_kernels._scaled_mm", generated_code)
+        self.assertNotIn("SCALE_RECIPE_A", generated_code)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
