@@ -58,7 +58,7 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
 def _codegen_current_stream(device: torch.device, cg: "PyCodegen") -> None:
     cg.add_push_null(
         lambda: cg.load_import_from(
-            torch._dynamo.graph_bytecode_inputs.__name__,
+            torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
             "stash_graph_created_object",
         )
     )
@@ -568,7 +568,7 @@ class StreamVariable(StreamContextVariable):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
                     "stash_graph_created_object",
                 )
             )
@@ -733,7 +733,7 @@ class EventVariable(VariableTracker):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
                     "stash_graph_created_object",
                 )
             )
