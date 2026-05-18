@@ -1240,6 +1240,15 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         # constant arguments, so might as well ban
         "aten._assert_scalar",
     ]
+    + (
+        # rocm workaround: topk kernels fault under cudagraph trees
+        # on the 2nd replay of a recorded graph.
+        [
+            "aten.topk.default",
+        ]
+        if torch.version.hip is not None
+        else []
+    )
 )
 
 
