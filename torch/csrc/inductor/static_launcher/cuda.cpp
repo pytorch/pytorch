@@ -9,13 +9,13 @@
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <optional>
-#include <vector>
 
 #if defined(USE_ROCM)
+#include <fstream>
 #include <hip/hip_runtime_api.h>
+#include <iterator>
+#include <vector>
 #endif
 
 /**
@@ -133,6 +133,8 @@ CUfunction loadKernel(
   CUfunction func = nullptr;
 
 #if defined(USE_ROCM)
+  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
+  // HSACO. Load from memory to avoid retaining one FD per static launcher.
   auto image = readKernelImage(filePath);
   AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
