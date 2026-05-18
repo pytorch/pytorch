@@ -26,7 +26,12 @@ from ._utils import (
     generate_stage_to_rank_mapping,
     InferenceMode,
 )
-from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
+from .microbatch import (
+    _split_tensor,
+    merge_chunks,
+    split_args_kwargs_into_chunks,
+    TensorChunkSpec,
+)
 from .stage import _PipelineStageBase, PipelineStage
 
 
@@ -81,6 +86,13 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+
+
+# Targets (e.g. labels) are always split along the batch dim (0). Use
+# _split_tensor so DTensor targets preserve their Shard placements instead of
+# being silently all-gathered to Replicate by the default dispatch path.
+_TARGET_CHUNK_SPEC = TensorChunkSpec(0)
+
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -753,10 +765,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(
@@ -1890,10 +1903,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(
