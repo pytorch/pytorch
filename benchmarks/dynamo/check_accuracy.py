@@ -17,6 +17,9 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
+    # borderline mask thresholding: one logit near 0.0 can flip a single pixel,
+    # giving IoU=0 when both masks are nearly empty
+    "sam",
 }
 
 
