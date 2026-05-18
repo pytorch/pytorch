@@ -2945,6 +2945,26 @@
       ]
     }
   ],
+  "GB9458": [
+    {
+      "Gb_type": "sq_repeat_impl not implemented",
+      "Context": "{type(self).__name__} has sq_repeat slot but no sq_repeat_impl override",
+      "Explanation": "The type {self.python_type_name()} has an sq_repeat C slot but the corresponding VariableTracker doesn't implement sq_repeat_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9561": [
+    {
+      "Gb_type": "sq_inplace_repeat_impl not implemented",
+      "Context": "{type(self).__name__} has sq_inplace_repeat slot but no sq_inplace_repeat_impl override",
+      "Explanation": "The type {self.python_type_name()} has an sq_inplace_repeat C slot but the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0217": [
     {
       "Gb_type": "unsupported hasattr operation",
