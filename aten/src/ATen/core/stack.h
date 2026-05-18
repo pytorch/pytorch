@@ -1,6 +1,8 @@
 #pragma once
 
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Deprecated.h>
@@ -120,7 +122,7 @@ inline std::vector<IValue> pop(Stack& stack, size_t n) {
   return result;
 }
 
-// variadic pop:
+// variadic pop (prefer the tuple-returning overload below for new code):
 // int64_t a; at::Tensor b;
 // pop(stack, a, b);
 // equivalent to:
@@ -137,6 +139,33 @@ inline void pop(Stack& stack, Types&... args) {
 template <typename... Types>
 inline void pop(Stack* stack, Types&... args) {
   pop(*stack, args...);
+}
+// tuple-returning pop:
+// auto [a, b] = pop<int64_t, at::Tensor>(stack);
+namespace detail {
+template <typename... Types, size_t... Is>
+inline std::tuple<Types...> pop_impl(
+    Stack& stack,
+    std::index_sequence<Is...>) {
+  constexpr size_t N = sizeof...(Types);
+  std::tuple<Types...> result{
+      std::move(peek(stack, Is, N)).template to<Types>()...};
+  drop(stack, N);
+  return result;
+}
+} // namespace detail
+template <
+    typename... Types,
+    std::enable_if_t<(sizeof...(Types) > 0), int> = 0>
+inline std::tuple<Types...> pop(Stack& stack) {
+  return detail::pop_impl<Types...>(
+      stack, std::make_index_sequence<sizeof...(Types)>{});
+}
+template <
+    typename... Types,
+    std::enable_if_t<(sizeof...(Types) > 0), int> = 0>
+inline std::tuple<Types...> pop(Stack* stack) {
+  return pop<Types...>(*stack);
 }
 template <typename Type>
 inline void push_one(Stack& stack, Type&& arg) {
