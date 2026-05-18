@@ -599,12 +599,16 @@ def _quack_cute_epilogue_code(
             )
 
     if local_norm is not None:
-        if local_norm.group_size != 32:
+        if 32 % local_norm.group_size != 0:
             raise NotImplementedError(
-                "QUACK reductions feeding the main output currently support only "
-                "same-fragment group size 32; aux reductions can use other static groups"
+                "QUACK reductions feeding the main output currently require a "
+                "power-of-two group size that divides the same-fragment N width 32; "
+                "aux reductions can use other static groups"
             )
         source = _quack_cute_arg(local_norm.source_node, env)
+        groups_per_fragment = 32 // local_norm.group_size
+        grouped_name = f"tmp{kernel.cse.index}"
+        kernel.cse.index += 1
         sum_name = f"tmp{kernel.cse.index}"
         kernel.cse.index += 1
         broadcast_name = f"tmp{kernel.cse.index}"
@@ -612,11 +616,21 @@ def _quack_cute_epilogue_code(
         out_name = f"tmp{kernel.cse.index}"
         kernel.cse.index += 1
         kernel.body.writeline(
-            f"{sum_name} = {source}.reduce("
-            "cute.ReductionOp.ADD, init_val=0.0, reduction_profile=((None, 1), 1, 1))"
+            f"{grouped_name} = {source}.reshape("
+            f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
         )
-        kernel.body.writeline(f"{broadcast_name} = cute.full_like({source}, {sum_name}[0])")
-        kernel.body.writeline(f"{out_name} = {source} / {broadcast_name}")
+        kernel.body.writeline(
+            f"{sum_name} = {grouped_name}.reduce("
+            "cute.ReductionOp.ADD, init_val=0.0, "
+            "reduction_profile=((None, 1, None), 1, 1))"
+        )
+        kernel.body.writeline(
+            f"{broadcast_name} = {sum_name}.reshape("
+            f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
+        )
+        kernel.body.writeline(
+            f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
+        )
         output_value = out_name
 
     return (
