@@ -1341,36 +1341,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            # Pure AOTI passes the model runtime device. Dual-wrapper-mode shares this
-            # call arg list with JIT code, where `this->device_idx_` is not
-            # available, so use the concrete graph device index.
-            device_idx = (
-                "this->device_idx_"
-                if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode
-                else str(device.index)
+            # AOTI side uses this->device_idx_ so the model honors runtime device
+            # assignment; JIT side has no this->device_idx_ in scope, so use the
+            # concrete graph device index. Similarly, AOTI side always uses the
+            # `stream` function parameter of run_impl, while JIT side uses the
+            # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
+            aoti_device_idx = (
+                "this->device_idx_" if V.graph.aot_mode else str(device.index)
             )
-            call_args.append(device_idx)
-            # In dual-wrapper mode, JIT side uses the locally-declared stream{idx}
-            # (see _codegen_entry_impl_prologue) while AOT side uses the
-            # `stream` function parameter of run_impl.
-            jit_call_args = [*call_args, stream]
-            aot_call_args = (
-                [*call_args, "stream"]
-                if V.graph.is_dual_wrapper_mode
-                else jit_call_args
-            )
+            jit_device_idx = str(device.index)
+            jit_call_args = [*call_args, jit_device_idx, stream]
+            aot_call_args = [*call_args, aoti_device_idx, "stream"]
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 jit_call_args[: len(arg_types)], kernel_name, arg_types, None
             )
-            self.wrapper_call.writeline_jit(
-                f"{wrapper_name}({', '.join(jit_call_args)});"
-            )
-            with debug_printer_manager:
-                self.wrapper_call.writeline_aot(
-                    f"{wrapper_name}({', '.join(aot_call_args)}, "
-                    f"kernels, this->cubin_dir_);"
-                )
+            # DebugPrinterManager is AOTI-only: route its writes through
+            # writeline_aot so they're dropped on the JIT side (no-op for the
+            # pure-JIT IndentedBuffer; AOT-only for DualIndentedBuffer). Without
+            # this, the JIT buffer would receive before/after-launch prints
+            # after the JIT launch, reporting post-launch state as pre-launch.
+            with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline_aot):
+                with debug_printer_manager:
+                    self.wrapper_call.writeline_jit(
+                        f"{wrapper_name}({', '.join(jit_call_args)});"
+                    )
+                    self.wrapper_call.writeline_aot(
+                        f"{wrapper_name}({', '.join(aot_call_args)}, "
+                        f"kernels, this->cubin_dir_);"
+                    )
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
