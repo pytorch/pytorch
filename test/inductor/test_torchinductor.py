@@ -11663,6 +11663,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    def test_argmax_argmin_noncontiguous(self):
+        def fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        self.common(fn, (torch.randn(5, 7),))
+
     def test_argmax_argmin2(self):
         def fn(x):
             return (

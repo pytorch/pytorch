@@ -565,7 +565,7 @@ inline IndexValueVec<T, NV, NI>& argmin_vec_impl(
     IndexValueVec<T, NV, NI>& a,
     at::vec::VectorizedN<T, NV> value,
     at::vec::VectorizedN<int64_t, NI> index,
-    std::optional<int64_t> tail_size) {
+    std::optional<int64_t> tail_size = std::nullopt) {
   at::vec::VecMask<T, NV> vmask(a.value < value);
   at::vec::VecMask<int64_t, NI> final_mask =
       get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
@@ -588,7 +588,7 @@ inline IndexValueVec<T, NV, NI>& argmax_vec_impl(
     IndexValueVec<T, NV, NI>& a,
     at::vec::VectorizedN<T, NV> value,
     at::vec::VectorizedN<int64_t, NI> index,
-    std::optional<int64_t> tail_size) {
+    std::optional<int64_t> tail_size = std::nullopt) {
   at::vec::VecMask<T, NV> vmask(a.value > value);
   at::vec::VecMask<int64_t, NI> final_mask =
       get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);

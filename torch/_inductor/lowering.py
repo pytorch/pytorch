@@ -6722,11 +6722,7 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
-    if (
-        reduction_type in ("argmax", "argmin")
-        and len(reduced_sizes) > 1
-        and is_triton(x)
-    ):
+    if reduction_type in ("argmax", "argmin") and len(reduced_sizes) > 1:
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
         elif isinstance(x.data, ir.ReinterpretView) or (

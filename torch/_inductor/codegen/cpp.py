@@ -2319,6 +2319,11 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
+
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -2365,9 +2370,12 @@ class CppKernel(Kernel):
             )
         else:
             assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
+            if logical_index is not None:
+                index = logical_index
+            else:
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
@@ -3044,6 +3052,11 @@ class CppVecKernel(CppKernel):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
+
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -3162,15 +3175,23 @@ class CppVecKernel(CppKernel):
                 )
         else:
             assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
-            kwargs = {
-                "next_value": value,
-                "index": index,
-                "horizontal_reduction": horizontal_reduction,
-                "src_dtype": src_dtype,
-            }
+            if logical_index is not None:
+                kwargs = {
+                    "next_value": value,
+                    "logical_index": logical_index,
+                    "horizontal_reduction": horizontal_reduction,
+                    "src_dtype": src_dtype,
+                }
+            else:
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
+                kwargs = {
+                    "next_value": value,
+                    "index": index,
+                    "horizontal_reduction": horizontal_reduction,
+                    "src_dtype": src_dtype,
+                }
             self.stores.writeline(
                 f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, **kwargs)};"
             )
@@ -3396,6 +3417,7 @@ class CppVecKernel(CppKernel):
         next_value,
         helper_val=None,
         index: sympy.Symbol | None = None,
+        logical_index=None,
         horizontal_reduction: bool | None = None,
         src_dtype: torch.dtype | None = torch.float32,
     ):
@@ -3475,6 +3497,18 @@ class CppVecKernel(CppKernel):
                     (next_value,) = unify_mask_base_type(self.compute, (next_value,))
             n_src = self._get_num_vectors(compute_dtype)
             n_idx = self._get_num_vectors(torch.int64)
+            if logical_index is not None:
+                # Non-contiguous case: use pre-computed vector of logical indices
+                if self.tail_size:
+                    return (
+                        f"{reduction_type}_vec_impl<{cdtype}, {n_src}, {n_idx}>"
+                        f"({var}, {next_value}, {logical_index}, {cexpr_index(self.tail_size)})"
+                    )
+                else:
+                    return (
+                        f"{reduction_type}_vec_impl<{cdtype}, {n_src}, {n_idx}>"
+                        f"({var}, {next_value}, {logical_index})"
+                    )
             t_extra = ""
             arg_extra = ""
             if index is not None:
