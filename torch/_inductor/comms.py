@@ -2203,11 +2203,11 @@ def visualize_overlap(order):
 
 
 def _swap_nodes(
-    a: "BaseSchedulerNode",
-    b: "BaseSchedulerNode",
+    a: BaseSchedulerNode,
+    b: BaseSchedulerNode,
     _prev: dict,
     _next: dict,
-) -> "BaseSchedulerNode | None":
+) -> BaseSchedulerNode | None:
     """Swap adjacent nodes a, b (a before b). Returns new head if it changed."""
     pp, nn = _prev[a], _next[b]
     if pp is not None:
@@ -2253,7 +2253,7 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         _buf_last_use, _freeable, _cand_buf_map,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
-    def _delta(node: "BaseSchedulerNode") -> int:
+    def _delta(node: BaseSchedulerNode) -> int:
         af = snodes_allocfree[node]
         return af.size_alloc - af.size_free
 
@@ -2261,7 +2261,6 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     n_moved_waits = 0
 
     # Phase 1: move each collective earlier via adjacent swaps
-    last_coll: "BaseSchedulerNode | None" = None
     for coll in collectives:
         coll_deps = deps_of[coll]
         moved = False
@@ -2289,10 +2288,8 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
 
         if moved:
             n_moved_colls += 1
-        last_coll = coll
 
     # Phase 2: move each wait later via adjacent swaps
-    last_wait: "BaseSchedulerNode | None" = None
     for wait in waits:
         wait_outs = outputs_of[wait]
         moved = False
@@ -2319,7 +2316,6 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
 
         if moved:
             n_moved_waits += 1
-        last_wait = wait
 
     elapsed = _time.perf_counter() - t0
     if n_moved_colls or n_moved_waits:
