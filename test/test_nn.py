@@ -14938,6 +14938,8 @@ if __name__ == '__main__':
         The unchunked reference (``options=None``) is gradchecked
         separately inside ``_test_linear_cross_entropy_loss``.
         """
+        if "mps" in device:
+            self.skipTest("MPS does not support fp64")
         torch.manual_seed(7)
         N, F, V = 4, 3, 5
         inp = torch.randn(N, F, device=device, dtype=torch.float64,

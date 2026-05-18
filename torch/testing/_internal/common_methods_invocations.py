@@ -15746,26 +15746,10 @@ op_db: list[OpInfo] = [
             # (options=None) would lower, but OpInfo can't gate per-sample.
             DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
                          'TestInductorOpInfo', 'test_comprehensive'),
-            # Forward-mode AD coverage is limited because
-            # register_autograd accepts no jvp callable. Tests
-            # requiring jvp still fail; vmap over grad works via
-            # register_vmap. An autograd.Function wrapper would
-            # unblock the remaining variants. Higher-order AD
-            # (test_fn_gradgrad, test_fn_fwgrad_bwgrad) needs
-            # precomputed second derivatives, which the chunked op
-            # does not produce.
-            #
-            # User-facing impact (torch.compile, torch.func.grad,
-            # vmap(grad(...)), higher-order AD, forward-mode AD) is
-            # documented in the "Autograd, functional-transform and
-            # torch.compile limitations" note in
-            # torch.nn.functional.linear_cross_entropy and mirrored
-            # in torch.nn.LinearCrossEntropyLoss. Keep those notes
-            # in sync with this list: if an infrastructure change
-            # makes one of these tests start passing, the
-            # expectedFailure will surface as unexpectedSuccess
-            # (loud) -- promote it (remove the decorator and update
-            # the user-facing notes).
+            # Chunked op: no jvp registered, no second derivatives.
+            # Mirrors the limitations notes on F.linear_cross_entropy
+            # / LinearCrossEntropyLoss; keep those in sync if any
+            # turns into unexpectedSuccess.
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),

@@ -84,16 +84,9 @@ from .instancenorm import (
     LazyInstanceNorm3d,
 )
 
-# Intentionally NOT importing .linear_cross_entropy here even though
-# ``LinearCrossEntropyOptions`` belongs at ``torch.nn.LinearCrossEntropyOptions``:
-# .linear_cross_entropy uses ``@torch.library.custom_op`` at module
-# level, which needs ``torch.library`` to be initialized. During
-# ``torch/__init__.py`` startup this file is loaded transitively
-# before ``torch.library`` exists, so an eager import crashes with
-# ``AttributeError: module 'torch' has no attribute 'library'``.
-# Exposure to ``torch.nn`` is handled by the ``__getattr__`` lazy
-# loader in ``torch/nn/__init__.py``; the same pattern used by
-# ``functional.linear_cross_entropy`` for its private op import.
+# LinearCrossEntropyOptions is not imported here — its module uses
+# @torch.library.custom_op at top level (needs torch.library, which
+# isn't ready during torch init). Exposed lazily via torch.nn.__getattr__.
 from .loss import (
     BCELoss,
     BCEWithLogitsLoss,

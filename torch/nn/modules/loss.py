@@ -1459,35 +1459,15 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             :func:`torch.jit.script`; see the note below.
 
     .. note::
-        **TorchScript compatibility:** ``LinearCrossEntropyLoss``
-        instances with ``options=None`` are scriptable via
-        :func:`torch.jit.script`. Passing a
-        :class:`~torch.nn.LinearCrossEntropyOptions` instance is
-        **not** supported under TorchScript because
-        :class:`LinearCrossEntropyOptions` is a Python dataclass
-        and not itself scriptable; ``options`` is therefore
-        deliberately excluded from this module's
-        ``__constants__``. If you need to script a model containing
-        this loss, leave ``options`` at its default ``None`` (which
-        runs the unchunked reference path) or move the chunked
-        call out of the scripted region.
+        Instances with ``options=None`` are scriptable; passing a
+        :class:`~torch.nn.LinearCrossEntropyOptions` instance is not
+        supported under :func:`torch.jit.script`.
 
-    .. note::
-        **Autograd, functional-transform and ``torch.compile``
-        limitations of the chunked path:** when ``options`` is set,
-        the underlying op precomputes gradients in forward and
-        consumes them in-place during backward. Standard
-        ``loss.backward()`` works as usual, but
-        :func:`torch.compile` falls back to eager at this op, and
-        :func:`torch.func.grad`, :func:`torch.func.jvp`,
-        higher-order AD and ``torch.func.vmap(grad(...))`` do not
-        work on the chunked path. Use ``options=None`` when those
-        APIs are needed. Under :func:`torch.compile` the
-        ``allow_retain_graph`` field is also auto-promoted to
-        ``True`` so the second-backward guard stays correct, with
-        a one-time warning. See the corresponding note in
-        :func:`torch.nn.functional.linear_cross_entropy` for the
-        full list of affected transforms.
+        The chunked path (``options`` not ``None``) does not support
+        higher-order AD, forward-mode AD, ``torch.func.grad`` /
+        ``vmap(grad(...))``, or Inductor lowering; standard
+        ``loss.backward()`` works. See the matching note in
+        :func:`torch.nn.functional.linear_cross_entropy`.
 
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
@@ -1526,10 +1506,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
     """
 
-    # ``options`` is intentionally NOT in ``__constants__``: it is a
-    # Python dataclass (``LinearCrossEntropyOptions``) and not
-    # TorchScript-scriptable. This BC implication is documented in
-    # the class docstring's "TorchScript compatibility" note.
+    # options is intentionally not in __constants__ (not scriptable).
     __constants__ = [
         "num_classes",
         "out_features",
