@@ -1196,7 +1196,7 @@ class aten_distributed_optimizations:
     #   - No collective reordering (preserves NCCL stream ordering)
     #   - No memory regression (each move verified individually)
     #   - Predictable (no runtime estimation, no heuristics)
-    enable_simple_overlap: bool = False
+    enable_simple_overlap: bool = True
 
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
