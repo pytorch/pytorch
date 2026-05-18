@@ -815,8 +815,9 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
     subdevice_id = info.subdevice_id
 
-    # Enumerate all temperature sensors under this device handle.
-    # For tiled dGPUs each sub-device's sensors are under the root handle.
+    # Note [telemetry handle selection]:
+    # For tiled dGPUs, pick the handle whose subdeviceId matches.
+    # For non-tiled devices, pick the root-level (non-subdevice) handle.
     temp_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumTemperatureSensors(device_handle, byref(temp_count), None),
@@ -832,9 +833,6 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman temperature sensor handles.",
     )
 
-    # Note [telemetry handle selection]:
-    # For tiled dGPUs, pick the handle whose subdeviceId matches.
-    # For non-tiled devices, pick the root-level (non-subdevice) handle.
     temperature_handle = None
     for temp_handle in temp_handles:
         temp_props = pyzes.zes_temp_properties_t()
@@ -914,7 +912,6 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
 
     # Enumerate all frequency domains under this device handle.
-    # For tiled dGPUs each sub-device's domains are under the root handle.
     freq_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumFrequencyDomains(device_handle, byref(freq_count), None),
@@ -986,7 +983,6 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
 
     # Enumerate all power domains under this device handle.
-    # For tiled dGPUs each sub-device's domains are under the root handle.
     power_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumPowerDomains(device_handle, byref(power_count), None),
@@ -1083,17 +1079,14 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
     subdevice_id = info.subdevice_id
 
-    # Enumerate all engine groups under this device handle.
-    # For tiled dGPUs each sub-device's group are under the root handle.
+    # See Note [telemetry handle selection]
     engine_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None),
         "Can't get Level Zero Sysman engine group count.",
     )
-    # TODO: zesDeviceEnumEngineGroups does not return
-    # ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
-    # instead it succeeds with count=0. Treat that as an error with a
-    # helpful hint about elevated privileges.
+    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
+    # instead it succeeds with count=0. Treat that as an error with a helpful hint about elevated privileges.
     if engine_count.value == 0:
         raise RuntimeError(
             "No Level Zero Sysman engine groups found. The GPU may not support engine monitoring, or try running with elevated privileges (e.g. sudo)."
@@ -1106,7 +1099,6 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman engine group handles.",
     )
 
-    # See Note [telemetry handle selection]
     engine_handle = None
     for eng_handle in engine_handles:
         eng_props = pyzes.zes_engine_properties_t()
@@ -1206,8 +1198,7 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
     device_handle = info.device_handle
     subdevice_id = info.subdevice_id
 
-    # Enumerate all memory modules under this device handle.
-    # For tiled dGPUs each sub-device's modules are under the root handle.
+    # See Note [telemetry handle selection]
     mem_count = c_uint32(0)
     _zes_check(
         pyzes.zesDeviceEnumMemoryModules(device_handle, byref(mem_count), None),
@@ -1223,7 +1214,6 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman memory module handles.",
     )
 
-    # See Note [telemetry handle selection]
     memory_handle = None
     for mem_handle in memory_handles:
         mem_props = pyzes.zes_mem_properties_t()
