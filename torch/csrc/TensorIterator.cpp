@@ -3,9 +3,10 @@
 #include <ATen/TensorIterator.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <pybind11/stl.h>
 
-#include <sstream>
 #include <vector>
 
 namespace torch {
@@ -318,25 +319,16 @@ void initTensorIteratorBindings(PyObject* module) {
       });
 
   py::class_<TensorIterator>(m, "_TensorIterator")
-      .def_property_readonly(
-          "ndim", [](const TensorIterator& it) { return it.ndim(); })
+      .def_property_readonly("ndim", &TensorIterator::ndim)
       .def_property_readonly(
           "shape",
           [](const TensorIterator& it) { return shape_as_tuple(it.shape()); })
-      .def_property_readonly(
-          "numel", [](const TensorIterator& it) { return it.numel(); })
-      .def_property_readonly(
-          "ntensors", [](const TensorIterator& it) { return it.ntensors(); })
-      .def_property_readonly(
-          "ninputs", [](const TensorIterator& it) { return it.ninputs(); })
-      .def_property_readonly(
-          "noutputs", [](const TensorIterator& it) { return it.noutputs(); })
-      .def_property_readonly(
-          "is_contiguous",
-          [](const TensorIterator& it) { return it.is_contiguous(); })
-      .def_property_readonly(
-          "is_trivial_1d",
-          [](const TensorIterator& it) { return it.is_trivial_1d(); })
+      .def_property_readonly("numel", &TensorIterator::numel)
+      .def_property_readonly("ntensors", &TensorIterator::ntensors)
+      .def_property_readonly("ninputs", &TensorIterator::ninputs)
+      .def_property_readonly("noutputs", &TensorIterator::noutputs)
+      .def_property_readonly("is_contiguous", &TensorIterator::is_contiguous)
+      .def_property_readonly("is_trivial_1d", &TensorIterator::is_trivial_1d)
       .def_property_readonly(
           "common_dtype",
           [](const TensorIterator& it) -> py::object {
@@ -409,18 +401,13 @@ void initTensorIteratorBindings(PyObject* module) {
           },
           py::arg("index"))
       .def("__repr__", [](const TensorIterator& it) {
-        std::ostringstream ss;
-        ss << "<_TensorIterator ndim=" << it.ndim() << " shape=(";
-        auto shape = it.shape();
-        for (size_t i = 0; i < shape.size(); ++i) {
-          if (i > 0) {
-            ss << ", ";
-          }
-          ss << shape[i];
-        }
-        ss << ") ntensors=" << it.ntensors() << " (" << it.noutputs()
-           << " out, " << it.ninputs() << " in)>";
-        return ss.str();
+        return fmt::format(
+            "<_TensorIterator ndim={} shape=({}) ntensors={} ({} out, {} in)>",
+            it.ndim(),
+            fmt::join(it.shape(), ", "),
+            it.ntensors(),
+            it.noutputs(),
+            it.ninputs());
       });
 }
 
