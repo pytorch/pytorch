@@ -754,7 +754,7 @@ def lt(left, right):
 
 
 class HalideKernel(SIMDKernel):
-    overrides = HalideOverrides
+    overrides = HalideOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = texpr
 
     def __init__(
@@ -958,7 +958,7 @@ class HalideKernel(SIMDKernel):
                     self.index_replacements[node.symbol()] = (
                         V.graph.sizevars.simplify_with_ranges(
                             ModularIndexing(full_index, node.divisor, node.length),
-                            self.halide_vars,
+                            self.halide_vars,  # type: ignore[arg-type]
                         )
                     )
 
@@ -1007,7 +1007,7 @@ class HalideKernel(SIMDKernel):
     ):
         index = super().prepare_indexing(index)
         index = sympy_subs(index, self.index_replacements)
-        return V.graph.sizevars.simplify_with_ranges(index, self.halide_vars)
+        return V.graph.sizevars.simplify_with_ranges(index, self.halide_vars)  # type: ignore[arg-type]
 
     def sym_size(self, sym):
         """The size of an index symbol"""
@@ -1018,7 +1018,7 @@ class HalideKernel(SIMDKernel):
     def indexing_to_dimensions(self, var: str, index: sympy.Expr, is_store: bool):
         """Convert address-based indexing into dimensions using self.halide_vars"""
         symbols = []
-        for sym in sorted(index.free_symbols, key=lambda x: x.name):
+        for sym in sorted(index.free_symbols, key=lambda x: x.name):  # type: ignore[attr-defined]
             if symbol_is_type(sym, (SymT.HALIDE, SymT.TMP)):
                 symbols.append(sym)
             else:
@@ -1088,7 +1088,7 @@ class HalideKernel(SIMDKernel):
             key=lambda d: V.graph.sizevars.optimization_hint(
                 d.stride, fallback=sys.maxsize
             )
-        )
+        )  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
@@ -1222,7 +1222,7 @@ class HalideKernel(SIMDKernel):
             if result.used_dims:
                 self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
                 self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
-                other = self.kexpr(self._load_other or 0)
+                other = self.kexpr(self._load_other or 0)  # type: ignore[arg-type]
                 self.body.writeline(
                     f"{result} = hl.cast({halide_type(dtype)}, {other})"
                 )
@@ -1326,7 +1326,7 @@ class HalideKernel(SIMDKernel):
         else:
             combine_fn = get_reduction_combine_fn(reduction_type, acc_type)
             with V.set_ops_handler(AddParenHandler(HalideOverrides())):
-                combine_str = combine_fn(result_var, value_str)
+                combine_str = combine_fn(result_var, value_str)  # type: ignore[arg-type]
             default_str = f"hl.cast({acc_type}, {halide_constant(default)})"
             self.body.writeline(f"{result_var} = {default_str}")
             self.body.writeline(f"{result_var} = {combine_str}")
@@ -1763,7 +1763,7 @@ class HalideKernel(SIMDKernel):
 
 
 class HalideScheduling(SIMDScheduling):
-    kernel_type = HalideKernel
+    kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:

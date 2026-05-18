@@ -17,7 +17,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
-from .. import config, config as inductor_config
+from .. import config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -327,6 +327,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -2073,10 +2075,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ) -> dict[str, Any]:
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
-        # Calculate allow_tf32
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+        )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+            size_threshold
         )
 
         return {
@@ -2879,7 +2884,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,
+    ROCmConfigHeuristic,  # type: ignore[misc]
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
