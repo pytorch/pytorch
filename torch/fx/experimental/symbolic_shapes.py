@@ -228,7 +228,6 @@ __all__ = [
     "resolve_unbacked_bindings",
     "is_accessor_node",
     "ValueRangesSLoc",
-    "ShapeGuardExpression",
     "SymIntEqByExpr",
     "Specialization",
 ]
@@ -4692,7 +4691,7 @@ class ShapeEnv:
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
 
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
-        size = []
+        size: list[sympy.Expr] = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
                 hint_overrides.get(i, val),
@@ -4720,6 +4719,29 @@ class ShapeEnv:
             ):
                 self.size_like.add(sym)
             size.append(sym)
+
+        # Record tensor exclusion constraints for stable graph selection.
+        # The ndim check guards against stale excluded_sizes from graph
+        # breaks where the resumed tensor may have different dimensionality.
+        # Skip dims with hint overrides: the overridden hint in
+        # backed_var_to_val would mismatch the excluded value, causing the
+        # not-all check in produce_guards_verbose to emit a guard that
+        # immediately fails.
+        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
+        dim = len(tensor_size)
+        if (
+            excluded_sizes
+            and len(excluded_sizes) == dim
+            and any(v is not None for v in excluded_sizes)
+        ):
+            for i in range(dim):
+                ev = excluded_sizes[i]
+                if (
+                    ev is not None
+                    and isinstance(size[i], sympy.Symbol)
+                    and i not in (hint_overrides or {})
+                ):
+                    self._record_exclusion_constraint(size[i], ev)
         return size
 
     def create_symbolic_sizes_strides_storage_offset(
@@ -5021,27 +5043,6 @@ class ShapeEnv:
         size: list[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context, hint_overrides=hint_overrides
         )
-        # Record tensor exclusion constraints for stable graph selection.
-        # The ndim check guards against stale excluded_sizes from graph
-        # breaks where the resumed tensor may have different dimensionality.
-        # Skip dims with hint overrides: the overridden hint in
-        # backed_var_to_val would mismatch the excluded value, causing the
-        # not-all check in produce_guards_verbose to emit a guard that
-        # immediately fails.
-        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
-        if (
-            excluded_sizes
-            and len(excluded_sizes) == dim
-            and any(v is not None for v in excluded_sizes)
-        ):
-            for i in range(dim):
-                ev = excluded_sizes[i]
-                if (
-                    ev is not None
-                    and isinstance(size[i], sympy.Symbol)
-                    and i not in (hint_overrides or {})
-                ):
-                    self._record_exclusion_constraint(size[i], ev)
         stride = self._compute_symbolic_stride(
             source,
             size,
@@ -6786,11 +6787,10 @@ class ShapeEnv:
         )[0]
         if produced_guards.exprs:
             if len(produced_guards.source_locations) != len(produced_guards.exprs):
-                source_locations: list[SLoc | None] = [None] * len(
-                    produced_guards.exprs
+                raise AssertionError(
+                    "guard expressions and source locations must stay in sync"
                 )
-            else:
-                source_locations = produced_guards.source_locations
+            source_locations = produced_guards.source_locations
             guards_with_source = [
                 ShapeGuardExpression(expr, sloc)
                 for expr, sloc in zip(produced_guards.exprs, source_locations)
@@ -6823,17 +6823,6 @@ class ShapeEnv:
         arg_names = [f"t{i}" for i in range(len(args))]
         return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
 
-    @contextmanager
-    def _evaluate_guards_with_source_location(
-        self, sloc: SLoc | None
-    ) -> Generator[None, None, None]:
-        old_sloc = self._evaluate_guards_source_location
-        self._evaluate_guards_source_location = sloc
-        try:
-            yield
-        finally:
-            self._evaluate_guards_source_location = old_sloc
-
     def evaluate_guards_expression_with_source_info(
         self, guards: Sequence[ShapeGuardExpression], args: Sequence[object]
     ) -> bool:
@@ -6844,11 +6833,15 @@ class ShapeEnv:
         """
         arg_names = [f"t{i}" for i in range(len(args))]
         locals_ = {"L": dict(zip(arg_names, args))}
-        for guard in guards:
-            with self._evaluate_guards_with_source_location(guard.sloc):
+        old_sloc = self._evaluate_guards_source_location
+        try:
+            for guard in guards:
+                self._evaluate_guards_source_location = guard.sloc
                 result = eval(guard.expr, SYMPY_INTERP, locals_)
                 if not bool(result):
                     return False
+        finally:
+            self._evaluate_guards_source_location = old_sloc
         return True
 
     def evaluate_guards_for_args(

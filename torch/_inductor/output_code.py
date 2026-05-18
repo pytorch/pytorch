@@ -496,6 +496,7 @@ class CompiledFxGraph(OutputCode):
     # ShapeEnv.produce_guards_expression()
     guards_expr: str | None
     guards_expr_with_source: list[ShapeGuardExpression] | None
+    guards_expr_with_source_arg_count: int | None
     extern_libs_key: str | None
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
@@ -589,6 +590,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.guards_expr_with_source = None
+        self.guards_expr_with_source_arg_count = None
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps

@@ -1854,11 +1854,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
+            # Older cache entries were serialized before guard source locations
+            # were stored, so keep accepting entries with only guards_expr.
             guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
-            if (
+            guards_expr_with_source_arg_count = getattr(
+                graph, "guards_expr_with_source_arg_count", None
+            )
+            # AOTAutograd can load an FX graph using a custom guard checker and
+            # an argument list that differs from the one Inductor used to save
+            # these per-guard expressions. In that case, preserve the custom
+            # evaluate_guards fallback below.
+            can_replay_guards_with_source = (
                 guards_expr_with_source is not None
+                and guards_expr_with_source_arg_count == len(symints)
                 and not config.unsafe_skip_cache_dynamic_shape_guards
-            ):
+            )
+            if can_replay_guards_with_source:
                 check = shape_env.evaluate_guards_expression_with_source_info(
                     guards_expr_with_source, symints
                 )
@@ -1914,6 +1925,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             compiled_graph.guards_expr_with_source,
         ) = shape_env.produce_guards_expression_with_source_info(
             placeholders=symints, guards=guards
+        )
+        compiled_graph.guards_expr_with_source_arg_count = (
+            len(symints) if compiled_graph.guards_expr_with_source is not None else None
         )
         try:
             backend = torch.utils._triton.triton_backend()
