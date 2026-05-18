@@ -6720,7 +6720,7 @@ def _make_reduction_inner(
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
     if (
-        reduction_type in ("argmax", "argmin")
+        reduction_type in ("argmax", "argmin", "argmax_value", "argmin_value")
         and len(reduced_sizes) > 1
         and is_triton(x)
     ):
@@ -6747,7 +6747,7 @@ def _make_reduction_inner(
             new_index[idx] = var
         value = inner_loader(new_index)
 
-        # For argmax/argmin, return tuple with logical linear index if needed
+        # For argmax/argmin reductions, return tuple with logical linear index if needed
         if should_compute_logical_index:
             rindex = [sympy.expand(i) for i in reduction_index]
 
@@ -6787,7 +6787,7 @@ def make_reduction(
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
         if (
-            reduction_type in ("argmax", "argmin")
+            reduction_type in ("argmax", "argmin", "argmax_value", "argmin_value")
             and x.get_dtype() == torch.bool
             and is_triton(x)
         ):
@@ -7387,6 +7387,11 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            return (
+                reduce_argmax_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmax(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
             reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -7398,6 +7403,11 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            return (
+                reduce_argmin_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmin(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
             reduce_argmin(x, axis=dim, keepdims=keepdim),
@@ -7415,6 +7425,8 @@ reduce_argmax = register_lowering(aten.argmax)(
 reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_return_dtype=torch.int64)
 )
+reduce_argmax_value = make_reduction("argmax_value")
+reduce_argmin_value = make_reduction("argmin_value")
 
 add = register_pointwise(
     aten.add,

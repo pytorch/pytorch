@@ -1215,7 +1215,7 @@ def get_reduction_combine_fn(
     if reduction_type in REDUCTION_COMBINE_FN:
         return REDUCTION_COMBINE_FN[reduction_type]
 
-    elif reduction_type in ("argmax", "argmin"):
+    elif reduction_type in ("argmax", "argmin", "argmax_value", "argmin_value"):
 
         def argmax_combine_fn(
             a: tuple[object, object], b: tuple[object, object]
@@ -1223,7 +1223,7 @@ def get_reduction_combine_fn(
             a_value, a_index = a
             b_value, b_index = b
 
-            if reduction_type == "argmin":
+            if reduction_type in ("argmin", "argmin_value"):
                 mask = ops.lt(a_value, b_value)
             else:
                 mask = ops.gt(a_value, b_value)
@@ -1374,14 +1374,11 @@ class Reduction(Loops):
                 device, numel, reduction_numel
             )
         )
+        arg_reduction_types = ("argmax", "argmin", "argmax_value", "argmin_value")
 
         should_split = reduction_type == "scan" or (
             not should_reduce_to_single_element
-            and reduction_type
-            not in (
-                "argmax",
-                "argmin",
-            )
+            and reduction_type not in arg_reduction_types
             and config.split_reductions
         )
 
@@ -1552,7 +1549,7 @@ class Reduction(Loops):
             )
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in ("argmin", "argmax", "argmin_value", "argmax_value"):
             flatten_index = _fixed_indexer(
                 reduction_ranges,
                 FlexibleLayout.contiguous_strides(reduction_ranges),
@@ -1567,6 +1564,8 @@ class Reduction(Loops):
                     ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
+            if reduction_type in ("argmin_value", "argmax_value"):
+                return lambda index: fn(index)[0]
             return lambda index: fn(index)[1]
         else:
             value_fn = inner_fn
@@ -1786,14 +1785,14 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax"):
+        if reduction_type in ("max", "argmax", "argmax_value"):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return False
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin"):
+        if reduction_type in ("min", "argmin", "argmin_value"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):

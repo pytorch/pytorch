@@ -37,6 +37,8 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
     "welford_reduce",
     "welford_combine",
     "any",
