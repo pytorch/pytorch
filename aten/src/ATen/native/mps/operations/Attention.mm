@@ -257,14 +257,13 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
 
       if (has_mask) {
         auto mask = mask_.value();
-        int nd = mask_.value().dim();
+        int nd = mask.dim();
         uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
         uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
         uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
         uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
-        mtl_setArgs<9>(computeEncoder,
-                       mask_.value(),
-                       std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
+        mtl_setArgs<9>(
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
       mtl_setArgs<11>(computeEncoder,
                       std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
@@ -356,7 +355,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   scale_factor);
 
       if (has_mask) {
-        Tensor mask = mask_.value();
+        auto mask = mask_.value();
         int nd = mask.dim();
         uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
         uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
