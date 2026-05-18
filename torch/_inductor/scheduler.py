@@ -7602,10 +7602,13 @@ class Scheduler:
                 )
             written_buffer_name = node1.node.mutation_outputs[0].name
 
-            # The epilogue can only read from the output buffer.
-            # Any other tensor/s would require additional load expressions.
-            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("epilogue reads from buffers other than the mutated output")
+            reads = list(node2.read_writes.reads)
+            if (
+                len(reads) != 1
+                or reads[0].name != written_buffer_name
+                or not node2.can_inplace(reads[0])
+            ):
+                why("epilogue is not unary in-place pointwise on the output buffer")
                 return False
 
             # the epilogue depends on expressions which may not available in the user triton kernel
