@@ -673,6 +673,8 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: pytorch/pytorch/.github/actions/download-td-artifacts@main
+        with:
+          use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
 
       - name: Download Windows torch wheel for cross-compilation
         if: matrix.win_torch_wheel_artifact != ''
