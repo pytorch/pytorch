@@ -295,8 +295,7 @@ kernel void scatter_reduce_strided(
 
 // gather: for each coord in `index` (= output) shape, read input at
 // (coord with coord[dim] replaced by index[coord]) and write to output[coord].
-// One write per output element -> no atomics needed. Bounds-check fires the
-// async error path on out-of-range indices, matching CUDA's behavior.
+// One write per output element -> no atomics needed.
 
 // Dense fast path: output and index contiguous, index.shape == output.shape,
 // input.shape == output.shape outside dim (no slicing).

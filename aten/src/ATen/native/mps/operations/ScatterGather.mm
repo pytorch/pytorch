@@ -67,9 +67,7 @@ static void dispatch_chunked(id<MTLComputeCommandEncoder> encoder,
 
 // In-place scatter with reduce='set'. `self` already holds the output's
 // initial contents (scatter_impl in TensorAdvancedIndexing.cpp does the
-// self->out copy before invoking the stub). Reports out-of-bounds indices
-// via the stream's async error buffer; raised on the next sync via
-// MPSStream::checkLastError (matches CUDA's deferred-assert model).
+// self->out copy before invoking the stub).
 static void scatter_set_metal(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "scatter: expected index to be Long or Int, got ",
@@ -267,8 +265,7 @@ static void scatter_reduce_metal(const Tensor& self,
 }
 
 // Metal gather: output[c] = input[c with c[dim] replaced by index[c]] for
-// every coord c in index's shape. Bounds-check fires the async error path
-// matching the scatter behavior. No atomics needed since each output position
+// every coord c in index's shape. No atomics needed since each output position
 // is written exactly once.
 static void gather_metal(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& output) {
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
