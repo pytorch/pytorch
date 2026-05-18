@@ -259,6 +259,10 @@ torch_new_stable_ivalue(StableIValue** ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_delete_stable_ivalue(StableIValue* value);
 
+/// Backend-specific non-owning stream handle (e.g. `cudaStream_t` for CUDA).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus

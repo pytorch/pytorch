@@ -460,10 +460,10 @@ class TestLibtorchAgnostic(TestCase):
     def test_stream_native_handle(self, device):
         import libtorch_agn_2_13 as libtorch_agnostic
 
-        stream = torch.cuda.Stream()
         device_idx = torch.cuda.current_device()
+        stream = torch.cuda.Stream(device=device_idx)
 
-        with stream:
+        with torch.cuda.stream(stream):
             expected = torch.accelerator.current_stream(device_idx).native_handle
             nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
 
