@@ -334,9 +334,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
 
     for backend in ordering:
         if backend == SDPBackend.CUDNN_ATTENTION:
-            if can_use_cudnn_attention(params) and _can_use_cudnn_sdpa_jagged(
-                params
-            ):
+            if can_use_cudnn_attention(params) and _can_use_cudnn_sdpa_jagged(params):
                 return SDPBackend.CUDNN_ATTENTION
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):

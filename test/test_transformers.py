@@ -3372,7 +3372,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(torch.backends.cudnn.version() is None or torch.backends.cudnn.version() < 91800, "cuDNN 9.18.0.64 is needed for correct support")
     @parametrize("dtype", [torch.bfloat16, torch.half])
     def test_cudnn_attention_varlen(self, dtype):
-        from typing import Any, Optional
+        from typing import Any
 
         @torch.library.custom_op("torch_attn::_varlen_attn", mutates_args={})
         def _varlen_attn(
@@ -3428,7 +3428,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         def _backward(
             ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor, grad_philox_offset: torch.Tensor
-        ) -> tuple[Optional[torch.Tensor], ...]:
+        ) -> tuple[torch.Tensor | None, ...]:
             query = ctx.query
             key = ctx.key
             value = ctx.value

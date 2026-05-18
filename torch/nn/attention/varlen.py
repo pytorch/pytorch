@@ -560,7 +560,7 @@ def _varlen_attn_backward(
             max_k=max_k,
             dropout_p=0.0,
             philox_seed=rng_state,
-            philox_offset=rng_state, # should be unused
+            philox_offset=rng_state,  # should be unused
             attn_bias=None,
             is_causal=is_causal,
             scale=scale,
