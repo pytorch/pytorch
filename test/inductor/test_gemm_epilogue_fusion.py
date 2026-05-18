@@ -1050,6 +1050,33 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_row_reduce_feeding_main(self):
+        M = 128
+        N = 64
+        group = 2
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(-1, group, N)
+                denom = x.sum(1, keepdim=True)
+                return (x / denom).view(M, N)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.rand(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            Exception, "device-side value-producing row reduction"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_large_group_reduce_feeding_main(self):
         M = 64
         N = 64
