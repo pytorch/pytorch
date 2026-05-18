@@ -2202,6 +2202,133 @@ def visualize_overlap(order):
     overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
+def _swap_nodes(
+    a: BaseSchedulerNode,
+    b: BaseSchedulerNode,
+    _prev: dict,
+    _next: dict,
+) -> BaseSchedulerNode | None:
+    """Swap adjacent nodes a, b (a before b). Returns new head if it changed."""
+    pp, nn = _prev[a], _next[b]
+    if pp is not None:
+        _next[pp] = b
+    _prev[b] = pp
+    _next[b] = a
+    _prev[a] = b
+    _next[a] = nn
+    if nn is not None:
+        _prev[nn] = a
+    return b if pp is None else None
+
+
+def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+    """Move collectives earlier and waits later. No collective reordering,
+    no memory regression (each swap verified via incremental tracking)."""
+    import time as _time
+
+    if len(snodes) < 2:
+        return snodes
+
+    collectives = [s for s in snodes if contains_async_collective(s)]
+    waits = [s for s in snodes if contains_wait(s)]
+    if not collectives and not waits:
+        return snodes
+
+    t0 = _time.perf_counter()
+
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+
+    outputs_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: frozenset(o.get_name() for o in s.get_outputs()) for s in snodes
+    }
+    deps_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: frozenset(d.name for d in s.unmet_dependencies if not _is_fake_dep(d))
+        for s in snodes
+    }
+
+    _prev, _next, _head = _initialize_double_linked_list(snodes)
+    (
+        peak_memory, _curr_memory, snodes_allocfree,
+        _buf_last_use, _freeable, _cand_buf_map,
+    ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
+
+    def _delta(node: BaseSchedulerNode) -> int:
+        af = snodes_allocfree[node]
+        return af.size_alloc - af.size_free
+
+    n_moved_colls = 0
+    n_moved_waits = 0
+
+    # Phase 1: move each collective earlier via adjacent swaps
+    for coll in collectives:
+        coll_deps = deps_of[coll]
+        moved = False
+
+        while _prev[coll] is not None:
+            pred = _prev[coll]
+            if outputs_of[pred] & coll_deps:
+                break
+            if contains_async_collective(pred):
+                break
+
+            # Memory check: pred moves later, sees coll's allocation delta
+            if _curr_memory[pred][0] + _delta(coll) > peak_memory:
+                break
+
+            new_head = _swap_nodes(pred, coll, _prev, _next)
+            if new_head is not None:
+                _head = new_head
+
+            # Update incremental memory state
+            cd, pd = _delta(coll), _delta(pred)
+            _curr_memory[coll] = tuple(v - pd for v in _curr_memory[coll])
+            _curr_memory[pred] = tuple(v + cd for v in _curr_memory[pred])
+            moved = True
+
+        if moved:
+            n_moved_colls += 1
+
+    # Phase 2: move each wait later via adjacent swaps
+    for wait in waits:
+        wait_outs = outputs_of[wait]
+        moved = False
+
+        while _next[wait] is not None:
+            succ = _next[wait]
+            if deps_of[succ] & wait_outs:
+                break
+            if contains_wait(succ):
+                break
+
+            # Memory check: wait moves later, sees succ's allocation delta
+            if _curr_memory[wait][0] + _delta(succ) > peak_memory:
+                break
+
+            new_head = _swap_nodes(wait, succ, _prev, _next)
+            if new_head is not None:
+                _head = new_head
+
+            wd, sd = _delta(wait), _delta(succ)
+            _curr_memory[wait] = tuple(v + sd for v in _curr_memory[wait])
+            _curr_memory[succ] = tuple(v - wd for v in _curr_memory[succ])
+            moved = True
+
+        if moved:
+            n_moved_waits += 1
+
+    elapsed = _time.perf_counter() - t0
+    if n_moved_colls or n_moved_waits:
+        log.info(
+            "simple_overlap: moved %d collectives, %d waits "
+            "(peak %d MB, %.3fs)",
+            n_moved_colls, n_moved_waits,
+            peak_memory // (1024 * 1024), elapsed,
+        )
+
+    return _group_nodes_from_linked_list(_head, None, _next)
+
+
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
