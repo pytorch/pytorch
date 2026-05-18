@@ -1888,7 +1888,7 @@ def _low_contention_all_gather_v2(
 #
 #   slots [0 .. ws)           barrier() channel 0 + multimem sync_remote_blocks
 #   slots [ws .. 3*ws)        v2 two barriers (unchanged)
-#   slots [3*ws .. 5*ws)      v3 batched ready/done barriers
+#   slots [3*ws .. 5*ws)      v3 per-peer ready/done signals
 #   slots [5*ws .. 7*ws)      v4 CE->multicast barriers
 #
 # v5 reuses the existing multimem kernel synchronization slots.
@@ -2007,7 +2007,7 @@ def _low_contention_all_gather_v3(
     tensor: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    """Direct-input P2P push all-gather using one batched memcpy call."""
+    """Direct-input P2P push all-gather with per-peer Lamport signals."""
     world_size = c10d._get_group_size_by_name(group_name)
     device_index = (
         tensor.device.index
@@ -2030,24 +2030,45 @@ def _low_contention_all_gather_v3(
     backend_stream.wait_stream(torch.cuda.current_stream())
     with backend_stream:
         ag_input = _direct_ag_input(tensor, backend_stream)
-        _batched_counter_barrier(
-            symm_mem, rank, world_size, ready_base, counter
-        )
-
-        dsts = [
-            symm_mem.get_buffer(
-                dst_rank,
-                tensor.shape,
-                tensor.dtype,
-                storage_offset=rank * tensor.numel(),
+        local_pad = symm_mem.get_signal_pad(rank)
+        for sender in range(world_size):
+            _SymmetricMemory.stream_write_value32(
+                local_pad, ready_base + sender, counter
             )
-            for dst_rank in range(world_size)
-        ]
-        torch.ops.symm_mem.memcpy_batch_async(
-            dsts, [ag_input for _ in range(world_size)]
-        )
-        _batched_counter_barrier(
-            symm_mem, rank, world_size, done_base, counter
+
+        peer_streams: list[torch.cuda.Stream] = []
+        for step in range(1, world_size):
+            dst_rank = (rank + step) % world_size
+            peer_stream = _get_peer_stream(device_index, dst_rank)
+            peer_stream.wait_stream(backend_stream)
+            with peer_stream:
+                ag_input.record_stream(peer_stream)
+                torch.ops.symm_mem.stream_wait_value32(
+                    symm_mem.get_signal_pad(dst_rank), ready_base + rank, counter
+                )
+                dst = symm_mem.get_buffer(
+                    dst_rank,
+                    tensor.shape,
+                    tensor.dtype,
+                    storage_offset=rank * tensor.numel(),
+                )
+                dst.copy_(ag_input)
+                _SymmetricMemory.stream_write_value32(
+                    symm_mem.get_signal_pad(dst_rank), done_base + rank, counter
+                )
+            peer_streams.append(peer_stream)
+
+        output.chunk(world_size)[rank].copy_(ag_input)
+        _SymmetricMemory.stream_write_value32(local_pad, done_base + rank, counter)
+
+        for peer_stream in peer_streams:
+            backend_stream.wait_stream(peer_stream)
+        torch.ops.symm_mem.stream_batch_mem_op(
+            [local_pad for _ in range(world_size)],
+            [done_base + sender for sender in range(world_size)],
+            [counter for _ in range(world_size)],
+            [_LC_OP_WAIT for _ in range(world_size)],
+            [_LC_WAIT_GEQ for _ in range(world_size)],
         )
         output.record_stream(backend_stream)
         torch._C._distributed_c10d._register_work(output, Work())
