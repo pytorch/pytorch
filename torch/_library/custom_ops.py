@@ -743,8 +743,8 @@ class CustomOpDef:
         When any condition fails, ``fast_path`` returns ``_DO_SLOW_PATH``
         and the call falls through to the C++ dispatcher.
 
-        Uses a chain-based dispatch: fast_path → autograd_impl → [adinplaceorview_impl →]
-        backend_dispatch, connected via op.redispatch popping from a thread-local chain."""
+        Dispatch order: fast_path -> autograd_impl -> op.redispatch (C++ dispatcher
+        handles ADInplaceOrView and backend keys)."""
         schema = self._opoverload._schema
         if schema._is_view_op():
             return
@@ -800,7 +800,7 @@ class CustomOpDef:
         # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
         # Save the original entry once so repeated `_install_fast_path` invocations
         # (e.g. registering kernels for different devices) don't nest wrappers.
-        # Note that OpOverload's `_op` (read by `torch.ops.ns.name(x)`) does not hit the fast path.
+        # The OpOverloadPacket (torch.ops.ns.name) is NOT wrapped.
         overload = self._opoverload
         if not hasattr(overload, "_orig_op"):
             overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]

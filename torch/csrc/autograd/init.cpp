@@ -1217,7 +1217,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
 // Arg: a tuple of positional args to the custom op.
 // Non-Tensor args are skipped; Tensor[] args are NOT unpacked, so ops
 // with tensor-list parameters must be excluded by the caller
-// (_install_fast_call checks has_tensorlist).
+// (_install_fast_path checks has_tensorlist).
 // Returns None when any guard fails (caller should fall back).
 // Otherwise returns (device_type: str, any_requires_grad: bool).
 static PyObject* custom_op_fast_path_check(
