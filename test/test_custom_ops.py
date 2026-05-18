@@ -4685,6 +4685,33 @@ class TestCustomOpFastPath(TestCase):
             # default overload whose _op carries the fast path.
             self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
 
+    def test_fast_path_multiple_overloads(self):
+        @torch.library.custom_op("_torch_testing::fp_multi", mutates_args=())
+        def fp_multi(x: Tensor) -> Tensor:
+            return x * 2
+
+        @torch.library.custom_op("_torch_testing::fp_multi.with_bias", mutates_args=())
+        def fp_multi_bias(x: Tensor, bias: Tensor) -> Tensor:
+            return x * 2 + bias
+
+        x = torch.randn(3)
+        bias = torch.randn(3)
+
+        # Each overload should work independently via its OpOverload._op
+        with self._assert_fast_path_taken(fp_multi):
+            self.assertEqual(torch.ops._torch_testing.fp_multi.default(x), x * 2)
+        with self._assert_fast_path_taken(fp_multi_bias):
+            self.assertEqual(
+                torch.ops._torch_testing.fp_multi.with_bias(x, bias),
+                x * 2 + bias,
+            )
+
+        # Calling via the packet dispatches to the correct overload
+        with self._assert_fast_path_taken(fp_multi):
+            self.assertEqual(torch.ops._torch_testing.fp_multi(x), x * 2)
+        with self._assert_fast_path_taken(fp_multi_bias):
+            self.assertEqual(torch.ops._torch_testing.fp_multi(x, bias), x * 2 + bias)
+
     def test_fast_path_mutable(self):
         @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
         def fp_inplace(x: Tensor) -> None:
