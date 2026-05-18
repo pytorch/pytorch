@@ -2178,6 +2178,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertIsNotNone(combo)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
     @requires_cuda_and_triton
     def test_combo_kernel_peak_memory_wide_resnet(self):
         """A tight peak-memory threshold must measurably reduce the

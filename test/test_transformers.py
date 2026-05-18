@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     xfailIfNoAcceleratorTriton,
+    setSdpaBackendsToDefaultFinally,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -822,6 +823,26 @@ class TestTransformers(NNTestCase):
                 mask=src_mask,
                 src_key_padding_mask=padding_mask,
             )
+
+    def test_transformer_encoder_layer_fwd_fake(self, device):
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=128,
+                nhead=8,
+                dim_feedforward=256,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=2,
+        ).to(device).eval()
+
+        x = torch.rand(2, 10, 128, device=device)
+        eager_out = model(x)
+
+        compiled_model = torch.compile(model, fullgraph=True, dynamic=True)
+        compiled_out = compiled_model(x)
+
+        self.assertEqual(eager_out, compiled_out)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_decoder_padding_and_src_mask_bool(self):
@@ -4030,6 +4051,7 @@ class TestSDPACudaOnly(NNTestCase):
         "Does not support SDPA or pre-SM80 hardware",
     )
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
+    @setSdpaBackendsToDefaultFinally
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 143, 2048])
     @parametrize("seq_len_k", [4, 127, 579, 2048])
