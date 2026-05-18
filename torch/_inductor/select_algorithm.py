@@ -78,8 +78,13 @@ from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.hints import DeviceProperties
-from .runtime.triton_compat import HAS_WARP_SPEC
-from .runtime.triton_heuristics import FixedGrid
+from .runtime.triton_compat import (
+    HAS_WARP_SPEC,
+    IntelGPUError,
+    OutOfResources,
+    PTXASError,
+)
+from .runtime.triton_heuristics import FixedGrid, NoTritonConfigsError
 from .utils import (
     ceildiv,
     do_bench_using_profiling,
@@ -3778,6 +3783,49 @@ class AlgorithmSelectorCache(PersistentCache):
         else:
             return choices[0]
 
+    @staticmethod
+    def _is_fallbackable_precompile_error(exc: Exception) -> bool:
+        if isinstance(
+            exc,
+            (
+                CUDACompileError,
+                NoTritonConfigsError,
+                OutOfResources,
+                PTXASError,
+                IntelGPUError,
+                torch.cuda.OutOfMemoryError,
+            ),
+        ):
+            return True
+        return isinstance(exc, RuntimeError) and str(exc).startswith(
+            "No valid triton configs"
+        )
+
+    def precompile_first_valid_choice(
+        self, choices: list[ChoiceCaller]
+    ) -> ChoiceCaller | None:
+        exceptions: list[tuple[ChoiceCaller, BaseException]] = []
+        for choice in choices:
+            if not isinstance(choice, TritonTemplateCaller):
+                if exceptions:
+                    _log_autotune_exceptions(exceptions)
+                return choice
+            try:
+                with restore_stdout_stderr():
+                    choice.precompile()
+            except Exception as e:
+                if not self._is_fallbackable_precompile_error(e):
+                    raise
+                choice.mark_failed()
+                exceptions.append((choice, e))
+                continue
+            if exceptions:
+                _log_autotune_exceptions(exceptions)
+            return choice
+        if exceptions:
+            _log_autotune_exceptions(exceptions)
+        return None
+
     def __call__(
         self,
         name,
@@ -3796,6 +3844,7 @@ class AlgorithmSelectorCache(PersistentCache):
         is_collective=False,
         min_speedup_threshold: float = 1.0,  # Only pick non-fallback if faster by this ratio
         benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
+        precompile_only: bool = False,
     ):
         from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
@@ -3822,13 +3871,13 @@ class AlgorithmSelectorCache(PersistentCache):
             raise self.create_no_valid_choices(name, "No choices exist for backend.")
         log.debug("Max autotune selects from %s choices.", len(choices))
 
-        if len(choices) == 1:
+        if len(choices) == 1 and not precompile_only:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 node = choices[0].output_node()
                 return node, choices[0]
 
-        if config.deterministic:
+        if config.deterministic and not precompile_only:
             choice = self.pick_deterministic_choice(choices)
             node = choice.output_node()
             return node, choice
@@ -3839,6 +3888,24 @@ class AlgorithmSelectorCache(PersistentCache):
         if config.autotune_in_subproc or has_cutlass:
             # Warmup the subprocess pool early so it's ready for benchmarking
             torch._inductor.autotune_process.get_tuning_process_pool()
+
+        if precompile_only:
+            if not use_pipelined_autotuning():
+                with dynamo_timed(
+                    f"{name}_template_precompiling",
+                    log_pt2_compile_event=True,
+                    dynamo_compile_column_us="compile_time_autotune_time_us",
+                ):
+                    choice = self.precompile_first_valid_choice(choices)
+            else:
+                choice = self.precompile_first_valid_choice(choices)
+
+            if choice is None:
+                raise self.create_no_valid_choices(
+                    name, "All choices failed to compile for backend."
+                )
+            node = choice.output_node()
+            return node, choice
 
         precompile_fn = self.make_precompile_fn(
             choices,

@@ -3351,6 +3351,157 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_mixed = (compiled_fn(q, k, v, _identity)).mean()
             out_mixed.backward()
 
+    def _run_with_first_failed_flex_choice(
+        self,
+        target_name,
+        fn,
+        *,
+        seen=None,
+        selected=None,
+    ):
+        from torch._inductor.runtime.triton_heuristics import NoTritonConfigsError
+        from torch._inductor.select_algorithm import (
+            get_algorithm_selector_cache,
+            TritonTemplateCaller,
+        )
+
+        torch._dynamo.reset()
+        get_algorithm_selector_cache().cache_clear()
+        if seen is None:
+            seen = []
+        if selected is None:
+            selected = []
+
+        handled_names = {"flex_attention", "flex_attention_backward"}
+        original_precompile = TritonTemplateCaller.precompile
+        original_output_node = TritonTemplateCaller.output_node
+
+        def precompile(choice):
+            kernel_name = choice.bmreq.kernel_name.removeprefix("triton_")
+            if kernel_name not in handled_names:
+                return original_precompile(choice)
+            if kernel_name == target_name:
+                seen.append(choice)
+                if len(seen) == 1:
+                    raise NoTritonConfigsError(
+                        "No valid triton configs. OutOfResources: mocked"
+                    )
+                if len(seen) > 2:
+                    raise AssertionError(
+                        f"precompiled unused {target_name} fallback choice"
+                    )
+            return None
+
+        def output_node(choice):
+            if choice.bmreq.kernel_name == f"triton_{target_name}":
+                selected.append(choice)
+            return original_output_node(choice)
+
+        with (
+            config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False}),
+            patch.object(
+                TritonTemplateCaller,
+                "precompile",
+                new=precompile,
+            ),
+            patch.object(TritonTemplateCaller, "output_node", new=output_node),
+        ):
+            fn()
+
+        return seen, selected
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_fallback_on_fwd_precompile_failure(self, device):
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 128, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options={"BACKEND": "TRITON"}
+            )
+
+        seen, selected = self._run_with_first_failed_flex_choice("flex_attention", run)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(selected, [seen[1]])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_fallback_on_bwd_precompile_failure(self, device):
+        def run():
+            q, k, v = (
+                torch.randn(
+                    1,
+                    1,
+                    128,
+                    64,
+                    device=device,
+                    dtype=torch.float16,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            )
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options={"BACKEND": "TRITON"}
+            )
+            out.sum().backward()
+
+        seen, selected = self._run_with_first_failed_flex_choice(
+            "flex_attention_backward", run
+        )
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(selected, [seen[1]])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    @patch.object(torch._inductor.config, "flex_fallback_max_configs", 1)
+    def test_fallback_respects_max_configs(self, device):
+        seen = []
+
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 128, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options={"BACKEND": "TRITON"}
+            )
+
+        with self.assertRaisesRegex(InductorError, "All choices failed to compile"):
+            self._run_with_first_failed_flex_choice("flex_attention", run, seen=seen)
+        self.assertEqual(len(seen), 1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_no_fallback_when_user_pins_fwd_config(self, device):
+        seen = []
+
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 128, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                _identity,
+                kernel_options={"BACKEND": "TRITON", "fwd_BLOCK_M": 64},
+            )
+
+        with self.assertRaisesRegex(InductorError, "All choices failed to compile"):
+            self._run_with_first_failed_flex_choice("flex_attention", run, seen=seen)
+        self.assertEqual(len(seen), 1)
+
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):

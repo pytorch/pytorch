@@ -681,6 +681,13 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+# Maximum number of FlexAttention fallback configs to compile-check when
+# max_autotune is disabled.
+flex_fallback_max_configs: int = max(
+    int(os.environ.get("TORCHINDUCTOR_FLEX_FALLBACK_MAX_CONFIGS", "5")),
+    1,
+)
+
 
 # Fall back to ATen for all ops by default, except those nodes that users explicitly
 # annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor

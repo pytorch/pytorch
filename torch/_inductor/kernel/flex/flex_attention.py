@@ -7,7 +7,7 @@ import logging
 import math
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -17,6 +17,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv, Mod
 
+from ... import config
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
@@ -59,6 +60,113 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 Expr = sympy.Expr
+
+_FWD_TUNING_KEYS = (
+    "BLOCK_M",
+    "BLOCK_N",
+    "num_warps",
+    "num_stages",
+    "num_consumer_groups",
+    "num_buffers_warp_spec",
+)
+_BWD_TUNING_KEYS = (
+    "BLOCK_M1",
+    "BLOCK_N1",
+    "BLOCK_M2",
+    "BLOCK_N2",
+    "num_warps",
+    "num_stages",
+    "num_consumer_groups",
+    "num_buffers_warp_spec",
+)
+
+
+def _has_user_pinned_tuning(
+    kernel_options: dict[str, Any],
+    keys: tuple[str, ...],
+    prefix: str,
+) -> bool:
+    return any(
+        name in kernel_options or f"{prefix}_{name}" in kernel_options for name in keys
+    )
+
+
+def _unique_configs(configs):
+    unique = []
+    for cfg in configs:
+        if cfg not in unique:
+            unique.append(cfg)
+    return unique
+
+
+def _limit_fallback_configs(configs):
+    return configs[: config.flex_fallback_max_configs]
+
+
+def _with_fwd_fallback_configs(configs):
+    if config.max_autotune or not configs:
+        return configs
+
+    default_config = configs[0]
+    fallback_configs = list(configs)
+    for stages in range(default_config.num_stages - 1, 0, -1):
+        fallback_configs.append(replace(default_config, num_stages=stages))
+    fallback_configs.extend(
+        [
+            replace(
+                default_config,
+                block_m=min(default_config.block_m, 64),
+                block_n=min(default_config.block_n, 32),
+                num_stages=min(default_config.num_stages, 2),
+                num_warps=4,
+            ),
+            replace(
+                default_config,
+                block_m=min(default_config.block_m, 32),
+                block_n=min(default_config.block_n, 32),
+                num_stages=1,
+                num_warps=4,
+            ),
+            replace(
+                default_config,
+                block_m=16,
+                block_n=16,
+                num_stages=1,
+                num_warps=4,
+            ),
+        ]
+    )
+    return _limit_fallback_configs(_unique_configs(fallback_configs))
+
+
+def _with_bwd_fallback_configs(configs):
+    if config.max_autotune or not configs:
+        return configs
+
+    default_config = configs[0]
+    fallback_configs = [
+        *configs,
+        replace(default_config, num_stages=1),
+        replace(
+            default_config,
+            block_m1=min(default_config.block_m1, 32),
+            block_n1=min(default_config.block_n1, 32),
+            block_m2=min(default_config.block_m2, 32),
+            block_n2=min(default_config.block_n2, 32),
+            num_stages=1,
+            num_warps=4,
+        ),
+        replace(
+            default_config,
+            block_m1=16,
+            block_n1=16,
+            block_m2=16,
+            block_n2=16,
+            num_stages=1,
+            num_warps=4,
+        ),
+    ]
+    return _limit_fallback_configs(_unique_configs(fallback_configs))
 
 
 def _sanitize_kernel_options_for_triton(
@@ -386,6 +494,9 @@ def flex_attention(
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    user_pinned = _has_user_pinned_tuning(kernel_options, _FWD_TUNING_KEYS, "fwd")
+    if not user_pinned:
+        configs = _with_fwd_fallback_configs(configs)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -505,6 +616,7 @@ def flex_attention(
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
         layout,
         input_gen_fns=input_gen_fns,
+        precompile_only=not config.max_autotune,
     )
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
@@ -913,6 +1025,9 @@ def flex_attention_backward(*args, **kwargs):
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    user_pinned = _has_user_pinned_tuning(kernel_options, _BWD_TUNING_KEYS, "bwd")
+    if not user_pinned:
+        configs = _with_bwd_fallback_configs(configs)
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -1042,6 +1157,7 @@ def flex_attention_backward(*args, **kwargs):
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
+        precompile_only=not config.max_autotune,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention

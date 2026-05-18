@@ -9,6 +9,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._inductor import config
 from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -1740,6 +1741,133 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
             ).mean()
             out_mixed.backward()
+
+    def _run_with_first_failed_decode_choice(
+        self,
+        fn,
+        *,
+        seen=None,
+        selected=None,
+    ):
+        from torch._inductor.runtime.triton_heuristics import NoTritonConfigsError
+        from torch._inductor.select_algorithm import (
+            get_algorithm_selector_cache,
+            TritonTemplateCaller,
+        )
+
+        torch._dynamo.reset()
+        get_algorithm_selector_cache().cache_clear()
+        if seen is None:
+            seen = []
+        if selected is None:
+            selected = []
+
+        original_precompile = TritonTemplateCaller.precompile
+        original_output_node = TritonTemplateCaller.output_node
+
+        def precompile(choice):
+            if choice.bmreq.kernel_name != "triton_flex_decoding":
+                return original_precompile(choice)
+            seen.append(choice)
+            if len(seen) == 1:
+                raise NoTritonConfigsError(
+                    "No valid triton configs. OutOfResources: mocked"
+                )
+            if len(seen) > 2:
+                raise AssertionError("precompiled unused flex_decoding fallback choice")
+            return None
+
+        def output_node(choice):
+            if choice.bmreq.kernel_name == "triton_flex_decoding":
+                selected.append(choice)
+            return original_output_node(choice)
+
+        with (
+            config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False}),
+            patch.object(
+                TritonTemplateCaller,
+                "precompile",
+                new=precompile,
+            ),
+            patch.object(TritonTemplateCaller, "output_node", new=output_node),
+        ):
+            fn()
+
+        return seen, selected
+
+    @supported_platform
+    @skip_on_xpu
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_decode_fallback_on_precompile_failure(self, device):
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                _identity,
+                kernel_options={"BACKEND": "TRITON_DECODE"},
+            )
+
+        seen, selected = self._run_with_first_failed_decode_choice(run)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(selected, [seen[1]])
+
+    @supported_platform
+    @skip_on_xpu
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    @patch.object(torch._inductor.config, "flex_fallback_max_configs", 1)
+    def test_decode_fallback_respects_max_configs(self, device):
+        seen = []
+
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                _identity,
+                kernel_options={"BACKEND": "TRITON_DECODE"},
+            )
+
+        with self.assertRaisesRegex(InductorError, "All choices failed to compile"):
+            self._run_with_first_failed_decode_choice(run, seen=seen)
+        self.assertEqual(len(seen), 1)
+
+    @supported_platform
+    @skip_on_xpu
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_no_decode_fallback_when_user_pins(self, device):
+        seen = []
+
+        def run():
+            q, k, v = (
+                torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+                for _ in range(3)
+            )
+            torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                _identity,
+                kernel_options={
+                    "BACKEND": "TRITON_DECODE",
+                    "fwd_BLOCK_N": 64,
+                },
+            )
+
+        with self.assertRaisesRegex(InductorError, "All choices failed to compile"):
+            self._run_with_first_failed_decode_choice(run, seen=seen)
+        self.assertEqual(len(seen), 1)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
