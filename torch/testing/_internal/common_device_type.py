@@ -410,6 +410,15 @@ class DeviceTypeTestBase(TestCase):
         return cls.device_type
 
     @classmethod
+    def distributed_backend(cls) -> str:
+        """
+        Default distributed backend for this device type.
+        """
+        import torch.distributed as dist
+
+        return dist.get_default_backend_for_device(cls.device_type)
+
+    @classmethod
     def _get_test_exclusions(cls, test_class_name):
         test_exclusions = getattr(cls, "test_exclusions", None)
         if test_exclusions is not None and test_class_name in test_exclusions:

@@ -246,5 +246,15 @@ with _temp_test_configs(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
 
+
+class TestDistributedBackendHook(TestCase):
+    def test_distributed_backend_for_openreg(self, device):
+        self.assertEqual(type(self).distributed_backend(), "occl")
+
+
+instantiate_device_type_tests(
+    TestDistributedBackendHook, globals(), only_for=("openreg",)
+)
+
 if __name__ == "__main__":
     run_tests()
