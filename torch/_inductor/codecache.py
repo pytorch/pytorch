@@ -1854,7 +1854,16 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            check = bool(evaluate_guards(graph.guards_expr, symints))
+            guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
+            if (
+                guards_expr_with_source is not None
+                and not config.unsafe_skip_cache_dynamic_shape_guards
+            ):
+                check = shape_env.evaluate_guards_expression_with_source_info(
+                    guards_expr_with_source, symints
+                )
+            else:
+                check = bool(evaluate_guards(graph.guards_expr, symints))
             assert check is True
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
@@ -1900,7 +1909,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        compiled_graph.guards_expr = shape_env.produce_guards_expression(
+        (
+            compiled_graph.guards_expr,
+            compiled_graph.guards_expr_with_source,
+        ) = shape_env.produce_guards_expression_with_source_info(
             placeholders=symints, guards=guards
         )
         try:

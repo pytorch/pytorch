@@ -1294,6 +1294,49 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @requires_cuda_and_triton
+    def test_cache_hit_inductor_guard_preserves_source(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        def mask_fn(b, h, q_idx, kv_idx):
+            return (q_idx - kv_idx <= 512) & (kv_idx - q_idx <= 512)
+
+        def run(compiled_fn, seq_len):
+            x = torch.empty((1, 1, seq_len, 1), dtype=torch.float16, device="cuda")
+            torch._dynamo.mark_dynamic(x, 2)
+            result = compiled_fn(
+                mask_fn,
+                B=None,
+                H=None,
+                Q_LEN=x.size(-2),
+                KV_LEN=x.size(-2),
+                device="cuda",
+            )
+            torch.cuda.synchronize()
+            return result
+
+        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
+        run(compiled_fn, 10_000)
+
+        self.reset()
+        counters.clear()
+
+        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
+        run(compiled_fn, 10_000)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError) as cm:
+                run(compiled_fn, 50_000)
+
+        msg = str(cm.exception)
+        self.assertIn("can_use_32bit_indexing", msg)
+        self.assertNotIn("_lookup_graph", msg)
+        self.assertNotIn("autograd_cache.py", msg)
+        self.assertNotIn("<string>:1", msg)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_with_guards_static_bounds(self, device, dtype):
