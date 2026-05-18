@@ -273,6 +273,10 @@ benchmark_harness = True
 # fuse pointwise into templates epilogues
 epilogue_fusion = True
 
+# fuse atomic-add scatter mutations into Triton template epilogues
+# Disabled by default because performance depends on index contention.
+epilogue_fusion_with_atomic_add = False
+
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
