@@ -423,6 +423,37 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_mark_dirty_discarded_output_grad(self):
+        class TimesThreeInplace(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(3)
+                ctx.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 3
+
+        def fn(w):
+            y = torch.ones(2, 2) @ w
+            TimesThreeInplace.apply(y)
+            return y.sum()
+
+        def grad_for(compiled):
+            torch._dynamo.reset()
+            w = torch.eye(2, requires_grad=True)
+            f = torch.compile(fn, backend="eager", fullgraph=True) if compiled else fn
+            loss = f(w)
+            loss.backward()
+            return loss.detach(), w.grad
+
+        eager_loss, eager_grad = grad_for(compiled=False)
+        compiled_loss, compiled_grad = grad_for(compiled=True)
+
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(eager_grad, compiled_grad)
+
     def test_multi_output(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
