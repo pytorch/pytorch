@@ -149,6 +149,15 @@ class MutationType:
             )
 
 
+class AttrMutationKind(Enum):
+    # Replay through STORE_ATTR/DELETE_ATTR, preserving descriptor-aware
+    # setattr/delattr semantics. Used for slots, getset descriptors, and other
+    # ordinary attribute writes that should not bypass descriptors.
+    GENERIC_SETATTR = 0
+    # Replay a direct object.__dict__ mutation while bypassing descriptors.
+    INSTANCE_DICT = 1
+
+
 class ValueMutationNew(MutationType):
     """
     This case of VariableTracker.mutation_type marker indicates
@@ -500,24 +509,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Try to peek at the constant value without triggering realization.
-
-        Returns a tuple of (can_peek, is_unrealized, value):
-        - can_peek: True if this variable can be peeked as a constant
-        - is_unrealized: True if this is an unrealized lazy constant (guards not yet installed)
-        - value: The constant value (only valid if can_peek is True)
-
-        Default implementation for non-lazy variables: returns (is_python_constant, False, value).
-        LazyConstantVariable and ComputedLazyConstantVariable override this to peek without
-        realizing. Container types (TupleVariable, ListVariable) override this to recursively
-        peek at their contents.
-        """
-        try:
-            return (True, False, self.as_python_constant())
-        except NotImplementedError:
-            return (False, False, None)
-
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -824,6 +815,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
+        elif name == "__sub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_subtract_impl(tx, args[0])
+        elif name == "__rsub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_subtract_impl(tx, args[0], reverse=True)
+        elif name == "__isub__":
+            return self.nb_inplace_subtract_impl(tx, args[0])
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1291,6 +1291,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement nb_positive_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def nb_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_subtract slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rsub__`` instead of ``__sub__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
+        return variables.ConstantVariable(NotImplemented)
 
     def __init__(
         self,
