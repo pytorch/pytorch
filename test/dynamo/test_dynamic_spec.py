@@ -346,7 +346,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec=ShapesSpec(params=ParamsSpec({"n": 10})),
+            shapes_spec={"n": 10},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -363,9 +363,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])})
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar("batch"), 3])},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -379,9 +377,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
         )
         for n in [4, 8, 16, 32]:
             fn(torch.randn(n, 3))
@@ -405,9 +401,7 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar(), None])})
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar(), None])},
         )
         with self.assertRaises(GuardOnDataDependentSymNode) as cm:
             compiled(torch.randn(10, 3))
@@ -428,7 +422,7 @@ class TestShapeVarCompile(TestCase):
             lambda x: x + 1,
             fullgraph=True,
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
+            shapes_spec={"x": ts},
         )
 
         fn(torch.randn(4, 3))
@@ -451,9 +445,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch")])})
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar("batch")])},
         )
 
         compiled(torch.randn(2), 10)
@@ -478,9 +470,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
         )
         x = torch.randn(12, 3)
         compiled(x, torch.randn(4, 3))
@@ -513,6 +503,25 @@ class TestShapeVarCompile(TestCase):
         # Unbacked dim 0 -> single compile
         self.assertEqual(len(backend.graphs), 1)
 
+    def test_dict_shorthand(self):
+        """shapes_spec={...} (bare dict) is auto-wrapped into
+        ShapesSpec(params=ParamsSpec(dict))."""
+        backend = EagerAndRecordGraphs()
+        fn = torch.compile(
+            lambda x: x.sum(0),
+            backend=backend,
+            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+        )
+        for n in [4, 8, 16]:
+            fn(torch.randn(n, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_normalize_rejects_bad_type(self):
+        """Passing something that's not dict/ParamsSpec/ShapesSpec/None
+        should raise TypeError at compile entry."""
+        with self.assertRaisesRegex(TypeError, "shapes_spec must be"):
+            torch.compile(lambda x: x, shapes_spec="not a spec")
+
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_min_max_bypasses_dde_on_branching(self):
         """Mirror of test_unbacked_raises_dde_on_branching: setting min/max on
@@ -528,11 +537,7 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("batch", min=10, max=100), None])}
-                )
-            ),
+            shapes_spec={"x": TensorSpec([ShapeVar("batch", min=10, max=100), None])},
         )
         # min=10 > 5 → branch resolves statically, no DDE.
         compiled(torch.randn(20, 3))
@@ -549,7 +554,7 @@ class TestShapeVarCompile(TestCase):
                     lambda x: x + 1,
                     backend="eager",
                     dynamic=dynamic,
-                    shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
+                    shapes_spec={"x": ts},
                 )
 
     def test_tensor_dim_optimization_hint_in_shape_env(self):
@@ -558,11 +563,9 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": TensorSpec([ShapeVar("batch", optimization_hint=32), None])}
-                )
-            ),
+            shapes_spec={
+                "x": TensorSpec([ShapeVar("batch", optimization_hint=32), None])
+            },
         )
         fn(torch.randn(8, 3))
         shape = _tensor_placeholder_shape(backend.graphs[0])
@@ -581,9 +584,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"n": IntVar("size", optimization_hint=128)})
-            ),
+            shapes_spec={"n": IntVar("size", optimization_hint=128)},
         )
         compiled(torch.randn(4), 100)
         sym = None
@@ -613,13 +614,9 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [TensorSpec([ShapeVar("batch")])],
-                    }
-                )
-            ),
+            shapes_spec={
+                "*args": [TensorSpec([ShapeVar("batch")])],
+            },
         )
         for n in [4, 8, 16]:
             compiled(torch.randn(n))
@@ -641,13 +638,9 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [TensorSpec([ShapeVar("batch")])],
-                    }
-                )
-            ),
+            shapes_spec={
+                "*args": [TensorSpec([ShapeVar("batch")])],
+            },
         )
         x = torch.randn(8)
         compiled(x, torch.randn(4))
@@ -669,14 +662,10 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("bx")]),
-                        "*args": [TensorSpec([ShapeVar("by")])],
-                    }
-                )
-            ),
+            shapes_spec={
+                "x": TensorSpec([ShapeVar("bx")]),
+                "*args": [TensorSpec([ShapeVar("by")])],
+            },
         )
         for nx, ny in [(4, 5), (8, 9), (16, 17)]:
             compiled(torch.randn(nx), torch.randn(ny))
@@ -701,13 +690,9 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "**kwargs": {"a": TensorSpec([ShapeVar("batch")])},
-                    }
-                )
-            ),
+            shapes_spec={
+                "**kwargs": {"a": TensorSpec([ShapeVar("batch")])},
+            },
         )
         for n in [4, 8, 16]:
             compiled(a=torch.randn(n))
@@ -728,13 +713,9 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "**kwargs": {"a": TensorSpec([ShapeVar("batch")])},
-                    }
-                )
-            ),
+            shapes_spec={
+                "**kwargs": {"a": TensorSpec([ShapeVar("batch")])},
+            },
         )
         a = torch.randn(8)
         compiled(a=a, b=torch.randn(4))
@@ -755,14 +736,10 @@ class TestVarargsVarkwCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "x": TensorSpec([ShapeVar("bx")]),
-                        "**kwargs": {"a": TensorSpec([ShapeVar("ba")])},
-                    }
-                )
-            ),
+            shapes_spec={
+                "x": TensorSpec([ShapeVar("bx")]),
+                "**kwargs": {"a": TensorSpec([ShapeVar("ba")])},
+            },
         )
         for nx, na in [(4, 5), (8, 9), (16, 17)]:
             compiled(torch.randn(nx), a=torch.randn(na))
@@ -789,13 +766,9 @@ class TestVarargsVarkwCompile(TestCase):
             fn,
             backend=backend,
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {
-                        "*args": [None, TensorSpec([ShapeVar("a")])],
-                    }
-                )
-            ),
+            shapes_spec={
+                "*args": [None, TensorSpec([ShapeVar("a")])],
+            },
         )
         for n in [3, 5, 7]:
             compiled(torch.randn(3), torch.randn(n))
