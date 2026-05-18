@@ -437,10 +437,12 @@ class ComboKernelTests(TestCase):
             ).check("XBLOCK_1 : tl.constexpr").check("XBLOCK_2 : tl.constexpr").check(
                 "R0_BLOCK_2 : tl.constexpr"
             ).run(code[0])
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         else:
             FileCheck().check_not("XBLOCK_0 : tl.constexpr").check_not(
                 "combo_grid_meta"
             ).run(code[0])
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @skipIfRocm
     @requires_gpu_and_triton
@@ -1381,8 +1383,9 @@ class ComboKernelTestsMaxAutotune(TestCase):
         FileCheck().check("start_combo_kernel_standalone_autotune(").check(".run(").run(
             code
         )
+        # Seed kernels are internal autotune artifacts and must not inflate
+        # generated_kernel_count. Only the combo kernel itself counts.
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-
         self.assertIn(
             f"Combo standalone autotune seed: submit {seed_count} standalone kernels",
             logs,
