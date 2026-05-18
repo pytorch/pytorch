@@ -179,6 +179,38 @@ def find_broadcast_var(
     return None
 
 
+def is_broadcast_over_var(
+    index: sympy.Expr, var: sympy.Symbol, var_ranges: dict[sympy.Expr, int]
+) -> bool:
+    """
+    Check whether incrementing ``var`` leaves ``index`` unchanged.
+    """
+    variables: dict[sympy.Symbol, int] = {}
+    for v in index.free_symbols:
+        if v in var_ranges:
+            variables[v] = 0
+        else:
+            variables[v] = get_hint(v)
+
+    zero_index = sympy_subs(index, variables)
+    variables[var] = 1
+    try:
+        one_index = sympy_subs(index, variables)
+    except ZeroDivisionError:
+        loop_tiling_log.info("zero division error %s %s", index, variables)
+        return False
+    if one_index != zero_index:
+        return False
+
+    variables[var] = 2
+    try:
+        two_index = sympy_subs(index, variables)
+    except ZeroDivisionError:
+        loop_tiling_log.info("zero division error %s %s", index, variables)
+        return False
+    return two_index == one_index
+
+
 def find_coalesced_var(
     index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
 ) -> sympy.Expr | None:
@@ -217,6 +249,34 @@ def find_coalesced_var(
     return None
 
 
+def find_split_var_separating_expr_from_var(
+    index: sympy.Expr,
+    target_var: sympy.Symbol,
+    index_vars: OrderedSet[sympy.Symbol],
+) -> sympy.Symbol | None:
+    """
+    Find a split boundary after every normalized var used by ``index`` and
+    before ``target_var``.
+    """
+    ordered_vars = list(index_vars)
+    try:
+        target_pos = ordered_vars.index(target_var)
+    except ValueError:
+        return None
+
+    source_positions = [
+        pos for pos, var in enumerate(ordered_vars) if var in index.free_symbols
+    ]
+    if not source_positions:
+        return None
+
+    split_pos = max(source_positions)
+    if split_pos >= target_pos:
+        return None
+
+    return ordered_vars[split_pos]
+
+
 def has_indirect_access(memory_expr: sympy.Expr) -> bool:
     """
     Check if this memory expression has any indirect indexing.
@@ -235,6 +295,53 @@ class FusedNormalizedReadsWrites:
     reads: dict[sympy.Expr, OrderedSet[str]]
     writes: dict[sympy.Expr, OrderedSet[str]]
     var_ranges: dict[sympy.Symbol, int]
+    indirect_sources: dict[sympy.Symbol, tuple[sympy.Expr, ...]]
+
+
+def _get_loop_body_indirect_sources(body) -> dict[sympy.Symbol, sympy.Expr]:
+    """
+    Map each indirect symbol to the load index expression that produces it.
+    """
+    sources: dict[sympy.Symbol, sympy.Expr] = {}
+
+    for node in body.get_nodes():
+        if (
+            node.op != "call_module"
+            or not isinstance(node.target, str)
+            or not node.target.startswith("set_indirect")
+        ):
+            continue
+
+        indirect_idx_str = node.target.removeprefix("set_indirect")
+        if not indirect_idx_str.isdigit():
+            continue
+        indirect_idx = int(indirect_idx_str)
+        if indirect_idx >= len(body.indirect_vars) or len(node.args) != 1:
+            continue
+
+        load_node = node.args[0]
+        if (
+            not isinstance(load_node, torch.fx.Node)
+            or load_node.op != "call_method"
+            or load_node.target != "load"
+            or len(load_node.args) != 3
+        ):
+            continue
+
+        index_node = load_node.args[2]
+        if (
+            not isinstance(index_node, torch.fx.Node)
+            or index_node.op != "call_module"
+            or index_node.target != "get_index"
+            or len(index_node.args) != 1
+        ):
+            continue
+
+        index_name = index_node.args[0]
+        if isinstance(index_name, str):
+            sources[body.indirect_vars[indirect_idx]] = body.indexing_exprs[index_name]
+
+    return sources
 
 
 @overload
@@ -507,6 +614,9 @@ def extract_normalized_read_writes(
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
     writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
+    indirect_sources: dict[sympy.Symbol, OrderedSet[sympy.Expr]] = defaultdict(
+        OrderedSet
+    )
 
     all_output_names = node.get_buffer_names()
     op_names = node.get_operation_names()
@@ -598,6 +708,10 @@ def extract_normalized_read_writes(
             sympy_subs(remove_identity(write), var_map): v
             for write, v in n_writes.items()
         }
+        n_indirect_sources_new = {
+            indirect_var: sympy_subs(remove_identity(source), var_map)
+            for indirect_var, source in _get_loop_body_indirect_sources(body).items()
+        }
 
         for expr, buf_names in n_reads_new.items():
             reads[expr] |= buf_names
@@ -605,11 +719,23 @@ def extract_normalized_read_writes(
         for expr, buf_names in n_writes_new.items():
             writes[expr] |= buf_names
 
+        for indirect_var, source in n_indirect_sources_new.items():
+            indirect_sources[indirect_var].add(source)
+
     reads = {
         V.graph.sizevars.simplify_with_ranges(r, ranges): v for r, v in reads.items()
     }
     writes = {
         V.graph.sizevars.simplify_with_ranges(w, ranges): v for w, v in writes.items()
+    }
+    normalized_indirect_sources = {
+        indirect_var: tuple(
+            OrderedSet(
+                V.graph.sizevars.simplify_with_ranges(source, ranges)
+                for source in sources
+            )
+        )
+        for indirect_var, sources in indirect_sources.items()
     }
 
     fused_out = FusedNormalizedReadsWrites(
@@ -618,6 +744,7 @@ def extract_normalized_read_writes(
         reads,
         writes,
         ranges,
+        normalized_indirect_sources,
     )
     loop_tiling_log.info("Normalized Fused reads: %s", fused_out)
     return fused_out
@@ -639,6 +766,20 @@ def get_score(
     from .virtualized import V
 
     return V.graph.sizevars.optimization_hint(sympy_product(var_sizes))
+
+
+def get_repeated_broadcast_score(
+    var_ranges: dict[sympy.Symbol, int], buf_names: OrderedSet[str]
+) -> int:
+    """
+    Score a broadcast load by the number of loop lanes that execute it.
+    """
+    score = 0
+    num_lanes = V.graph.sizevars.optimization_hint(sympy_product(var_ranges.values()))
+    for buf_name in buf_names:
+        if buf := V.graph.try_get_buffer(buf_name):
+            score += num_lanes * buf.dtype.itemsize
+    return score
 
 
 def try_get_buf_size(buf_name: str) -> int | None:
@@ -717,6 +858,7 @@ def _analyze_memory_coalescing(
     innermost_var = (
         next(reversed(index_vars)) if index_vars and not reduce_vars else None
     )
+    has_indirect_write = any(has_indirect_access(memory_expr) for memory_expr in writes)
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
@@ -781,6 +923,46 @@ def _analyze_memory_coalescing(
                 coalesced_by_var[innermost_var] += total_score
         else:
             uncoalesced_addrs[memory_expr] += total_score
+
+        if not (is_read and indirect_expr) or reduce_vars or has_indirect_write:
+            continue
+
+        # If a broadcasted load produces the index for an indirect load, a
+        # flattened 1D tile repeats the same index address across many lanes.
+        # Splitting after the source index dimensions keeps the indirect load's
+        # dense dimension in x while making the source index address independent
+        # of the x tile.
+        for indirect_var in memory_expr.free_symbols:
+            if not symbol_is_type(indirect_var, SymT.INDIRECT):
+                continue
+
+            sources = norm_read_writes.indirect_sources.get(indirect_var, ())
+            if len(sources) != 1:
+                continue
+
+            source_expr = sources[0]
+            target_var = find_coalesced_var(memory_expr, var_ranges)
+            split_var = (
+                None
+                if target_var is None
+                else find_split_var_separating_expr_from_var(
+                    source_expr, target_var, index_vars
+                )
+            )
+            if (
+                split_var is None
+                or target_var is None
+                or not is_broadcast_over_var(source_expr, target_var, var_ranges)
+            ):
+                continue
+
+            source_buf_names = reads.get(source_expr)
+            if not source_buf_names:
+                continue
+
+            coalesced_by_var[split_var] += get_repeated_broadcast_score(
+                var_ranges, source_buf_names
+            )
 
     if not uncoalesced_addrs:
         return CoalesceVarAnalysis(

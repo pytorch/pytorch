@@ -1621,6 +1621,41 @@ class TestTiling(TestCase):
         expected = embedding_1d(indices, weights)
         self.assertEqual(out, expected)
 
+    def test_indirect_broadcast_embedding_uses_2d_tiling(self):
+        V, D = 512, 256
+        B, T = 2, 128
+        indices = torch.randint(0, V, (B, T), device=GPU_TYPE)
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding(idx, weight):
+            return weight[idx]
+
+        out, code = run_and_get_code(torch.compile(embedding), indices, weights)
+        FileCheck().check("ynumel").check_regex(
+            r"tl\.load\(in_ptr0 \+ \(y[0-9]+\)"
+        ).check_not(f"xindex // {D}").run(code[0])
+        self.assertEqual(out, embedding(indices, weights))
+
+    def test_indirect_broadcast_embedding_strided_indices(self):
+        V, D = 1024, 512
+        base = torch.randint(0, V, (512, 2), device=GPU_TYPE)
+        indices = base.t()
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding(idx, weight):
+            return weight[idx]
+
+        out, code = run_and_get_code(torch.compile(embedding), indices, weights)
+        FileCheck().check("ynumel = 1024").check("xnumel = 512").run(code[0])
+        index_load = next(
+            line for line in code[0].splitlines() if "tl.load(in_ptr0 +" in line
+        )
+        index_load_tail = index_load.split("tl.load(in_ptr0 + ", 1)[1]
+        index_load_address = index_load_tail.split(",", 1)[0]
+        self.assertRegex(index_load_address, r"\by\d+\b")
+        self.assertNotRegex(index_load_address, r"\bx(?:index|\d+)\b")
+        self.assertEqual(out, embedding(indices, weights))
+
     @parametrize("dynamic", (False, True))
     def test_scatter_broadcast_no_tiling(self, dynamic):
         """Scatter with broadcast loads should not trigger 2D tiling."""
