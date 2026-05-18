@@ -59,8 +59,32 @@ def replace_collectives_with_low_contention(
 
     from torch._inductor import config
 
-    min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
-    use_ag_v2 = config.aten_distributed_optimizations.low_contention_all_gather_v2
+    cfg = config.aten_distributed_optimizations
+    min_bytes = cfg.low_contention_min_bytes_per_rank
+    max_replacements = cfg.low_contention_max_replacements
+    max_output_bytes = cfg.low_contention_max_output_bytes_per_graph
+    use_ag_v2 = cfg.low_contention_all_gather_v2
+    use_ag_v3 = cfg.low_contention_all_gather_v3
+    use_ag_v4 = cfg.low_contention_all_gather_v4
+    use_ag_v5 = cfg.low_contention_all_gather_v5
+
+    enabled_ag_flags = [
+        name
+        for name, val in (
+            ("v2", use_ag_v2),
+            ("v3", use_ag_v3),
+            ("v4", use_ag_v4),
+            ("v5", use_ag_v5),
+        )
+        if val
+    ]
+    if len(enabled_ag_flags) > 1:
+        log.warning(
+            "Multiple low_contention_all_gather_v{2,3,4,5} flags are enabled "
+            "(%s). Selecting the most aggressive applicable variant per op "
+            "(v5 > v4 > v3 > v2).",
+            ", ".join(enabled_ag_flags),
+        )
 
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
@@ -68,8 +92,13 @@ def replace_collectives_with_low_contention(
     skipped_small = 0
     skipped_no_overlap = 0
     skipped_nvlink_contention = 0
+    skipped_budget = 0
+    selected_output_bytes = 0
     for node, is_ag, group_name in collectives:
         coll_type = "AG" if is_ag else "RS"
+
+        if max_replacements >= 0 and replacements >= max_replacements:
+            break
 
         # Size filter: LC barrier overhead dominates for small messages
         if min_bytes > 0:
@@ -101,19 +130,64 @@ def replace_collectives_with_low_contention(
             )
             continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2)
+        target = None
+        if is_ag:
+            target = _select_low_contention_all_gather_target(
+                symm_mem,
+                input_node=node.args[0],
+                use_ag_v2=use_ag_v2,
+                use_ag_v3=use_ag_v3,
+                use_ag_v4=use_ag_v4,
+                use_ag_v5=use_ag_v5,
+            )
+            if max_output_bytes >= 0 and _is_budgeted_all_gather_target(
+                target, symm_mem
+            ):
+                output_bytes = _get_ag_output_bytes(node, group_name)
+                if (
+                    output_bytes is None
+                    or selected_output_bytes + output_bytes > max_output_bytes
+                ):
+                    skipped_budget += 1
+                    log.debug(
+                        "LC skip %s %s: output budget exceeded "
+                        "(estimated_output_bytes=%s, selected_output_bytes=%d, "
+                        "max_output_bytes_per_graph=%d)",
+                        coll_type,
+                        node.name,
+                        output_bytes,
+                        selected_output_bytes,
+                        max_output_bytes,
+                    )
+                    continue
+                selected_output_bytes += output_bytes
+
+        _replace_collective(
+            node,
+            graph,
+            symm_mem,
+            is_ag,
+            group_name,
+            target=target,
+        )
         replacements += 1
 
     log.info(
         "Replaced %d/%d FSDP collectives "
         "(skipped_small=%d, skipped_no_overlap=%d, "
-        "skipped_nvlink_contention=%d, min_bytes=%d)",
+        "skipped_nvlink_contention=%d, skipped_budget=%d, min_bytes=%d, "
+        "max_replacements=%d, max_output_bytes_per_graph=%d, "
+        "selected_output_bytes=%d)",
         replacements,
         len(collectives),
         skipped_small,
         skipped_no_overlap,
         skipped_nvlink_contention,
+        skipped_budget,
         min_bytes,
+        max_replacements,
+        max_output_bytes,
+        selected_output_bytes,
     )
 
 
@@ -136,14 +210,110 @@ def _enable_symm_mem(group_name):
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2=False):
+_has_multicast_cached: dict[int, bool] = {}
+
+
+def _has_multicast_support(device_index: int) -> bool:
+    """Return True iff the current CUDA device supports NVLink multicast.
+
+    Cached per-device so we don't call into the driver every lowering.
+    """
+    cached = _has_multicast_cached.get(device_index)
+    if cached is not None:
+        return cached
+    try:
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+    except ImportError:
+        _has_multicast_cached[device_index] = False
+        return False
+    try:
+        result = bool(
+            _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index)
+        )
+    except Exception:
+        result = False
+    _has_multicast_cached[device_index] = result
+    return result
+
+
+def _select_low_contention_all_gather_target(
+    symm_mem,
+    input_node,
+    use_ag_v2=False,
+    use_ag_v3=False,
+    use_ag_v4=False,
+    use_ag_v5=False,
+):
+    # Selection order: v5 > v4 > v3 > v2 > v1. v4 and v5 require
+    # multicast support; if absent we fall through to v3/v2/v1 as appropriate.
+    device_index = None
+    input_val = input_node.meta.get("val")
+    if isinstance(input_val, torch.Tensor) and input_val.device.type == "cuda":
+        device_index = input_val.device.index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+
+    if use_ag_v5 and _has_multicast_support(device_index):
+        return symm_mem._low_contention_all_gather_v5.default
+    if use_ag_v5:
+        log.info(
+            "low_contention_all_gather_v5 requested but multicast is not "
+            "supported on device %d; falling through.",
+            device_index,
+        )
+
+    if use_ag_v4 and _has_multicast_support(device_index):
+        return symm_mem._low_contention_all_gather_v4.default
+    if use_ag_v4:
+        log.info(
+            "low_contention_all_gather_v4 requested but multicast is not "
+            "supported on device %d; falling through.",
+            device_index,
+        )
+
+    if use_ag_v3:
+        return symm_mem._low_contention_all_gather_v3.default
+    if use_ag_v2:
+        return symm_mem._low_contention_all_gather_v2.default
+    return symm_mem._low_contention_all_gather.default
+
+
+def _is_budgeted_all_gather_target(target, symm_mem) -> bool:
+    return target in (
+        symm_mem._low_contention_all_gather_v4.default,
+        symm_mem._low_contention_all_gather_v5.default,
+    )
+
+
+def _replace_collective(
+    node,
+    graph,
+    symm_mem,
+    is_ag,
+    group_name,
+    target=None,
+):
     input_node = node.args[0]
     if is_ag:
-        if use_ag_v2:
-            target = symm_mem._low_contention_all_gather_v2.default
-            args = (input_node, group_name)
+        assert target is not None
+
+        if node.target is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
+            out = node.kwargs["out"]
+            if target is symm_mem._low_contention_all_gather_v5.default:
+                target = symm_mem._low_contention_all_gather_v5_out.default
+            elif target is symm_mem._low_contention_all_gather_v4.default:
+                target = symm_mem._low_contention_all_gather_v4_out.default
+            else:
+                # v1/v2/v3 do not have out variants.
+                out = None
+
+            args = (
+                (input_node, group_name, out)
+                if out is not None
+                else (input_node, group_name)
+            )
         else:
-            target = symm_mem._low_contention_all_gather.default
             args = (input_node, group_name)
     else:
         reduce_op = node.args[1]
@@ -155,6 +325,45 @@ def _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2=Fals
     new_node.meta.update(node.meta)
     node.replace_all_uses_with(new_node)
     graph.erase_node(node)
+
+
+def _get_tensor_nbytes(tensor: torch.Tensor) -> int | None:
+    numel = 1
+    for dim in tensor.shape:
+        if not isinstance(dim, int):
+            return None
+        numel *= dim
+    return numel * tensor.element_size()
+
+
+def _get_group_size(node, group_name) -> int | None:
+    if len(node.args) > 1 and isinstance(node.args[1], int):
+        return node.args[1]
+    try:
+        from torch.distributed import distributed_c10d as c10d
+
+        return c10d._get_group_size_by_name(group_name)
+    except Exception:
+        return None
+
+
+def _get_ag_output_bytes(node, group_name) -> int | None:
+    """Return estimated all-gather output bytes for budget accounting."""
+    if node.target is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
+        out = node.kwargs.get("out")
+        if isinstance(out, torch.fx.Node):
+            out_val = out.meta.get("val")
+            if isinstance(out_val, torch.Tensor):
+                return _get_tensor_nbytes(out_val)
+
+    input_val = node.args[0].meta.get("val") if node.args else None
+    if not isinstance(input_val, torch.Tensor):
+        return None
+    input_bytes = _get_tensor_nbytes(input_val)
+    group_size = _get_group_size(node, group_name)
+    if input_bytes is None or group_size is None:
+        return None
+    return input_bytes * group_size
 
 
 def _get_per_rank_bytes(node, is_ag):
@@ -184,7 +393,9 @@ def _has_compute_bound_overlap(start_node, graph, node_positions):
     wait_pos = node_positions[wait_node]
 
     for node in graph.nodes:
-        pos = node_positions[node]
+        pos = node_positions.get(node)
+        if pos is None:
+            continue
         if pos <= start_pos or pos >= wait_pos:
             continue
         if is_compute_node(node):
@@ -202,7 +413,9 @@ def _has_other_group_collectives(start_node, group_name, graph, node_positions):
     wait_pos = node_positions[wait_node]
 
     for node in graph.nodes:
-        pos = node_positions[node]
+        pos = node_positions.get(node)
+        if pos is None:
+            continue
         if pos <= start_pos or pos >= wait_pos:
             continue
         info = _get_collective_info(node)

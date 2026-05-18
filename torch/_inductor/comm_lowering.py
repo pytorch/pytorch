@@ -545,6 +545,34 @@ def register_symm_mem_lowerings():
                 group_name,  # type: ignore[arg-type]
             )
 
+    def _create_low_contention_ag_out(
+        kernel: torch._ops.OpOverload,
+        inp: ir.TensorBox,
+        group_name: str,
+    ) -> ir.TensorBox:
+        from torch.distributed import distributed_c10d as c10d
+
+        inp.realize()
+        group_size = c10d._get_group_size_by_name(group_name)
+        out_size = [inp.get_size()[0] * group_size, *inp.get_size()[1:]]
+        layout = ir.CommBufferLayout(
+            ir.FixedLayout(
+                device=inp.get_device_or_error(),
+                dtype=inp.get_dtype(),
+                size=out_size,
+            ),
+            ir.CommBufferType.SYMM_MEM,
+            group_name,
+        )
+        return ir.TensorBox.create(
+            ir.ExternKernelOut(
+                layout=layout,
+                inputs=[inp],
+                constant_args=(group_name,),
+                op_overload=kernel,
+            )
+        )
+
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
         inp: ir.TensorBox,
@@ -900,18 +928,105 @@ def register_symm_mem_lowerings():
             ),
         )
 
-    @register_lowering(symm_mem._nccl_ce_all_gather)
-    def _symm_mem_nccl_ce_all_gather(
+    @register_lowering(symm_mem._low_contention_all_gather_v3)
+    def _symm_mem_low_contention_all_gather_v3(
         inp: ir.TensorBox,
         group_name: str,
-        buffer_id: int = 0,
     ):
-        return _create_out_of_place(
-            symm_mem._nccl_ce_all_gather.default,
+        inp.realize()
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v3.default,
+                inp,
+                group_name,
+            ),
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v4)
+    def _symm_mem_low_contention_all_gather_v4(
+        inp: ir.TensorBox,
+        group_name: str,
+    ):
+        return _create_low_contention_ag_out(
+            symm_mem._low_contention_all_gather_v4_out.default,
             inp,
             group_name,
-            buffer_id,
         )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v4_out)
+    def _symm_mem_low_contention_all_gather_v4_out(
+        inp: ir.TensorBox,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        inp.realize()
+        if can_realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM, group_name)
+        else:
+            raise AssertionError(
+                "_low_contention_all_gather_v4_out requires an Inductor-owned "
+                "output buffer that can be realized as symmetric memory."
+            )
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v4_out.default,
+                inp,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v5)
+    def _symm_mem_low_contention_all_gather_v5(
+        inp: ir.TensorBox,
+        group_name: str,
+    ):
+        return _create_low_contention_ag_out(
+            symm_mem._low_contention_all_gather_v5_out.default,
+            inp,
+            group_name,
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v5_out)
+    def _symm_mem_low_contention_all_gather_v5_out(
+        inp: ir.TensorBox,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        inp.realize()
+        if can_realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(out, ir.CommBufferType.SYMM_MEM, group_name)
+        else:
+            raise AssertionError(
+                "_low_contention_all_gather_v5_out requires an Inductor-owned "
+                "output buffer that can be realized as symmetric memory."
+            )
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v5_out.default,
+                inp,
+                group_name,
+                out,
+            ),
+        )
+
+    if hasattr(symm_mem, "_nccl_ce_all_gather"):
+
+        @register_lowering(symm_mem._nccl_ce_all_gather)
+        def _symm_mem_nccl_ce_all_gather(
+            inp: ir.TensorBox,
+            group_name: str,
+            buffer_id: int = 0,
+        ):
+            return _create_out_of_place(
+                symm_mem._nccl_ce_all_gather.default,
+                inp,
+                group_name,
+                buffer_id,
+            )
 
     @register_lowering(symm_mem._low_contention_reduce_scatter)
     def _symm_mem_low_contention_reduce_scatter(
@@ -932,15 +1047,17 @@ def register_symm_mem_lowerings():
             ),
         )
 
-    @register_lowering(symm_mem._nccl_efficiency_reduce_scatter)
-    def _symm_mem_nccl_efficiency_reduce_scatter(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        return _create_out_of_place(
-            symm_mem._nccl_efficiency_reduce_scatter.default,
-            inp,
-            reduce_op,
-            group_name,
-        )
+    if hasattr(symm_mem, "_nccl_efficiency_reduce_scatter"):
+
+        @register_lowering(symm_mem._nccl_efficiency_reduce_scatter)
+        def _symm_mem_nccl_efficiency_reduce_scatter(
+            inp: ir.TensorBox,
+            reduce_op: str,
+            group_name: str,
+        ):
+            return _create_out_of_place(
+                symm_mem._nccl_efficiency_reduce_scatter.default,
+                inp,
+                reduce_op,
+                group_name,
+            )
