@@ -89,11 +89,14 @@ LOOP_BODY_2D = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
         idx_x_w = j - PADDING_W + idx_y_w * STRIDE_W
         idx_x_c = tl.arange(0, BLOCK_K) + k
+        idx_x_h_clamped = tl.maximum(tl.minimum(idx_x_h, IN_H - 1), 0)
+        idx_x_w_clamped = tl.maximum(tl.minimum(idx_x_w, IN_W - 1), 0)
+        idx_x_c_clamped = tl.minimum(idx_x_c, GROUP_IN_C - 1)
 
         x_ptrs = x_base + (
-            (idx_x_h * stride_xh)[:, None]
-            + (idx_x_w * stride_xw)[:, None]
-            + (idx_x_c * stride_xc)[None, :]
+            (idx_x_h_clamped * stride_xh)[:, None]
+            + (idx_x_w_clamped * stride_xw)[:, None]
+            + (idx_x_c_clamped * stride_xc)[None, :]
         )
         mask_x = (
             (idx_n < BATCH)[:, None]
@@ -106,7 +109,9 @@ LOOP_BODY_2D = """
         matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
 
         w_ptrs = w_base + (
-            (idx_x_c * stride_wc_in)[:, None] + (i * stride_wh) + (j * stride_ww)
+            (idx_x_c_clamped * stride_wc_in)[:, None]
+            + (i * stride_wh)
+            + (j * stride_ww)
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
@@ -159,9 +164,15 @@ conv2d_template = TritonTemplate(
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
 
-    x_base = X + (group * stride_xc * GROUP_IN_C + idx_n * stride_xn)[:, None]
+    idx_n_clamped = tl.minimum(idx_n, BATCH - 1)
+    idx_y_c_clamped = tl.minimum(idx_y_c, GROUP_OUT_C - 1)
+    x_base = X + (group * stride_xc * GROUP_IN_C + idx_n_clamped * stride_xn)[:, None]
     w_base = (
-        W + (group * stride_wc_out * GROUP_OUT_C + idx_y_c * stride_wc_out)[None, :]
+        W
+        + (
+            group * stride_wc_out * GROUP_OUT_C
+            + idx_y_c_clamped * stride_wc_out
+        )[None, :]
     )
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
@@ -214,12 +225,16 @@ LOOP_BODY_3D = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
         idx_x_w = j - PADDING_W + idx_y_w * STRIDE_W
         idx_x_c = tl.arange(0, BLOCK_K) + k
+        idx_x_d_clamped = tl.maximum(tl.minimum(idx_x_d, IN_D - 1), 0)
+        idx_x_h_clamped = tl.maximum(tl.minimum(idx_x_h, IN_H - 1), 0)
+        idx_x_w_clamped = tl.maximum(tl.minimum(idx_x_w, IN_W - 1), 0)
+        idx_x_c_clamped = tl.minimum(idx_x_c, GROUP_IN_C - 1)
 
         x_ptrs = x_base + (
-            (idx_x_d * stride_xd)[:, None]
-            + (idx_x_h * stride_xh)[:, None]
-            + (idx_x_w * stride_xw)[:, None]
-            + (idx_x_c * stride_xc)[None, :]
+            (idx_x_d_clamped * stride_xd)[:, None]
+            + (idx_x_h_clamped * stride_xh)[:, None]
+            + (idx_x_w_clamped * stride_xw)[:, None]
+            + (idx_x_c_clamped * stride_xc)[None, :]
         )
         mask_x = (
             (idx_n < BATCH)[:, None]
@@ -234,7 +249,7 @@ LOOP_BODY_3D = """
         matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
 
         w_ptrs = w_base + (
-            (idx_x_c * stride_wc_in)[:, None] +
+            (idx_x_c_clamped * stride_wc_in)[:, None] +
             (d * stride_wd) + (i * stride_wh) + (j * stride_ww)
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
@@ -289,9 +304,15 @@ conv3d_template = TritonTemplate(
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
 
-    x_base = X + (group * stride_xc * GROUP_IN_C + idx_n * stride_xn)[:, None]
+    idx_n_clamped = tl.minimum(idx_n, BATCH - 1)
+    idx_y_c_clamped = tl.minimum(idx_y_c, GROUP_OUT_C - 1)
+    x_base = X + (group * stride_xc * GROUP_IN_C + idx_n_clamped * stride_xn)[:, None]
     w_base = (
-        W + (group * stride_wc_out * GROUP_OUT_C + idx_y_c * stride_wc_out)[None, :]
+        W
+        + (
+            group * stride_wc_out * GROUP_OUT_C
+            + idx_y_c_clamped * stride_wc_out
+        )[None, :]
     )
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
