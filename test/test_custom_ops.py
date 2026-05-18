@@ -2859,6 +2859,50 @@ class TestCustomOpAPI(TestCase):
                 tags=torch.Tag.inplace,
             )
 
+    def test_custom_op_inplace_tag_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_manual_schema",
+            mutates_args={"x"},
+            schema="(Tensor(a!) x, Tensor y) -> Tensor(a!)",
+            tags=torch.Tag.inplace,
+        )
+        def f(x, y):
+            x.add_(y)
+            return x
+
+        self.assertIn(torch.Tag.inplace, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[0].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[0].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        expected = x + y
+        result = f(x, y)
+        self.assertIs(result, x)
+        self.assertEqual(x, expected)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            self.assertIs(f(fake_x, fake_y), fake_x)
+
+    def test_custom_op_inplace_tag_bad_manual_schema(self):
+        with self.assertRaisesRegex(ValueError, "return must alias"):
+
+            @torch.library.custom_op(
+                "_torch_testing::inplace_tag_bad_manual_schema",
+                mutates_args={"x"},
+                schema="(Tensor(a!) x) -> Tensor",
+                tags=torch.Tag.inplace,
+            )
+            def f(x):
+                return x
+
     def test_custom_op_out_tag(self):
         @torch.library.custom_op(
             "_torch_testing::out_tag",
@@ -3174,6 +3218,52 @@ class TestCustomOpAPI(TestCase):
                 mutates_args={"out"},
                 tags=torch.Tag.out,
             )
+
+    def test_custom_op_out_tag_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_manual_schema",
+            mutates_args={"out"},
+            schema="(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=torch.Tag.out,
+        )
+        def f(x, y, *, out):
+            out.copy_(x + y)
+            return out
+
+        self.assertIn(torch.Tag.out, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[2].kwarg_only)
+        self.assertTrue(schema.arguments[2].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[2].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        out = torch.empty_like(x)
+        result = f(x, y, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out, x + y)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_out = torch.empty_like(fake_x)
+            self.assertIs(f(fake_x, fake_y, out=fake_out), fake_out)
+
+    def test_custom_op_out_tag_bad_manual_schema(self):
+        with self.assertRaisesRegex(ValueError, "keyword-only"):
+
+            @torch.library.custom_op(
+                "_torch_testing::out_tag_bad_manual_schema",
+                mutates_args={"out"},
+                schema="(Tensor x, Tensor(a!) out) -> Tensor(a!)",
+                tags=torch.Tag.out,
+            )
+            def f(x, out):
+                return out
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
