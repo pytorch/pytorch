@@ -506,6 +506,14 @@ pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
 )
 
+# use torch profiler to benchmark kernels during autotuning
+# when enabled, this takes precedence over use_experimental_benchmarker
+use_torch_profiler_benchmarker: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
+    justknob="pytorch/inductor:use_torch_profiler_benchmarker",
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -2095,7 +2103,7 @@ class triton:
     # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
     # by per-block amax over a small group dimension like FP8 block size)
     # into a single kernel with two sequential reduction passes.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    nested_reduction = False
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
