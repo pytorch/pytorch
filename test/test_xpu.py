@@ -296,6 +296,8 @@ if __name__ == "__main__":
                 torch.xpu.utilization()
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.memory_usage()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.device_memory_used()
 
     def test_temperature_returns_float(self):
         try:
@@ -386,6 +388,25 @@ if __name__ == "__main__":
         # Sanity check: GPU memory bandwidth usage should be between 0 and 100 percent
         self.assertGreaterEqual(mem_usage, 0.0)
         self.assertLessEqual(mem_usage, 100.0)
+
+    def test_device_memory_used_returns_int(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            mem_used = torch.xpu.device_memory_used()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU memory usage requires elevated privileges")
+            raise
+
+        self.assertIsInstance(mem_used, int)
+        # Sanity check: Memory used should be non-negative and less than total memory
+        total_memory = torch.xpu.get_device_properties().total_memory
+        self.assertGreaterEqual(mem_used, 0)
+        self.assertLessEqual(mem_used, total_memory)
 
     def test_device_count_respects_affinity_mask(self):
         try:
