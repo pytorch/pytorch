@@ -2395,6 +2395,12 @@ def split(x, sizes, dim=0):
     return result
 
 
+# Some compiled autograd graphs still target the aten.split overload packet for
+# list-size splits. Keep that packet target supported without registering
+# aten.split.Tensor, which should be handled by decomposition.
+lowerings[aten.split] = split
+
+
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
@@ -3346,8 +3352,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
+            size = x.get_size()
+            if len(size) == 0:
+                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
