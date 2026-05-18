@@ -961,6 +961,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self._write_entry_point_signature()
         with self.prefix.indent():
             self._codegen_entry_impl_prologue()
+            if config.triton.debug_sync_graph:
+                self.generate_debug_sync(self.prefix)
             self._write_input_preamble()
             self._write_input_unpacking()
             self._write_constants_unpacking()
@@ -2049,6 +2051,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
+
+    def generate_debug_sync(self, buffer: IndentedBuffer) -> None:
+        pass
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(

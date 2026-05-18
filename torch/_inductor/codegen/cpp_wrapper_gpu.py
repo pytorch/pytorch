@@ -844,6 +844,19 @@ class CppWrapperGpu(CppWrapperCpu):
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
 
+    def generate_debug_sync(self, buffer: IndentedBuffer) -> None:
+        if self.device == "cuda":
+            buffer.splice(
+                maybe_hipify_code_wrapper(
+                    """
+                    {
+                        auto status = cudaDeviceSynchronize();
+                        AOTI_TORCH_CHECK(status == cudaSuccess, cudaGetErrorString(status));
+                    }
+                    """
+                )
+            )
+
     @staticmethod
     def create(
         is_subgraph: bool,
