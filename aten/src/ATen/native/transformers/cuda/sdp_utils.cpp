@@ -296,11 +296,14 @@ bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug
   const auto offset_bytes = [](const at::Tensor& tensor) {
     return tensor.sym_storage_offset() * tensor.element_size();
   };
-  // guard_or_true: for symbolic offsets (FakeTensors) we assume aligned so the
-  // chooser does not regress tracing; the eager runtime call re-checks.
+  // Empty tensors need no alignment. For symbolic offsets (FakeTensors),
+  // assume aligned so the chooser does not regress tracing; the eager runtime
+  // call re-checks.
   const auto is_aligned = [&](const at::Tensor& tensor) {
-    return TORCH_GUARD_OR_TRUE(
-        (offset_bytes(tensor) % alignment_bytes).sym_eq(0));
+    const auto offset_is_aligned =
+        (offset_bytes(tensor) % alignment_bytes).sym_eq(0);
+    return TORCH_GUARD_OR_FALSE(tensor.sym_numel().sym_eq(0)) ||
+        TORCH_GUARD_OR_TRUE(offset_is_aligned);
   };
   if (!is_aligned(params.query) || !is_aligned(params.key) ||
       !is_aligned(params.value)) {
@@ -309,11 +312,11 @@ bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug
           "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets * element_size to be aligned to ",
           alignment_bytes,
           " bytes. Got query.storage_offset() * element_size % alignment_bytes: ",
-          (offset_bytes(params.query) % alignment_bytes).expect_int(),
+          offset_bytes(params.query) % alignment_bytes,
           ", key.storage_offset() * element_size % alignment_bytes: ",
-          (offset_bytes(params.key) % alignment_bytes).expect_int(),
+          offset_bytes(params.key) % alignment_bytes,
           ", value.storage_offset() * element_size % alignment_bytes: ",
-          (offset_bytes(params.value) % alignment_bytes).expect_int(),
+          offset_bytes(params.value) % alignment_bytes,
           ".");
     }
     return false;
