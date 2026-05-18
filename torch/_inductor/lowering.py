@@ -6958,6 +6958,11 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     return output[0] if not return_mean else output
 
 
+aten_var_mean_correction_fallback = fallback_handler(
+    aten.var_mean.correction, add_to_fallback_set=False
+)
+
+
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
     return var_mean_helper_(
@@ -6967,6 +6972,18 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
+    device = x.get_device()
+    if (
+        V.current_node is not None
+        and V.current_node.target is aten.var_mean.correction
+        and device is not None
+        and device.type == "cuda"
+        and x.get_dtype() in (torch.float16, torch.bfloat16)
+    ):
+        return aten_var_mean_correction_fallback(
+            x, axis, correction=correction, keepdim=keepdim
+        )
+
     return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )

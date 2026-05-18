@@ -758,6 +758,22 @@ class CudaReproTests(TestCase):
         actual = torch.compile(forward, fullgraph=True)(x)
         self.assertEqual(actual, correct)
 
+    @parametrize("dtype,seed", [(torch.float16, 30), (torch.bfloat16, 147)])
+    @unittest.skipIf(device_type != "cuda", "requires CUDA")
+    def test_issue145401_var_mean_lowp(self, dtype, seed):
+        def forward(x):
+            return torch.ops.aten.var_mean.correction(
+                x, [1], correction=0, keepdim=True
+            )
+
+        # This seed/shape has a row where ATen var_mean's Welford mean and a
+        # standalone mean round to different low-precision values.
+        torch.manual_seed(seed)
+        x = torch.rand((1024, 384), device=device_type, dtype=dtype)
+        correct = forward(x)
+        actual = torch.compile(forward, fullgraph=True)(x)
+        self.assertTrue(same(correct, actual))
+
     def test_full_copy(self):
         def forward(x):
             full_10 = torch.ops.aten.full.default(
