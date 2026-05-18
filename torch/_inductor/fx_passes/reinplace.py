@@ -344,9 +344,7 @@ def _view_ops_shape(
 def _validate_scatter_src_shape(src: torch.Tensor, dst: Sequence[Any]) -> None:
     dst_shape = torch.Size(dst)
     try:
-        broadcast_shape = torch.broadcast_shapes(src.shape, dst_shape)
-        if broadcast_shape != dst_shape:
-            raise RuntimeError
+        torch._refs.expand(src, dst_shape)
     except RuntimeError as e:
         raise RuntimeError(
             f"shape error in scatter op, can not broadcast {src.shape} to {dst_shape}"

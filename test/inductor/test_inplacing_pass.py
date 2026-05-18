@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     subtest,
+    TEST_Z3,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -544,6 +545,27 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         expected = fn(x, y)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
+    def test_generalized_scatter_dynamic_clamped_slice_translation_validation(self):
+        if not TEST_Z3:
+            self.skipTest("requires z3-solver")
+
+        import torch.fx.experimental._config as fx_config
+
+        def fn(x, y):
+            z = x.sin()
+            z[:9223372036854775807].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(4, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        with fx_config.patch(translation_validation=True):
+            result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
         self.assertEqual(result, expected)
 
     def test_generalized_scatter_dynamic_negative_slice(self):
