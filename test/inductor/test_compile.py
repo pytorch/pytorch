@@ -232,6 +232,18 @@ class TestStandaloneInductor(TestCase):
         else:
             check_linux_debug_section(binary_path)
 
+    def _aot_cpp_arch_flags(self):
+        build_option = CppTorchOptions(
+            aot_mode=True,
+            compile_only=True,
+            vec_isa=invalid_vec_isa,
+        )
+        return [
+            flag
+            for flag in build_option.get_cflags()
+            if flag.startswith(("march=", "mcpu="))
+        ]
+
     def test_aot_cpp_march_config(self):
         with (
             config.patch({"cpp.march": "x86-64"}),
@@ -240,32 +252,23 @@ class TestStandaloneInductor(TestCase):
                 return_value="x86_64",
             ),
         ):
-            build_option = CppTorchOptions(
-                aot_mode=True,
-                compile_only=True,
-                vec_isa=invalid_vec_isa,
-            )
-
-        arch_flags = [
-            flag
-            for flag in build_option.get_cflags()
-            if flag.startswith(("march=", "mcpu="))
-        ]
+            arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, ["march=x86-64"])
+
+    def test_aot_cpp_march_config_ppc64le(self):
+        with (
+            config.patch({"cpp.march": "power9"}),
+            mock.patch(
+                "torch._inductor.cpp_builder.platform.machine",
+                return_value="ppc64le",
+            ),
+        ):
+            arch_flags = self._aot_cpp_arch_flags()
+        self.assertEqual(arch_flags, ["mcpu=power9"])
 
     def test_cpp_march_config_can_disable_arch_flag(self):
         with config.patch({"cpp.march": ""}):
-            build_option = CppTorchOptions(
-                aot_mode=True,
-                compile_only=True,
-                vec_isa=invalid_vec_isa,
-            )
-
-        arch_flags = [
-            flag
-            for flag in build_option.get_cflags()
-            if flag.startswith(("march=", "mcpu="))
-        ]
+            arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, [])
 
 
