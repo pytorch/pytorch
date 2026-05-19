@@ -1,5 +1,6 @@
 """Functional interface."""
 
+import dataclasses
 import importlib
 import math
 import warnings
@@ -3737,7 +3738,7 @@ def linear_cross_entropy(
         - ``torch.compile`` falls back to eager at the chunked op (no
           Inductor lowering). To keep double-backward correct under
           compile, ``allow_retain_graph=True`` is forced internally
-          with a one-time warning.
+          with a warning.
         - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
 
         The reference path (``options=None``) supports all of the above.
@@ -3852,17 +3853,13 @@ def linear_cross_entropy(
         # without this override double-backward under torch.compile would
         # silently return wrong gradients.
         if not options.allow_retain_graph and torch.compiler.is_compiling():
-            import warnings as _warnings
-
-            _warnings.warn(
+            warnings.warn(
                 "linear_cross_entropy: forcing allow_retain_graph=True under "
                 "torch.compile (adds one gradient-sized allocation/call). "
                 "Construct options with allow_retain_graph=True to silence.",
                 stacklevel=2,
             )
-            import dataclasses as _dataclasses
-
-            options = _dataclasses.replace(options, allow_retain_graph=True)
+            options = dataclasses.replace(options, allow_retain_graph=True)
 
         # Local import avoids a circular init via torch.library.custom_op.
         from torch.nn.modules.linear_cross_entropy import (
@@ -3881,8 +3878,8 @@ def linear_cross_entropy(
             options.acc_policy,
             options.acc_dtype,
             options.allow_retain_graph,
-            input.requires_grad,
-            linear_weight.requires_grad,
+            input.requires_grad and torch.is_grad_enabled(),
+            linear_weight.requires_grad and torch.is_grad_enabled(),
         )[0]
 
         if not has_batches:

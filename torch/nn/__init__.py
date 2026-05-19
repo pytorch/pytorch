@@ -36,6 +36,10 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def __dir__():
+    return [*globals(), "LinearCrossEntropyOptions"]
+
+
 def factory_kwargs(kwargs):
     r"""Return a canonicalized dict of factory kwargs.
 

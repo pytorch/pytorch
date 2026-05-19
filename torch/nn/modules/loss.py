@@ -1459,15 +1459,10 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             :func:`torch.jit.script`; see the note below.
 
     .. note::
-        Instances with ``options=None`` are scriptable; passing a
-        :class:`~torch.nn.LinearCrossEntropyOptions` instance is not
-        supported under :func:`torch.jit.script`.
-
-        The chunked path (``options`` not ``None``) does not support
-        higher-order AD, forward-mode AD, ``torch.func.grad`` /
-        ``vmap(grad(...))``, or Inductor lowering; standard
-        ``loss.backward()`` works. See the matching note in
-        :func:`torch.nn.functional.linear_cross_entropy`.
+        ``options=None`` is scriptable; an ``options`` instance is not.
+        The chunked path does not support higher-order AD, forward-mode
+        AD, ``torch.func.grad`` / ``vmap(grad(...))``, or Inductor
+        lowering; see :func:`torch.nn.functional.linear_cross_entropy`.
 
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.

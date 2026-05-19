@@ -7623,6 +7623,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(adjusted.acc_policy, "compact")
         self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
+        # acc_dtype auto resolution: fp32 on supported hardware,
+        # input dtype otherwise; explicit non-auto policy opts out.
+        opts = nn.LinearCrossEntropyOptions()
+        cpu = torch.device("cpu")
+        for d in (torch.bfloat16, torch.float16):
+            self.assertEqual(opts._adjust(128, 4096, 50000, d, cpu).acc_dtype, torch.float32)
+        self.assertEqual(opts._adjust(128, 4096, 50000, torch.float32, cpu).acc_dtype, torch.float32)
+        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="balanced")
+        self.assertEqual(
+            opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
+            torch.bfloat16,
+        )
+        if torch.cuda.is_available():
+            major = torch.cuda.get_device_capability()[0]
+            cuda = torch.device("cuda")
+            self.assertEqual(
+                opts._adjust(128, 4096, 50000, torch.bfloat16, cuda).acc_dtype,
+                torch.float32 if major >= 8 else torch.bfloat16,
+            )
+            self.assertEqual(
+                opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
+                torch.float32 if major >= 7 else torch.float16,
+            )
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
@@ -10333,14 +10357,18 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
-        # cuda throws device assert for invalid data
-        # xla & mps ignore out of bound indices
-        if self.device_type == 'cpu':
+        # cpu raises synchronously; mps reports the bad index from its scatter
+        # kernel asynchronously, surfaced on the next sync. xla still ignores.
+        if self.device_type in ('cpu', 'mps'):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
         t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
@@ -14682,15 +14710,8 @@ if __name__ == '__main__':
                     else:  # CUDA/...
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90
-                        # Loosened from 37 -> 50 after the
-                        # weight_chunk_dtype = acc_dtype fix in
-                        # _ChunkContext.build: keeping weight_chunk
-                        # in fp32 changes the rounding path of the
-                        # weight-grad bulk matmul slightly, but
-                        # the relative-error bound (still 2e-3) is
-                        # unchanged and the fix is what makes
-                        # "balanced" / "compact" fp16-safe at
-                        # large num_batches in the first place.
+                        # 50 (was 37); loosened by weight_chunk_dtype=acc_dtype
+                        # rounding path, relative-error bound unchanged.
                         expected_weight_grad_max_ulp_diff = 50
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
@@ -14716,18 +14737,10 @@ if __name__ == '__main__':
                     expected_input_grad_max_ulp_diff = 0
                     expected_weight_grad_max_ulp_diff = 0
         elif _resolved_policy == "compact":
-            # "compact" mirrors "balanced" except on CUDA where it
-            # drops weight_grad_chunk and accumulates per-chunk into
-            # grad_linear_weight directly via addmm_. Input-grad path
-            # is unchanged. weight_grad picks up an extra dtype
-            # quantization per chunk on rows hit by the
-            # ignore-index correction (a few extra ULP on rare rows
-            # at LLM scale). On non-CUDA backends with mixed
-            # precision, the optimization can't be applied and bounds
-            # reduce to "balanced".
+            # Mirrors "balanced" except on CUDA (direct addmm_ skips
+            # weight_grad_chunk). Falls back to "balanced" on non-CUDA
+            # mixed precision.
             if "cpu" in device:
-                # silent fallback to balanced: bounds copy the
-                # "balanced" branch.
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 204
@@ -14968,8 +14981,10 @@ if __name__ == '__main__':
         """
         torch.manual_seed(0)
         N, F, C = 13, 7, 11
-        inp = torch.randn(N, F, device=device)
-        weight = torch.randn(C, F, device=device)
+        # requires_grad=True + no_grad context: wrapper must gate via
+        # torch.is_grad_enabled() (else the chunked op wastes a forward).
+        inp = torch.randn(N, F, device=device, requires_grad=True)
+        weight = torch.randn(C, F, device=device, requires_grad=True)
         target = torch.randint(0, C, (N,), device=device)
         options = nn.LinearCrossEntropyOptions(
             batch_chunk_size=4, acc_policy=acc_policy,

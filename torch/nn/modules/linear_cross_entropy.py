@@ -15,7 +15,7 @@ class LinearCrossEntropyOptions:
 
     The chunked implementation processes the batch dimension in pieces, so
     the full ``(num_batches, num_classes)`` logits tensor is never
-    materialized — useful when ``num_classes`` is much larger than
+    materialized -- useful when ``num_classes`` is much larger than
     ``in_features`` (e.g. LLM vocabulary heads). Pass ``options=None`` to
     use the reference path; pass an instance of this class to opt in.
 
@@ -58,13 +58,9 @@ class LinearCrossEntropyOptions:
 
     Higher-order autograd (gradgrad, forward-mode AD) is unsupported.
 
-    Under :func:`torch.compile` this field is auto-promoted to
-    ``True`` regardless of what the user passed, because the default
-    mode's second-backward guard relies on a Python-level ``ctx``
-    mutation that Dynamo's autograd tracing does not preserve.
-    :func:`torch.nn.functional.linear_cross_entropy` emits a one-time
-    warning on the auto-promotion so the per-call extra-allocation
-    cost stays visible.
+    Under :func:`torch.compile` this field is auto-promoted to ``True``
+    because the default-mode second-backward guard relies on a ctx
+    mutation Dynamo doesn't preserve; the wrapper warns on the promotion.
 
     Example::
 
@@ -75,41 +71,27 @@ class LinearCrossEntropyOptions:
     """
 
     batch_chunk_size: int | None = None
-    """Number of batch rows processed per chunk.
-
-    The op loops over ``ceil(num_batches / batch_chunk_size)`` chunks.
-    Smaller values reduce peak memory but launch more kernels; the
-    default ``None`` means a single chunk (no actual chunking).
-
-    Cannot be combined with :attr:`chunking_method`: if both are set
-    and the heuristic-computed chunk size disagrees with this value, a
-    ``ValueError`` is raised. Pass only one.
+    """Batch rows per chunk. The op loops over
+    ``ceil(num_batches / batch_chunk_size)`` chunks; smaller values cut
+    peak memory but launch more kernels. Default ``None`` means a single
+    chunk. Cannot be combined with :attr:`chunking_method` -- if both are
+    set and disagree, ``ValueError`` is raised.
     """
 
     chunking_method: str | None = "auto"
-    """Heuristic for selecting :attr:`batch_chunk_size` from input sizes.
+    """Heuristic for picking :attr:`batch_chunk_size`.
 
-    Supported methods:
-
-    - ``"auto"`` (default) — at call time, resolves to a per-(device,
-      dtype) recommendation. Combined with the ``acc_policy="auto"``
-      default, zero-argument ``LinearCrossEntropyOptions()`` produces
-      a configuration that is sensible for the local device. For
-      unlisted (device, dtype) pairs falls back to the conservative
-      ``"aspect_ratio:2"``.
-    - "aspect_ratio" — sizes each chunk so its ``(batch_chunk_size,
-      num_classes)`` logits buffer uses about the same memory as the
-      full ``(num_batches, in_features)`` input.  Computed as
-      ``batch_chunk_size = next_pow2(ceil(num_batches /
-      ceil(num_classes / in_features)))``.  Suitable when
-      ``num_classes`` is much larger than ``in_features`` (LLM
-      vocabulary heads); reduces to ``next_pow2(num_batches)`` when
-      ``num_classes <= in_features``.
-    - ``"aspect_ratio:N"`` for ``N >= 1`` — same heuristic, then
-      divides the batch chunk size by ``N``. Reduces peak memory
-      roughly by a factor of ``N`` at the cost of more chunks.
-    - ``None`` — disables the heuristic; uses :attr:`batch_chunk_size`
-      directly (single chunk if that is also ``None``).
+    - ``"auto"`` (default) -- resolves to a per-(device, dtype) pick from
+      :data:`_AUTO_DEFAULTS` at call time; falls back to
+      ``"aspect_ratio:2"`` for unlisted pairs.
+    - ``"aspect_ratio"`` -- sizes each chunk so its
+      ``(batch_chunk_size, num_classes)`` logits buffer matches the
+      ``(num_batches, in_features)`` input in memory:
+      ``next_pow2(ceil(num_batches / ceil(num_classes / in_features)))``.
+      Best when ``num_classes >> in_features`` (LLM vocab heads).
+    - ``"aspect_ratio:N"`` (``N >= 1``) -- same, divided by ``N``.
+      ~N times less peak memory at the cost of N times more chunks.
+    - ``None`` -- disables the heuristic; uses :attr:`batch_chunk_size`.
     """
 
     acc_policy: Literal[
@@ -122,27 +104,27 @@ class LinearCrossEntropyOptions:
     intermediates are kept in :attr:`acc_dtype` vs. the input dtype, and
     whether the per-chunk weight-gradient scratch buffer is materialized.
 
-    - ``"auto"`` (default) — per-(device, dtype) pick from
+    - ``"auto"`` (default) -- per-(device, dtype) pick from
       :data:`_AUTO_DEFAULTS`; unlisted pairs fall back to ``"compact"``.
       The fallback assumes a CUDA-like backend with hardware-native
       low-precision matmul; pass ``"accurate"`` explicitly on backends
       that emulate fp16/bf16 GEMMs via fp32 upcast.
-    - ``"accurate"`` — broadest use of :attr:`acc_dtype`; noticeably
+    - ``"accurate"`` -- broadest use of :attr:`acc_dtype`; noticeably
       better input-grad accuracy when chunk size is large relative to
       ``num_classes``. Highest peak memory and slowest of the chunked
       policies on CUDA. Only chunked policy whose weight-grad matmul
       runs in fp32 on CPU (other policies hit CPU's emulated
       low-precision path, ~20-50x slower).
-    - ``"balanced"`` — :attr:`acc_dtype` only where needed for gradient
+    - ``"balanced"`` -- :attr:`acc_dtype` only where needed for gradient
       correctness; keeps a ``(num_classes, in_features)``
       :attr:`acc_dtype` scratch for cross-chunk weight-grad accumulation.
       Same precision as ``"accurate"`` in bf16, slightly looser in fp16,
       faster than ``"accurate"`` in both.
-    - ``"compact"`` — like ``"balanced"`` but drops the weight-grad
+    - ``"compact"`` -- like ``"balanced"`` but drops the weight-grad
       scratch and accumulates per-chunk directly via ``addmm_`` (cuBLAS
       uses an fp32 internal accumulator, so bulk precision matches
       ``"balanced"``). Saves ``num_classes * in_features *
-      sizeof(acc_dtype)`` — typically several hundred MB for an LLM
+      sizeof(acc_dtype)`` -- typically several hundred MB for an LLM
       head. On non-CUDA mixed-precision falls back to ``"balanced"``.
 
     Policy effects (``"balanced"`` vs ``"accurate"``) are visible only
@@ -157,40 +139,67 @@ class LinearCrossEntropyOptions:
 
     acc_dtype: torch.dtype | None = None
     """Dtype for internal accumulation. ``None`` (the default visible
-    in ``repr`` / :meth:`extra_repr`) is resolved to the input dtype
-    at call time — same semantics as passing the input dtype explicitly.
+    in ``repr``) resolves at call time:
 
-    Mixed-precision is currently limited to ``torch.float16``
-    or ``torch.bfloat16`` input and ``acc_dtype=torch.float32``.
+    - Under ``acc_policy="auto"`` with fp16/bf16 input on hardware
+      that supports mixed-precision mm (CUDA SM 7.0+ for fp16,
+      SM 8.0+ for bf16, and CPU): resolves to ``torch.float32`` --
+      the realistic training configuration.
+    - Otherwise: resolves to the input dtype.
+
+    Mixed-precision currently requires fp16 / bf16 input with
+    ``acc_dtype=torch.float32``.
     """
 
     def __post_init__(self):
-        if self.acc_policy not in {
-            "auto",
-            "accurate",
-            "balanced",
-            "compact",
-        }:
-            raise ValueError(
-                f"acc_policy must be 'auto', 'accurate', 'balanced', "
-                f"or 'compact', got {self.acc_policy!r}"
-            )
+        if self.acc_policy not in {"auto", "accurate", "balanced", "compact"}:
+            raise ValueError(f"invalid acc_policy: {self.acc_policy!r}")
         if self.chunking_method is not None and self.chunking_method != "auto":
-            if ":" in self.chunking_method:
-                name, factor = self.chunking_method.split(":", 1)
-            else:
-                name, factor = self.chunking_method, "1"
+            name, _, factor = self.chunking_method.partition(":")
+            factor = factor or "1"
             if not (name == "aspect_ratio" and factor.isdigit() and int(factor) > 0):
-                raise ValueError(
-                    f"chunking_method must be 'auto', 'aspect_ratio', "
-                    f"'aspect_ratio:N' for a positive integer N, or None, "
-                    f"got {self.chunking_method!r}"
-                )
+                raise ValueError(f"invalid chunking_method: {self.chunking_method!r}")
+        if not (
+            self.batch_chunk_size is None
+            or (isinstance(self.batch_chunk_size, int) and self.batch_chunk_size > 0)
+        ):
+            raise ValueError(
+                f"batch_chunk_size must be positive int or None, got {self.batch_chunk_size!r}"
+            )
+        if self.acc_dtype is not None and not getattr(
+            self.acc_dtype, "is_floating_point", False
+        ):
+            raise ValueError(
+                f"acc_dtype must be a floating dtype or None, got {self.acc_dtype!r}"
+            )
 
     @staticmethod
     def _ceil_div(a: int, b: int) -> int:
         """ceil(a / b) for non-negative integers."""
         return -(-a // b)
+
+    @staticmethod
+    def _resolve_auto_acc_dtype(
+        dtype: torch.dtype, device: torch.device | None
+    ) -> torch.dtype | None:
+        """Return fp32 for fp16/bf16 input on hardware with a working
+        mixed-precision mm path (CUDA SM 7.0+ for fp16, SM 8.0+ for bf16,
+        and CPU); ``None`` otherwise (caller falls back to input dtype).
+        """
+        if device is None or dtype not in (torch.float16, torch.bfloat16):
+            return None
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                return None
+            major, _ = torch.cuda.get_device_capability(device)
+            if dtype == torch.bfloat16 and major < 8:
+                return None
+            if dtype == torch.float16 and major < 7:
+                return None
+            return torch.float32
+        if device.type == "cpu":
+            return torch.float32
+        return None
 
     def _compute_batch_chunk_size(
         self,
@@ -213,9 +222,6 @@ class LinearCrossEntropyOptions:
 
         if method.startswith("aspect_ratio"):
             factor = int(method.split(":", 1)[1]) if ":" in method else 1
-            # Liger-Kernel heuristic: size each chunk so its
-            # (chunk_size, num_classes) logits buffer uses about the same
-            # memory as the full (num_batches, in_features) input.
             # See LinearCrossEntropyOptions.chunking_method docstring.
             inc_factor = self._ceil_div(num_classes, in_features)
             target = self._ceil_div(num_batches, inc_factor)
@@ -236,12 +242,9 @@ class LinearCrossEntropyOptions:
         """
         acc_policy = self.acc_policy
         chunking_method = self.chunking_method
-        # If the caller passed an explicit ``batch_chunk_size`` (a
-        # specific-intent signal), an "auto" chunking heuristic would
-        # likely disagree with their chunk size and trigger the
-        # batch_chunk_size/chunking_method conflict check below. Honour
-        # the explicit chunk size by disabling the heuristic in that
-        # case; acc_policy="auto" still resolves normally.
+        # Honour an explicit batch_chunk_size by disabling auto chunking
+        # (it would conflict with the user's size); acc_policy="auto" is
+        # unaffected.
         if chunking_method == "auto" and self.batch_chunk_size is not None:
             chunking_method = None
         if acc_policy == "auto" or chunking_method == "auto":
@@ -281,7 +284,14 @@ class LinearCrossEntropyOptions:
                 )
 
         if self.acc_dtype is None:
-            acc_dtype = dtype
+            # Under "auto" prefer fp32 on hardware that supports the
+            # mixed-precision mm path; otherwise fall back to input dtype.
+            auto_acc = (
+                self._resolve_auto_acc_dtype(dtype, device)
+                if self.acc_policy == "auto"
+                else None
+            )
+            acc_dtype = auto_acc if auto_acc is not None else dtype
         else:
             acc_dtype = self.acc_dtype
         return dataclasses.replace(
@@ -293,12 +303,11 @@ class LinearCrossEntropyOptions:
         )
 
 
-# Per-(device_type, input_dtype) "auto" picks. Established by sweeping
-# (N, F, V, dtype) against an fp64 reference jacobian, picking the
-# Pareto-best (acc_policy, chunking_method) on time x transient_peak.
-# CPU picks "accurate" because it is the only policy that stages the
-# weight-grad matmul through fp32, avoiding CPU's slow emulated low-
-# precision matmul path (20-50x speedup vs. balanced / compact).
+# Per-(device_type, input_dtype) "auto" picks for (acc_policy,
+# chunking_method). Established by sweeping against an fp64 reference
+# jacobian; CPU picks "accurate" because it's the only policy that
+# stages the weight-grad mm through fp32 (20-50x vs. CPU emulation).
+# acc_dtype is resolved separately by ``_resolve_auto_acc_dtype``.
 _AUTO_DEFAULTS: dict[tuple[str, torch.dtype], tuple[str, str]] = {
     ("cuda", torch.bfloat16): ("compact", "aspect_ratio:2"),
     ("cuda", torch.float16): ("compact", "aspect_ratio:2"),
@@ -309,8 +318,7 @@ _AUTO_FALLBACK: tuple[str, str] = ("compact", "aspect_ratio:2")
 
 
 def _make_empty(shape, dtype, device, when=True):
-    # When when=False, return a rank-matching empty tensor (shape
-    # (0,) * len(shape)) so callers can treat the result uniformly.
+    # when=False returns a rank-matching empty (shape (0,)*len(shape)).
     return torch.empty(
         shape if when else (0,) * len(shape),
         device=device,
@@ -395,8 +403,7 @@ class _ChunkViews:
 
     @property
     def logits_upcast(self) -> torch.Tensor:
-        # On non-CUDA mixed-dtype with logits at input dtype, copy into
-        # logits_acc_buf so the weight-grad mm has matching-dtype operands.
+        # Non-CUDA mixed-dtype: copy into logits_acc_buf for matching-dtype mm.
         ctx = self.ctx
         if ctx.is_cuda or ctx.weight_grad_mm_same_dtype:
             return self.logits
@@ -412,8 +419,7 @@ class _ChunkViews:
 
     @cached_property
     def logits_downcast(self) -> torch.Tensor:
-        # Lazy: first access must come AFTER in-place mods to self.logits
-        # in the loop body finish.
+        # Lazy: first access must come AFTER in-place mods to self.logits.
         ctx = self.ctx
         if ctx.loop_caches_logits_downcast:
             return self.logits.to(ctx.linear_weight.dtype)
@@ -632,16 +638,13 @@ class _ChunkContext:
         if use_acc_dtype:
             output_dtype = acc_dtype if dtype == torch.float16 else dtype
             grad_input_dtype = dtype if is_memory_like else acc_dtype
-            # fp16 + memory-like keeps the per-chunk logits at input
-            # dtype (fp16 native matmul is well-served and the buffer
-            # is sized to 2BC instead of 4BC). Everything else under
-            # mixed precision upcasts for softmax stability.
+            # fp16 + memory-like keeps logits at fp16 (2BC vs 4BC);
+            # everything else upcasts for softmax stability.
             logits_buf_dtype = (
                 dtype if dtype == torch.float16 and is_memory_like else acc_dtype
             )
-            # weight_chunk_dtype is always acc_dtype under mixed
-            # precision: 1/N for reduction="mean" is subnormal in fp16
-            # at N >= 65536, silently zeroing the loss / grad.
+            # acc_dtype mandatory: 1/N for reduction="mean" is subnormal
+            # in fp16 at N >= 65536.
             weight_chunk_dtype = acc_dtype
         else:
             output_dtype = grad_input_dtype = logits_buf_dtype = weight_chunk_dtype = (
@@ -838,14 +841,11 @@ class _ChunkContext:
         return x.to(dtype)
 
 
-# Private op (leading-underscore qualified name). Returns
-# ``(loss, grad_input, grad_linear_weight)`` because
-# ``torch.library.register_autograd`` has no ``save_for_backward``-
-# style hidden ctx state; ``setup_context`` stashes the grad tensors,
-# ``backward`` consumes them in place. ``F.linear_cross_entropy``
-# discards the tuple's extra slots. Direct callers who capture the
-# stashed grads get a loud "consumed buffer" failure, not silent
-# corruption.
+# Private op. Returns ``(loss, grad_input, grad_linear_weight)``:
+# ``torch.library.register_autograd`` has no ``save_for_backward``-style
+# state, so the grads flow via the return tuple, get stashed on ctx by
+# ``setup_context``, and backward mutates them in place via ``.mul_()``.
+# ``mutates_args=()`` reflects that inputs are not mutated.
 @torch.library.custom_op(
     "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
 )
@@ -865,25 +865,27 @@ def _linear_cross_entropy_batch_chunked(
     compute_linear_weight_grad: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Returns ``(loss, grad_input, grad_linear_weight)``. Gradients
-    are precomputed during the chunked forward loop and stashed on ctx
-    by ``setup_context``; backward is a single multiply by the upstream
-    gradient. This "compute gradients in forward" design is what lets
-    chunking save memory — the alternative (retain per-chunk softmax
-    intermediates or recompute in backward) would defeat the
-    chunking.
+    precomputed in forward and stashed on ctx; backward is a single
+    multiply by the upstream gradient. Computing grads in forward is
+    what lets chunking save memory.
     """
-    # compute_input_grad / compute_linear_weight_grad are read at call
-    # time in F.linear_cross_entropy; under AOTAutograd / AOTInductor
-    # they are baked at trace time and the runtime tensor's
-    # requires_grad is ignored. Catch the silent-corruption direction
-    # (bool False at trace, requires_grad True at runtime).
-    if not compute_input_grad and input.requires_grad:
+    # Direct callers must resolve "auto" / None via _adjust first.
+    if acc_policy == "auto" or acc_dtype is None:
+        raise RuntimeError(
+            f"unresolved acc_policy={acc_policy!r} or acc_dtype={acc_dtype!r};"
+            " use F.linear_cross_entropy."
+        )
+    # AOTAutograd/AOTInductor bake compute_*_grad at trace time; catch
+    # the silent-corruption case (False at trace, but grad-enabled at
+    # runtime with a requires_grad leaf).
+    grad_enabled = torch.is_grad_enabled()
+    if not compute_input_grad and input.requires_grad and grad_enabled:
         raise RuntimeError(
             "linear_cross_entropy chunked op: compute_input_grad was False at "
             "trace time but input.requires_grad is True at runtime; recompile "
             "the graph with the desired requires_grad."
         )
-    if not compute_linear_weight_grad and linear_weight.requires_grad:
+    if not compute_linear_weight_grad and linear_weight.requires_grad and grad_enabled:
         raise RuntimeError(
             "linear_cross_entropy chunked op: compute_linear_weight_grad was "
             "False at trace time but linear_weight.requires_grad is True at "
@@ -949,8 +951,6 @@ def _linear_cross_entropy_batch_chunked(
                 input_grad_linear_weight = chunk.input_grad_linear_weight
 
                 # grad_input_chunk = linear_weight_cast[target_chunk] * weight_chunk
-                # (.to() handles dtype-strict torch.mul on backends
-                # that don't support cross-dtype out=)
                 torch.mul(
                     torch.index_select(linear_weight_cast, 0, target_chunk),
                     weight_chunk.to(grad_input_chunk.dtype).unsqueeze(1),
@@ -970,9 +970,8 @@ def _linear_cross_entropy_batch_chunked(
                 # grad_linear_weight += per-chunk weight grad
                 # (= -logits.T @ input + input*weight scattered at target rows)
                 if ctx.alloc_weight_grad_chunk:
-                    # Build the per-chunk weight grad in acc_dtype scratch,
-                    # then commit to grad_lw with one sub_ -- keeps the
-                    # bulk-minus-correction subtraction in fp32 for precision.
+                    # Stage per-chunk weight grad in acc_dtype scratch;
+                    # one sub_ commit keeps bulk-minus-correction in fp32.
                     logits_upcast = chunk.logits_upcast
                     weight_grad_input = chunk.weight_grad_input
                     ctx.mm(
@@ -1002,10 +1001,9 @@ def _linear_cross_entropy_batch_chunked(
     )
 
 
-# Argument count of _linear_cross_entropy_batch_chunked; backward returns
-# this many gradient slots. Hand-maintained because torch.library.custom_op
-# has no public arg-introspection path (inspect.signature returns the
-# CustomOpDef wrapper's *args/**kwargs). Update on signature change.
+# Op arg count; backward returns this many slots. Hand-maintained
+# because CustomOpDef has no public arg-introspection. Update on
+# signature change.
 _NUM_OP_INPUTS = 13
 
 
@@ -1051,10 +1049,9 @@ def _(
 
 @_linear_cross_entropy_batch_chunked.register_vmap
 def _vmap(info, in_dims, *args):
-    """vmap rule: loop over the vmap dimension and stack outputs.
-    Per-sample input/linear_weight grads flow through autograd
-    naturally. A fold-into-num_batches fast path would need
-    ``reduction="none"`` support inside the chunked op.
+    """vmap rule (slow path: per-sample Python loop). A fold-into-
+    num_batches fast path would need ``reduction="none"`` support in
+    the chunked op.
     """
     batch_size = info.batch_size
 
