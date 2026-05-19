@@ -1628,6 +1628,52 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
 
+class TestSDPAPatternRegistration(TestCase):
+    def test_inference_only_patterns_not_registered_for_training(self):
+        from torch._inductor.fx_passes import fuse_attention
+
+        inference_only_patterns = [
+            "_sfdp_pattern_13",
+            "_sfdp_pattern_15",
+            "_sfdp_pattern_17",
+            "_sfdp_pattern_18",
+            "_sfdp_pattern_19",
+            "_sfdp_pattern_20",
+            "_sfdp_pattern_21",
+            "_sfdp_pattern_22",
+            "_sfdp_pattern_23",
+            "_sfdp_pattern_24",
+        ]
+        self.assertEqual(
+            inference_only_patterns,
+            sorted(fuse_attention._INFERENCE_ONLY_SFDP_PATTERNS),
+        )
+
+        registered_names = [
+            name for name, _ in fuse_attention._get_sfdp_patterns(torch.device("cpu"))
+        ]
+        unexpected_training_names = sorted(
+            name
+            for name in registered_names
+            if name.endswith("_training")
+            and any(
+                name.startswith(f"{pattern_name}_")
+                for pattern_name in inference_only_patterns
+            )
+        )
+        self.assertEqual([], unexpected_training_names)
+
+        missing_inference_names = sorted(
+            pattern_name
+            for pattern_name in inference_only_patterns
+            if not any(
+                name.endswith("_inference") and name.startswith(f"{pattern_name}_")
+                for name in registered_names
+            )
+        )
+        self.assertEqual([], missing_inference_names)
+
+
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
