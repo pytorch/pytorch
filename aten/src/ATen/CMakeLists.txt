@@ -202,13 +202,13 @@ file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  # Now building CK by default
-  if(USE_ROCM)
+  # Now building CK by default (Linux only; USE_ROCM_CK_SDPA defaults OFF on WIN32)
+  if(USE_ROCM AND NOT WIN32)
     if(DEFINED ENV{USE_ROCM_CK_SDPA})
         if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
           caffe2_update_option(USE_ROCM_CK_SDPA ON)
         endif()
-    elseif(NOT WIN32)
+    else()
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
     # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
