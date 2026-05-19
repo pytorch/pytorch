@@ -1410,6 +1410,74 @@ class GraphDeduplicationInductorWrapperTests(TestCase):
             0,
         )
 
+    def test_inductor_wrapper_keeps_different_targets_separate(self):
+        class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
+            def __init__(self):
+                super().__init__(
+                    mode=None,
+                    options={"graph_deduplication": True},
+                    dynamic=None,
+                )
+                self.graphs = []
+
+            def __call__(self, gm, example_inputs, *, config_patches=None):
+                self.graphs.append(gm)
+                return gm.forward
+
+        def non_zero_rand(size, dtype):
+            a = torch.rand(size=size, dtype=dtype)
+            return a + (a == 0).to(dtype)
+
+        def fn():
+            dtype = torch.complex128
+            a = non_zero_rand((2, 2), dtype=dtype)
+            b = non_zero_rand((2, 2), dtype=dtype)
+            c = non_zero_rand((2, 2), dtype=dtype)
+            alpha = 0.5 * (1 + 1j)
+
+            expected = a + (alpha * b) / c
+            actual = torch.addcdiv(a, b, c, value=alpha)
+            return expected, actual
+
+        backend = RecordingInductorWrapper()
+        opt_fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+        expected, actual = opt_fn()
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(expected, actual)
+
+    def test_inductor_wrapper_keeps_distinct_python_targets_separate(self):
+        class RecordingInductorWrapper(torch._TorchCompileInductorWrapper):
+            def __init__(self):
+                super().__init__(
+                    mode=None,
+                    options={"graph_deduplication": True},
+                    dynamic=None,
+                )
+                self.graphs = []
+
+            def __call__(self, gm, example_inputs, *, config_patches=None):
+                self.graphs.append(gm)
+                return gm.forward
+
+        def make(scale):
+            @torch._dynamo.allow_in_graph
+            def inner(x):
+                return x * scale
+
+            return inner
+
+        f2 = make(2)
+        f3 = make(3)
+
+        def fn(x):
+            return f2(x) + 1, f3(x) + 1
+
+        backend = RecordingInductorWrapper()
+        opt_fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
     def test_inductor_wrapper_disables_graph_deduplication_for_cpp_wrapper(self):
         self.assertEqual(
             self._compile_and_count_invoke_subgraphs(

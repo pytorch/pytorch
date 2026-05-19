@@ -378,6 +378,28 @@ z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
         key = next(iter(tracker.node_to_duplicates.keys()))
         tracker.track_node(None, key)  # this will fail if the node is added again
 
+    def test_node_hash_includes_op_target(self):
+        from torch._dynamo.graph_region_tracker import GraphRegionTracker
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = 1
+        add = graph.call_function(torch.add, (x, 1))
+        mul = graph.call_function(torch.mul, (x, 1))
+
+        tx = SimpleNamespace(
+            f_code=SimpleNamespace(co_filename="test.py"),
+            lineno=1,
+            instruction_pointer=0,
+        )
+        tracker = GraphRegionTracker()
+        tracker.track_node(tx, add)
+        tracker.track_node(tx, mul)
+        self.assertIsNot(
+            tracker.node_to_duplicates[add],
+            tracker.node_to_duplicates[mul],
+        )
+
     def test_unpickleable_node_metadata_is_not_tracked(self):
         from torch._dynamo.graph_region_tracker import GraphRegionTracker
 
@@ -389,9 +411,16 @@ z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
             def __reduce_ex__(self, protocol):
                 raise pickle.PickleError("no pickle")
 
+        class SymbolicTensorSubclassValue:
+            def __reduce_ex__(self, protocol):
+                raise RuntimeError(
+                    "Cannot call numel() on tensor with symbolic sizes/strides"
+                )
+
         unpickleable_values = [
             Unpickleable(),
             PickleErrorValue(),
+            SymbolicTensorSubclassValue(),
             {},
         ]
         unpickleable_values[-1]["cycle"] = unpickleable_values[-1]

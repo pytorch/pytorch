@@ -86,6 +86,15 @@ class NodeHashException(Exception):
     pass
 
 
+def _normalize_target(target: Any) -> tuple[Any, ...]:
+    if isinstance(target, str):
+        return ("str", target)
+    if isinstance(target, torch._ops.OpOverload):
+        return ("op_overload", str(target))
+
+    return (type(target).__name__, id(target))
+
+
 class InputPickler(pickle.Pickler):
     def __init__(self) -> None:
         from torch._inductor.codecache import _ident
@@ -118,6 +127,14 @@ class InputPickler(pickle.Pickler):
             pickle.PickleError,
             ValueError,
         ) as e:
+            raise NodeHashException from e
+        except RuntimeError as e:
+            # Some tensor subclass picklers call numel(), which is invalid for
+            # symbolic sizes/strides.
+            if "Cannot call numel() on tensor with symbolic sizes/strides" not in str(
+                e
+            ):
+                raise
             raise NodeHashException from e
         finally:
             self._stream.seek(0)
@@ -248,6 +265,8 @@ class GraphRegionTracker:
             filename,
             lineno,
             instruction_pointer,
+            node.op,
+            _normalize_target(node.target),
             _normalize_args(node),
         )
         return sha256_hash(self.input_pickler.dumps(key))
