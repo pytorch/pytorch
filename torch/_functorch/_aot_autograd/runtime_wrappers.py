@@ -106,7 +106,7 @@ from .utils import (
 def _unwrap_tensor_subclasses_no_symints(
     args: list[Any],
 ) -> list[Any]:
-    return runtime_unwrap_tensor_subclasses(args, append_symints=False)
+    return runtime_unwrap_tensor_subclasses(args, append_symints=False)  # type: ignore[arg-type]
 
 
 zip = strict_zip
@@ -967,7 +967,7 @@ def _create_runtime_wrapper(
         def _replay_alias(self, orig_inputs, fw_outs):
             return _codegen_alias_fn(orig_inputs, fw_outs)
 
-        runtime_epilogue._replay_output_aliases = types.MethodType(
+        runtime_epilogue._replay_output_aliases = types.MethodType(  # type: ignore[attr-defined]
             _replay_alias,
             runtime_epilogue,
         )
@@ -1058,7 +1058,7 @@ def _create_runtime_wrapper(
         )
         import types
 
-        runtime_epilogue._apply_input_mutations = types.MethodType(
+        runtime_epilogue._apply_input_mutations = types.MethodType(  # type: ignore[attr-defined]
             lambda self, orig_inputs, updated_inputs: codegen_apply_mutations(
                 orig_inputs, updated_inputs
             ),
@@ -1724,7 +1724,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         )
         from .subclass_codegen import _compile_and_exec_source
 
-        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(
+        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(  # type: ignore[assignment]
             source,
             {"compiled_fn": compiled_fn},
             "inner_fn",
@@ -1789,6 +1789,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
+    base_groups: dict[int, list[int]] = field(
+        default_factory=lambda: collections.defaultdict(list)
+    )
+    other_arg_indices: list[int] = field(default_factory=list)
 
     def pre_compile(
         self,
@@ -1855,8 +1859,25 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
         )
-        # Save old input args for post-compile
-        self.old_input_info = fw_metadata.input_info
+        # Pre-compute base_groups and other_arg_map from
+        # synthetic_base_info so the post_compile codegen can emit a
+        # wrapper without calling merge_view_inputs at runtime.
+        #
+        # other_arg_entries collects (new_idx, orig_idx) pairs so we can
+        # sort by new_idx -- the position in the post-merge calling
+        # convention (bases ++ others).  merge_view_inputs puts
+        # non-tensor args before non-aliased tensor args, so iterating
+        # by orig_idx alone would produce a wrong order when non-tensors
+        # are interleaved with tensors.
+        other_arg_entries: list[tuple[int, int]] = []
+        for orig_idx, entry in enumerate(synthetic_base_info):
+            if isinstance(entry, int):
+                other_arg_entries.append((entry, orig_idx))
+            else:
+                base_idx, _ = entry
+                self.base_groups[base_idx].append(orig_idx)
+        other_arg_entries.sort()
+        self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -1948,48 +1969,76 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        is_inference = not self.trace_joint
+        from .subclass_codegen import _compile_and_exec_source
 
-        @wraps(compiled_fn)
-        def wrapped_compiled_fn(args: list[Any]) -> Any:
-            # TODO: this sure seems expensive to run at runtime (which
-            # post_compile seems to imply it does?!)
-            args_with_synthetic_bases, _, synthetic_base_info = merge_view_inputs(
-                aot_config, args, None, self.old_input_info, is_inference=is_inference
-            )
-            if synthetic_base_info is None:
-                raise AssertionError("synthetic_base_info must not be None")
-            aliased_args_w_metadata_mutations = [
-                args[i] for i in self.aliased_arg_idx_with_metadata_mutations
-            ]
-            num_aliased_args_with_metadata_mutations = len(
-                aliased_args_w_metadata_mutations
-            )
-            args.clear()
-            outs = compiled_fn(args_with_synthetic_bases)
-            if num_aliased_args_with_metadata_mutations > 0:
-                # This code does not handle **all** input metadata mutations.
-                # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
-                # (which only happens if at least one aliased input experienced a data mutation).
-                # e.g:
-                # def f(a, b):
-                #     a.mul_(2)
-                #     b.t_(1, 0)
-                # f(x.view(2, 2), x.view(2, 2))
-                mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
-                user_outs = outs[:-num_aliased_args_with_metadata_mutations]
-                for inp, mutated_inp in zip(
-                    aliased_args_w_metadata_mutations, mutated_metadata_inps
-                ):
-                    inp.as_strided_(
-                        mutated_inp.size(),
-                        mutated_inp.stride(),
-                        mutated_inp.storage_offset(),
-                    )
-                return user_outs
-            return outs
+        base_groups = self.base_groups
+        other_indices = self.other_arg_indices
 
-        return wrapped_compiled_fn
+        num_bases = len(base_groups)
+        aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
+        num_meta_mut = len(aliased_meta_mut_indices)
+
+        lines: list[str] = ["def _synthetic_base_wrapper(args):"]
+        code_globals: dict[str, object] = {"torch": torch, "_compiled_fn_": compiled_fn}
+
+        lines.append(f"    _bases = [None] * {num_bases}")
+        for base_idx in sorted(base_groups):
+            group = base_groups[base_idx]
+            first_orig = group[0]
+            if len(group) == 1:
+                indices_check = f"args[{first_orig}]._base is not None"
+                base_expr = f"args[{first_orig}]._base"
+            else:
+                indices_str = ", ".join(str(i) for i in group)
+                indices_check = (
+                    f"any(args[_i]._base is not None for _i in [{indices_str}])"
+                )
+                base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
+            lines.append(f"""\
+    if {indices_check}:
+        _bases[{base_idx}] = {base_expr}
+    else:
+        _b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)
+        _b.set_(args[{first_orig}].untyped_storage())
+        _bases[{base_idx}] = _b""")
+
+        other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
+        lines.append(f"    _new_args = _bases + [{other_items}]")
+
+        if num_meta_mut > 0:
+            meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
+            lines.append(f"    _meta_mut = [{meta_items}]")
+
+        lines.append("""\
+    args.clear()
+    _outs = _compiled_fn_(_new_args)""")
+
+        if num_meta_mut > 0:
+            # Handles metadata mutations on inputs that were merged into
+            # synthetic bases (create_synthetic_base_metadata hides these
+            # from the normal tracking by forcing mutates_metadata=False
+            # on the base).  Metadata mutations on non-aliased inputs are
+            # handled separately by _apply_input_mutations in the runtime
+            # epilogue.
+            lines.append(f"""\
+    _mut_inps = _outs[-{num_meta_mut}:]
+    _user_outs = _outs[:-{num_meta_mut}]
+    for _inp, _mi in zip(_meta_mut, _mut_inps):
+        _inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())
+    return _user_outs""")
+        else:
+            lines.append("    return _outs")
+
+        source = "\n".join(lines)
+        inner_fn = _compile_and_exec_source(
+            source,
+            code_globals,
+            "_synthetic_base_wrapper",
+            "synthetic_base_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
 
 # Note [Handling mutations on an input that aliases other inputs]
@@ -2373,9 +2422,11 @@ def initialize_rng_states(
     graphsafe_idx: int,
     fwd_rng_states: list[torch.Generator],
     bwd_rng_states: list[torch.Generator],
+    *,
+    device: torch.device,
 ) -> None:
     """
-    Initialize the cudagraph safe rng states.
+    Initialize the graphsafe rng states.
 
     Initialization of rng states should have a few properties:
     - the initialization for each rng state should be independent
@@ -2387,23 +2438,16 @@ def initialize_rng_states(
     with preserve_rng_states. Seed initialization should advance the rng states so consecutive compilations
     do not give equal randomness.
     """
+    from .utils import get_default_generator
+
     with torch.utils._python_dispatch._disable_current_modes():
         seeds = torch.randint(0, torch.iinfo(torch.int64).max, (num_rng,), device="cpu")
+        generator = get_default_generator(device)
         fwd_rng_states.extend(
-            [
-                torch.cuda.default_generators[graphsafe_idx]
-                .clone_state()
-                .manual_seed(int(seeds[i]))
-                for i in range(num_rng)
-            ]
+            [generator.clone_state().manual_seed(int(seeds[i])) for i in range(num_rng)]
         )
         bwd_rng_states.extend(
-            [
-                torch.cuda.default_generators[graphsafe_idx]
-                .clone_state()
-                .manual_seed(int(seeds[i]))
-                for i in range(num_rng)
-            ]
+            [generator.clone_state().manual_seed(int(seeds[i])) for i in range(num_rng)]
         )
 
 
@@ -2514,6 +2558,7 @@ class AOTDispatchAutogradCompileSpec:
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2666,6 +2711,7 @@ class _AutogradForwardEpilogue:
 class _AutogradRngStateTracker:
     num_rng: int
     graphsafe_idx: int | None
+    device: torch.device | None = None
     fwd_rng_states: list[torch.Generator] = field(default_factory=list)
     bwd_rng_states: list[torch.Generator] = field(default_factory=list)
     curr_fwd_iter: Any = field(default_factory=lambda: itertools.count(0))
@@ -2682,11 +2728,14 @@ class _AutogradRngStateTracker:
         if len(self.fwd_rng_states) == 0:
             if self.graphsafe_idx is None:
                 raise AssertionError("graphsafe_idx must not be None when num_rng > 0")
+            if self.device is None:
+                raise AssertionError("device must not be None when num_rng > 0")
             initialize_rng_states(
                 self.num_rng,
                 self.graphsafe_idx,
                 self.fwd_rng_states,
                 self.bwd_rng_states,
+                device=self.device,
             )
 
         curr_iter = next(self.curr_fwd_iter)
@@ -2750,6 +2799,7 @@ class _AutogradBackwardCompiler:
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
     disable_amp: bool
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2796,9 +2846,9 @@ class _AutogradBackwardCompiler:
         ):
             CompileEventLogger.compilation_metric(is_forward=False)
             # See Note: [Backward graph lazy lowering]
-            if self.aot_config.bw_compiler is None:
-                raise AssertionError("aot_config.bw_compiler must not be None")
-            self.compiled_bw = self.aot_config.bw_compiler(
+            if self.bw_compiler is None:
+                raise AssertionError("bw_compiler must not be None")
+            self.compiled_bw = self.bw_compiler(
                 copy.deepcopy(bw_module), placeholder_list
             )
             # Maybe save cache entry
@@ -3212,11 +3262,13 @@ class _AOTDispatchAutogradFunctionFactory:
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
+            device=self.spec.fw_metadata.graphsafe_rng_device,
         )
         backward_compiler = _AutogradBackwardCompiler(
             compiled_bw=self.spec.compiled_bw_func,
             lazy_backward_info=self.spec.lazy_backward_info,
             disable_amp=self.spec.disable_amp,
+            bw_compiler=self.spec.bw_compiler,
             aot_config=self.spec.aot_config,
             fw_metadata=self.spec.fw_metadata,
             try_save_cache_entry=self.spec.try_save_cache_entry,

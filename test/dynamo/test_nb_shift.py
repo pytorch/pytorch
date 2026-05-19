@@ -2,9 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 @torch._dynamo.config.patch(enable_trace_unittest=True)
@@ -423,7 +421,6 @@ class TestNbRshift(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(x, 0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
-
 
 
 if __name__ == "__main__":
