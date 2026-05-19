@@ -21,32 +21,6 @@ class Info:
     _setup_context_fn: Callable | None
 
 
-def _invoke_setup_context(
-    info: InfoProtocol,
-    schema,
-    has_kwarg_only_args: bool,
-    ctx,
-    args,
-    kwargs,
-    result,
-):
-    """Invoke info._setup_context_fn after filling defaults.
-
-    Shared between make_autograd_impl's Generated.forward and
-    CustomOpDef's fast-path Generated.forward so we only spell the
-    fill_defaults / has_kwarg_only_args handling once.
-    """
-    if info._setup_context_fn is None:
-        return
-    args, kwargs = utils.fill_defaults(schema, args, kwargs)
-    if has_kwarg_only_args:
-        info._setup_context_fn(
-            ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
-        )
-    else:
-        info._setup_context_fn(ctx=ctx, inputs=args, output=result)
-
-
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
