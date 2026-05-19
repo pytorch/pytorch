@@ -31,8 +31,37 @@ if [[ "$OS" == "windows-arm64" ]]; then
     elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
         ./windows/arm64/build_pytorch.bat
     fi
-else
+elif [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+    # libtorch zip artifacts still go through the legacy bat chain;
+    # the Python pipeline below covers wheel builds only.
     ./windows/internal/build_wheels.bat
+else
+    # New Python pipeline: install the requested Python, then chain
+    # build_env_setup.py -> build_install_deps.py -> build_wheel.py.
+    # Mirrors the Linux split landed in gh-182409.
+    case "$DESIRED_CUDA" in
+        cpu)  export GPU_ARCH_TYPE=cpu  ;;
+        cu*)  export GPU_ARCH_TYPE=cuda ;;
+        xpu)  export GPU_ARCH_TYPE=xpu  ;;
+        *)    echo "Unsupported DESIRED_CUDA=$DESIRED_CUDA" >&2; exit 1 ;;
+    esac
+
+    # shellcheck source=./windows/set_desired_python.sh
+    source ./windows/set_desired_python.sh
+
+    ENV_FILE="$(mktemp)"
+    trap 'rm -f "$ENV_FILE"' EXIT
+
+    python ./windows/build_env_setup.py --env-out "$ENV_FILE"
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+
+    python ./windows/build_install_deps.py --env-out "$ENV_FILE"
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+
+    cd "$PYTORCH_ROOT"
+    python "$PYTORCH_ROOT/.ci/pytorch/windows/build_wheel.py" "$PYTORCH_FINAL_PACKAGE_DIR"
 fi
 
 echo "Free space on filesystem after build:"
