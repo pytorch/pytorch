@@ -333,6 +333,8 @@ if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
 
 
 class TestPyCodeCache(TestCase):
+    _share_triton_cache = False
+
     def test_linemaps_empty(self):
         src = """import torch"""
         (key, path) = PyCodeCache.write(src, "")
@@ -401,10 +403,6 @@ class TestPyCodeCache(TestCase):
                 .decode()
                 .strip()
             )
-            # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-            if torch.xpu.is_available():
-                wrapper_path = wrapper_path.splitlines()[-1]
-                hit = hit.splitlines()[-1]
             self.assertEqual(hit, "1")
 
             with open(wrapper_path) as f:
@@ -444,6 +442,7 @@ class TestPyCodeCache(TestCase):
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
     device_type = GPU_TYPE
+    _share_triton_cache = False
 
     def setUp(self):
         super().setUp()
@@ -663,6 +662,35 @@ class TestFxGraphCache(TestCase):
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalFxGraphCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self.reset()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
@@ -2088,6 +2116,8 @@ class TestFxGraphCache(TestCase):
 
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
+    _share_triton_cache = False
+
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -2739,6 +2769,8 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    _share_triton_cache = False
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
@@ -3597,6 +3629,8 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    _share_triton_cache = False
+
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
@@ -3639,6 +3673,8 @@ class TestCudaCompileCommand(TestCase):
 
 @instantiate_parametrized_tests
 class TestAutotuneCache(TestCase):
+    _share_triton_cache = False
+
     device_type = GPU_TYPE
 
     def setUp(self):
@@ -4038,6 +4074,8 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
+    _share_triton_cache = False
+
     @requires_gpu()
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
@@ -4128,6 +4166,8 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 
 class TestUtils(TestCase):
+    _share_triton_cache = False
+
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
         def fn(x, y):
@@ -4170,6 +4210,8 @@ class TestUtils(TestCase):
 
 
 class TestCompilationEventLogging(TestCase):
+    _share_triton_cache = False
+
     def reset(self):
         DynamoCache.clear()
         PrecompileContext.clear()
@@ -4360,6 +4402,8 @@ class TestCompilationEventLogging(TestCase):
 
 
 class TestAutotuneCacheExtraOptions(TestCase):
+    _share_triton_cache = False
+
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
 

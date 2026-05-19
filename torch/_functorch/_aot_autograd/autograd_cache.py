@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import json
@@ -49,6 +50,7 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._inductor.output_code import OutputCode
+from torch._inductor.remote_cache import cache_stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
@@ -942,9 +944,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         local: bool,
         remote: bool,
         compile_region_name: str | None = None,
-    ) -> Callable[..., Any] | None:
+    ) -> tuple[Callable[..., Any] | None, AOTConfig]:
         """
-        Load a result from the cache, and reconstruct a runtime wrapper around the object
+        Load a result from the cache, and reconstruct a runtime wrapper around
+        the object. On a cache miss, return an updated config carrying the
+        cache metadata needed to save the eventual compile result.
         """
         compiled_fn = None
         cache_info: dict[str, Any] = {}
@@ -1039,10 +1043,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)
             if cache_key is not None:
-                aot_config.cache_info = AOTAutogradCacheInfo(
-                    cache_key,
-                    time.time_ns(),
-                    forward_symints=symints,
+                aot_config = dataclasses.replace(
+                    aot_config,
+                    cache_info=AOTAutogradCacheInfo(
+                        cache_key,
+                        time.time_ns(),
+                        forward_symints=symints,
+                    ),
                 )
 
         cache_info.update(
@@ -1078,7 +1085,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        return compiled_fn
+        return compiled_fn, aot_config
 
     @classmethod
     def generate_guards_expression(
@@ -1120,6 +1127,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_hit_count",
@@ -1130,6 +1138,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "aotautograd_remote_cache_hit_count",
             )
         if local_miss:
+            cache_stats.miss("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_miss_count",
@@ -1306,6 +1315,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
+            cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
