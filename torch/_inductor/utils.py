@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -1273,7 +1273,7 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
         if isinstance(node.meta.get("val"), torch.Tensor)
     )
 
-    out_arg = output_node(gm).args[0]
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
     out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
@@ -1366,24 +1366,36 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
+    share_triton: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
+
+    When share_triton=True, the Triton compilation cache is placed in a
+    persistent shared directory rather than inside the per-test temp dir.
+    Triton compilation is a pure function of the kernel source, so sharing
+    compiled kernels across tests is safe and avoids redundant compilation.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
+    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = normalize_path_separator(
-                os.path.join(inductor_cache_dir, "triton")
-            )
+            if share_triton:
+                triton_cache_dir = normalize_path_separator(
+                    os.path.join(default_cache_dir(), "triton")
+                )
+            else:
+                triton_cache_dir = normalize_path_separator(
+                    os.path.join(inductor_cache_dir, "triton")
+                )
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
@@ -1641,7 +1653,7 @@ class IndentedBuffer:
                 return
             other_code = other_code.rstrip()
             for s in other_code.split("\n"):
-                self.writeline(s)
+                IndentedBuffer.writeline(self, s)
 
     def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
         res = IndentedBuffer(initial_indent=self._indent)
@@ -1663,13 +1675,92 @@ class IndentedBuffer:
         return new_line in self._lines
 
 
+class DualIndentedBuffer(IndentedBuffer):
+    """IndentedBuffer that simultaneously accumulates JIT and AOTI output.
+
+    The base class (self._lines) holds JIT content. self.aot holds AOTI content.
+    By default, writeline/splice write to both. Use _jit/_aot variants for
+    mode-specific writes.
+    """
+
+    def __init__(self, initial_indent: int = 0) -> None:
+        super().__init__(initial_indent)
+        self.aot = IndentedBuffer(initial_indent)
+
+    @property
+    def jit(self) -> IndentedBuffer:
+        """Read-only accessor for JIT buffer (for splicing into result).
+
+        WARNING: Do NOT use jit for writing — writes would go to both buffers
+        because self.writeline is overridden. Use writeline_jit/splice_jit instead.
+        """
+        return self  # type: ignore[return-value]
+
+    def writeline(self, line):  # type: ignore[override]
+        IndentedBuffer.writeline(self, line)
+        self.aot.writeline(line)
+
+    def writeline_jit(self, line) -> None:
+        IndentedBuffer.writeline(self, line)
+
+    def writeline_aot(self, line) -> None:
+        self.aot.writeline(line)
+
+    def writelines(self, lines):  # type: ignore[override]
+        for line in lines:
+            self.writeline(line)
+
+    def splice(self, other_code, strip: bool = False) -> None:  # type: ignore[override]
+        # Splice into each buffer independently. When other_code is itself a
+        # DualIndentedBuffer, each side reads from the matching side.
+        IndentedBuffer.splice(self, other_code, strip=strip)
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        IndentedBuffer.splice(self, other_code, strip=strip)
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def indent(self, offset: int = 1):
+        @contextlib.contextmanager
+        def ctx():
+            self._indent += offset
+            self.aot._indent += offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
+                self.aot._indent -= offset
+
+        return ctx()
+
+    def do_indent(self, offset: int = 1) -> None:
+        self._indent += offset
+        self.aot._indent += offset
+
+    def do_unindent(self, offset: int = 1) -> None:
+        self._indent -= offset
+        self.aot._indent -= offset
+
+    def clear(self) -> None:
+        super().clear()
+        self.aot.clear()
+
+
 class AotOnlyBuffer(IndentedBuffer):
     """IndentedBuffer for pure-AOTI codegen.
 
     Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
     write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
-    sites use writeline_jit/writeline_aot uniformly across pure-JIT and
-    pure-AOTI modes.
+    sites use writeline_jit/writeline_aot uniformly across pure-JIT,
+    pure-AOTI, and dual-wrapper modes.
     """
 
     def writeline_jit(self, line) -> None:
@@ -1688,8 +1779,8 @@ class AotOnlyBuffer(IndentedBuffer):
 def make_codegen_buffer() -> IndentedBuffer:
     """Construct the IndentedBuffer subclass matching the current codegen mode.
 
-    Pure AOTI → AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
-    Pure JIT  → IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
     """
     from .virtualized import V
 
@@ -2946,7 +3037,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(val, sympy.Expr), (
         "only support sympy.Expr as input to get_sympy_Expr_dtype"
     )
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -3676,7 +3767,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
     # Allow for unhinted e as long as we can still statically prove
@@ -4068,7 +4159,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     # Check for cudagraph_unsafe tag
     if (
         isinstance(target, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in target.tags
+        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
     ):
         return True
 
