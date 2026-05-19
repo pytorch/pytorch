@@ -156,7 +156,7 @@ from .partitioners import default_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from torch._inductor.compile_fx import CompilerConfigExtra
     from torch._inductor.output_code import OutputCode
@@ -1531,15 +1531,15 @@ def aot_compile_joint_with_descriptors(
 @contextlib.contextmanager
 def _aot_export_decomposition_context(
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
-) -> Any:
+) -> Iterator[dict[OpOverload, Callable[..., Any]] | None]:
     if decompositions is None:
         yield decompositions
         return
 
-    from torch.export.decomp_utils import (
+    from torch.export.decomp_utils import CustomDecompTable
+    from torch.export.exported_program import (
         _override_composite_implicit_decomp,
         _split_decomp_table_to_cia_and_python_decomp,
-        CustomDecompTable,
     )
 
     decomp_table = (
@@ -1551,7 +1551,7 @@ def _aot_export_decomposition_context(
         decomp_table
     )
     with _override_composite_implicit_decomp(cia_to_decomp):
-        yield python_decomp_table
+        yield cast("dict[OpOverload, Callable[..., Any]]", python_decomp_table)
 
 
 def aot_export_module(

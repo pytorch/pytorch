@@ -25,7 +25,6 @@ from common_utils import (
     decorateForModules,
     saved_tensors_hooks_to_gm,
     skip,
-    skipOps,
     xfail,
 )
 
@@ -81,6 +80,7 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skipOps,
     tol,
     toleranceOverride,
 )
@@ -5851,6 +5851,22 @@ class <lambda>(torch.nn.Module):
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertEqual(targets, [torch.ops.aten.matmul.default])
 
+    def test_aot_export_simplified_none_decomp_table_keeps_raw_semantics(self):
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=False,
+            decompositions=None,
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.mm.default])
+
     def test_aot_export_simplified_joint_preserves_cia_ops(self):
         def f(x, y):
             return (torch.matmul(x, y).sum(),)
@@ -11496,17 +11512,13 @@ def _test_aot_autograd_module_helper(
 
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestEagerFusionOpInfo", "test_aot_autograd_exhaustive", aot_autograd_failures
-    )
+    @skipOps(aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
-        "TestEagerFusionOpInfo",
-        "test_aot_autograd_symbolic_exhaustive",
         aot_autograd_failures | symbolic_aot_autograd_failures,
     )
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
@@ -11514,8 +11526,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        "TestEagerFusionOpInfo",
-        "test_aot_autograd_disable_functionalization_exhaustive",
         aot_autograd_failures,
     )
     def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
@@ -11526,8 +11536,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
-        "TestEagerFusionOpInfo",
-        "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
         aot_autograd_failures | symbolic_aot_autograd_failures,
     )
     def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
