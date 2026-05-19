@@ -485,20 +485,49 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
 
         # === TRANSFORM ===
 
-        # Route computation to use shard directly. If FSDP pads the shard
-        # (shard rows > split_size), the slice was trimming padding off the
-        # gathered tensor. We must trim the shard to match.
-        # Guard: split_size must not exceed shard_dim
-        if split_size > shard_dim:
+        # Verify the split is evenly divisible: all getitems must have the
+        # same shape. In SPMD compilation (same graph for all ranks), the
+        # split distributes chunks to all ranks. If the last chunk is smaller
+        # (uneven vocab/param size), we can't replace the gathered compute
+        # with shard compute because different ranks expect different shapes.
+        all_getitems = [
+            u
+            for u in split_node.users
+            if u.op == "call_function" and u.target is operator.getitem
+        ]
+        if all_getitems:
+            shapes = [
+                tuple(int(d) for d in u.meta["val"].shape)
+                for u in all_getitems
+                if u.meta.get("val") is not None
+            ]
+            if len(OrderedSet(shapes)) > 1:
+                logger.debug(
+                    "decomp_gram_matrix_all_gather: skip — uneven split "
+                    "shapes %s (FSDP padding with non-divisible param size)",
+                    shapes[:3],
+                )
+                continue
+
+        # Determine the expected output rows from the getitem.
+        # With FSDP padding, the shard is padded for divisibility but the
+        # getitem output matches the per-rank unpadded size. We trim the
+        # shard to match if needed.
+        getitem_val = getitem_node.meta.get("val")
+        if getitem_val is None:
             continue
+        expected_rows = int(getitem_val.shape[0])
 
         replacement: fx.Node = info.shard
-        if split_size < shard_dim:
+        if expected_rows < shard_dim:
             with graph.inserting_before(info.slice_node):
                 replacement = graph.call_function(
-                    aten.slice.Tensor, args=(info.shard, 0, 0, split_size)
+                    aten.slice.Tensor,
+                    args=(info.shard, 0, 0, expected_rows),
                 )
                 _retrace_node_meta(replacement)
+        elif expected_rows > shard_dim:
+            continue
 
         # Verify all slice users are in the chain ending at split.
         # If slice has users outside the chain, replacing it would break them.
@@ -511,7 +540,8 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                 slice_chain.add(sn)
             sn = sn.next
         slice_chain.add(split_node)
-        slice_chain.add(getitem_node)
+        for gi in all_getitems:
+            slice_chain.add(gi)
         if any(u not in slice_chain for u in info.slice_node.users):
             continue
 
@@ -646,6 +676,18 @@ def decomp_comms(gm: fx.GraphModule) -> fx.GraphModule:
         "decomp_comms: running on graph with %d nodes",
         len(list(gm.graph.nodes)),
     )
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "pre_decomp_comms",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
+
     decomp_gram_matrix_all_gather(gm)
 
     trace_structured(
