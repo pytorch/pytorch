@@ -82,7 +82,7 @@ T = TypeVar("T")
 
 aten = torch._ops.ops.aten
 
-CONSTANT_NUMEL_LIMIT = 1
+# CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
 
@@ -338,36 +338,38 @@ class FakeTensorConverter:
         self.constant_storage_mapping = {}
 
     def add_constant_storage_mapping(self, fake_tensor: FakeTensor) -> None:
-        # when you have a constant, aliased tensor:
-        # const_tensor.add_(torch.rand([1]))
-        # all aliases of it must become no longer const
-        if not isinstance(fake_tensor, FakeTensor) or fake_tensor.constant is None:
-            raise AssertionError("fake_tensor must be a FakeTensor with a constant")
-        weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
-
-        # we need a map from a weak storage to all of its corresponding
-        # constant tensors. python doesn't have the weak value equivalent
-        # of defaultdict(list), so we are using a WeakValueDictionary as one
-        if weak_st not in self.constant_storage_mapping:
-            self.constant_storage_mapping[weak_st] = []
-        self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
+        pass
+        # # when you have a constant, aliased tensor:
+        # # const_tensor.add_(torch.rand([1]))
+        # # all aliases of it must become no longer const
+        # if not isinstance(fake_tensor, FakeTensor) or fake_tensor.constant is None:
+        #     raise AssertionError("fake_tensor must be a FakeTensor with a constant")
+        # weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
+        #
+        # # we need a map from a weak storage to all of its corresponding
+        # # constant tensors. python doesn't have the weak value equivalent
+        # # of defaultdict(list), so we are using a WeakValueDictionary as one
+        # if weak_st not in self.constant_storage_mapping:
+        #     self.constant_storage_mapping[weak_st] = []
+        # self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
 
     def invalidate_constant_aliases(self, tensor: Tensor) -> None:
-        if isinstance(tensor, FakeTensor):
-            raise AssertionError("Expected a real tensor, not a FakeTensor")
-
-        weak_st = StorageWeakRef(tensor._typed_storage())
-        if weak_st not in self.constant_storage_mapping:
-            return
-
-        for weak_tensor_ref in self.constant_storage_mapping[weak_st]:
-            ten = weak_tensor_ref()
-            if ten is not None:
-                # pyrefly: ignore [missing-attribute]
-                ten._fix_weakref()
-                ten.constant = None
-
-        del self.constant_storage_mapping[weak_st]
+        pass
+        # if isinstance(tensor, FakeTensor):
+        #     raise AssertionError("Expected a real tensor, not a FakeTensor")
+        #
+        # weak_st = StorageWeakRef(tensor._typed_storage())
+        # if weak_st not in self.constant_storage_mapping:
+        #     return
+        #
+        # for weak_tensor_ref in self.constant_storage_mapping[weak_st]:
+        #     ten = weak_tensor_ref()
+        #     if ten is not None:
+        #         # pyrefly: ignore [missing-attribute]
+        #         ten._fix_weakref()
+        #         ten.constant = None
+        #
+        # del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
@@ -421,7 +423,8 @@ class FakeTensorConverter:
             if make_constant:
                 raise AssertionError("make_constant must be False for nn.Parameter")
 
-        constant = t if make_constant else None
+        # constant = t if make_constant else None
+        constant = None
 
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
@@ -548,8 +551,8 @@ class FakeTensorConverter:
                         hint=value,
                         source=item_source,
                     )
-        if make_constant:
-            self.add_constant_storage_mapping(out)
+        # if make_constant:
+        #     self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
         return out
 
@@ -1813,8 +1816,8 @@ class FakeTensorMode(TorchDispatchMode):
             if isinstance(arg, FakeTensor):
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
-                if arg.constant is not None:
-                    raise _BypassDispatchCache("constant attribute")
+                # if arg.constant is not None:
+                #     raise _BypassDispatchCache("constant attribute")
                 if is_sparse_any(arg):
                     raise _BypassDispatchCache(f"{arg.layout} tensor")
                 metadata = extract_tensor_metadata(arg)
@@ -1873,10 +1876,10 @@ class FakeTensorMode(TorchDispatchMode):
         if not isinstance(output, FakeTensor):
             raise _BypassDispatchCache("non-FakeTensor output")
 
-        # Avoid caching FakeTensors with constants attached since those
-        # can be invalidated.
-        if output.constant is not None:
-            raise _BypassDispatchCache("constant attribute")
+        # # Avoid caching FakeTensors with constants attached since those
+        # # can be invalidated.
+        # if output.constant is not None:
+        #     raise _BypassDispatchCache("constant attribute")
 
         # TODO: support caching sparse outputs?
         if output.is_sparse:
@@ -2501,47 +2504,47 @@ class FakeTensorMode(TorchDispatchMode):
             if func is torch.ops.prims.device_put.default:
                 avoiding_device_init = True
 
-        # skip const prop for aten._to_copy if
-        # 1. input tensor is on "meta" device
-        # 2. destination device is unavailable, captured by `avoiding_device_init`
-        device_conversion_skip_const_prop = (
-            func is torch.ops.aten._to_copy.default
-            and isinstance(args[0], torch.Tensor)
-            and args[0].device.type == "meta"
-        ) or avoiding_device_init
+        # # skip const prop for aten._to_copy if
+        # # 1. input tensor is on "meta" device
+        # # 2. destination device is unavailable, captured by `avoiding_device_init`
+        # device_conversion_skip_const_prop = (
+        #     func is torch.ops.aten._to_copy.default
+        #     and isinstance(args[0], torch.Tensor)
+        #     and args[0].device.type == "meta"
+        # ) or avoiding_device_init
 
-        # To constant propagate through these functions:
-        # 1, If this is a lift due to a torch.tensor call,
-        #    the input tensor is guaranteed to be a
-        #    constant, so we keep a copy of the original argument along so
-        #    we can query it if we're asked to item() it at some later point.
-        #    (Note that you can always call a lift fn manually, so we do
-        #    have to check if there are any fake tensors!)
-        # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if (is_lift_func and not flat_arg_fake_tensors) or (
-            should_allow_numbers_as_tensors(func)
-            and not has_symbolic_sizes
-            and not flat_arg_fake_tensors
-            and not device_conversion_skip_const_prop
-        ):
-            if not all(t.constant is not None for t in flat_arg_fake_tensors):
-                raise AssertionError(
-                    f"{func} should not have fake inputs without constants"
-                )
-            const_flat_args = [
-                a.constant if self.is_our_fake(a) else a for a in flat_args
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
-            out = func(*const_args, **const_kwargs)
-            if type(out) is Tensor and self.may_turn_const(out):
-                # NB: not in_kernel_invocation_manager because we're doing real
-                # compute here
-                # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
-                # dangerous) if this is actually a wrapper subclass tensor,
-                # therefore the exact type test above
-                with no_dispatch():
-                    out = out.clone()
-                return converter.from_real_tensor(self, out, make_constant=True)
+        # # To constant propagate through these functions:
+        # # 1, If this is a lift due to a torch.tensor call,
+        # #    the input tensor is guaranteed to be a
+        # #    constant, so we keep a copy of the original argument along so
+        # #    we can query it if we're asked to item() it at some later point.
+        # #    (Note that you can always call a lift fn manually, so we do
+        # #    have to check if there are any fake tensors!)
+        # # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
+        # if (is_lift_func and not flat_arg_fake_tensors) or (
+        #     should_allow_numbers_as_tensors(func)
+        #     and not has_symbolic_sizes
+        #     and not flat_arg_fake_tensors
+        #     and not device_conversion_skip_const_prop
+        # ):
+        #     if not all(t.constant is not None for t in flat_arg_fake_tensors):
+        #         raise AssertionError(
+        #             f"{func} should not have fake inputs without constants"
+        #         )
+        #     const_flat_args = [
+        #         a.constant if self.is_our_fake(a) else a for a in flat_args
+        #     ]
+        #     const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
+        #     out = func(*const_args, **const_kwargs)
+        #     if type(out) is Tensor and self.may_turn_const(out):
+        #         # NB: not in_kernel_invocation_manager because we're doing real
+        #         # compute here
+        #         # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
+        #         # dangerous) if this is actually a wrapper subclass tensor,
+        #         # therefore the exact type test above
+        #         with no_dispatch():
+        #             out = out.clone()
+        #         return converter.from_real_tensor(self, out, make_constant=True)
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
         # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
@@ -2565,61 +2568,61 @@ class FakeTensorMode(TorchDispatchMode):
         )
         del args, kwargs  # Invalidated
 
-        # The current constant handling only support tracing systems
-        # (aot autograd, torchdynamo) where each operation is run consecutively.
-        # Because each operation is run in order, we can trace out and support
-        # sequences like: x = torch.tensor(0.); y = x.add_(1)
-        # Whenever a constant is written to but with inputs that cannot be evaluated
-        # statically, such as random_(), we invalidate all constants that alias the input
-        # We will rely on functionalization for use of fake tensors constants as persistent
-        # objects on an FX Graph.
+        # # The current constant handling only support tracing systems
+        # # (aot autograd, torchdynamo) where each operation is run consecutively.
+        # # Because each operation is run in order, we can trace out and support
+        # # sequences like: x = torch.tensor(0.); y = x.add_(1)
+        # # Whenever a constant is written to but with inputs that cannot be evaluated
+        # # statically, such as random_(), we invalidate all constants that alias the input
+        # # We will rely on functionalization for use of fake tensors constants as persistent
+        # # objects on an FX Graph.
 
-        all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
-        if (
-            isinstance(func, torch._ops.OpOverload)
-            and torch.Tag.nondeterministic_seeded not in func.tags
-            # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view.
-            # Example: fake_a.transpose_(0,1) would mutate fake_a.constant in-place, changing its
-            # shape from (2,3) to (3,2), while fake_a.shape still reports (2,3) → divergence.
-            # However, detach_ is safe: it only mutates requires_grad (not shape/stride/data),
-            # and constants are used purely for their values, not autograd.
-            and (
-                torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
-            )
-            and all_constant
-            and len(flat_arg_fake_tensors) != 0
-            and not has_symbolic_sizes
-            and not avoiding_device_init
-            and func is not aten._nested_tensor_from_tensor_list.default
-        ):
-            const_flat_args = [
-                a.constant if self.is_our_fake(a) else a for a in flat_args
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
+        # all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
+        # if (
+        #     isinstance(func, torch._ops.OpOverload)
+        #     and torch.Tag.nondeterministic_seeded not in func.tags
+        #     # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view.
+        #     # Example: fake_a.transpose_(0,1) would mutate fake_a.constant in-place, changing its
+        #     # shape from (2,3) to (3,2), while fake_a.shape still reports (2,3) -> divergence.
+        #     # However, detach_ is safe: it only mutates requires_grad (not shape/stride/data),
+        #     # and constants are used purely for their values, not autograd.
+        #     and (
+        #         torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
+        #     )
+        #     and all_constant
+        #     and len(flat_arg_fake_tensors) != 0
+        #     and not has_symbolic_sizes
+        #     and not avoiding_device_init
+        #     and func is not aten._nested_tensor_from_tensor_list.default
+        # ):
+        #     const_flat_args = [
+        #         a.constant if self.is_our_fake(a) else a for a in flat_args
+        #     ]
+        #     const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
+        #
+        #     # NB: not in_kernel_invocation_manager(self) as we want to do REAL
+        #     # compute
+        #     with no_dispatch():
+        #         out = func(*const_args, **const_kwargs)
+        #
+        #     flat_out = pytree.tree_leaves(out)
+        #     flat_out_tensors = [t for t in flat_out if isinstance(t, Tensor)]
+        #     all_constant = all(self.may_turn_const(t) for t in flat_out_tensors)
+        #
+        #     if all_constant:
+        #         return pytree.tree_map_only(
+        #             Tensor,
+        #             lambda t: converter.from_real_tensor(self, t, make_constant=True),
+        #             out,
+        #         )
+        #
+        #     # we weren't able to turn outputs to constants,
+        #     # so invalidate all constants that might be aliases of the outputs
+        #     for ten in flat_out_tensors:
+        #         converter.invalidate_constant_aliases(ten)
 
-            # NB: not in_kernel_invocation_manager(self) as we want to do REAL
-            # compute
-            with no_dispatch():
-                out = func(*const_args, **const_kwargs)
-
-            flat_out = pytree.tree_leaves(out)
-            flat_out_tensors = [t for t in flat_out if isinstance(t, Tensor)]
-            all_constant = all(self.may_turn_const(t) for t in flat_out_tensors)
-
-            if all_constant:
-                return pytree.tree_map_only(
-                    Tensor,
-                    lambda t: converter.from_real_tensor(self, t, make_constant=True),
-                    out,
-                )
-
-            # we weren't able to turn outputs to constants,
-            # so invalidate all constants that might be aliases of the outputs
-            for ten in flat_out_tensors:
-                converter.invalidate_constant_aliases(ten)
-
-        # we are falling through to running non constant tensors, any input constant that
-        # is written to must be invalidated
+        # # we are falling through to running non constant tensors, any input constant that
+        # # is written to must be invalidated
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
 
         if (
@@ -2636,7 +2639,7 @@ class FakeTensorMode(TorchDispatchMode):
             with self, maybe_ignore_fresh_unbacked_symbols():
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
-        self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
+        # self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         def maybe_to_real_tensor(
             t: T,
@@ -3155,12 +3158,13 @@ class FakeTensorMode(TorchDispatchMode):
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
     def may_turn_const(self, t: Tensor) -> bool:
-        return (
-            t.numel() <= CONSTANT_NUMEL_LIMIT
-            and not is_sparse_any(t)
-            and not self.is_our_fake(t)
-            and t.device.type != "meta"
-        )
+        return False
+        # return (
+        #     t.numel() <= CONSTANT_NUMEL_LIMIT
+        #     and not is_sparse_any(t)
+        #     and not self.is_our_fake(t)
+        #     and t.device.type != "meta"
+        # )
 
     def invalidate_written_to_constants(
         self,
@@ -3169,23 +3173,24 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> None:
-        any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
-        schema_info = get_schema_info(func)
-        if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(  # type: ignore[misc]
-                func,
-                args=args,  # type: ignore[arg-type]
-                kwargs=kwargs,  # type: ignore[arg-type]
-                normalize_to_only_use_kwargs=True,
-            )
-            for k, v in new_kwargs.items():
-                k = k if (k != "input" or schema_info.has_argument(k)) else "self"
-                if (
-                    self.is_our_fake(v)
-                    and schema_info.is_mutable(k)
-                    and v.constant is not None
-                ):
-                    self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
+        pass
+        # any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
+        # schema_info = get_schema_info(func)
+        # if any_constant and schema_info.is_mutable():
+        #     _, new_kwargs = normalize_function(  # type: ignore[misc]
+        #         func,
+        #         args=args,  # type: ignore[arg-type]
+        #         kwargs=kwargs,  # type: ignore[arg-type]
+        #         normalize_to_only_use_kwargs=True,
+        #     )
+        #     for k, v in new_kwargs.items():
+        #         k = k if (k != "input" or schema_info.has_argument(k)) else "self"
+        #         if (
+        #             self.is_our_fake(v)
+        #             and schema_info.is_mutable(k)
+        #             and v.constant is not None
+        #         ):
+        #             self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
     def from_tensor(
         self,
