@@ -3432,7 +3432,7 @@ class SIMDScheduling(BaseScheduling):
             features=node_info.features,
             tiling_scores=node_info.tiling_scores,
         )
-        metrics.generated_kernel_count -= 1
+        metrics.generated_kernel_count -= 1  # pyrefly: ignore [bad-assignment]
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
         with (
