@@ -25,7 +25,7 @@ from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -3367,6 +3367,165 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             KV_S=64,
             device=device,
         )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_rocm
+    def test_fwd_fallback_handles_low_shared_memory_limit(self, device):
+        import triton.compiler.compiler as triton_compiler
+
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            FlexConfig,
+        )
+        from torch._inductor.virtualized import V
+
+        with (
+            config.patch({"max_autotune": False}),
+            patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
+        ):
+            fwd_configs = CUDAConfigHeuristic().get_flex_attn_fwd_configs(
+                192, torch.float16
+            )
+        self.assertEqual(fwd_configs[0], FlexConfig(128, 128, 1, 8))
+        self.assertIn(FlexConfig(64, 64, 1, 4), fwd_configs)
+
+        q, k, v = (
+            torch.randn(1, 2, 256, 192, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "compile_threads": 1,
+                    "force_disable_caches": True,
+                    "max_autotune": False,
+                    "use_static_triton_launcher": False,
+                }
+            ),
+            patch.object(triton_compiler, "max_shared_mem", return_value=101376),
+            patch.object(
+                V.choices,
+                "get_flex_attention_fwd_configs",
+                return_value=fwd_configs,
+            ),
+        ):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, kernel_options={"BACKEND": "TRITON"}
+            )
+            torch.cuda.synchronize()
+
+        self.assertEqual(out.shape, (1, 2, 256, 192))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_rocm
+    def test_fwd_fallback_handles_large_value_head_dim(self, device):
+        import triton.compiler.compiler as triton_compiler
+
+        from torch._inductor.template_heuristics.triton import FlexConfig
+        from torch._inductor.virtualized import V
+
+        q = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+        k = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+        v = torch.randn(1, 2, 256, 256, device=device, dtype=torch.float16)
+
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "compile_threads": 1,
+                    "force_disable_caches": True,
+                    "max_autotune": False,
+                    "use_static_triton_launcher": False,
+                }
+            ),
+            patch.object(triton_compiler, "max_shared_mem", return_value=101376),
+            patch.object(
+                V.choices,
+                "get_flex_attention_fwd_configs",
+                return_value=[FlexConfig(128, 64, 1, 4)],
+            ),
+        ):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                kernel_options={"BACKEND": "TRITON", "BLOCK_M": 128, "BLOCK_N": 64},
+            )
+            torch.cuda.synchronize()
+
+        self.assertEqual(out.shape, (1, 2, 256, 256))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_rocm
+    def test_bwd_fallback_handles_low_shared_memory_limit(self, device):
+        import triton.compiler.compiler as triton_compiler
+
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            FlexBwDConfig,
+            FlexConfig,
+        )
+        from torch._inductor.virtualized import V
+
+        with (
+            config.patch({"max_autotune": False}),
+            patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
+        ):
+            bwd_configs = CUDAConfigHeuristic().get_flex_attn_bwd_configs(
+                256, torch.float16
+            )
+        self.assertEqual(bwd_configs[0], FlexBwDConfig(64, 64, 64, 64, 1, 4))
+        self.assertIn(FlexBwDConfig(32, 64, 64, 32, 1, 4), bwd_configs)
+
+        q, k, v = (
+            torch.randn(
+                1,
+                2,
+                256,
+                256,
+                device=device,
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        grad_out = torch.randn_like(q)
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "compile_threads": 1,
+                    "force_disable_caches": True,
+                    "max_autotune": False,
+                    "use_static_triton_launcher": False,
+                }
+            ),
+            patch.object(triton_compiler, "max_shared_mem", return_value=101376),
+            patch.object(
+                V.choices,
+                "get_flex_attention_fwd_configs",
+                return_value=[FlexConfig(64, 32, 1, 4)],
+            ),
+            patch.object(
+                V.choices,
+                "get_flex_attention_bwd_configs",
+                return_value=bwd_configs,
+            ),
+        ):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, kernel_options={"BACKEND": "TRITON"}
+            )
+            out.backward(grad_out, retain_graph=True)
+            torch.cuda.synchronize()
+
+        self.assertEqual(out.shape, (1, 2, 256, 256))
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")

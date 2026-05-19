@@ -216,6 +216,43 @@ class FlexDecodeConfig:
     num_warps: int
 
 
+def _append_unique_config(configs: list[Any], candidates: list[Any]) -> None:
+    for candidate in candidates:
+        if candidate not in configs:
+            configs.append(candidate)
+
+
+def _flex_fwd_fallback_configs(default_config: FlexConfig) -> list[FlexConfig]:
+    candidates = [default_config]
+    if default_config.num_stages != 1:
+        candidates.append(dataclasses.replace(default_config, num_stages=1))
+
+    for block_m, block_n in ((64, 64), (64, 32), (32, 32), (16, 16)):
+        if default_config.block_m >= block_m and default_config.block_n >= block_n:
+            candidates.append(FlexConfig(block_m, block_n, 1, 4))
+    return candidates
+
+
+def _flex_bwd_fallback_configs(default_config: FlexBwDConfig) -> list[FlexBwDConfig]:
+    candidates = [default_config]
+    if default_config.num_stages != 1:
+        candidates.append(dataclasses.replace(default_config, num_stages=1))
+
+    for candidate in (
+        FlexBwDConfig(32, 64, 64, 32, 1, 4),
+        FlexBwDConfig(32, 32, 32, 32, 1, 4),
+        FlexBwDConfig(16, 16, 16, 16, 1, 4),
+    ):
+        if (
+            default_config.block_m1 >= candidate.block_m1
+            and default_config.block_n1 >= candidate.block_n1
+            and default_config.block_m2 >= candidate.block_m2
+            and default_config.block_n2 >= candidate.block_n2
+        ):
+            candidates.append(candidate)
+    return candidates
+
+
 # ROCm classes
 @dataclasses.dataclass
 class ROCmGemmConfig(GemmConfig):
@@ -1182,8 +1219,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             else:
                 default_config = FlexConfig(64, 32, 3, 4)
 
-        if default_config not in flex_attn_fwd_configs:
-            flex_attn_fwd_configs.append(default_config)
+        if config.max_autotune:
+            if default_config not in flex_attn_fwd_configs:
+                flex_attn_fwd_configs.append(default_config)
+        else:
+            _append_unique_config(
+                flex_attn_fwd_configs,
+                _flex_fwd_fallback_configs(default_config),
+            )
 
         return flex_attn_fwd_configs
 
@@ -1199,8 +1242,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
-        if default_config not in flex_attn_bwd_configs:
-            flex_attn_bwd_configs.append(default_config)
+        if config.max_autotune:
+            if default_config not in flex_attn_bwd_configs:
+                flex_attn_bwd_configs.append(default_config)
+        else:
+            _append_unique_config(
+                flex_attn_bwd_configs,
+                _flex_bwd_fallback_configs(default_config),
+            )
 
         return flex_attn_bwd_configs
 
@@ -1409,8 +1458,14 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             else:
                 default_config = FlexConfig(64, 32, 3, 4)
 
-        if default_config not in flex_attn_fwd_configs:
-            flex_attn_fwd_configs.append(default_config)
+        if config.max_autotune:
+            if default_config not in flex_attn_fwd_configs:
+                flex_attn_fwd_configs.append(default_config)
+        else:
+            _append_unique_config(
+                flex_attn_fwd_configs,
+                _flex_fwd_fallback_configs(default_config),
+            )
 
         return flex_attn_fwd_configs
 
@@ -1483,8 +1538,14 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         else:
             default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
-        if default_config not in flex_attn_bwd_configs:
-            flex_attn_bwd_configs.append(default_config)
+        if config.max_autotune:
+            if default_config not in flex_attn_bwd_configs:
+                flex_attn_bwd_configs.append(default_config)
+        else:
+            _append_unique_config(
+                flex_attn_bwd_configs,
+                _flex_bwd_fallback_configs(default_config),
+            )
 
         return flex_attn_bwd_configs
 
