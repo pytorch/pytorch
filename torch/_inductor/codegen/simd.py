@@ -87,7 +87,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_", "r2_"])
 
 
 def get_max_tiles(default: int = 2) -> int:
@@ -645,7 +645,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         grid_dims = ["x", "y", "z"]
         pointwise_tensor_dims = list(reversed(grid_dims))
-        reduction_dims = ["r0_", "r1_"]
+        reduction_dims = ["r0_", "r1_", "r2_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
@@ -2716,7 +2716,7 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ("z", "y", "x")
-        reduction_prefixes = ("r0_", "r1_")
+        reduction_prefixes = ("r0_", "r1_", "r2_")
         assert len(pw_tiling) <= len(pw_prefixes)
         assert len(reduction_tiling) <= len(reduction_prefixes)
 
@@ -2785,9 +2785,9 @@ class SIMDScheduling(BaseScheduling):
             if V.graph.sizevars.statically_known_equals(
                 pointwise_numel, 1
             ) and V.graph.sizevars.statically_known_gt(reduction_numel, 1):
-                # We only have at most two dimensions to tile over when emitting a
-                # reduction-only kernel.
-                max_tiles = min(max_tiles, 2)
+                # Reduction-only kernels do not use pointwise Y/Z tiles, so allow
+                # one more reduction tile to avoid collapsing odd logical dims.
+                max_tiles = min(get_max_tiles(3), 3)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])

@@ -250,7 +250,7 @@ class TritonSymbols:
     Stores sympy.Symbol instances and constants associated with triton codegen.
     """
 
-    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
     block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
 
     block_offsets = {
@@ -4311,7 +4311,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
         # When we do native matmtul codegen,
-        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # we don't want to keep reduction block dimensions in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
