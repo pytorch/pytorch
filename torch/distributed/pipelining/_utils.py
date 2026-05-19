@@ -10,6 +10,7 @@ from enum import Enum
 from typing import cast, Literal, overload, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
+import torch.distributed as dist
 from torch import fx
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor import DTensor
@@ -266,40 +267,31 @@ class _SPMDTensorMeta(_TensorMeta):
     )
 
     @staticmethod
-    def _axis_to_str(axis_to_name: dict, axis: object) -> str:
-        name = axis_to_name.get(axis)
-        return name if name is not None else str(axis)
-
-    @staticmethod
     def from_tensor(tensor: torch.Tensor) -> _SPMDTensorMeta:
-        import spmd_types as spmd
-
-        lt = spmd.get_local_type(tensor)
-        ps = spmd.get_partition_spec(tensor)
-
+        import spmd_types as spmd  # pyrefly: ignore
         from spmd_types._mesh_axis import _mesh_axis_names
 
-        axis_to_name: dict = {}
-        for axis, names in _mesh_axis_names.items():
-            if names:
-                axis_to_name[axis] = next(iter(names))
+        lt = spmd.get_local_type(tensor)
+        ps = spmd._checker.get_partition_spec(tensor)
 
-        str_lt = {
-            _SPMDTensorMeta._axis_to_str(axis_to_name, k): v for k, v in lt.items()
+        axis_to_name = {
+            axis: next(iter(names)) for axis, names in _mesh_axis_names.items() if names
         }
+
+        def to_str(a: object) -> str:
+            return axis_to_name.get(a, str(a))
+
+        str_lt = {to_str(k): v for k, v in lt.items()}
         str_ps = None
         if ps is not None:
-            result: list[str | tuple[str, ...] | None] = []
-            for entry in ps:
-                if entry is None:
-                    result.append(None)
-                elif isinstance(entry, tuple):
-                    result.append(tuple(
-                        _SPMDTensorMeta._axis_to_str(axis_to_name, a) for a in entry
-                    ))
-                else:
-                    result.append(_SPMDTensorMeta._axis_to_str(axis_to_name, entry))
-            str_ps = tuple(result)
+            str_ps = tuple(
+                tuple(to_str(a) for a in e)
+                if isinstance(e, tuple)
+                else to_str(e)
+                if e is not None
+                else None
+                for e in ps
+            )
 
         return _SPMDTensorMeta(
             shape=tensor.shape,
@@ -311,7 +303,7 @@ class _SPMDTensorMeta(_TensorMeta):
         )
 
     def to_tensor(self, device: torch.device | str) -> torch.Tensor:
-        import spmd_types as spmd
+        import spmd_types as spmd  # pyrefly: ignore
 
         t = _make_tensor_from_meta(self, device)
         t.requires_grad_(self.requires_grad)
@@ -423,26 +415,18 @@ def _derive_grad_meta(m: TensorMeta) -> _TensorMeta | None:
     base = _TensorMeta(
         shape=m.shape, stride=m.stride, dtype=m.dtype, requires_grad=False
     )
-    if isinstance(m, _SPMDTensorMeta):
-        from torch.distributed import _is_spmd_types_available
-
-        if _is_spmd_types_available():
-            import spmd_types as spmd
-
-            I, P, R, V = spmd.I, spmd.P, spmd.R, spmd.V
-
-            _GRAD_MAP = {R: P, P: R, I: I, V: V}
-            grad_local_type = {
-                axis: _GRAD_MAP.get(lt, lt) for axis, lt in m.local_type.items()
-            }
-            return _SPMDTensorMeta(
-                shape=m.shape,
-                stride=m.stride,
-                dtype=m.dtype,
-                requires_grad=False,
-                local_type=grad_local_type,
-                partition_spec=m.partition_spec,
-            )
+    if isinstance(m, _SPMDTensorMeta) and dist._is_spmd_types_available():
+        return _SPMDTensorMeta(
+            shape=m.shape,
+            stride=m.stride,
+            dtype=m.dtype,
+            requires_grad=False,
+            local_type={
+                axis: lt.backward_type()  # pyrefly: ignore[missing-attribute]
+                for axis, lt in m.local_type.items()
+            },
+            partition_spec=m.partition_spec,
+        )
     return base
 
 
@@ -708,9 +692,7 @@ def extract_tensor_meta(tensor: torch.Tensor) -> TensorMeta:
     if isinstance(tensor, DTensor):
         return _DTensorMeta.from_dtensor(tensor)
 
-    from torch.distributed import _is_spmd_types_available
-
-    if _is_spmd_types_available():
+    if dist._is_spmd_types_available():
         import spmd_types as spmd
 
         if spmd.runtime.has_local_type(tensor):

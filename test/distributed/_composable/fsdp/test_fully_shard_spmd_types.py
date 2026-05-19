@@ -277,14 +277,34 @@ class TestFullyShardSpmdTypes(FSDPTest):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
 
 
-class TwoLayerMLP(nn.Module):
-    def __init__(self, dim, device=None):
+class TPCheckedMLP(nn.Module):
+    """MLP that checks TP annotations are alive on params during forward."""
+
+    def __init__(self, dim, tp_pg, tp_axis, test_case, device=None):
         super().__init__()
-        self.layer0 = TestMLP(dim, device=device)
-        self.layer1 = TestMLP(dim, device=device)
+        self.in_proj = nn.Linear(dim, dim * 4, bias=False, device=device)
+        self.out_proj = nn.Linear(dim * 4, dim, bias=False, device=device)
+        self.tp_pg = tp_pg
+        self.tp_axis = tp_axis
+        self.tc = test_case
+        self.forward_count = 0
 
     def forward(self, x):
-        return self.layer1(self.layer0(x))
+        # in_proj.weight: column-parallel, S(0) on TP axis
+        in_lt = spmd.get_local_type(self.in_proj.weight)
+        self.tc.assertEqual(in_lt[self.tp_axis], spmd.S(0))
+        # out_proj.weight: row-parallel, S(1) on TP axis
+        out_lt = spmd.get_local_type(self.out_proj.weight)
+        self.tc.assertEqual(out_lt[self.tp_axis], spmd.S(1))
+        self.forward_count += 1
+
+        x = spmd.convert(x, self.tp_pg, src=spmd.I, dst=spmd.R)
+        z = self.in_proj(x)
+        z = F.relu(z)
+        z = self.out_proj(z)
+        z = spmd.all_reduce(z, self.tp_pg, dst=spmd.I)
+        z = F.relu(z)
+        return z
 
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
@@ -316,9 +336,17 @@ class TestPipelineSpmdTypes(FSDPTest):
 
         mlp_dim = 16
         torch.manual_seed(42)
-        model = TwoLayerMLP(mlp_dim, device=device_type)
-        stage_module = model.layer0 if pp_rank == 0 else model.layer1
-        _tp_init(stage_module, tp_pg)
+        stage_module = TPCheckedMLP(mlp_dim, tp_pg, tp_axis, self, device=device_type)
+
+        tp_rank = tp_pg.rank()
+        tp_size = tp_pg.size()
+        with torch.no_grad():
+            stage_module.in_proj.weight = nn.Parameter(
+                stage_module.in_proj.weight.chunk(tp_size, dim=0)[tp_rank].contiguous()
+            )
+            stage_module.out_proj.weight = nn.Parameter(
+                stage_module.out_proj.weight.chunk(tp_size, dim=1)[tp_rank].contiguous()
+            )
 
         tp_plan = {
             "in_proj.weight": spmd.S(0),
@@ -327,24 +355,6 @@ class TestPipelineSpmdTypes(FSDPTest):
         for fqn, param in stage_module.named_parameters():
             spmd._type_attr.set_local_type(param, {tp_axis: tp_plan[fqn]})
 
-        # Track whether TP annotations are alive during compute
-        annotations_seen = []
-
-        def check_tp_hook(module, args):
-            for name, param in module.named_parameters(recurse=False):
-                self.assertNotIsInstance(param.data, DTensor)
-                self.assertTrue(
-                    spmd._checker.has_local_type(param),
-                    f"{name} should have spmd_types annotation in compute",
-                )
-                lt = spmd.get_local_type(param)
-                self.assertIn(tp_axis, lt, f"{name} missing TP axis annotation")
-                annotations_seen.append(name)
-
-        for m in stage_module.modules():
-            if isinstance(m, nn.Linear):
-                m.register_forward_pre_hook(check_tp_hook)
-
         stage = PipelineStage(
             submodule=stage_module,
             stage_index=pp_rank,
@@ -352,11 +362,9 @@ class TestPipelineSpmdTypes(FSDPTest):
             device=device_type,
             group=pp_group,
         )
-
-        chunks = 2
         schedule = ScheduleGPipe(
             stage,
-            n_microbatches=chunks,
+            n_microbatches=2,
             loss_fn=lambda out, tgt: out.sum(),
         )
 
@@ -370,10 +378,7 @@ class TestPipelineSpmdTypes(FSDPTest):
             else:
                 schedule.step(target=target)
 
-        self.assertGreater(
-            len(annotations_seen), 0,
-            "TP annotations should have been checked during compute",
-        )
+        self.assertGreater(stage_module.forward_count, 0)
 
 
 if __name__ == "__main__":
