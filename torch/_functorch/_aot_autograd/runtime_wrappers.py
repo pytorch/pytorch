@@ -1983,14 +1983,23 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         lines.append(f"    _bases = [None] * {num_bases}")
         for base_idx in sorted(base_groups):
-            first_orig = base_groups[base_idx][0]
+            group = base_groups[base_idx]
+            first_orig = group[0]
+            if len(group) == 1:
+                indices_check = f"args[{first_orig}]._base is not None"
+                base_expr = f"args[{first_orig}]._base"
+            else:
+                indices_str = ", ".join(str(i) for i in group)
+                indices_check = (
+                    f"any(args[_i]._base is not None for _i in [{indices_str}])"
+                )
+                base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
             lines.append(f"""\
-    _a = args[{first_orig}]
-    if _a._base is not None:
-        _bases[{base_idx}] = _a._base
+    if {indices_check}:
+        _bases[{base_idx}] = {base_expr}
     else:
-        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)
-        _b.set_(_a.untyped_storage())
+        _b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)
+        _b.set_(args[{first_orig}].untyped_storage())
         _bases[{base_idx}] = _b""")
 
         other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
@@ -3304,7 +3313,6 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
-
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with

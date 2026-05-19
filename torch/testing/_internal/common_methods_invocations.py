@@ -794,6 +794,9 @@ def error_inputs_arange(op, device, **kwargs):
                      error_regex='upper bound and lower bound inconsistent with step sign')
     yield ErrorInput(SampleInput(0, args=(float('inf'), 2)), error_type=RuntimeError, error_regex='unsupported range')
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
+    # https://github.com/pytorch/pytorch/issues/175761: fractional step truncates to 0 for integer out
+    yield ErrorInput(SampleInput(0, args=(64, 0.5), kwargs={'out': torch.empty(0, dtype=torch.int64, device=device)}),
+                     error_type=ValueError, error_regex='step must be nonzero')
 
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     int_samples = (
@@ -12587,6 +12590,11 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
+               # Dynamo wraps the ValueError from the fractional-step / integer-out check,
+               # so test_errors can't match the eager exception type/regex under inductor.
+               DecorateInfo(unittest.skip("error type wrapped under torch.compile"),
+                            'TestCommon', 'test_errors', active_if=TEST_WITH_TORCHINDUCTOR),
+
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
@@ -23336,6 +23344,10 @@ op_db: list[OpInfo] = [
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        # MPS: int64 prod is not supported (no atomic_binary_op for 64-bit).
+        dtypesIfMPS=_dispatch_dtypes(
+            t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64
+        ),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         skips=(
@@ -23353,7 +23365,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        # MPS: reject bool to match CPU (which raises NotImplementedError for bool mean).
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
@@ -23364,15 +23377,16 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+        # MPS: int64 amin requires macOS 15+ (ulong atomic_min intrinsic).
+        dtypesIfMPS=(
+            _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
+            if MACOS_VERSION < 15.0
+            else all_types_and(torch.float16, torch.bfloat16, torch.bool)
+        ),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
-        skips=(
-            # MPS: not supported for torch.int64
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
-        ),
     ),
     OpInfo(
         'scatter_reduce',
@@ -23380,15 +23394,16 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+        # MPS: int64 amax requires macOS 15+ (ulong atomic_max intrinsic).
+        dtypesIfMPS=(
+            _dispatch_dtypes(t for t in all_types_and(torch.float16, torch.bfloat16, torch.bool) if t != torch.int64)
+            if MACOS_VERSION < 15.0
+            else all_types_and(torch.float16, torch.bfloat16, torch.bool)
+        ),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
-        skips=(
-            # MPS: not supported for torch.int64
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
-        ),
     ),
     OpInfo(
         '_segment_reduce',
