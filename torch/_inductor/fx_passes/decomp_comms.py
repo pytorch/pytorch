@@ -1,49 +1,70 @@
 """
-Decompose comm collectives: replace all_gather + Gram matmul with local matmul + all_reduce.
+Decompose collective communication patterns into mathematically equivalent
+local computation + lighter collectives.
 
-Provides reusable utilities for detecting Gram matrices, tracing data provenance
-through collectives, and finding shard split patterns in FX graphs.
+Provides reusable utilities for:
+- Detecting Gram matrices and other decomposable patterns in FX graphs
+- Tracing data provenance backward through collectives
+- Finding shard split/getitem patterns downstream
 
-The main pass `decomp_gram_matrix_all_gather` composes these utilities to
-eliminate unnecessary all_gather collectives when the gathered tensor feeds
-a decomposable Gram matrix computation.
+Current passes:
+- decomp_gram_matrix_all_gather:
+    all_gather + mm(X.T, X) -> local mm(Xi.T, Xi) + all_reduce(sum)
+    Exploits the Gram matrix identity X.T @ X = sum_i(Xi.T @ Xi).
+    Applicable to Muon (Newton-Schulz), Shampoo/K-FAC (Kronecker factors),
+    and other optimizers with self-product patterns.
+
+Gated by config.aten_distributed_optimizations.allow_comms_decompositions.
 """
 
 import logging
 import operator
 from collections import defaultdict
+from typing import NamedTuple
 
 import torch
 import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_tensor
 from torch._inductor.pattern_matcher import CallFunction, Ignored, KeywordArg
+from torch.utils._ordered_set import OrderedSet
+
 
 aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Reusable graph utilities
-# ---------------------------------------------------------------------------
-
-
-def _is_collective(node: fx.Node) -> bool:
+def _is_collective_or_wait(node: fx.Node) -> bool:
     """True if node is any distributed collective or wait_tensor."""
     return get_collective_type(node) != "" or is_wait_tensor(node)
 
 
-def _is_permute_transpose(node: fx.Node) -> bool:
-    """True if node is permute(X, [1, 0]) — a strict 2D transpose."""
-    if node.op != "call_function" or node.target is not aten.permute.default:
+def _is_2d_transpose(node: fx.Node) -> bool:
+    """True if node is a 2D matrix transpose.
+
+    Matches:
+    - aten.t(X)
+    - permute(X, [1, 0])
+    - transpose(X, 0, 1) / transpose(X, -2, -1)
+    """
+    if node.op != "call_function":
         return False
-    dims = node.args[1] if len(node.args) > 1 else None
-    return isinstance(dims, (list, tuple)) and list(dims) == [1, 0]
+    if node.target is aten.t.default:
+        return True
+    if node.target is aten.permute.default:
+        dims = node.args[1] if len(node.args) > 1 else None
+        return isinstance(dims, (list, tuple)) and list(dims) == [1, 0]
+    if node.target is aten.transpose.int:
+        if len(node.args) >= 3:
+            d0, d1 = node.args[1], node.args[2]
+            return (d0, d1) in ((0, 1), (1, 0), (-2, -1), (-1, -2))
+    return False
 
 
 def is_gram_mm(node: fx.Node) -> bool:
-    """True if node computes mm(X, X.T) or mm(X.T, X) where .T = permute([1,0]).
+    """True if node computes mm(X, X.T) or mm(X.T, X).
 
+    Matches transpose via permute([1,0]) or transpose(-2,-1).
     A Gram matrix is a self-product of a matrix with its transpose.
     This pattern appears in Newton-Schulz iterations (Muon optimizer),
     Kronecker-factored preconditioners (Shampoo, K-FAC), and other
@@ -53,10 +74,13 @@ def is_gram_mm(node: fx.Node) -> bool:
         return False
     if len(node.args) != 2:
         return False
-    a, b = node.args
-    if _is_permute_transpose(a) and a.args[0] is b:
+    a = node.args[0]
+    b = node.args[1]
+    if not isinstance(a, fx.Node) or not isinstance(b, fx.Node):
+        return False
+    if _is_2d_transpose(a) and a.args[0] is b:
         return True
-    if _is_permute_transpose(b) and b.args[0] is a:
+    if _is_2d_transpose(b) and b.args[0] is a:
         return True
     return False
 
@@ -72,8 +96,10 @@ def gram_source(gram_node: fx.Node) -> fx.Node:
     For mm(permute(X), X) returns X (args[1]).
     For mm(X, permute(X)) returns X (args[0]).
     """
-    a, b = gram_node.args
-    if _is_permute_transpose(a):
+    a = gram_node.args[0]
+    b = gram_node.args[1]
+    assert isinstance(a, fx.Node) and isinstance(b, fx.Node)
+    if _is_2d_transpose(a):
         return b
     return a
 
@@ -95,16 +121,24 @@ _all_gather_wait_slice_pattern = CallFunction(
 )
 
 
-def trace_to_all_gather(node: fx.Node, max_depth: int = 30) -> dict | None:
+class AllGatherInfo(NamedTuple):
+    shard: fx.Node
+    group_name: str
+    ag_node: fx.Node
+    wait_node: fx.Node
+    slice_node: fx.Node
+
+
+def find_all_gather_ancestor(
+    node: fx.Node, max_depth: int = 30
+) -> AllGatherInfo | None:
     """Walk backward from node to find all_gather -> wait -> slice chain.
 
     BFS through input nodes looking for a slice that matches the
     all_gather -> wait_tensor -> slice pattern. Stops at placeholders
     and respects max_depth to bound the search.
-
-    Returns {shard, group_name, ag_node, wait_node, slice_node} or None.
     """
-    visited = set()
+    visited: OrderedSet[fx.Node] = OrderedSet()
     queue = [(node, 0)]
     while queue:
         n, depth = queue.pop(0)
@@ -115,29 +149,36 @@ def trace_to_all_gather(node: fx.Node, max_depth: int = 30) -> dict | None:
             match = _all_gather_wait_slice_pattern.match(n)
             if match:
                 wait_node = n.args[0]
+                assert isinstance(wait_node, fx.Node)
                 ag_node = wait_node.args[0]
-                return {
-                    "shard": match.kwargs["shard"],
-                    "group_name": match.kwargs["group_name"],
-                    "ag_node": ag_node,
-                    "wait_node": wait_node,
-                    "slice_node": n,
-                }
+                assert isinstance(ag_node, fx.Node)
+                return AllGatherInfo(
+                    shard=match.kwargs["shard"],
+                    group_name=match.kwargs["group_name"],
+                    ag_node=ag_node,
+                    wait_node=wait_node,
+                    slice_node=n,
+                )
         for inp in n.all_input_nodes:
             queue.append((inp, depth + 1))
     return None
 
 
-def find_split_getitem(start: fx.Node) -> tuple[fx.Node, fx.Node] | None:
+def find_split_getitem(
+    start: fx.Node, max_search: int = 3000
+) -> tuple[fx.Node, fx.Node] | None:
     """Walk forward from start to find split(dim=0) -> getitem in the dependent chain.
 
     Tracks all nodes transitively dependent on start. Returns the first
     (split_node, getitem_node) pair found, or None.
     Rejects chains that contain collectives (would break distributed semantics).
+    Stops after max_search nodes to bound cost on large graphs.
     """
-    chain = {start}
+    chain: OrderedSet[fx.Node] = OrderedSet([start])
+    searched = 0
     node = start.next
-    while node is not None:
+    while node is not None and searched < max_search:
+        searched += 1
         if node.op != "call_function":
             node = node.next
             continue
@@ -159,18 +200,13 @@ def find_split_getitem(start: fx.Node) -> tuple[fx.Node, fx.Node] | None:
                 return None
             return node, getitems[0]
 
-        if _is_collective(node):
+        if _is_collective_or_wait(node):
             return None
 
         chain.add(node)
         node = node.next
 
     return None
-
-
-# ---------------------------------------------------------------------------
-# Main pass
-# ---------------------------------------------------------------------------
 
 
 def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
@@ -241,28 +277,23 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
 
     # 1. Find Gram mms and trace each to its all_gather source
     ag_to_grams: dict[fx.Node, list[fx.Node]] = defaultdict(list)
-    ag_infos: dict[fx.Node, dict] = {}
+    ag_infos: dict[fx.Node, AllGatherInfo] = {}
 
     for gram_mm in find_gram_mms(graph):
-        ag_info = trace_to_all_gather(gram_source(gram_mm))
-        if ag_info is None:
+        info = find_all_gather_ancestor(gram_source(gram_mm))
+        if info is None:
             continue
-        ag_node = ag_info["ag_node"]
-        ag_to_grams[ag_node].append(gram_mm)
-        ag_infos[ag_node] = ag_info
+        ag_to_grams[info.ag_node].append(gram_mm)
+        ag_infos[info.ag_node] = info
 
     # 2. Process each all_gather group
     for ag_node, gram_mms in ag_to_grams.items():
-        ag_info = ag_infos[ag_node]
-        wait_node = ag_info["wait_node"]
-        slice_node = ag_info["slice_node"]
-        shard = ag_info["shard"]
-        group_name = ag_info["group_name"]
+        info = ag_infos[ag_node]
 
-        if len(ag_node.users) != 1 or len(wait_node.users) != 1:
+        if len(ag_node.users) != 1 or len(info.wait_node.users) != 1:
             continue
 
-        split_result = find_split_getitem(slice_node)
+        split_result = find_split_getitem(info.slice_node)
         if split_result is None:
             continue
 
@@ -275,14 +306,14 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         # === TRANSFORM ===
 
         # Route computation to use shard directly
-        slice_node.replace_all_uses_with(shard)
+        info.slice_node.replace_all_uses_with(info.shard)
 
         # Insert all_reduce(sum) after each Gram mm
         for mm_node in gram_mms:
             with graph.inserting_before(mm_node.next):
                 ar = graph.call_function(
                     c10d.all_reduce.default,
-                    args=(mm_node, "sum", group_name),
+                    args=(mm_node, "sum", info.group_name),
                 )
                 wait_ar = graph.call_function(
                     c10d.wait_tensor.default,
@@ -293,11 +324,19 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     user.replace_input_with(mm_node, wait_ar)
 
         # Remove split+getitem (result is already shard-sized)
-        getitem_node.replace_all_uses_with(split_node.args[0])
+        pre_split = split_node.args[0]
+        assert isinstance(pre_split, fx.Node)
+        getitem_node.replace_all_uses_with(pre_split)
 
         # Erase dead collective nodes (side-effectful, so
         # eliminate_dead_code won't remove them)
-        for dead in [getitem_node, split_node, slice_node, wait_node, ag_node]:
+        for dead in [
+            getitem_node,
+            split_node,
+            info.slice_node,
+            info.wait_node,
+            ag_node,
+        ]:
             if len(dead.users) == 0:
                 graph.erase_node(dead)
 
@@ -312,4 +351,27 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
             transformed,
         )
 
+    return gm
+
+
+def decomp_comms(gm: fx.GraphModule) -> fx.GraphModule:
+    """Run all collective decomposition passes sequentially."""
+    from torch._logging import trace_structured
+
+    logger.info(
+        "decomp_comms: running on graph with %d nodes",
+        len(list(gm.graph.nodes)),
+    )
+    decomp_gram_matrix_all_gather(gm)
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "post_decomp_comms",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
     return gm

@@ -27,7 +27,7 @@ aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
 
 
-def _count_ops(graph: fx.Graph, target) -> int:
+def _count_ops(graph: fx.Graph, target) -> int:  # type: ignore[type-arg]
     return sum(1 for n in graph.nodes if n.op == "call_function" and n.target is target)
 
 
@@ -50,47 +50,55 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
     def test_muon_newton_schulz(self):
         """
-        Muon optimizer: Newton-Schulz with X @ X.T Gram, 3 iterations.
-        Verifies all_gather removed, one all_reduce inserted per iteration.
+        Rigi Muon optimizer pattern: all_gather -> bf16 cast -> norm ->
+        conditional transpose -> 5 NS steps (X @ X.T Gram via aten.transpose.int)
+        -> transpose back -> scale -> split -> getitem.
+
+        Matches the graph produced by torch.compile on rigi/bv2/muon.py ns_ortho.
         """
         group_name = "0"
         world_size = 2
-        ns_steps = 3
+        ns_steps = 5
 
         def muon_step(x_shard):
             gathered = c10d.all_gather_into_tensor.default(
                 x_shard, world_size, group_name
             )
             waited = c10d.wait_tensor.default(gathered)
-            x = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0])
+            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0])
 
-            norm_val = aten.clamp_min.default(
-                aten.pow.Tensor_Scalar(
-                    aten.sum.dim_IntList(aten.pow.Tensor_Scalar(x, 2), [0, 1]),
-                    0.5,
-                ),
-                1e-7,
-            )
-            x = aten.div.Tensor(x, norm_val)
+            # bf16 cast
+            X = aten._to_copy.default(X, dtype=torch.bfloat16)
 
+            # norm(dim=(-2,-1), keepdim=True).clamp_min(eps)
+            norm_val = aten.linalg_vector_norm.default(X, 2, [-2, -1], True)
+            norm_val = aten.clamp_min.default(norm_val, 1e-7)
+            X = aten.div.Tensor(X, norm_val)
+
+            # Conditional transpose (rows > cols at trace time)
+            X = aten.transpose.int(X, -2, -1)
+
+            # 5 Newton-Schulz iterations
             for _ in range(ns_steps):
-                xt = aten.permute.default(x, [1, 0])
-                gram = aten.mm.default(x, xt)  # X @ X.T — Gram
-                gram_sq = aten.mm.default(gram, gram)
-                update = aten.add.Tensor(
-                    aten.mul.Tensor(gram, -4.7750),
-                    aten.mul.Tensor(gram_sq, 2.0315),
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))  # Gram
+                B = aten.add.Tensor(
+                    aten.mul.Tensor(A, -4.7750),
+                    aten.mul.Tensor(aten.mm.default(A, A), 2.0315),
                 )
-                x = aten.add.Tensor(
-                    aten.mul.Tensor(x, 3.4445),
-                    aten.mm.default(update, x),
+                X = aten.add.Tensor(
+                    aten.mul.Tensor(X, 3.4445),
+                    aten.mm.default(B, X),
                 )
 
-            chunks = aten.split.Tensor(x, x_shard.shape[0], 0)
+            # Transpose back + scale
+            X = aten.transpose.int(X, -2, -1)
+            X = aten.mul.Tensor(X, 0.2 * (512**0.5))
+
+            chunks = aten.split.Tensor(X, x_shard.shape[0], 0)
             return operator.getitem(chunks, 0)
 
         with FakeTensorMode():
-            x_shard = torch.randn(32, 128, device=self.device)
+            x_shard = torch.randn(64, 128, device=self.device)
             traced = make_fx(muon_step)(x_shard)
 
         self.assertEqual(
@@ -108,8 +116,8 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
     def test_shampoo_preconditioner(self):
         """
-        Shampoo optimizer: G.T @ G right Kronecker factor.
-        Verifies the pass handles both Gram directions (X.T @ X, not just X @ X.T).
+        Shampoo optimizer: G.T @ G right Kronecker factor via aten.permute.
+        Verifies the pass handles both transpose variants and Gram directions.
         """
         group_name = "0"
         world_size = 2
@@ -122,7 +130,7 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
             g = aten.slice.Tensor(waited, 0, 0, g_shard.shape[0])
 
             gt = aten.permute.default(g, [1, 0])
-            gram = aten.mm.default(gt, g)  # G.T @ G — Gram
+            gram = aten.mm.default(gt, g)  # G.T @ G
 
             precond = aten.mul.Tensor(gram, -0.5)
             g_precond = aten.mm.default(g, precond)
