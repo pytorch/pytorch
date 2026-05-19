@@ -4212,10 +4212,10 @@ class TestUtils(TestCase):
 
 class TestVecISACheckBuild(TestCase):
     # Regression tests for the VecISA.check_build dlopen probe behavior:
-    # the parent must (1) bound the child with a timeout and retry on
-    # transient hangs, and (2) make libtorch findable in the child's
-    # loader path so the child can dlopen the probe .so without
-    # importing torch.
+    # the parent must (1) bound the child with a timeout and return
+    # False if it expires, and (2) make libtorch findable in the
+    # child's loader path so the child can dlopen the probe .so
+    # without importing torch.
 
     def _patched_check_build(self, fake_run):
         from torch._inductor import cpu_vec_isa
@@ -4261,11 +4261,11 @@ class TestVecISACheckBuild(TestCase):
                     with mock.patch("builtins.open", side_effect=fake_open):
                         return instance.check_build(cpu_vec_isa.VecISA._avx_code)
 
-    def test_check_build_returns_false_after_repeated_timeouts(self):
-        timeouts: list[Any] = []
+    def test_check_build_returns_false_on_probe_timeout(self):
+        calls: list[Any] = []
 
         def fake_run(*args, **kwargs):
-            timeouts.append(kwargs.get("timeout"))
+            calls.append(kwargs.get("timeout"))
             raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
 
         with warnings.catch_warnings(record=True) as caught:
@@ -4273,8 +4273,7 @@ class TestVecISACheckBuild(TestCase):
             result = self._patched_check_build(fake_run)
 
         self.assertFalse(result)
-        # max_attempts in check_build is 2.
-        self.assertEqual(len(timeouts), 2)
+        self.assertEqual(len(calls), 1)
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
             msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
