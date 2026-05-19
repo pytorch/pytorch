@@ -25,8 +25,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
     parametrize,

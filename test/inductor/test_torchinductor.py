@@ -72,9 +72,9 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
-    SM100OrLater,
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
