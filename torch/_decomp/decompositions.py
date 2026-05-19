@@ -1222,12 +1222,29 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
-        x_max = torch.amax(x, dim, keepdim=True)
+        x_max = _softmax_compatible_amax(x, dim)
         unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
     return result
+
+
+def _softmax_compatible_amax(x: Tensor, dim: int) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if x.ndim == 0:
+        return torch.amax(x, dim, keepdim=True)
+
+    dim = utils.canonicalize_dim(x.ndim, dim)
+    if statically_known_true(x.shape[dim] > 0):
+        return torch.amax(x, dim, keepdim=True)
+
+    # amax has no identity, but softmax is defined on empty reduction dims.
+    pad_shape = list(x.shape)
+    pad_shape[dim] = 1
+    pad = torch.full(pad_shape, float("-inf"), dtype=x.dtype, device=x.device)
+    return torch.amax(torch.cat((x, pad), dim=dim), dim, keepdim=True)
 
 
 @register_decomposition(aten._log_softmax)
@@ -1250,7 +1267,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         shifted = x
     else:
-        x_max = torch.amax(x, dim, keepdim=True)
+        x_max = _softmax_compatible_amax(x, dim)
         shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
