@@ -377,15 +377,27 @@ class Vectorized<float> {
 
     return vfmaq_f32(scale, poly, scale);
   }
-  Vectorized<float> exp_u20() const {
-    return vexpq_f32_u20();
-  }
 #if defined(CPU_CAPABILITY_SVE128)
-  // SVE128 uses the ASIMD wrapper type, but can still reuse the SVE fexp.
+  // SVE128 uses the ASIMD wrapper type, but can still reuse the SVE exp
+  // helpers.
+  Vectorized<float> exp_u20() const {
+    // special case to handle special inputs that are too large or too small
+    // i.e. where there's at least one element x, s.t. |x| >= 87.3...
+    svfloat32_t sve_values = neon_to_sve(values);
+    svbool_t is_special_case =
+        svacgt(svptrue_b32(), sve_values, 0x1.5d5e2ap+6f);
+    if (svptest_any(svptrue_b32(), is_special_case)) {
+      return exp();
+    }
+    return sve_to_neon(at::vec::exp_u20_fast_path(sve_values));
+  }
   Vectorized<float> fexp_u20() const {
     return sve_to_neon(at::vec::fexp_u20(neon_to_sve(values)));
   }
 #else
+  Vectorized<float> exp_u20() const {
+    return vexpq_f32_u20();
+  }
   Vectorized<float> fexp_u20() const {
     // fast exponential intended for cases where outputs will be downcasted to
     // FP16 / BF16 (e.g. attention softmax). Accurate within 1 ULP for FP16
