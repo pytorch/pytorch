@@ -4756,6 +4756,138 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestPythonChromeTraceExport(TestCase):
+    """Verify that the Python streaming exporter produces traces equivalent
+    to the C++ Kineto save() path."""
+
+    def _profile_workload(self):
+        x = torch.randn(64, 64, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for _ in range(20):
+                torch.mm(x, x)
+                torch.add(x, x)
+            torch.cuda.synchronize()
+        return prof
+
+    def test_python_export_matches_kineto(self):
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            kineto_path = os.path.join(tmpdir, "kineto.json")
+            prof.profiler.kineto_results.save(kineto_path)
+
+            py_path = os.path.join(tmpdir, "python.json")
+            from torch.profiler._chrome_trace_export import (
+                export_chrome_trace as _export,
+            )
+
+            _export(prof.profiler.kineto_results, py_path)
+
+            with open(kineto_path) as f:
+                kineto_trace = json.load(f)
+            with open(py_path) as f:
+                py_trace = json.load(f)
+
+        kineto_events = kineto_trace["traceEvents"]
+        py_events = py_trace["traceEvents"]
+
+        def _activity_events(events):
+            return [
+                e
+                for e in events
+                if e.get("ph") == "X" and e.get("cat") not in ("Trace",)
+            ]
+
+        kineto_acts = _activity_events(kineto_events)
+        py_acts = _activity_events(py_events)
+        self.assertEqual(
+            len(kineto_acts),
+            len(py_acts),
+            f"Activity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
+        )
+
+        from collections import Counter
+
+        kineto_names = Counter((e["cat"], e["name"]) for e in kineto_acts)
+        py_names = Counter((e["cat"], e["name"]) for e in py_acts)
+        self.assertEqual(
+            kineto_names, py_names, "Event (cat, name) distribution differs"
+        )
+
+        def _strip_ev_idx(event):
+            """Return a copy with the internal 'Ev Idx' arg removed."""
+            e = dict(event)
+            args = dict(e.get("args", {}))
+            args.pop("Ev Idx", None)
+            e["args"] = args
+            return e
+
+        kineto_sorted = sorted(
+            [_strip_ev_idx(e) for e in kineto_acts],
+            key=lambda e: (e["cat"], e["name"], e["ts"]),
+        )
+        py_sorted = sorted(
+            [_strip_ev_idx(e) for e in py_acts],
+            key=lambda e: (e["cat"], e["name"], e["ts"]),
+        )
+        # Compare every key of every activity event.
+        for ke, pe in zip(kineto_sorted, py_sorted):
+            self.assertEqual(
+                ke,
+                pe,
+                f"Event mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
+            )
+
+        # Flow event parity (ph, id, cat).
+        kineto_flow = sorted(
+            [
+                (e["ph"], e["id"], e.get("cat", ""))
+                for e in kineto_events
+                if e.get("ph") in ("s", "f")
+            ],
+        )
+        py_flow = sorted(
+            [
+                (e["ph"], e["id"], e.get("cat", ""))
+                for e in py_events
+                if e.get("ph") in ("s", "f")
+            ],
+        )
+        self.assertEqual(kineto_flow, py_flow, "Flow events differ")
+
+    def test_python_export_gzip(self):
+        import gzip as gzip_mod
+
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gz_path = os.path.join(tmpdir, "trace.json.gz")
+            prof.export_chrome_trace(gz_path, use_python_export=True)
+
+            with gzip_mod.open(gz_path, "rt") as f:
+                trace = json.load(f)
+
+        self.assertIn("traceEvents", trace)
+        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
+        self.assertGreater(len(x_events), 0)
+
+    def test_python_export_plain_json(self):
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = os.path.join(tmpdir, "trace.json")
+            prof.export_chrome_trace(json_path, use_python_export=True)
+
+            with open(json_path) as f:
+                trace = json.load(f)
+
+        self.assertIn("traceEvents", trace)
+        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
+        self.assertGreater(len(x_events), 0)
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestMetadataJsonFormat(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 

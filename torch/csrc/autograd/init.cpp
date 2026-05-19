@@ -405,15 +405,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("save", &ProfilerResult::save)
       .def(
           "trace_activities",
-          [](ProfilerResult& r) {
+          [](py::object self) {
+            auto& r = self.cast<ProfilerResult&>();
             auto* activities = r.traceActivities();
             if (!activities) {
               return py::list();
             }
             py::list result(activities->size());
             for (size_t i = 0; i < activities->size(); i++) {
+              // reference_internal ties each element's lifetime to self,
+              // preventing use-after-free if the list outlives the
+              // ProfilerResult.
               result[i] = py::cast(
-                  (*activities)[i], py::return_value_policy::reference);
+                  (*activities)[i],
+                  py::return_value_policy::reference_internal,
+                  self);
             }
             return result;
           })
