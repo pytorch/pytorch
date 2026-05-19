@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import builtins
 import copy
 import dataclasses
 import enum
@@ -113,7 +112,13 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Generator, Hashable
+    from collections.abc import (
+        Callable,
+        Container,
+        Generator,
+        Hashable,
+        Iterable,
+    )
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -929,6 +934,49 @@ class CachingAutotuner(KernelInterface):
         if static_triton_bundle_key is not None and self.is_statically_launchable():
             TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
 
+    def _bench_launchers(
+        self,
+        launchers: Iterable[LauncherType],
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[dict[LauncherType, float], int]:
+        """Bench each launcher and feed the coordesc cache. Returns
+        ``(timings, bench_ns)``; caller decides on the winner.
+        """
+        timings: dict[LauncherType, float] = {}
+        bench_ns = 0
+        for launcher in launchers:
+            t0 = time.time_ns()
+            timings[launcher] = self.bench(launcher, *args, **kwargs)
+            bench_ns += time.time_ns() - t0
+            self.coordesc_tuner.cache_benchmark_result(
+                launcher.config, timings[launcher]
+            )
+        return timings, bench_ns
+
+    def _finalize_autotune_winner(
+        self,
+        timings: dict[LauncherType, float],
+        autotune_time_taken_ns: int,
+    ) -> None:
+        """Pick the lowest-timing launcher as the sole survivor, register it
+        with ``TritonBundler.put_winner``, notify ``save_cache_hook``, and
+        record ``self.autotune_time_taken_ns``.
+        """
+        self.autotune_time_taken_ns = autotune_time_taken_ns
+        best_launcher = min(timings, key=timings.get)  # type: ignore[arg-type]
+        self.launchers = [best_launcher]
+        TritonBundler.put_winner(best_launcher.cache_hash)
+        if self.save_cache_hook:
+            self.save_cache_hook(
+                best_launcher.config,
+                self.autotune_time_taken_ns,
+                found_by_coordesc=self.inductor_meta.get(
+                    "coordinate_descent_tuning", False
+                ),
+                triton_cache_hash=best_launcher.cache_hash,
+            )
+
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
 
@@ -1550,9 +1598,11 @@ class CachingAutotuner(KernelInterface):
                     best_time,
                 )
 
-        self.launchers = [builtins.min(timings, key=timings.get)]
-        self.autotune_time_taken_ns = (
-            self.precompile_time_taken_ns + benchmark_time_taken_ns
+        self._finalize_autotune_winner(
+            timings,
+            autotune_time_taken_ns=(
+                self.precompile_time_taken_ns + benchmark_time_taken_ns
+            ),
         )
 
         # log the best config
@@ -1566,18 +1616,6 @@ class CachingAutotuner(KernelInterface):
             launcher.n_spills,
             launcher.shared,
         )
-
-        TritonBundler.put_winner(launcher.cache_hash)
-
-        if self.save_cache_hook:
-            self.save_cache_hook(
-                launcher.config,
-                self.autotune_time_taken_ns,
-                found_by_coordesc=self.inductor_meta.get(
-                    "coordinate_descent_tuning", False
-                ),
-                triton_cache_hash=launcher.cache_hash,
-            )
 
     def _combo_sequential_autotune(self, launcher, *args, **kwargs):
         """
