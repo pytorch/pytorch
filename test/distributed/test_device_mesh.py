@@ -381,7 +381,7 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator available!")
+    @onlyAccelerator
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
