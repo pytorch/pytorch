@@ -2304,6 +2304,46 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
+        def test_error_on_dealloc_use_after_recording_and_execution(self):
+            def run(loop_count):
+                torch._dynamo.reset()
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
+                for _ in range(loop_count):
+                    x = cfn2(torch.randn(5, device="cuda"))
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    y = cfn(x)
+                    _ = y.cpu()
+
+                del x
+
+            for loop_count in (2, 3):
+                run(loop_count)
+
+        def test_error_on_dealloc_use_after_cached_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            stale = None
+            for _ in range(3):
+                stale = foo(torch.rand([4], device="cuda"))
+
+            self.assertIsNotNone(stale)
+            node = self.curr_node()
+            self.assertIs(stale, node.cached_tensor_outputs[0])
+
+            new = foo(torch.rand([4], device="cuda"))
+            self.assertIsNot(stale, new)
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+            _ = new.cpu()
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale + 1
+
+            del stale, new
+
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
             stack traces even when a post-grad pass strips them from arg nodes
