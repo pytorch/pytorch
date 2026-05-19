@@ -6706,9 +6706,9 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment += "\n" + origins + "\n" + detailed_origins
         wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
 
-    def define_kernel(self, src_code, node_schedule, kernel, *, dedupe: bool = True):
+    def define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
-        if dedupe and src_code in wrapper.src_to_kernel:
+        if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
@@ -6727,9 +6727,8 @@ class TritonScheduling(SIMDScheduling):
                 # distinguish kernel related symbols.
                 kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
 
-            if dedupe:
-                # use the original src_code as the key
-                wrapper.src_to_kernel[src_code] = kernel_name
+            # use the original src_code as the key
+            wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
@@ -7001,7 +7000,7 @@ class TritonScheduling(SIMDScheduling):
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, kernel, node_group, _node_info_group, *_ in kernel_code_list:
+        for src_code, kernel, node_group, _node_info_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 
