@@ -10018,6 +10018,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    def test_index_copy_source_slice_shape_check(self):
+        x = torch.randn(4, 5, 6, device=self.device)
+        y = torch.randn(1, 1, 6, device=self.device)
+        index = torch.tensor([0, 2], device=self.device)
+        fn = torch.compile(torch.index_copy)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Source/destination tensor must have same slice shapes",
+        ):
+            fn(x, 0, index, y)
+
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
