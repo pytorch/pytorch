@@ -736,8 +736,9 @@ class CustomOpDef:
         - No ``TorchFunctionMode`` is active.
         - No autocast is active.
         - Device is not ``"meta"`` and the kernel is not disabled.
-        - The TLS dispatch include set is a subset of the normal eager set
-          (covers ``inference_mode``; excludes Functionalize, Vmap, etc.).
+        - The resolved keyset contains only keys from the normal eager set:
+          an autograd key, ADInplaceOrView, and a dense backend key.
+          (Falls back to slow path under inference_mode, Functionalize, Vmap, etc.)
         - The schema has no tensor-list args and is not a view op.
         When any condition fails, ``fast_path`` returns ``_DO_SLOW_PATH``
         and the call falls through to the C++ dispatcher.
