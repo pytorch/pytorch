@@ -436,14 +436,14 @@ class TestCalculateShards(unittest.TestCase):
             {opinfo: 1, "normal_test": 2},
             None,
         )
-        self.assertEqual(THRESHOLD * 14 + 2, shards[0][0])
+        self.assertEqual(THRESHOLD * 56 + 2, shards[0][0])
 
         opinfo_shards = [test for test in shards[0][1] if test.name == opinfo]
-        self.assertEqual(14, len(opinfo_shards))
-        self.assertEqual(list(range(1, 15)), [test.shard for test in opinfo_shards])
+        self.assertEqual(56, len(opinfo_shards))
+        self.assertEqual(list(range(1, 57)), [test.shard for test in opinfo_shards])
         self.assertTrue(
             all(
-                test.num_shards == 14 and test.time == THRESHOLD
+                test.num_shards == 56 and test.time == THRESHOLD
                 for test in opinfo_shards
             )
         )

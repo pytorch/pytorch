@@ -40,7 +40,7 @@ MIN_TEST_FILE_TIMES = {
     # Generated stats can record a fully skipped CPU Inductor OpInfo run.
     # Keep enough pytest shards to stay under per-test timeouts when that
     # near-zero runtime is stale.
-    "inductor/test_torchinductor_opinfo": THRESHOLD * 14,
+    "inductor/test_torchinductor_opinfo": THRESHOLD * 56,
 }
 
 # See Note [ROCm parallel CI testing]
