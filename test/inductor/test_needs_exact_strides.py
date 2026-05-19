@@ -36,6 +36,170 @@ if HAS_GPU_AND_TRITON:
 
 
 class TestNeedsExactStrides(InductorTestCase):
+    @parametrize("fallback_by_default", [False, True])
+    def test_custom_op_inserted_without_eager_input_vals(self, fallback_by_default):
+        class InsertCustomOp:
+            def __init__(self, op):
+                self.op = op
+                self.called = False
+
+            def __call__(self, graph):
+                self.called = True
+                output = next(n for n in graph.nodes if n.op == "output")
+                (orig,) = output.args[0]
+                with graph.inserting_before(output):
+                    new = graph.call_function(self.op, (orig,), {})
+                    new.meta = {
+                        key: value
+                        for key, value in orig.meta.items()
+                        if key != "eager_input_vals"
+                    }
+                    output.args = ((new,),)
+                graph.lint()
+
+        with torch.library._scoped_library("mylib_exact_strides", "DEF") as lib:
+            lib.define("check_last_dim(Tensor x) -> Tensor")
+
+            seen_strides = []
+
+            @torch.library.impl(lib, "check_last_dim", "CompositeExplicitAutograd")
+            def _(x):
+                seen_strides.append(tuple(x.stride()))
+                if x.stride(-1) != 1 and x.size(-1) != 1:
+                    raise AssertionError(
+                        f"expected last dim contiguous, got {x.stride()}"
+                    )
+                return x.clone()
+
+            @torch.library.impl(lib, "check_last_dim", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            post_pass = InsertCustomOp(
+                torch.ops.mylib_exact_strides.check_last_dim.default
+            )
+
+            def f(x):
+                u = x.transpose(1, 2).contiguous()
+                if u.stride(-1) != 1:
+                    u = u.contiguous()
+                return u + 1
+
+            x = torch.randn(1, 8, 4)
+            expected = f(x)
+
+            from torch._inductor import config
+
+            with config.patch(
+                implicit_fallbacks=not fallback_by_default,
+                fallback_by_default=fallback_by_default,
+                post_grad_custom_post_pass=post_pass,
+            ):
+                actual = torch.compile(f, fullgraph=True)(x)
+
+            self.assertTrue(post_pass.called)
+            self.assertEqual(actual, expected)
+            self.assertEqual(seen_strides, [(32, 8, 1)])
+
+    def test_registered_lowering_without_tag_has_no_default_constraint(self):
+        with torch.library._scoped_library("mylib_lowering_layout", "DEF") as lib:
+            lib.define("lowered_identity(Tensor x) -> Tensor")
+
+            @torch.library.impl(lib, "lowered_identity", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            from torch._inductor.graph import GraphLowering
+            from torch._inductor.lowering import (
+                constrain_to_fake_tensors,
+                register_lowering,
+            )
+
+            target = torch.ops.mylib_lowering_layout.lowered_identity.default
+
+            @register_lowering(target)
+            def _(x):
+                return x
+
+            self.assertIsNone(GraphLowering._layout_constraints_for_target(target))
+            self.assertIs(
+                GraphLowering._layout_constraints_for_target(target, with_default=True),
+                constrain_to_fake_tensors,
+            )
+
+    def test_registered_lowering_selective_fallback_uses_default_constraint(self):
+        class InsertFallbackCustomOp:
+            def __init__(self, op):
+                self.op = op
+                self.called = False
+
+            def __call__(self, graph):
+                self.called = True
+                output = next(n for n in graph.nodes if n.op == "output")
+                (orig,) = output.args[0]
+                with graph.inserting_before(output):
+                    new = graph.call_function(self.op, (orig,), {})
+                    new.meta = {
+                        key: value
+                        for key, value in orig.meta.items()
+                        if key != "eager_input_vals"
+                    }
+                    custom_meta = dict(new.meta.get("custom", {}))
+                    custom_meta["fallback_to_eager"] = True
+                    new.meta["custom"] = custom_meta
+                    output.args = ((new,),)
+                graph.lint()
+
+        with torch.library._scoped_library(
+            "mylib_lowering_fallback_layout", "DEF"
+        ) as lib:
+            lib.define("check_last_dim(Tensor x) -> Tensor")
+
+            seen_strides = []
+
+            @torch.library.impl(lib, "check_last_dim", "CompositeExplicitAutograd")
+            def _(x):
+                seen_strides.append(tuple(x.stride()))
+                if x.stride(-1) != 1 and x.size(-1) != 1:
+                    raise AssertionError(
+                        f"expected last dim contiguous, got {x.stride()}"
+                    )
+                return x.clone()
+
+            @torch.library.impl(lib, "check_last_dim", "Meta")
+            def _(x):
+                return torch.empty_like(x)
+
+            from torch._inductor import config
+            from torch._inductor.lowering import lowerings, register_lowering
+
+            target = torch.ops.mylib_lowering_fallback_layout.check_last_dim.default
+
+            @register_lowering(target)
+            def _(x):
+                return x
+
+            try:
+                post_pass = InsertFallbackCustomOp(target)
+
+                def f(x):
+                    u = x.transpose(1, 2).contiguous()
+                    if u.stride(-1) != 1:
+                        u = u.contiguous()
+                    return u + 1
+
+                x = torch.randn(1, 8, 4)
+                expected = f(x)
+
+                with config.patch(post_grad_custom_post_pass=post_pass):
+                    actual = torch.compile(f, fullgraph=True)(x)
+
+                self.assertTrue(post_pass.called)
+                self.assertEqual(actual, expected)
+                self.assertEqual(seen_strides, [(32, 8, 1)])
+            finally:
+                lowerings.pop(target, None)
+
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
         device = (
