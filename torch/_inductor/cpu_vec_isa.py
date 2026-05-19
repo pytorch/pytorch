@@ -137,58 +137,66 @@ cdll.LoadLibrary("__lib_path__")
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
-                # Make libtorch_cpu (and other torch shlibs) findable by
-                # the dynamic linker on Linux/macOS so the probe child
-                # does not need to `import torch` to bring them into its
-                # address space. Prepend rather than append so a
-                # successful probe is guaranteed to bind against the
-                # torch we are currently running, not an older install
-                # on the user's loader path. On Windows the equivalent
-                # registration happens inside the child via
-                # os.add_dll_directory (see _avx_py_load).
-                lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
-                env = python_subprocess_env()
-                for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-                    existing = env.get(var, "")
-                    env[var] = (
-                        os.pathsep.join([lib_dir, existing]) if existing else lib_dir
-                    )
+                # Cache the subprocess load-check result with a marker
+                # file next to the compiled .so so subsequent processes
+                # skip the probe entirely (each spawn is still ~0.3s).
+                load_ok_marker = output_path + ".load_ok"
+                if not os.path.isfile(load_ok_marker):
+                    # Make libtorch_cpu (and other torch shlibs)
+                    # findable by the dynamic linker on Linux/macOS so
+                    # the probe child does not need to `import torch` to
+                    # bring them into its address space. Prepend rather
+                    # than append so a successful probe is guaranteed to
+                    # bind against the torch we are currently running,
+                    # not an older install on the user's loader path. On
+                    # Windows the equivalent registration happens inside
+                    # the child via os.add_dll_directory (see
+                    # _avx_py_load).
+                    lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+                    env = python_subprocess_env()
+                    for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+                        existing = env.get(var, "")
+                        env[var] = (
+                            os.pathsep.join([lib_dir, existing])
+                            if existing
+                            else lib_dir
+                        )
 
-                # The root cause of the 30-minute CI hangs that motivated
-                # this code -- a multi-second `import torch` in the child
-                # stalling under load -- is fixed above by dropping that
-                # import. The 60s timeout and one retry below remain as
-                # defense in depth for any future child hang (e.g. a
-                # static initializer in the .so itself). Use
-                # subprocess.run so the child is killed on TimeoutExpired
-                # (check_call leaks it). Retry only on TimeoutExpired
-                # (transient); CalledProcessError means the .so genuinely
-                # can't load and falls through to the outer except.
-                probe_cmd = [
-                    sys.executable,
-                    "-c",
-                    VecISA._avx_py_load.replace("__lib_path__", output_path),
-                ]
-                max_attempts = 2
-                for attempt in range(max_attempts):
-                    try:
-                        subprocess.run(
-                            probe_cmd,
-                            stderr=subprocess.DEVNULL,
-                            env=env,
-                            timeout=60,
-                            check=True,
-                        )
-                        break
-                    except subprocess.TimeoutExpired:
-                        warnings.warn(
-                            f"VecISA dlopen probe for {self} hung after 60s "
-                            f"(attempt {attempt + 1}/{max_attempts})",
-                            stacklevel=2,
-                        )
-                else:
-                    # for/else: every attempt timed out -- give up.
-                    return False
+                    # Bound the dlopen probe and retry on hang. A stuck
+                    # child has been observed in CI to hang the parent
+                    # test process for the whole 30-minute outer
+                    # timeout. Use subprocess.run so the child is killed
+                    # on TimeoutExpired (check_call leaks it). Retry only
+                    # on TimeoutExpired (transient); CalledProcessError
+                    # means the .so genuinely can't load and falls
+                    # through to the outer except.
+                    probe_cmd = [
+                        sys.executable,
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ]
+                    max_attempts = 2
+                    for attempt in range(max_attempts):
+                        try:
+                            subprocess.run(
+                                probe_cmd,
+                                stderr=subprocess.DEVNULL,
+                                env=env,
+                                timeout=60,
+                                check=True,
+                            )
+                            break
+                        except subprocess.TimeoutExpired:
+                            warnings.warn(
+                                f"VecISA dlopen probe for {self} hung after 60s "
+                                f"(attempt {attempt + 1}/{max_attempts})",
+                                stacklevel=2,
+                            )
+                    else:
+                        # for/else: every attempt timed out -- give up.
+                        return False
+                    with open(load_ok_marker, "w") as f:
+                        f.write("")
             except Exception:
                 return False
 

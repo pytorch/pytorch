@@ -334,6 +334,8 @@ if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
 
 
 class TestPyCodeCache(TestCase):
+    _share_triton_cache = False
+
     def test_linemaps_empty(self):
         src = """import torch"""
         (key, path) = PyCodeCache.write(src, "")
@@ -441,6 +443,7 @@ class TestPyCodeCache(TestCase):
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
     device_type = GPU_TYPE
+    _share_triton_cache = False
 
     def setUp(self):
         super().setUp()
@@ -2114,6 +2117,8 @@ class TestFxGraphCache(TestCase):
 
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
+    _share_triton_cache = False
+
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -2765,6 +2770,8 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    _share_triton_cache = False
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
@@ -3623,6 +3630,8 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
+    _share_triton_cache = False
+
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
@@ -3665,6 +3674,8 @@ class TestCudaCompileCommand(TestCase):
 
 @instantiate_parametrized_tests
 class TestAutotuneCache(TestCase):
+    _share_triton_cache = False
+
     device_type = GPU_TYPE
 
     def setUp(self):
@@ -4064,6 +4075,8 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
+    _share_triton_cache = False
+
     @requires_gpu()
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
@@ -4154,6 +4167,8 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 
 class TestUtils(TestCase):
+    _share_triton_cache = False
+
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
         def fn(x, y):
@@ -4209,14 +4224,26 @@ class TestVecISACheckBuild(TestCase):
         # our fake_run does not intercept the unrelated compiler
         # --version check that runs deeper in cpp_builder. Stub the
         # fingerprint (its compiler version call would otherwise need a
-        # real g++) and short-circuit os.path.isfile for the inductor
-        # cache path so build() is skipped on a cold machine.
+        # real g++). Make os.path.isfile claim the compiled .so already
+        # exists (so build() is skipped) but the .load_ok marker does
+        # not (so the probe actually runs and our fake_run is called).
+        # Mock builtins.open so the post-probe marker write is a no-op.
         real_isfile = os.path.isfile
 
         def fake_isfile(path):
-            if "torchinductor" in str(path):
+            path_str = str(path)
+            if path_str.endswith(".load_ok"):
+                return False
+            if "torchinductor" in path_str:
                 return True
-            return real_isfile(path)
+            return real_isfile(path_str)
+
+        real_open = open
+
+        def fake_open(path, *args, **kwargs):
+            if isinstance(path, (str, os.PathLike)) and str(path).endswith(".load_ok"):
+                return mock.mock_open()()
+            return real_open(path, *args, **kwargs)
 
         fake_subprocess = types.SimpleNamespace(
             run=fake_run,
@@ -4231,7 +4258,8 @@ class TestVecISACheckBuild(TestCase):
         ):
             with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
                 with mock.patch("os.path.isfile", side_effect=fake_isfile):
-                    return instance.check_build(cpu_vec_isa.VecISA._avx_code)
+                    with mock.patch("builtins.open", side_effect=fake_open):
+                        return instance.check_build(cpu_vec_isa.VecISA._avx_code)
 
     def test_check_build_returns_false_after_repeated_timeouts(self):
         timeouts: list[Any] = []
@@ -4274,6 +4302,8 @@ class TestVecISACheckBuild(TestCase):
 
 
 class TestCompilationEventLogging(TestCase):
+    _share_triton_cache = False
+
     def reset(self):
         DynamoCache.clear()
         PrecompileContext.clear()
@@ -4464,6 +4494,8 @@ class TestCompilationEventLogging(TestCase):
 
 
 class TestAutotuneCacheExtraOptions(TestCase):
+    _share_triton_cache = False
+
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
 
