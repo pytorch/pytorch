@@ -294,6 +294,20 @@ class AOTInductorTestsTemplate:
         inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), inputs)
 
+    def test_searchsorted_slice_boundaries_smoke(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer(
+                    "offsets", torch.tensor([0, 3, 7, 12], device=device)
+                )
+
+            def forward(self, positions):
+                return torch.searchsorted(self.offsets[1:], positions, right=True)
+
+        positions = torch.arange(12, device=self.device)
+        self.check_model(Model(self.device), (positions,))
+
     def test_triton_kernel_bool_tensor_arg(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")

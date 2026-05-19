@@ -6656,6 +6656,42 @@ class CPUReproTests(TestCase):
         actual = torch.compile(f, backend="inductor")(buf, idx)
         self.assertEqual(actual, expected)
 
+    def test_searchsorted_slice_boundaries_regression(self):
+        def fn(offsets, positions):
+            return torch.searchsorted(offsets[1:], positions, right=True)
+
+        offsets = torch.tensor([0, 3, 7, 12])
+        positions = torch.arange(12)
+        expected = fn(offsets, positions)
+        actual = torch.compile(fn, backend="inductor")(offsets, positions)
+        self.assertEqual(actual, expected)
+
+    def test_searchsorted_dynamic_slice_boundaries_regression(self):
+        def fn(lengths, positions):
+            offsets = torch.zeros(
+                lengths.shape[0] + 1,
+                dtype=lengths.dtype,
+                device=lengths.device,
+            )
+            offsets[1:] = torch.cumsum(lengths, dim=0)
+            return torch.searchsorted(offsets[1:], positions, right=True)
+
+        lengths = torch.tensor([3, 4, 5])
+        positions = torch.arange(12)
+        expected = fn(lengths, positions)
+        actual = torch.compile(fn, backend="inductor")(lengths, positions)
+        self.assertEqual(actual, expected)
+
+    def test_bucketize_slice_boundaries_regression(self):
+        def fn(values, offsets):
+            return torch.bucketize(values, offsets[1:], right=True)
+
+        values = torch.arange(12)
+        offsets = torch.tensor([0, 3, 7, 12])
+        expected = fn(values, offsets)
+        actual = torch.compile(fn, backend="inductor")(values, offsets)
+        self.assertEqual(actual, expected)
+
     def test_layernorm_nan_with_inf_cpu_float16(self):
         # https://github.com/pytorch/pytorch/issues/173885
         # LayerNorm with torch.compile on CPU produces NaN when input has Inf
