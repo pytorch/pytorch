@@ -1594,6 +1594,7 @@ class CompilationMetrics:
     inline_inbuilt_nn_modules_candidate: bool | None = False
     pytorch_version: str | None = None
     inductor_provenance: set[str] | None = None
+    functorch_config: str | None = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1764,7 +1765,13 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: sorted(value) if isinstance(value, set) else value
+            key: (
+                sorted(value)
+                if isinstance(value, set)
+                else value.to_jsonable()
+                if hasattr(value, "to_jsonable")
+                else value
+            )
             for key, value in d.items()
             if key not in blocklist
         }
@@ -1845,6 +1852,31 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
     return inductor_conf_str
 
 
+def _functorch_config_for_logging() -> str | None:
+    """Serialize functorch config (AOT autograd settings) for Scuba logging."""
+    if not justknobs_check("pytorch/dynamo:log_functorch_config"):
+        return None
+
+    try:
+        functorch_config_copy = torch._functorch.config.get_config_copy()
+    except (TypeError, AttributeError, RuntimeError, AssertionError):
+        return None
+
+    try:
+        blocklist = {
+            "TYPE_CHECKING",
+            "_save_config_ignore",
+        }
+        clean = {
+            k: (list(v) if isinstance(v, set) else v)
+            for k, v in functorch_config_copy.items()
+            if k not in blocklist and isinstance(k, str)
+        }
+        return json.dumps(clean, sort_keys=True, default=str)
+    except Exception:
+        return "Functorch Config is not JSON serializable"
+
+
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
@@ -1891,6 +1923,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
         "pytorch_version": torch.__version__,
+        "functorch_config": _functorch_config_for_logging(),
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -4240,9 +4273,31 @@ def object_has_getattribute(value: Any) -> bool:
 
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
-    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
-    d = object.__getattribute__(obj, "__dict__")
+    # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        # threading.local stores attributes in a per-thread C-backed dict that
+        # object.__getattribute__ cannot see. CPython passes that dict directly
+        # to _PyObject_GenericSetAttrWithDict:
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
+        d = threading.local.__getattribute__(obj, "__dict__")
     d[name] = value
+
+
+def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
+    # Same path as object_setattr_ignore_descriptor with a NULL value.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        d = threading.local.__getattribute__(obj, "__dict__")
+    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:

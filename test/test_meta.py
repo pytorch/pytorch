@@ -2274,6 +2274,8 @@ class TestMetaKernelRegistrations(TestCase):
     def test_mkldnn_rnn_backward_dtype(self):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN not available")
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest("MKLDNN bf16 not supported on this CPU")
         hidden_size = 16
         seq_len, batch, input_size = 5, 2, 8
         input_t = torch.randn(seq_len, batch, input_size, dtype=torch.bfloat16)

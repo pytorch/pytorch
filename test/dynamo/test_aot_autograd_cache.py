@@ -311,6 +311,39 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalAOTAutogradCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self._clear_dynamo_and_codecache()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
@@ -3772,6 +3805,51 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             results[1],
             "DTensor cache keys should be identical across processes",
         )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_fake_script_object_mesh_cache_key(self):
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        with _fake_process_group():
+            mesh = DeviceMesh("cpu", torch.arange(2))
+            fake_mesh = FakeScriptObject(
+                mesh,
+                f"{DeviceMesh.__module__}.{DeviceMesh.__qualname__}",
+                mesh,
+            )
+            local_tensor = torch.zeros(4, 4)
+            tensor_meta = TensorMeta(
+                local_tensor.shape, local_tensor.stride(), local_tensor.dtype
+            )
+            fake_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    fake_mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+            real_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+
+            pickler = AOTAutogradCachePickler(
+                torch.fx.GraphModule({}, torch.fx.Graph())
+            )
+            self.assertEqual(
+                pickler.get_hash(fake_mesh_dtensor),
+                pickler.get_hash(real_mesh_dtensor),
+            )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_dtensor_different_placements_different_cache_key(self):

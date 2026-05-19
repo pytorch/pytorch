@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -159,7 +159,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm)
+    fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
@@ -285,6 +285,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
 
+    if config.dedup_reduce_scatters:
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
+            dedup_fsdp_reduce_scatter
+        )
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
@@ -375,16 +382,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
         overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
-        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
 
-        # by default, insert overlap deps and enable fusion regions within inductor
+        # by default, insert overlap deps within inductor
         with config.patch(
             {
                 "aten_distributed_optimizations.insert_overlap_deps": (
                     True if overlap_deps is None else overlap_deps
-                ),
-                "aten_distributed_optimizations.enable_fusion_regions": (
-                    True if fusion_regions is None else fusion_regions
                 ),
             }
         ):
@@ -1303,6 +1306,39 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
+def _get_single_replacement_node(
+    replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
+) -> torch.fx.Node:
+    nodes = [
+        node
+        for node in replacement_nodes
+        if node.op == "call_function" and node.target is target
+    ]
+    if len(nodes) != 1:
+        raise AssertionError(f"Expected exactly one replacement node for {target}")
+    return nodes[0]
+
+
+def _propagate_triton_eager_input_vals(
+    replacement_nodes: Sequence[torch.fx.Node],
+    hop_node: torch.fx.Node,
+) -> None:
+    eager_input_vals = hop_node.meta.get("eager_input_vals")
+    if eager_input_vals is None:
+        return
+
+    _, eager_kwargs = eager_input_vals
+    mutation_eager_kwargs = {
+        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+    }
+    # The dense decomposition introduces clones plus the mutation HOP, but only
+    # the mutation HOP should receive the eager-mode tensor metadata.
+    mutation_node = _get_single_replacement_node(
+        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
+    )
+    mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
+
+
 def decompose_triton_kernel_wrapper_functional(graph):
     """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
     mutation node.
@@ -1326,6 +1362,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             triton_kernel_wrapper_functional_dense,
         )
 
+        hop_node = match.nodes[0]
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -1336,7 +1373,10 @@ def decompose_triton_kernel_wrapper_functional(graph):
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
 
     graph_pass.apply(graph)
 
