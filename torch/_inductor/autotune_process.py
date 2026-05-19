@@ -741,6 +741,13 @@ class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest)
     pass
 
 
+@dataclasses.dataclass
+class TensorKwargMeta:
+    tensor_meta: TensorMeta
+    source: str
+    input_index: int | None = None
+
+
 class ExternKernelBenchmarkRequest(BenchmarkRequest):
     """
     A class to handle extern kernel benchmark requests. This allows extern kernels
@@ -758,17 +765,45 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
         extra_args: Iterable[Any],
         callable_path: str,  # Module path to the callable (e.g., "extern_kernels.mm")
         kwargs: dict[str, Any] | None = None,
+        tensor_kwargs: dict[str, TensorKwargMeta] | None = None,
+        call_arg_count: int | None = None,
         has_out_variant: bool = True,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.callable_path = callable_path
         self.kwargs = kwargs or {}
+        self.tensor_kwargs = tensor_kwargs or {}
+        self.call_arg_count = call_arg_count
         self.has_out_variant = has_out_variant
+
+    def _make_kwargs(self, input_tensors: Sequence[torch.Tensor]) -> dict[str, Any]:
+        kwargs = dict(self.kwargs)
+        tensor_kwargs_by_source: dict[str, torch.Tensor] = {}
+        for name, meta in self.tensor_kwargs.items():
+            if meta.input_index is not None and meta.input_index < len(input_tensors):
+                kwargs[name] = input_tensors[meta.input_index]
+                continue
+
+            if meta.source not in tensor_kwargs_by_source:
+                tensor_kwargs_by_source[meta.source] = meta.tensor_meta.to_tensor()
+            kwargs[name] = tensor_kwargs_by_source[meta.source]
+        return kwargs
+
+    def call_args_and_kwargs(
+        self, input_tensors: Sequence[torch.Tensor]
+    ) -> tuple[tuple[torch.Tensor, ...], dict[str, Any]]:
+        call_arg_count = (
+            self.call_arg_count
+            if self.call_arg_count is not None
+            else len(input_tensors)
+        )
+        return tuple(input_tensors[:call_arg_count]), self._make_kwargs(input_tensors)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        fn = self.to_callable()
+        input_tensors, kwargs = self.call_args_and_kwargs(input_tensors)
+        fn = self.to_callable(kwargs)
         if self.has_out_variant:
             # For out=variant, pass output as keyword arg
             return functools.partial(fn, *input_tensors, out=out)
@@ -780,37 +815,56 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
         if out is not None and out.numel() == 0:
             # no need to run the kernel of do benchmarking
             return 0.0
-        if self.has_out_variant or len(input_tensors) == 0:
+        if self.has_out_variant:
             return super().benchmark(*input_tensors, out=out)
-        else:
-            algo = self.to_callable()
-            out_new = algo(*input_tensors)
-            if out is not None:
-                torch._C._dynamo.guards.assert_size_stride(
-                    out_new, tuple(out.size()), tuple(out.stride())
-                )
-                out.copy_(out_new)  # for correctness checking
-            if self.benchmark_with_cudagraphs:
-                return benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: algo(*input_tensors)
-                )
-            if config.profile_bandwidth_with_do_bench_using_profiling:
-                return do_bench_using_profiling(lambda: algo(*input_tensors))
-            return benchmarker.benchmark(algo, input_tensors, {})
+
+        if len(input_tensors) == 0:
+            assert self.output_tensor_meta is not None, (
+                "Output tensor meta must be populated when out is None"
+            )
+            input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+            if out is None:
+                out = self.output_tensor_meta.to_tensor()
+
+        input_tensors, kwargs = self.call_args_and_kwargs(input_tensors)
+        algo = self.to_callable(kwargs)
+        out_new = algo(*input_tensors)
+        if out is not None:
+            torch._C._dynamo.guards.assert_size_stride(
+                out_new, tuple(out.size()), tuple(out.stride())
+            )
+            out.copy_(out_new)  # for correctness checking
+        if self.benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(
+                lambda: algo(*input_tensors)
+            )
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: algo(*input_tensors))
+        device_type = next(
+            (
+                tensor.device.type
+                for tensor in [*input_tensors, *kwargs.values(), out]
+                if isinstance(tensor, torch.Tensor)
+            ),
+            None,
+        )
+        return benchmarker.benchmark(algo, input_tensors, {}, device=device_type)
 
     def precompile(self) -> None:
         # Extern kernels don't need precompilation - they're already compiled
         pass
 
-    def to_callable(self):
+    def to_callable(self, kwargs: dict[str, Any] | None = None):
         # While ExternKernelChoice also has a to_callable method,
         # we avoid calling the ExternKernelChoice version here to make sure
         # this is picklable
         from torch._inductor.select_algorithm import extern_kernels
 
         fn = getattr(extern_kernels, self.kernel_name)
-        if self.kwargs:
-            return functools.partial(fn, **self.kwargs)
+        if kwargs is None:
+            kwargs = self._make_kwargs(())
+        if kwargs:
+            return functools.partial(fn, **kwargs)
 
         return fn
 
