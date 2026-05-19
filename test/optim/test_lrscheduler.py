@@ -7,6 +7,7 @@ import tempfile
 import types
 import warnings
 from functools import partial
+from unittest import expectedFailure
 
 import torch
 import torch.nn.functional as F
@@ -2680,32 +2681,32 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    @expectedFailure
     def test_onecycle_lr_zero_div_factor(self):
-        # NOTE: This test documents the current behavior rather than defining
-        # intended API semantics.
-        #
+
         # `div_factor` is used to compute
         # `initial_lr = max_lr / div_factor` during initialization. When
         # `div_factor=0.0`, this currently falls through to a raw
         # ZeroDivisionError instead of being validated explicitly.
-        with self.assertRaises(ZeroDivisionError):
-            scheduler = OneCycleLR(
+        with self.assertRaisesRegex(ValueError, "Expected positive div_factor"):
+            OneCycleLR(
                 self.opt,
                 max_lr=1e-3,
                 total_steps=10,
                 div_factor=0.0,
             )
 
+    @expectedFailure
     def test_onecycle_lr_zero_final_div_factor(self):
-        # NOTE: This test documents the current behavior rather than defining
-        # intended API semantics.
-        #
+
         # `final_div_factor` is used to compute
         # `min_lr = initial_lr / final_div_factor` during initialization.
         # When `final_div_factor=0.0`, this currently falls through to a raw
         # ZeroDivisionError instead of being validated explicitly.
-        with self.assertRaises(ZeroDivisionError):
-            scheduler = OneCycleLR(
+        with self.assertRaisesRegex(
+            ValueError, "Expected positive final_div_factor"
+        ):
+            OneCycleLR(
                 self.opt,
                 max_lr=1e-3,
                 total_steps=10,
