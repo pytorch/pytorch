@@ -6691,6 +6691,7 @@ class CPUReproTests(TestCase):
         expected = fn(values, offsets)
         actual = torch.compile(fn, backend="inductor")(values, offsets)
         self.assertEqual(actual, expected)
+
     def test_layernorm_nan_with_inf_cpu_float16(self):
         # https://github.com/pytorch/pytorch/issues/173885
         # LayerNorm with torch.compile on CPU produces NaN when input has Inf
