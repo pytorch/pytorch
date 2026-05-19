@@ -1805,8 +1805,7 @@ if HAS_CPU:
         test_sdpa_rewriter_13_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
         )
-        # see https://github.com/pytorch/pytorch/issues/177244
-        test_sdpa_rewriter_14_cpu = xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)(
+        test_sdpa_rewriter_14_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
         )
         test_sdpa_rewriter_15_cpu = functools.partialmethod(
