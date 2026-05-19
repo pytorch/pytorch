@@ -4465,7 +4465,10 @@ class TestPrologueFusion(TestCase):
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
-    @unittest.skip("Triton bug in compilation")
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
     def test_gather_fusion(self):
         M, K, N = (64, 128, 256)
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
@@ -4488,6 +4491,96 @@ class TestPrologueFusion(TestCase):
             .check("dot")
             .run(code[0])
         )
+        (
+            FileCheck()
+            .check("tl.load(in_ptr1 + (_loop_invariant_idx_m)")
+            .check("for k_idx")
+            .check_not("tl.load(in_ptr1")
+            .check("tl.dot")
+            .run(code[0])
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", code[0])), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_both_inputs(self):
+        M, K, N = (64, 128, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\)",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\)",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertRegex(loop_body, r"_loop_invariant_A_tmp\d+")
+        self.assertRegex(loop_body, r"_loop_invariant_B_tmp\d+")
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_B_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_even_k_false(self):
+        M, K, N = (64, 130, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        self.assertIn("EVEN_K : tl.constexpr = False", kernel_code)
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\), None",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\), None",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertIn("a_mask =", loop_body)
+        self.assertIn("b_mask =", loop_body)
+        self.assertIn(", a_mask", loop_body)
+        self.assertIn(", b_mask", loop_body)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
