@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -106,27 +107,39 @@ struct TORCH_API ProfilerResult {
       std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
           trace,
       std::vector<experimental_event_t>&& event_tree);
+  using post_process_t = std::function<
+      void(int64_t, std::vector<std::string>&, std::vector<std::string>&)>;
+  ProfilerResult(
+      uint64_t start_time,
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+          trace,
+      std::vector<experimental_event_t>&& pending_results,
+      torch::profiler::impl::ProfilerConfig config,
+      int64_t trace_end_ns,
+      post_process_t post_process_cb = nullptr);
   ~ProfilerResult();
 
   uint64_t trace_start_ns() const {
     return trace_start_ns_;
   }
 
-  const std::vector<KinetoEvent>& events() const {
-    return events_;
-  }
-
-  const std::vector<experimental_event_t>& event_tree() const {
-    return event_tree_;
-  }
+  const std::vector<KinetoEvent>& events();
+  const std::vector<experimental_event_t>& event_tree();
 
   void save(const std::string& path);
 
  private:
+  void materializeIfNeeded();
+
   uint64_t trace_start_ns_ = 0;
   std::vector<KinetoEvent> events_;
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
   std::vector<experimental_event_t> event_tree_;
+
+  std::vector<experimental_event_t> pending_results_;
+  std::optional<torch::profiler::impl::ProfilerConfig> pending_config_;
+  int64_t pending_trace_end_ns_ = 0;
+  post_process_t pending_post_process_cb_;
 };
 
 /*

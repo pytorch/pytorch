@@ -1236,7 +1236,7 @@ class TransferEvents {
 };
 #endif
 
-trace_ptr_t addKinetoEvents(
+trace_ptr_t addKinetoEventsAndStopTrace(
     std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
     uint64_t end_time_ns,
@@ -1251,7 +1251,6 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace, config};
   return trace;
 }
 
@@ -1488,6 +1487,24 @@ void adjust_timestamps(std::vector<std::shared_ptr<Result>>& out) {
 }
 } // namespace
 
+void transferEventsAndBuildTree(
+    std::vector<std::shared_ptr<Result>>& results,
+    trace_ptr_t& trace,
+    const ProfilerConfig& config) {
+  TransferEvents transfer{results, trace, config};
+
+  std::stable_sort(
+      results.begin(), results.end(), [](const auto& a, const auto& b) {
+        return a->start_time_ns_ < b->start_time_ns_;
+      });
+
+  if (config.report_input_shapes && config.profile_memory) {
+    calculateUniqueTensorIDs(results);
+  }
+
+  build_tree(results);
+}
+
 std::pair<
     std::vector<std::shared_ptr<Result>>,
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
@@ -1637,17 +1654,9 @@ RecordQueue::getRecords(
     }
   }
 
-  auto trace = addKinetoEvents(out, start_time_ns, end_time_ns, config_);
+  auto trace =
+      addKinetoEventsAndStopTrace(out, start_time_ns, end_time_ns, config_);
 
-  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a->start_time_ns_ < b->start_time_ns_;
-  });
-
-  if (config_.report_input_shapes && config_.profile_memory) {
-    calculateUniqueTensorIDs(out);
-  }
-
-  build_tree(out);
   return {out, std::move(trace)};
 }
 

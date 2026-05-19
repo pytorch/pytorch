@@ -707,4 +707,9 @@ TORCH_API bool get_record_tensor_addrs_enabled();
 TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()> /*fn*/);
 TORCH_API void set_record_tensor_addrs_enabled_val(bool /*val*/);
 
+TORCH_API void transferEventsAndBuildTree(
+    std::vector<std::shared_ptr<Result>>& results,
+    std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>& trace,
+    const ProfilerConfig& config);
+
 } // namespace torch::profiler::impl

@@ -450,8 +450,13 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     recordQueue.restart();
   }
 
-  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
-  finalizeTrace() {
+  struct FinalizedTrace {
+    std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace;
+    std::vector<std::shared_ptr<Result>> results;
+    int64_t end_time_ns;
+  };
+
+  FinalizedTrace finalizeTrace() {
     auto end_time = getTimeNs();
     recordQueue.stop();
 
@@ -463,55 +468,15 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     auto records_and_trace =
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
-    materializeOpEvents(records_and_trace.first, end_time);
-
-    return std::move(records_and_trace.second);
-  }
-
-  template <typename T>
-  void invokeCallback(T& t) {
-    if (eventPostProcessCb) {
-      eventPostProcessCb(t.debug_handle_, t.jit_stack_, t.jit_modules_);
-    }
-  }
-
-  void materializeOpEvents(
-      std::vector<std::shared_ptr<Result>>& events,
-      int64_t trace_end_ns) {
-    for (auto& e : events) {
-      if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
-        eventTree.push_back(e);
-      }
-
-      // Unfinished events automatically have end time set to trace end time
-      if (!e->finished_) {
-        e->visit(c10::overloaded(
-            [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
-              i.end_time_ns_ = trace_end_ns;
-            },
-            [](auto&) {}));
-      }
-
-      e->visit(c10::overloaded(
-          [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
-          [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
-          [](auto&) {}));
-
-      kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
-      AddTensorboardFields add_tb(e, kinetoEvents.back());
-      AddGenericMetadata add_generic(e, &config_);
-
-      // It is not safe to use the activity after post processing.
-      e->kineto_activity_ = nullptr;
-    }
+    return {
+        std::move(records_and_trace.second),
+        std::move(records_and_trace.first),
+        end_time};
   }
 
   uint64_t startTime;
   c10::ApproximateClockToUnixTimeConverter clockConverter;
   torch::profiler::impl::RecordQueue recordQueue;
-  std::vector<KinetoEvent> kinetoEvents;
-  std::vector<experimental_event_t> eventTree;
-  // Optional, if event post-processing is enabled.
   post_process_t eventPostProcessCb;
 };
 
@@ -907,12 +872,14 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   if (isKinetoCompatibleState(config.state)) {
     auto kineto_state_ptr =
         std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
-    auto trace = kineto_state_ptr->finalizeTrace();
+    auto finalized = kineto_state_ptr->finalizeTrace();
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->startTime,
-        std::move(kineto_state_ptr->kinetoEvents),
-        std::move(trace),
-        std::move(kineto_state_ptr->eventTree));
+        std::move(finalized.trace),
+        std::move(finalized.results),
+        config,
+        finalized.end_time_ns,
+        std::move(kineto_state_ptr->eventPostProcessCb));
   }
 
   return result;
@@ -1299,8 +1266,80 @@ ProfilerResult::ProfilerResult(
       events_(std::move(events)),
       trace_(std::move(trace)),
       event_tree_(std::move(event_tree)) {}
+
+ProfilerResult::ProfilerResult(
+    uint64_t start_time,
+    std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+        trace,
+    std::vector<experimental_event_t>&& pending_results,
+    torch::profiler::impl::ProfilerConfig config,
+    int64_t trace_end_ns,
+    post_process_t post_process_cb)
+    : trace_start_ns_(start_time),
+      trace_(std::move(trace)),
+      pending_results_(std::move(pending_results)),
+      pending_config_(std::move(config)),
+      pending_trace_end_ns_(trace_end_ns),
+      pending_post_process_cb_(std::move(post_process_cb)) {}
+
 ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
+
+void ProfilerResult::materializeIfNeeded() {
+  if (!pending_config_.has_value()) {
+    return;
+  }
+  auto config = std::move(*pending_config_);
+  pending_config_.reset();
+
+  torch::profiler::impl::transferEventsAndBuildTree(
+      pending_results_, trace_, config);
+
+  for (auto& e : pending_results_) {
+    if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
+      event_tree_.push_back(e);
+    }
+
+    if (!e->finished_) {
+      e->visit(c10::overloaded(
+          [this](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ = pending_trace_end_ns_;
+          },
+          [](auto&) {}));
+    }
+
+    if (pending_post_process_cb_) {
+      e->visit(c10::overloaded(
+          [&](ExtraFields<EventType::TorchOp>& i) {
+            pending_post_process_cb_(
+                i.debug_handle_, i.jit_stack_, i.jit_modules_);
+          },
+          [&](ExtraFields<EventType::Backend>& i) {
+            pending_post_process_cb_(
+                i.debug_handle_, i.jit_stack_, i.jit_modules_);
+          },
+          [](auto&) {}));
+    }
+
+    events_.emplace_back(e, config.experimental_config.verbose);
+    AddTensorboardFields add_tb(e, events_.back());
+    AddGenericMetadata add_generic(e, &config);
+
+    e->kineto_activity_ = nullptr;
+  }
+  pending_results_.clear();
+  pending_post_process_cb_ = nullptr;
+}
+
+const std::vector<KinetoEvent>& ProfilerResult::events() {
+  materializeIfNeeded();
+  return events_;
+}
+
+const std::vector<experimental_event_t>& ProfilerResult::event_tree() {
+  materializeIfNeeded();
+  return event_tree_;
+}
 
 void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
