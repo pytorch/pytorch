@@ -751,6 +751,44 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    def test_fuse_split_reduction_with_tiled_pw(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        M, N = 2048, 4096
+        x = torch.randn(M, N, device=GPU_TYPE)
+        actual = f(x)
+        opt_f = torch.compile(f)
+        expected = opt_f(x)
+        self.assertTrue(same(actual, expected, tol=1e-3))
+
+        # The first split-reduction level should share the pointwise tiling,
+        # so it can fuse with both pointwise outputs. The second reduction
+        # level remains a separate scalar reduction.
+        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(
+            x.nbytes * 3 + (M * 2 + 1) * x.itemsize,
+            metrics.num_bytes_accessed,
+        )
+
+    def test_fuse_split_reduction_with_pw_producer_and_tiled_pw(self):
+        def f(x):
+            y = x.abs().max()
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        M, N = 2048, 4096
+        x = torch.randn(M, N, device=GPU_TYPE)
+        actual = f(x)
+        opt_f = torch.compile(f)
+        expected = opt_f(x)
+        self.assertTrue(same(actual, expected, tol=1e-3))
+        self.assertEqual(2, metrics.generated_kernel_count)
+
     def test_factored_vs_expanded_pw_numel_in_fused_group(self):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/181563
