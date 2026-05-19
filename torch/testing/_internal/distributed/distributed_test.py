@@ -104,7 +104,6 @@ from torch.utils.data.distributed import DistributedSampler
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-# print("device_type: ",device_type)
 try:
     import torchvision
 
