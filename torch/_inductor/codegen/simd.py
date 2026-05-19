@@ -851,24 +851,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                # During native matmul on bmm, we enforce tiling order (z, y, x, r).
-                # When fusing a bmm node with loop (z, y, x, r) with a pw node
-                # of shape (z*y*x, 1), we need to split the pw iteration range
-                # into three dimensions.
-                # The group becomes [z, y, x, 1], with lengths ([z*y*x], []).
-                # In this case, we decompose the combined size z*y*x into three
-                # consecutive groups. Previously, _split_iteration_ranges supported
-                # splitting into at most two dimensions, but we now extend it to do
-                # three splits when the total size is divisible by all three.
-
-                # is group having (z,y,x,r=1) form?
-                is_bmm_then_pw = len(remaining) == 4 and remaining[-1] == 1
+                # When fusing a node whose flat iteration size spans three
+                # consecutive kernel groups, decompose it across those groups.
+                # This covers both bmm-style [z, y, x, 1] groups and nested
+                # reduction [outer, groups, local] groups.
                 if (
                     current_group + 2 < len(remaining)
                     and sv.statically_known_gt(
                         size, remaining[current_group] * remaining[current_group + 1]
                     )
-                    and is_bmm_then_pw
                 ):
                     # need to break size in three
                     if not sv.statically_known_multiple_of(
