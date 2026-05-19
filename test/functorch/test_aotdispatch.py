@@ -7664,7 +7664,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("def _backward_prologue(", source)
-        self.assertIn("_raise_if_functorch_active_", source)
+        self.assertIn("torch._C._functorch.peek_interpreter_stack()", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
         with capture_codegen_source("backward_prologue") as captured:
