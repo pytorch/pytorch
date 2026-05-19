@@ -48,6 +48,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn("orig_inputs = {}", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
+        self.assertNotIn("_is_view_replay_enabled", source)
+        self.assertNotIn("_set_view_replay_enabled", source)
 
     def test_training_simple(self):
         """
