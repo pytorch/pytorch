@@ -855,11 +855,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # consecutive kernel groups, decompose it across those groups.
                 # This covers both bmm-style [z, y, x, 1] groups and nested
                 # reduction [outer, groups, local] groups.
-                if (
-                    current_group + 2 < len(remaining)
-                    and sv.statically_known_gt(
-                        size, remaining[current_group] * remaining[current_group + 1]
-                    )
+                if current_group + 2 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group] * remaining[current_group + 1]
                 ):
                     # need to break size in three
                     if not sv.statically_known_multiple_of(
