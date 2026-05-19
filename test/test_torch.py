@@ -64,7 +64,7 @@ from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
-    get_all_qint_dtypes, all_types_complex_float8_and,
+    get_all_qint_dtypes, all_types_complex_float8_and, all_passthru_types_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.testing._internal.common_utils import IS_WINDOWS
@@ -6213,7 +6213,7 @@ class TestTorchDeviceType(TestCase):
             # to report. Compute the perturbed value on the CPU to avoid
             # invoking integer arithmetic ufuncs on the barebones types.
             old = int(a.view(-1)[0].item())
-            new = (old + 1) % max(2, torch.iinfo(dtype).max)
+            new = (old + 1) % torch.iinfo(dtype).max
             b.view(-1)[0] = new
             self.assertEqual(torch.eq(a, b), (a.cpu() == b.cpu()).to(device))
             self.assertEqual(torch.ne(a, b), (a.cpu() != b.cpu()).to(device))
@@ -6298,18 +6298,20 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
-    @dtypes(*all_types_and_complex_and(
-        torch.bool, torch.half, torch.bfloat16, torch.complex32,
-        torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_passthru_types_and(torch.chalf))
     def test_copy_(self, device, dtype):
         def can_cast(src_dtype, dst_dtype):
             # torch.can_cast(torch.int16, torch.uint8) returns True
             # which isn't actually safe-cast.
-            # This function returns False in this case.
+            # This function returns False in this case. For unsigned
+            # destinations we require an unsigned source no wider than
+            # the destination so widening (uint8 -> uint16) round-trips
+            # losslessly but narrowing (uint16 -> uint8) is rejected.
             unsigned = {torch.uint8, torch.uint16, torch.uint32, torch.uint64}
 
             if dst_dtype in unsigned:
-                return src_dtype in unsigned
+                return (src_dtype in unsigned
+                        and src_dtype.itemsize <= dst_dtype.itemsize)
             return torch.can_cast(src_dtype, dst_dtype)
 
         def make_tensor_wrapper(shape, dtype):
@@ -6320,9 +6322,7 @@ class TestTorchDeviceType(TestCase):
             return torch.randn(shape, device=device, dtype=dtype)
 
         t = make_tensor_wrapper((50,), dtype)
-        src_dtypes = all_types_and_complex_and(
-            torch.bool, torch.half, torch.bfloat16, torch.complex32,
-            torch.uint16, torch.uint32, torch.uint64)
+        src_dtypes = all_passthru_types_and(torch.chalf)
         for src_dtype in src_dtypes:
             src = make_tensor_wrapper((50,), dtype=src_dtype)
             t.copy_(src)

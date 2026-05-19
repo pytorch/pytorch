@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
-    (all_types_and_complex_and, get_all_dtypes,)
+    (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
 from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
 
@@ -40,10 +40,8 @@ class TestScatterGather(TestCase):
                     else:
                         idx[tuple(ii)] = torch.randint(dim_size, (elems_per_row,))
 
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    @dtypesIfCUDA(*all_types_and_complex_and(
-        torch.bool, torch.half, torch.bfloat16, torch.chalf,
-        torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_passthru_types())
+    @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
     def test_gather(self, device, dtype):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
@@ -66,7 +64,7 @@ class TestScatterGather(TestCase):
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Guarded because torch.max isn't defined for complex, bool, or
-        # barebones unsigned tensors on CUDA
+        # barebones unsigned tensors.
         max_unsupported = (
             dtype.is_complex
             or dtype is torch.bool

@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/ReduceUtils.h>
@@ -205,9 +206,10 @@ struct cpu_scatter_gather_base_kernel {
     // to keep equal granularity in parallelism.
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
-      "scatter_gather_scalar_cpu", [&] {
+    AT_DISPATCH_V2(
+      self.scalar_type(),
+      "scatter_gather_scalar_cpu",
+      AT_WRAP([&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
@@ -255,8 +257,10 @@ struct cpu_scatter_gather_base_kernel {
           }
         };
         iter.for_each(loop, grain_size);
-      }
-    );
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+      kBool, kHalf, kBFloat16);
     if (need_acc) {
       self.copy_(buffer);
     }
@@ -294,9 +298,10 @@ struct cpu_scatter_gather_base_kernel {
 
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(1),
-      "scatter_gather_tensor_cpu", [&] {
+    AT_DISPATCH_V2(
+      iter.dtype(1),
+      "scatter_gather_tensor_cpu",
+      AT_WRAP([&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
@@ -352,8 +357,10 @@ struct cpu_scatter_gather_base_kernel {
           }
         };
         iter.for_each(loop, grain_size);
-      }
-    );
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+      kBool, kHalf, kBFloat16);
     if (need_acc) {
       self.copy_(buffer);
     }

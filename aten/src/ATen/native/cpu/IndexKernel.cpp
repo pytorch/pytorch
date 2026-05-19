@@ -789,15 +789,23 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       return;
     }
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] { cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
-            return a;
-        },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
-            return a;
-        });
-    });
+    AT_DISPATCH_V2(
+        iter.dtype(),
+        "flip_cpu",
+        AT_WRAP([&iter] {
+          cpu_kernel_vec(iter,
+            [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+              return a;
+            },
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+              return a;
+            });
+        }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        kBool,
+        kHalf,
+        kBFloat16);
   }
 }
 
