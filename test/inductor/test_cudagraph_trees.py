@@ -2517,6 +2517,65 @@ if HAS_CUDA_AND_TRITON:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_new_compile_invocation_keeps_live_input_path(self):
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 1
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+            g_compiled = torch.compile(g, mode="reduce-overhead")
+
+            for _ in range(3):
+                x = torch.randn(2, device="cuda")
+                out = g_compiled(f_compiled(x))
+                self.assertEqual(out, x + 2)
+
+            self.assertEqual(self.get_root_children(), [1])
+
+        def test_repeated_live_input_path_errors(self):
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 1
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+            g_compiled = torch.compile(g, mode="reduce-overhead")
+
+            x = torch.randn(2, device="cuda")
+            x = f_compiled(x)
+            x = g_compiled(x)
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                f_compiled(x)
+
+            for _ in range(3):
+                out = g_compiled(f_compiled(torch.randn(2, device="cuda")))
+                del out
+
+            x = g_compiled(f_compiled(torch.randn(2, device="cuda")))
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                f_compiled(x)
+
+        def test_repeated_live_input_path_with_pending_backward_errors(self):
+            def f(x):
+                return x + 1
+
+            def g(x):
+                return x + 1
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+            g_compiled = torch.compile(g, mode="reduce-overhead")
+
+            x = torch.randn(2, device="cuda", requires_grad=True)
+            x = f_compiled(x)
+            x = g_compiled(x)
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                f_compiled(x)
+
         def test_warn_on_pending_backward(self):
             @torch.compile
             def foo(x):
