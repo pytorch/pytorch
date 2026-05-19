@@ -529,6 +529,9 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: int | None = None
 
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
+
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
     # the storage of the tensor that will be copied back into the original input

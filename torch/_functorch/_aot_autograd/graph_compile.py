@@ -90,7 +90,7 @@ from .schemas import (
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     contain_metadata_mutation_ops,
-    get_cuda_generator_meta_val,
+    get_default_generator,
     make_boxed_func,
     simple_wraps,
     strict_zip,
@@ -1933,7 +1933,9 @@ def _partition_joint_graph_into_fw_bw(
     ]
     fw_metadata.num_graphsafe_rng_states = len(rng_states)
     if rng_states:
-        fw_metadata.graphsafe_rng_state_index = rng_states[0].meta["val"].device.index
+        rng_device = rng_states[0].meta["val"].device
+        fw_metadata.graphsafe_rng_state_index = rng_device.index
+        fw_metadata.graphsafe_rng_device = rng_device
 
     return fw_module, bw_module, num_inner_fwd_outputs
 
@@ -2758,8 +2760,13 @@ def _aot_stage2b_compile_forward_or_inference(
                 raise AssertionError(
                     "fw_metadata.graphsafe_rng_state_index must not be None when num_graphsafe_rng_states > 0"
                 )
+            device = fw_metadata.graphsafe_rng_device
+            if device is None:
+                raise AssertionError(
+                    "fw_metadata.graphsafe_rng_device must not be None when num_graphsafe_rng_states > 0"
+                )
             rng_states = [
-                get_cuda_generator_meta_val(index)
+                get_default_generator(device).clone_state()
                 for _ in range(fw_metadata.num_graphsafe_rng_states)
             ]
             adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
