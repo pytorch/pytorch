@@ -1841,24 +1841,25 @@ class GemmEpilogueFusionTests(TestCase):
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_grouped_contract_shape_changing_main_fuses(self):
         cases = (
-            (64, 64, 64, torch.float16, "silu", True),
-            (96, 96, 64, torch.bfloat16, "relu", False),
-            (64, 128, 96, torch.float16, "sub", False),
+            (64, 64, 64, torch.float16, 2, "silu", True),
+            (96, 96, 64, torch.bfloat16, 2, "relu", False),
+            (64, 128, 96, torch.float16, 2, "sub", False),
+            (64, 64, 32, torch.float16, 4, "sum4", False),
         )
-        for M, K, N, dtype, expr, cast_acc in cases:
-            with self.subTest(shape=(M, K, N), dtype=dtype, expr=expr):
+        for M, K, N, dtype, group, expr, cast_acc in cases:
+            with self.subTest(shape=(M, K, N), dtype=dtype, group=group, expr=expr):
 
                 def fn(a, b):
                     def epilogue(acc):
-                        pair = (acc.float() if cast_acc else acc).view(M, -1, 2)
-                        gate = pair[..., 0]
-                        up = pair[..., 1]
+                        lanes = (acc.float() if cast_acc else acc).view(M, -1, group)
                         if expr == "silu":
-                            out = torch.nn.functional.silu(gate) * up
+                            out = torch.nn.functional.silu(lanes[..., 0]) * lanes[..., 1]
                         elif expr == "relu":
-                            out = torch.relu(gate) * up
+                            out = torch.relu(lanes[..., 0]) * lanes[..., 1]
+                        elif expr == "sub":
+                            out = lanes[..., 0] - lanes[..., 1]
                         else:
-                            out = gate - up
+                            out = lanes[..., 0] + lanes[..., 1] + lanes[..., 2] + lanes[..., 3]
                         return out.to(acc.dtype) if cast_acc else out
 
                     return gemm_epilogue_fusion(
@@ -1869,9 +1870,8 @@ class GemmEpilogueFusionTests(TestCase):
                     )
 
                 a = torch.randn(M, K, device="cuda", dtype=dtype)
-                gate_w = torch.randn(K, N, device="cuda", dtype=dtype)
-                up_w = torch.randn(K, N, device="cuda", dtype=dtype)
-                b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
+                weights = [torch.randn(K, N, device="cuda", dtype=dtype) for _ in range(group)]
+                b = torch.stack(weights, dim=-1).reshape(K, group * N).contiguous()
 
                 actual, (code,) = run_and_get_code(
                     torch.compile(fn, backend="inductor", fullgraph=True), a, b
@@ -1881,7 +1881,7 @@ class GemmEpilogueFusionTests(TestCase):
                 self.assertEqual(actual.shape, (M, N))
                 torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
                 FileCheck().check("main_output_transform='grouped_n_contract'").check(
-                    "main_output_transform_group=2"
+                    f"main_output_transform_group={group}"
                 ).check_not("activation='").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
@@ -1909,9 +1909,9 @@ class GemmEpilogueFusionTests(TestCase):
         with self.assertRaisesRegex(Exception, "shape-changing main epilogues"):
             torch.compile(chunk_fn, backend="inductor", fullgraph=True)(a, b)
 
-        def group4_fn(a, b):
+        def group3_fn(a, b):
             def epilogue(acc):
-                x = acc.view(M, -1, 4)
+                x = acc.view(M, -1, 3)
                 return x[..., 0] + x[..., 1]
 
             return gemm_epilogue_fusion(
@@ -1922,9 +1922,9 @@ class GemmEpilogueFusionTests(TestCase):
             )
 
         a = torch.randn(M, K, device="cuda", dtype=torch.float16)
-        b = torch.randn(K, 4 * N, device="cuda", dtype=torch.float16)
+        b = torch.randn(K, 3 * N, device="cuda", dtype=torch.float16)
         with self.assertRaisesRegex(Exception, "shape-changing main epilogues"):
-            torch.compile(group4_fn, backend="inductor", fullgraph=True)(a, b)
+            torch.compile(group3_fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_malformed_local_n_reduce_aux(self):

@@ -1134,11 +1134,14 @@ def _match_quack_grouped_n_contract_main(
             return True
         if value is mm_node:
             return False
-        if _match_quack_view_or_reshape(value) is not None and _quack_output_uses_node(value, mm_node):
+        if (
+            _match_quack_view_or_reshape(value) is not None
+            and _quack_output_uses_node(value, mm_node)
+        ):
             return False
         return all(visit(arg) for arg in pytree.tree_leaves((value.args, value.kwargs)))
 
-    if not visit(output_value) or not saw_select or select_group != 2:
+    if not visit(output_value) or not saw_select or select_group not in (2, 4):
         return None
     mm_meta = mm_node.meta.get("val")
     output_meta = (
