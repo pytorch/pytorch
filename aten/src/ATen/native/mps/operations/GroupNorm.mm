@@ -89,6 +89,125 @@ static void GroupNormKernelImpl(const Tensor& X,
   });
 }
 
+static void group_norm_backward_x(const Tensor& dY,
+                                  const Tensor& X,
+                                  const Tensor& mean,
+                                  const Tensor& rstd,
+                                  const Tensor& gamma,
+                                  int64_t N,
+                                  int64_t C,
+                                  int64_t HxW,
+                                  int64_t group,
+                                  Tensor& dX) {
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+  auto gamma_opt = gamma.defined() ? std::make_optional(gamma) : std::nullopt;
+  uint32_t channels_per_group = C / group;
+  uint32_t elements_per_group = channels_per_group * HxW;
+
+  GroupNormBackwardXParams params;
+  params.HxW = HxW;
+  params.num_groups = group;
+  params.channels_per_group = channels_per_group;
+  params.elements_per_group = elements_per_group;
+
+  uint32_t num_threadgroups = N * group;
+  uint32_t blocks_per_threadgroup = (elements_per_group + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  uint32_t simdgroups_per_threadgroup = (blocks_per_threadgroup + 31) / 32;
+  uint32_t threads_per_threadgroup = std::min(uint32_t(1024), 32 * simdgroups_per_threadgroup);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state =
+          lib.getPipelineStateForFunc(fmt::format("group_norm_backward_x_{}_{}",
+                                                  scalarToMetalTypeString(dY),
+                                                  gamma.defined() ? scalarToMetalTypeString(gamma) : "void"));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(compute_encoder, dX, dY, X, mean, rstd, gamma_opt, params);
+      [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
+                      threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
+}
+
+static void group_norm_backward_affine(const Tensor& dY,
+                                       const Tensor& X,
+                                       const Tensor& mean,
+                                       const Tensor& rstd,
+                                       Tensor& dgamma,
+                                       Tensor& dbeta,
+                                       int64_t N,
+                                       int64_t C,
+                                       int64_t HxW,
+                                       int64_t group) {
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+  uint32_t N_times_HxW = N * HxW;
+
+  GroupNormBackwardAffineParams params;
+  params.N_times_HxW = N_times_HxW;
+  params.C = C;
+  params.HxW = HxW;
+  params.num_groups = group;
+  params.channels_per_group = C / group;
+
+  uint32_t blocks_per_threadgroup = (N_times_HxW + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  uint32_t simdgroups_per_threadgroup = (blocks_per_threadgroup + 31) / 32;
+  uint32_t threads_per_threadgroup = std::min(uint32_t(1024), 32 * simdgroups_per_threadgroup);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format(
+          "group_norm_backward_affine_{}_{}", scalarToMetalTypeString(dY), scalarToMetalTypeString(dgamma)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(compute_encoder, dgamma, dbeta, dY, X, mean, rstd, params);
+      [compute_encoder dispatchThreadgroups:MTLSizeMake(C, 1, 1)
+                      threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
+}
+
+static void GroupNormBackwardKernelImpl(const Tensor& dY,
+                                        const Tensor& X,
+                                        const Tensor& mean,
+                                        const Tensor& rstd,
+                                        const Tensor& gamma,
+                                        int64_t N,
+                                        int64_t C,
+                                        int64_t HxW,
+                                        int64_t group,
+                                        Tensor& dX,
+                                        Tensor& dgamma,
+                                        Tensor& dbeta) {
+  if (N == 0) {
+    if (dgamma.defined()) {
+      dgamma.zero_();
+    }
+    if (dbeta.defined()) {
+      dbeta.zero_();
+    }
+    return;
+  }
+  if (dX.defined()) {
+    group_norm_backward_x(dY, X, mean, rstd, gamma, N, C, HxW, group, dX);
+  }
+  if (dgamma.defined() || dbeta.defined()) {
+    // If only one of either dgamma or dbeta is defined, allocate a temporary
+    // for the other, so that the kernel doesn't need to switch on it.
+    const Tensor& affine_ref = dgamma.defined() ? dgamma : dbeta;
+    Tensor dgamma_out = dgamma.defined() ? dgamma : at::empty({C}, affine_ref.options());
+    Tensor dbeta_out = dbeta.defined() ? dbeta : at::empty({C}, affine_ref.options());
+    group_norm_backward_affine(dY, X, mean, rstd, dgamma_out, dbeta_out, N, C, HxW, group);
+  }
+}
+
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
+REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
 
 } // namespace at::native
