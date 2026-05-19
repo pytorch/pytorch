@@ -92,6 +92,9 @@ def _torchscript_type_to_python_type(ts_type: "torch._C.JitType") -> Any:
     eval'ing the annotation_str. _type_eval_globals sets up expressions
     like "List" and "Future" to map to actual types (typing.List and jit.Future)
     """
+    py_object_type = getattr(torch._C, "PyObjectType", None)
+    if py_object_type is not None and isinstance(ts_type, py_object_type):
+        return Any
     return eval(ts_type.annotation_str, _type_eval_globals)
 
 

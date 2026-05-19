@@ -107,6 +107,18 @@ class ColorWithDescriptor(OpaqueBase):
 ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
 
 
+class DispatchBaseSchemaEnum(enum.Enum):
+    VALUE = 3
+
+
+class DispatchExactSchemaEnum(enum.Enum):
+    VALUE = 5
+
+
+class DispatchOtherEnum(enum.Enum):
+    VALUE = 7
+
+
 class OpaqueQueue(OpaqueBase):
     def __init__(self, queue: list[torch.Tensor], init_tensor_: torch.Tensor) -> None:
         super().__init__()
@@ -905,6 +917,12 @@ class TestOpaqueObject(TestCase):
     def test_ops(self):
         queue = OpaqueQueue([], torch.zeros(3))
 
+        opaque_queue_cls = get_opaque_type_name(OpaqueQueue)
+        self.assertExpectedInline(
+            str(torch.ops._TestOpaqueObject.queue_push.default._schema),
+            f"""_TestOpaqueObject::queue_push({opaque_queue_cls} a, Tensor b) -> ()""",
+        )
+
         torch.ops._TestOpaqueObject.queue_push(queue, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 1)
@@ -912,6 +930,99 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 0)
+
+    def test_opaque_schema_dispatch_checks_python_class(self):
+        opaque_queue_cls = get_opaque_type_name(OpaqueQueue)
+        self.lib.define(
+            f"opaque_queue_schema_probe({opaque_queue_cls} obj) -> int",
+        )
+
+        def opaque_queue_schema_probe_impl(obj):
+            return 1
+
+        self.lib.impl(
+            "opaque_queue_schema_probe",
+            opaque_queue_schema_probe_impl,
+            "CompositeExplicitAutograd",
+        )
+
+        queue = OpaqueQueue([], torch.zeros(1))
+        self.assertEqual(
+            torch.ops._TestOpaqueObject.opaque_queue_schema_probe(queue), 1
+        )
+
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError),
+            "Cannot cast object of type .*RNGState.* to .*OpaqueQueue",
+        ):
+            torch.ops._TestOpaqueObject.opaque_queue_schema_probe(RNGState(0))
+
+    def test_opaque_schema_type_hash_matches_equality(self):
+        opaque_queue_cls = get_opaque_type_name(OpaqueQueue)
+        schema = f"_TestOpaqueObject::schema_hash_probe({opaque_queue_cls} obj) -> int"
+        schema_a = torch._C.parse_schema(schema)
+        schema_b = torch._C.parse_schema(schema)
+        self.assertEqual(schema_a, schema_b)
+        self.assertEqual(hash(schema_a), hash(schema_b))
+
+    def test_opaque_enum_schema_dispatch_checks_python_class(self):
+        base_enum_cls = get_opaque_type_name(enum.Enum)
+        self.lib.define(
+            f"enum_base_schema_probe({base_enum_cls} obj) -> int",
+        )
+
+        def enum_base_schema_probe_impl(obj):
+            return obj.value
+
+        self.lib.impl(
+            "enum_base_schema_probe",
+            enum_base_schema_probe_impl,
+            "CompositeExplicitAutograd",
+        )
+
+        self.assertEqual(
+            torch.ops._TestOpaqueObject.enum_base_schema_probe(
+                DispatchBaseSchemaEnum.VALUE
+            ),
+            3,
+        )
+
+        register_opaque_type(DispatchExactSchemaEnum, typ="value")
+        exact_enum_cls = get_opaque_type_name(DispatchExactSchemaEnum)
+        self.lib.define(
+            f"enum_exact_schema_probe({exact_enum_cls} obj) -> int",
+        )
+
+        def enum_exact_schema_probe_impl(obj):
+            return obj.value
+
+        self.lib.impl(
+            "enum_exact_schema_probe",
+            enum_exact_schema_probe_impl,
+            "CompositeExplicitAutograd",
+        )
+
+        self.assertEqual(
+            torch.ops._TestOpaqueObject.enum_exact_schema_probe(
+                DispatchExactSchemaEnum.VALUE
+            ),
+            5,
+        )
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError),
+            "Cannot cast object of type .*DispatchOtherEnum.* "
+            "to .*DispatchExactSchemaEnum",
+        ):
+            torch.ops._TestOpaqueObject.enum_exact_schema_probe(DispatchOtherEnum.VALUE)
+
+    def test_pyobject_schema_is_disallowed(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "PyObject is not a valid type specifier",
+        ):
+            self.lib.define(
+                "pyobject_schema_probe(PyObject obj) -> int",
+            )
 
     def test_custom_op_reference_return(self):
         @torch.compile(backend="inductor", fullgraph=True)

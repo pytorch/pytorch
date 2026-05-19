@@ -31,6 +31,60 @@ ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
   allow_numbers_as_tensors = old_;
 }
 
+static std::string getQualifiedPythonClassName(py::handle cls) {
+  return c10::str(
+      py::cast<std::string>(py::getattr(cls, "__module__")),
+      ".",
+      py::cast<std::string>(py::getattr(cls, "__qualname__")));
+}
+
+static std::string getQualifiedPythonObjectTypeName(py::handle obj) {
+  return getQualifiedPythonClassName(py::type::handle_of(obj));
+}
+
+static bool pythonObjectHasClassInMro(
+    py::handle obj,
+    const std::string& class_name) {
+  auto obj_type = py::type::handle_of(obj);
+  auto mro = py::cast<py::tuple>(py::getattr(obj_type, "__mro__"));
+  for (auto cls : mro) {
+    if (getQualifiedPythonClassName(cls) == class_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool isFakeScriptObject(py::handle obj) {
+  return getQualifiedPythonObjectTypeName(obj) ==
+      "torch._library.fake_class_registry.FakeScriptObject";
+}
+
+static bool pythonObjectMatchesPyObjectType(
+    py::handle obj,
+    const std::string& class_name) {
+  if (pythonObjectHasClassInMro(obj, class_name)) {
+    return true;
+  }
+  if (isFakeScriptObject(obj) && py::hasattr(obj, "real_obj")) {
+    py::object real_obj = py::getattr(obj, "real_obj");
+    return pythonObjectHasClassInMro(real_obj, class_name);
+  }
+  return false;
+}
+
+static std::string getPyObjectTypeErrorName(py::handle obj) {
+  auto obj_type_name = getQualifiedPythonObjectTypeName(obj);
+  if (isFakeScriptObject(obj) && py::hasattr(obj, "real_obj")) {
+    py::object real_obj = py::getattr(obj, "real_obj");
+    return c10::str(
+        obj_type_name,
+        " wrapping ",
+        getQualifiedPythonObjectTypeName(real_obj));
+  }
+  return obj_type_name;
+}
+
 // This is a hack to remove instances deleted in C++ from the PyBind cache
 // C++->Python. We need this because otherwise we may get the old Python object
 // if C++ creates a new object at the memory location of the deleted object.
@@ -539,6 +593,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #endif
     } break;
     case TypeKind::PyObjectType: {
+      auto py_object_type = type->expect<PyObjectType>();
+      if (const auto& class_name = py_object_type->pythonClassName()) {
+        if (!pythonObjectMatchesPyObjectType(obj, *class_name)) {
+          throw py::cast_error(c10::str(
+              "Cannot cast object of type ",
+              getPyObjectTypeErrorName(obj),
+              " to ",
+              *class_name));
+        }
+      }
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
