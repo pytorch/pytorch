@@ -2574,14 +2574,6 @@
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
-    },
-    {
-      "Gb_type": "Missing richcompare_impl override",
-      "Context": "richcompare_impl {self}",
-      "Explanation": "{type(self).__name__} wraps {type(real_val).__name__} which has a non-default tp_richcompare. Add a richcompare_impl override to {type(self).__name__}.",
-      "Hints": [
-        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
     }
   ],
   "GB0185": [
@@ -3923,6 +3915,26 @@
       "Explanation": "Failed to call {user_cls.__name__}.fromkeys() because {user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
       "Hints": [
         "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
+      ]
+    }
+  ],
+  "GB6622": [
+    {
+      "Gb_type": "list_richcompare_nonconst",
+      "Context": "element comparison produced {type(eq_result).__name__}",
+      "Explanation": "Cannot determine list/tuple comparison at compile time when element comparison produces a non-constant result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5565": [
+    {
+      "Gb_type": "list_richcompare_ordering_symbolic",
+      "Context": "lexicographic ordering with symbolic element comparison",
+      "Explanation": "Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

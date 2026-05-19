@@ -1107,6 +1107,91 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(fn(torch.tensor(0)))
 
     # =====================================================================
+    # Tuple/list comparison with symbolic elements
+    # =====================================================================
+
+    def test_tuple_cmp_symbolic_shapes_same(self):
+        """Tuple comparison of symbolic shapes from the same tensor."""
+
+        def fn(x):
+            return x.shape == x.shape
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3, 4))
+        self.assertTrue(result)
+
+    def test_tuple_cmp_symbolic_shapes_equal(self):
+        """Tuple comparison where symbolic shapes happen to be equal."""
+
+        def fn(x, y):
+            return x.shape == y.shape
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.randn(3, 4), torch.randn(3, 4)
+        )
+        self.assertTrue(result)
+
+    def test_tuple_cmp_symbolic_shapes_ne(self):
+        """Tuple != comparison with symbolic shapes."""
+
+        def fn(x, y):
+            if x.shape != y.shape:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3, 4)
+        result = torch.compile(fn, backend="eager")(x, torch.randn(3, 4))
+        self.assertEqual(result, x + 2)
+
+    def test_tuple_cmp_symbolic_shapes_dynamic(self):
+        """Tuple comparison with fully dynamic shapes produces symbolic result."""
+
+        def fn(x, y):
+            if x.shape != y.shape:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3, 4)
+        result = torch.compile(fn, backend="eager", dynamic=True)(x, torch.randn(3, 4))
+        self.assertEqual(result, x + 2)
+
+    def test_list_cmp_symbolic_shapes(self):
+        """List comparison with symbolic shape elements."""
+
+        def fn(x, y):
+            a = list(x.shape)
+            b = list(y.shape)
+            if a != b:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3, 4)
+        result = torch.compile(fn, backend="eager")(x, torch.randn(3, 4))
+        self.assertEqual(result, x + 2)
+
+    def test_tuple_cmp_symbolic_shapes_fullgraph(self):
+        """Shape tuple eq/ne with fullgraph=True: no graph break needed."""
+
+        def fn(x, y):
+            return x.shape == y.shape, x.shape != y.shape
+
+        eq, ne = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.randn(3, 4), torch.randn(3, 4)
+        )
+        self.assertTrue(eq)
+        self.assertFalse(ne)
+
+    def test_tuple_cmp_symbolic_mixed_constant(self):
+        """Tuple with mix of constant and symbolic elements."""
+
+        def fn(x):
+            a = (1, x.shape[0])
+            b = (1, x.shape[0])
+            return a == b
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(5))
+        self.assertTrue(result)
+
+    # =====================================================================
     # Sourceless torch.Size
     # =====================================================================
 

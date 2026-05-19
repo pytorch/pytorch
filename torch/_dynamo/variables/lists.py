@@ -306,6 +306,7 @@ class BaseListVariable(VariableTracker):
         VT items without going through a polyfill.
         """
         from .object_protocol import generic_richcompare
+        from .tensor import SymNodeVariable
 
         if not isinstance(other, BaseListVariable):
             return ConstantVariable.create(NotImplemented)
@@ -327,12 +328,50 @@ class BaseListVariable(VariableTracker):
         if cmp_op is operator.ne and len(left) != len(right):
             return ConstantVariable.create(True)
 
+        sym_eq_acc = None
         for a, b in zip(left, right):
             eq_result = generic_richcompare(tx, a, b, "__eq__")
-            if not eq_result.as_python_constant():
-                if cmp_op in (operator.eq, operator.ne):
-                    return ConstantVariable.create(cmp_op is operator.ne)
-                return generic_richcompare(tx, a, b, op)
+            if eq_result.is_python_constant():
+                if not eq_result.as_python_constant():
+                    if cmp_op in (operator.eq, operator.ne):
+                        return ConstantVariable.create(cmp_op is operator.ne)
+                    return generic_richcompare(tx, a, b, op)
+            elif eq_result.is_symnode_like():
+                if cmp_op not in (operator.eq, operator.ne):
+                    unimplemented(
+                        gb_type="list_richcompare_ordering_symbolic",
+                        context="lexicographic ordering with symbolic element comparison",
+                        explanation="Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if sym_eq_acc is None:
+                    sym_eq_acc = eq_result
+                else:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        operator.and_,
+                        (sym_eq_acc.as_proxy(), eq_result.as_proxy()),
+                        {},
+                    )
+                    sym_eq_acc = SymNodeVariable.create(tx, proxy, sym_num=None)
+            else:
+                unimplemented(
+                    gb_type="list_richcompare_nonconst",
+                    context=f"element comparison produced {type(eq_result).__name__}",
+                    explanation="Cannot determine list/tuple comparison at compile time when element comparison produces a non-constant result.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if sym_eq_acc is not None:
+            if cmp_op is operator.ne:
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    operator.not_,
+                    (sym_eq_acc.as_proxy(),),
+                    {},
+                )
+                return SymNodeVariable.create(tx, proxy, sym_num=None)
+            return sym_eq_acc
 
         return ConstantVariable.create(cmp_op(len(left), len(right)))
 
