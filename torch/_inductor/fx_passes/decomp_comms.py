@@ -435,14 +435,22 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
 
         # === TRANSFORM ===
 
-        # Route computation to use shard directly (shape changes:
-        # slice output was gathered-size, shard is rank-local size)
-        info.slice_node.replace_all_uses_with(info.shard)
+        # Route computation to use shard directly. If FSDP pads the shard
+        # (shard rows > split_size), the slice was trimming padding off the
+        # gathered tensor. We must trim the shard to match.
+        replacement: fx.Node = info.shard
+        if split_size < shard_dim:
+            with graph.inserting_before(info.slice_node):
+                replacement = graph.call_function(
+                    aten.slice.Tensor, args=(info.shard, 0, 0, split_size)
+                )
+                _retrace_node_meta(replacement)
+        info.slice_node.replace_all_uses_with(replacement)
 
         # Find all nodes in the dependent chain (needed for reduction detection)
-        chain: OrderedSet[fx.Node] = OrderedSet([info.shard])
+        chain: OrderedSet[fx.Node] = OrderedSet([replacement])
         gram_set: OrderedSet[fx.Node] = OrderedSet(gram_mms)
-        n = info.shard.next
+        n = replacement.next
         while n is not None and n is not split_node:
             if n.op == "call_function" and any(
                 inp in chain for inp in n.all_input_nodes
@@ -508,8 +516,8 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         getitem_node.replace_all_uses_with(pre_split)
 
         # Retrace meta["val"] only for nodes in the dependent chain.
-        affected: OrderedSet[fx.Node] = OrderedSet([info.shard])
-        n = info.shard.next
+        affected: OrderedSet[fx.Node] = OrderedSet([replacement])
+        n = replacement.next
         while n is not None and n is not split_node:
             if n.op == "call_function" and any(
                 inp in affected for inp in n.all_input_nodes
