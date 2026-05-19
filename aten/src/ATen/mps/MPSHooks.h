@@ -67,7 +67,7 @@ struct MPSHooks : public at::MPSHooksInterface {
     return true;
   }
   DeviceIndex deviceCount() const override {
-    return static_cast<int>(hasMPS() && isAvailable());
+    return hasMPS() ? 1 : 0;
   }
 };
 
