@@ -3917,9 +3917,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #  2) It is a non-coalesced load. The intuition is that if it's
         #  non-coalesced, we will likely load each element multiple times in
         #  practice.
-        #  3) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   3.1) We are in a reduction loop
-        #   3.2) Its not its last use
+        #  3) The buffer will be loaded later and it won't be CSE'd. Equiv.,
+        #  if all the following hold
+        #   3.1) We are in a looped or persistent reduction
+        #   3.2) Its not its last load
         #   3.3) This load will not be lifted to the body
         #
         is_coalesced = any(
@@ -3929,7 +3930,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ep = ", eviction_policy='evict_last'"
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
-        elif self.inside_reduction and self.range_trees[-1].is_loop:
+        elif self.inside_reduction and (
+            self.persistent_reduction or self.range_trees[-1].is_loop
+        ):
 
             def decide_later():
                 if load_counts[name] > expected_count and (
