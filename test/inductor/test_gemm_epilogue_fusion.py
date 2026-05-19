@@ -1926,6 +1926,22 @@ class GemmEpilogueFusionTests(TestCase):
         with self.assertRaisesRegex(Exception, "shape-changing main epilogues"):
             torch.compile(group3_fn, backend="inductor", fullgraph=True)(a, b)
 
+        def group8_fn(a, b):
+            def epilogue(acc):
+                x = acc.view(M, -1, 8)
+                return x[..., 0] + x[..., 1]
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        b = torch.randn(K, 8 * N, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(Exception, "supports only groups 2 and 4"):
+            torch.compile(group8_fn, backend="inductor", fullgraph=True)(a, b)
+
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_malformed_local_n_reduce_aux(self):
         M = 32

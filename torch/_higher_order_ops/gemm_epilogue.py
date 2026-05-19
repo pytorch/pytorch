@@ -1141,8 +1141,13 @@ def _match_quack_grouped_n_contract_main(
             return False
         return all(visit(arg) for arg in pytree.tree_leaves((value.args, value.kwargs)))
 
-    if not visit(output_value) or not saw_select or select_group not in (2, 4):
+    if not visit(output_value) or not saw_select:
         return None
+    if select_group not in (2, 4):
+        raise NotImplementedError(
+            "QUACK grouped_n_contract currently supports only groups 2 and 4; "
+            f"group={select_group} needs a validated epilogue store layout"
+        )
     mm_meta = mm_node.meta.get("val")
     output_meta = (
         output_value.meta.get("val") if isinstance(output_value, torch.fx.Node) else None
