@@ -46,6 +46,11 @@ else
         *)    echo "Unsupported DESIRED_CUDA=$DESIRED_CUDA" >&2; exit 1 ;;
     esac
 
+    # Ensure VS2022 BuildTools are present before vcvarsall lookup. The
+    # helper bat invokes vs2022_install.ps1 if missing and resolves
+    # VS15INSTALLDIR via vswhere.
+    cmd /c "windows\\internal\\vc_install_helper.bat"
+
     # shellcheck source=./windows/set_desired_python.sh
     source ./windows/set_desired_python.sh
 
