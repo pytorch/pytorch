@@ -10280,7 +10280,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
     @setLinalgBackendsToDefaultFinally
     def test_preferred_linalg_library(self):
         # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
@@ -10289,16 +10288,17 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch.backends.cuda.preferred_linalg_library('cusolver')
         out1 = torch.linalg.inv(x)
 
-        torch.backends.cuda.preferred_linalg_library('magma')
-        out2 = torch.linalg.inv(x)
-
         torch.backends.cuda.preferred_linalg_library('default')
         # Although linalg preferred flags doesn't affect CPU currently,
         # we set this to make sure the flag can switch back to default normally.
         out_ref = torch.linalg.inv(x.cpu())
 
         self.assertEqual(out_ref, out1.cpu())
-        self.assertEqual(out1, out2)
+
+        if torch.cuda.has_magma:
+            torch.backends.cuda.preferred_linalg_library('magma')
+            out2 = torch.linalg.inv(x)
+            self.assertEqual(out1, out2)
 
     @onlyCUDA
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
