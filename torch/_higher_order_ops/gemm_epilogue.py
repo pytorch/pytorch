@@ -118,6 +118,67 @@ def _(amax: torch.Tensor) -> torch.Tensor:
     )
 
 
+def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> torch.Tensor:
+    if x.dtype is not torch.float32:
+        x = x.float()
+    exp_bias = (1 << (ebits - 1)) - 1
+    max_int = (1 << (ebits + mbits)) - 1
+    sign_mask = 1 << (ebits + mbits)
+    mbits_f32 = 23
+    ebits_f32 = 8
+    f32_exp_bias = 127
+    magic_adder = (1 << (mbits_f32 - mbits - 1)) - 1
+    max_normal = 2 ** ((1 << ebits) - 1 - exp_bias) * ((1 << (mbits + 1)) - 1) / (2**mbits)
+    min_normal = 2 ** (1 - exp_bias)
+    denorm_exp = (f32_exp_bias - exp_bias) + (mbits_f32 - mbits) + 1
+    denorm_mask_int = denorm_exp << mbits_f32
+    denorm_mask_float = torch.tensor(denorm_mask_int, dtype=torch.int32, device=x.device).view(torch.float32)
+
+    x_bits = x.view(torch.int32)
+    sign = x_bits & 0x80000000
+    abs_x = (x_bits ^ sign).view(torch.float32)
+    saturate_mask = abs_x >= max_normal
+    denormal_mask = torch.logical_and(torch.logical_not(saturate_mask), abs_x < min_normal)
+    normal_mask = torch.logical_not(torch.logical_or(saturate_mask, denormal_mask))
+
+    denormal_x = (abs_x + denorm_mask_float).view(torch.int32) - denorm_mask_int
+    denormal_x = denormal_x.to(torch.uint8)
+
+    normal_x = abs_x.view(torch.int32)
+    mant_odd = (normal_x >> (mbits_f32 - mbits)) & 1
+    val_to_add = ((exp_bias - f32_exp_bias) << mbits_f32) + magic_adder
+    normal_x = ((normal_x + val_to_add + mant_odd) >> (mbits_f32 - mbits)).to(torch.uint8)
+
+    out = torch.full_like(x, max_int, dtype=torch.uint8)
+    out = torch.where(denormal_mask, denormal_x, out)
+    out = torch.where(normal_mask, normal_x, out)
+    sign_lp = ((sign >> (mbits_f32 + ebits_f32 - mbits - ebits)).to(torch.uint8)) & sign_mask
+    return out | sign_lp
+
+
+@torch.library.custom_op("flex_gemm::nvfp4_e2m1_pack", mutates_args=())
+def nvfp4_e2m1_pack(x: torch.Tensor) -> torch.Tensor:
+    """Pack logical E2M1 FP4 values into torch.float4_e2m1fn_x2 storage."""
+    if x.shape[-1] % 2 != 0:
+        raise RuntimeError("nvfp4_e2m1_pack requires an even last dimension")
+    codes = _quack_f32_to_floatx_unpacked(x.float(), ebits=2, mbits=1)
+    flat = codes.contiguous().view(-1)
+    packed = (flat[0::2] | (flat[1::2] << 4)).view(*codes.shape[:-1], codes.shape[-1] // 2)
+    return packed.view(torch.float4_e2m1fn_x2)
+
+
+@nvfp4_e2m1_pack.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    if x.shape[-1] % 2 != 0:
+        raise RuntimeError("nvfp4_e2m1_pack requires an even last dimension")
+    return torch.empty_strided(
+        (*tuple(x.shape[:-1]), x.shape[-1] // 2),
+        (*tuple(x.stride()[:-1]), 1),
+        device=x.device,
+        dtype=torch.float4_e2m1fn_x2,
+    )
+
+
 def _normalize_gemm_epilogue_op(gemm_op: Callable[..., Any]) -> Callable[..., Any]:
     import torch.nn.functional as F
 
