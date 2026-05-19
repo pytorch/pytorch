@@ -11,34 +11,38 @@ std::array<SDPBackend, num_backends> priority_order_cpp(sdp_params const& params
   return default_order;
 }
 
-bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
+bool check_head_dim_size_cpp(
+    sdp_params const& params,
+    c10::OptionalRef<SDPDiagnostics> diagnostics = {}) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   if (!(query_size_last == key_size_last &&
         query_size_last == value_size_last)) {
-    if (debug) {
-      TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension.",
-          " Got Query.size(-1): ",
-          query_size_last,
-          ", Key.size(-1): ",
-          params.key.sym_size(-1),
-          ", Value.size(-1): ",
-          params.value.sym_size(-1),
-          " instead.");
-    }
+    report_failure(
+        diagnostics,
+        "Flash attention requires q,k,v to have the same last dimension.",
+        " Got Query.size(-1): ",
+        query_size_last,
+        ", Key.size(-1): ",
+        key_size_last,
+        ", Value.size(-1): ",
+        value_size_last,
+        " instead.");
     return false;
   }
   return true;
 }
 
-bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
+bool use_flash_attention_cpp(
+    sdp_params const& params,
+    c10::OptionalRef<SDPDiagnostics> diagnostics = {}) {
   constexpr auto cpp_supported_flash_dtypes =
       c10::array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16, at::kHalf);
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto constraints =
+      c10::array_of<bool (*)(sdp_params const&, c10::OptionalRef<SDPDiagnostics>)>(
       check_runtime_disabled_flash,
       check_nested_tensor,
       check_for_dropout,
@@ -48,13 +52,13 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
       check_head_dim_size_cpp,
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>);
-  for (auto& constraint : constraints) {
-    if (!constraint(params, debug)) {
+  for (const auto& constraint : constraints) {
+    if (!constraint(params, diagnostics)) {
       return false;
     }
   }
 
-  return check_tensor_dtype(params, cpp_supported_flash_dtypes, debug);
+  return check_tensor_dtype(params, cpp_supported_flash_dtypes, diagnostics);
 }
 } // namespace
 
@@ -63,19 +67,12 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
   // 1. Flash Attention
   // 2. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
-    return SDPBackend::error;
-  }
   // Get ideal kernel ordering
   const auto ordering = priority_order_cpp(kernel_params);
-
-  // Because TORCHCHECK checks if condition is true we negate debug so that
-  // The statements will be printed when debug is true
-  bool print_debug = false;
-  for (auto& backend : ordering) {
+  for (const auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::flash_attention:
-        if (use_flash_attention_cpp(kernel_params, print_debug)) {
+        if (use_flash_attention_cpp(kernel_params)) {
           return SDPBackend::flash_attention;
         }
         break;
@@ -92,13 +89,12 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
   // 1. use_flash_attention did not satisfy the
   // constraints to be ran
   // 2. The user has explicitly disabled the math kernel
-  // We then re-run the kernel checks with debug enabled to print out the
-  // reason why the kernel was not selected
-
-  print_debug = true;
-  TORCH_WARN("Flash attention kernel not used because:");
-  use_flash_attention_cpp(kernel_params, print_debug);
-  TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
+  // We then re-run the kernel checks with deferred diagnostics to aggregate
+  // the reason why the kernel was not selected.
+  SDPDiagnostics diagnostics(false);
+  diagnostics.set_current_backend("Flash attention");
+  use_flash_attention_cpp(kernel_params, diagnostics);
+  diagnostics.raise_error();
   return SDPBackend::error;
 }
 } // namespace sdp

@@ -9,6 +9,9 @@
 namespace sdp {
 
 C10_EXPORT bool is_flash_attention_available();
+C10_EXPORT bool can_use_flash_attention(
+    sdp_params const& params,
+    c10::OptionalRef<SDPDiagnostics> diagnostics);
 C10_EXPORT bool can_use_flash_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool check_flash_attention_hardware_support(
     sdp_params const& params,
