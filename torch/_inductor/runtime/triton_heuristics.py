@@ -435,8 +435,10 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
     This function just benches them serially on the calling thread (GPU work)
     and stores the results for _apply_combo_standalone_autotune_seed to stitch.
 
-    No thread pool, no futures, no locks. Compile is async (async_compile).
-    Bench is serial (single thread, correct GPU timing).
+    Failures propagate. Each seed is a regular Triton kernel and follows
+    standard non-combo semantics: an unrecoverable bench/compile error means
+    the user's program halts with the underlying exception, same as any
+    other CachingAutotuner failure.
     """
     if not isinstance(combo_kernel, CachingAutotuner):
         return
@@ -457,34 +459,18 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
         combo_kernel.fn.__name__,
     )
     seed_configs = []
-    for seed_spec in seed_specs:
-        if seed_spec is None:
-            seed_configs.append(None)
-            continue
-        seed_kernel, seed_args = seed_spec
-        try:
-            device_interface = seed_kernel.get_device_interface()
-            device_idx = seed_kernel.device_props.index
-            with DeviceGuard(device_interface, device_idx):
-                stream = device_interface.get_raw_stream(device_idx)
-                seed_kernel.autotune_to_one_config_no_launch(*seed_args, stream=stream)
-            assert seed_kernel.launchers
-            seed_configs.append(seed_kernel.launchers[0].config)
-            log.debug(
-                "Combo standalone autotune seed: selected config %s",
-                seed_kernel.launchers[0].config,
-            )
-        except (
-            NoTritonConfigsError,
-            OutOfResources,
-            PTXASError,
-            IntelGPUError,
-        ) as e:
-            log.warning(
-                "Combo standalone autotune seed failed (%s); ignoring",
-                type(e).__name__,
-            )
-            seed_configs.append(None)
+    for seed_kernel, seed_args in seed_specs:
+        device_interface = seed_kernel.get_device_interface()
+        device_idx = seed_kernel.device_props.index
+        with DeviceGuard(device_interface, device_idx):
+            stream = device_interface.get_raw_stream(device_idx)
+            seed_kernel.autotune_to_one_config_no_launch(*seed_args, stream=stream)
+        assert seed_kernel.launchers
+        seed_configs.append(seed_kernel.launchers[0].config)
+        log.debug(
+            "Combo standalone autotune seed: selected config %s",
+            seed_kernel.launchers[0].config,
+        )
 
     combo_kernel.combo_standalone_autotune_seed_configs = seed_configs
 
@@ -1618,15 +1604,19 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):
         seed_configs = self.combo_standalone_autotune_seed_configs
-        assert seed_configs is not None
-        seed_count = sum(cfg is not None for cfg in seed_configs)
+        assert seed_configs, (
+            "combo seed apply requires combo_standalone_autotune_seed_configs to "
+            "be a non-empty list of bench-validated seed configs"
+        )
+        assert all(cfg is not None for cfg in seed_configs), (
+            "combo seed apply requires every seed to have produced a config; "
+            "seed failures propagate, they are not represented as None"
+        )
         log.debug(
             "Combo standalone autotune seed: applying %d standalone configs to %s",
-            seed_count,
+            len(seed_configs),
             self.fn.__name__,
         )
-        if seed_count == 0:
-            return launcher
 
         num_kernels = combo_grid_meta.get("num_kernels", 0)
         skip_rblock_by_idx = {
@@ -1636,14 +1626,11 @@ class CachingAutotuner(KernelInterface):
 
         current_config = launcher.config
         seeded_kwargs = dict(current_config.kwargs)
-        valid_seeds = [cfg for cfg in seed_configs if cfg is not None]
 
         # Per-subkernel block sizes: stitch each seed's choice into its own
         # constexpr slot (XBLOCK_i, R0_BLOCK_i, ...).
         applied_seed = False
         for idx, cfg in enumerate(seed_configs):
-            if cfg is None:
-                continue
             before = dict(seeded_kwargs)
             _update_combo_kernel_kwargs(
                 seeded_kwargs,
@@ -1658,12 +1645,8 @@ class CachingAutotuner(KernelInterface):
         # kernel has a single num_warps/num_stages for the whole launch, so
         # when subkernels disagree we pick the most-common pair (every vote
         # came from a real per-seed benchmark).
-        if valid_seeds:
-            warp_stage_votes = [(cfg.num_warps, cfg.num_stages) for cfg in valid_seeds]
-            chosen_warps, chosen_stages = Counter(warp_stage_votes).most_common(1)[0][0]
-        else:
-            chosen_warps = current_config.num_warps
-            chosen_stages = current_config.num_stages
+        warp_stage_votes = [(cfg.num_warps, cfg.num_stages) for cfg in seed_configs]
+        chosen_warps, chosen_stages = Counter(warp_stage_votes).most_common(1)[0][0]
 
         # Shared backend kwargs (e.g. HIP waves_per_eu): same voting policy.
         # These appear in cfg.kwargs but are not in the combo's per-subkernel
@@ -1676,7 +1659,7 @@ class CachingAutotuner(KernelInterface):
             return name.endswith("BLOCK")
 
         shared_kwarg_keys: OrderedSet[str] = OrderedSet()
-        for cfg in valid_seeds:
+        for cfg in seed_configs:
             for k in cfg.kwargs:
                 if _is_block_like(k):
                     continue
@@ -1684,7 +1667,7 @@ class CachingAutotuner(KernelInterface):
                 if suffixed not in signature_keys and k not in signature_keys:
                     shared_kwarg_keys.add(k)
         for k in shared_kwarg_keys:
-            votes = Counter(cfg.kwargs[k] for cfg in valid_seeds if k in cfg.kwargs)
+            votes = Counter(cfg.kwargs[k] for cfg in seed_configs if k in cfg.kwargs)
             if votes:
                 seeded_kwargs[k] = votes.most_common(1)[0][0]
                 applied_seed = (
@@ -1715,23 +1698,8 @@ class CachingAutotuner(KernelInterface):
             return launcher
 
         self._ensure_kernel_loaded()
-        try:
-            with self.lock:
-                seeded_launcher = self._precompile_config(seed_config).make_launcher()
-        except (
-            OutOfResources,
-            PTXASError,
-            IntelGPUError,
-            torch.cuda.OutOfMemoryError,
-            NoTritonConfigsError,
-        ) as e:
-            log.warning(
-                "Combo standalone autotune seed: stitched config for %s failed "
-                "to compile (%s); falling back to base config",
-                self.fn.__name__,
-                type(e).__name__,
-            )
-            return launcher
+        with self.lock:
+            seeded_launcher = self._precompile_config(seed_config).make_launcher()
         counters["inductor"]["combo_autotune_seed_applied"] += 1
         log.debug(
             "Combo standalone autotune seed: selected stitched combo config %s",
