@@ -498,21 +498,19 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
       THPStorage_readFileRaw<int>(fd, self_storage_impl, element_size);
   if (!storage_impl.defined())
     return nullptr;
-  Py_INCREF(self);
 
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
   // advanced position
-  const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
+  const long long fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
   LSEEK(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(
-      file, "seek", "Li", static_cast<long long>(fd_current_pos), 0);
+  THPObjectPtr seek_return(
+      PyObject_CallMethod(file, "seek", "Li", fd_current_pos, 0));
   if (seek_return == nullptr) {
     return nullptr;
   }
-  Py_DECREF(seek_return);
 
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
