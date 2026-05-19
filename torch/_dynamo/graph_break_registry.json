@@ -149,6 +149,16 @@
       ]
     }
   ],
+  "GB2019": [
+    {
+      "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
+      "Context": "call_method {self} {name}",
+      "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0012": [
     {
       "Gb_type": "Attempted to read undefined local variable (implicit)",
@@ -1843,7 +1853,7 @@
     {
       "Gb_type": "Unsupported autograd.Function context method",
       "Context": "call_method {self} {name}",
-      "Explanation": "Dynamo does not support calling the method `{name}` on `autograd.Function` context objects. Supported methods are `__setattr__`, `save_for_backward` and `mark_non_differentiable`.",
+      "Explanation": "Dynamo does not support calling the method `{name}` on `autograd.Function` context objects. Supported methods are `__setattr__`, `save_for_backward`, `mark_dirty` and `mark_non_differentiable`.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -2945,6 +2955,26 @@
       ]
     }
   ],
+  "GB9458": [
+    {
+      "Gb_type": "sq_repeat_impl not implemented",
+      "Context": "{type(self).__name__} has sq_repeat slot but no sq_repeat_impl override",
+      "Explanation": "The type {self.python_type_name()} has an sq_repeat C slot but the corresponding VariableTracker doesn't implement sq_repeat_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9561": [
+    {
+      "Gb_type": "sq_inplace_repeat_impl not implemented",
+      "Context": "{type(self).__name__} has sq_inplace_repeat slot but no sq_inplace_repeat_impl override",
+      "Explanation": "The type {self.python_type_name()} has an sq_inplace_repeat C slot but the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0217": [
     {
       "Gb_type": "unsupported hasattr operation",
@@ -3191,6 +3221,16 @@
       "Hints": [
         "Ensure the Tensor argument's shape, dtype, and device are correct.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB0808": [
+    {
+      "Gb_type": "vectorcall_maybe on C method descriptor",
+      "Context": "name={name}, type={self.python_type_name()}, method={method}",
+      "Explanation": "Cannot trace special method '{name}' implemented in C on user-defined type '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4136,6 +4176,16 @@
       "Explanation": "`torch.compile` can only reorder functions where the arguments are Tensors, constants, or string formatters.",
       "Hints": [
         "Avoid calling the logging function {self.value} with args that are not supported."
+      ]
+    }
+  ],
+  "GB2464": [
+    {
+      "Gb_type": "autograd.Function.apply: mark_dirty input not returned",
+      "Context": "",
+      "Explanation": "Dynamo only supports ctx.mark_dirty when each dirty input is also returned from forward.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -5218,6 +5268,26 @@
       "Gb_type": "record_function escaped from compiled region",
       "Context": "str(self)",
       "Explanation": "Dynamo doesn't support graph break inside record_function region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3934": [
+    {
+      "Gb_type": "missing sq_concat",
+      "Context": "sq_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2544": [
+    {
+      "Gb_type": "missing sq_inplace_concat",
+      "Context": "sq_inplace_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
