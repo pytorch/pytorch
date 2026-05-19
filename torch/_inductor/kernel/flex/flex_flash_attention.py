@@ -6,7 +6,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, Literal
+from typing import Any, cast, Literal, NamedTuple
 
 import sympy
 from sympy import Expr, Integer
@@ -29,6 +29,11 @@ from .common import (
 )
 
 
+# Match one vectorized mask_mod call to one 32-bit R2P keep mask; on Blackwell,
+# vec32 aux loads are close to vec16 and keep the packed-mask ABI simple.
+DEFAULT_MASK_MOD_VEC_SIZE = 32
+
+
 @dataclasses.dataclass
 class FlexFlashConfig:
     """Autotuning configuration for CuteDSL flex flash attention kernels.
@@ -37,51 +42,134 @@ class FlexFlashConfig:
         application loop. Maps to score_mod.__vec_size__ in CuTe flash attention.
         None uses the kernel default. Only effective for forward; backward does
         not currently support vectorized score_mod.
+    mask_mod_vec_size: Number of consecutive KV lanes evaluated per mask_mod
+        call. Maps to mask_mod.__mask_vec_size__ in CuTe flash attention and to
+        the direct captured-tensor vector-load width for mask_mod.
     """
 
     score_mod_vec_size: int | None = None
+    mask_mod_vec_size: int | None = None
 
 
-def _get_flex_flash_fwd_configs(
+class AuxLoadVecInfo(NamedTuple):
+    vec_size: int | None
+    is_direct_contiguous: bool
+
+
+def get_flex_flash_fwd_configs(
     has_score_mod: bool,
     has_aux_tensors: bool,
     device: torch.device | None = None,
     score_mod_graph_module: GraphModule | None = None,
     score_mod_other_buffers: Sequence[TensorBox] = (),
+    has_mask_mod: bool = False,
+    has_mask_aux_tensors: bool = False,
+    mask_mod_graph_module: GraphModule | None = None,
+    mask_mod_other_buffers: Sequence[TensorBox] = (),
 ) -> list[FlexFlashConfig]:
-    if not has_score_mod:
-        return [FlexFlashConfig()]
-    if has_aux_tensors:
-        device_index = None if device is None else device.index
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability(device_index)[0] >= 10
-        ):
-            return [
-                FlexFlashConfig(
-                    score_mod_vec_size=_select_aux_score_mod_vec_size(
-                        score_mod_graph_module, score_mod_other_buffers
-                    )
-                )
-            ]
-        return [FlexFlashConfig(score_mod_vec_size=1)]
-    if not torch._inductor.config.max_autotune:
-        return [FlexFlashConfig()]
+    device_index = None if device is None else device.index
+    cuda_major = (
+        torch.cuda.get_device_capability(device_index)[0]
+        if torch.cuda.is_available()
+        else None
+    )
+    mask_mod_vec_size = select_mask_mod_vec_size(
+        has_mask_mod=has_mask_mod,
+        has_mask_aux_tensors=has_mask_aux_tensors,
+        supports_mask_mod_vec=cuda_major in (10, 11),
+        graph_module=mask_mod_graph_module,
+        other_buffers=mask_mod_other_buffers,
+    )
+    score_mod_vec_size = select_score_mod_vec_size(
+        has_score_mod=has_score_mod,
+        has_aux_tensors=has_aux_tensors,
+        is_sm100_or_later=cuda_major is not None and cuda_major >= 10,
+        graph_module=score_mod_graph_module,
+        other_buffers=score_mod_other_buffers,
+    )
+
+    if (
+        has_score_mod
+        and score_mod_vec_size is None
+        and torch._inductor.config.max_autotune
+    ):
+        return [
+            FlexFlashConfig(score_mod_vec_size=v, mask_mod_vec_size=mask_mod_vec_size)
+            for v in (1, 2, 4, 8, 16, 32, 64, 128)
+        ]
     return [
-        FlexFlashConfig(score_mod_vec_size=v) for v in (1, 2, 4, 8, 16, 32, 64, 128)
+        FlexFlashConfig(
+            score_mod_vec_size=score_mod_vec_size,
+            mask_mod_vec_size=mask_mod_vec_size,
+        )
     ]
 
 
-def _select_aux_score_mod_vec_size(
-    graph_module: GraphModule | None, score_mod_other_buffers: Sequence[TensorBox]
-) -> int:
-    """Choose a safe score_mod vector width for captured tensor loads.
+def select_mask_mod_vec_size(
+    *,
+    has_mask_mod: bool,
+    has_mask_aux_tensors: bool,
+    supports_mask_mod_vec: bool,
+    graph_module: GraphModule | None,
+    other_buffers: Sequence[TensorBox],
+) -> int | None:
+    if not has_mask_mod or not supports_mask_mod_vec:
+        return None
+    if not has_mask_aux_tensors:
+        return DEFAULT_MASK_MOD_VEC_SIZE
 
-    Flex score_mod vectorization is only enabled when every captured tensor
-    index load can be emitted without per-lane gather semantics: either as a
-    direct contiguous vector load or as a lane-uniform scalar load broadcast to
-    all lanes. If any load needs scalar gather semantics, force vec_size=1 so
-    the generated score_mod matches scalar-lane lowering.
+    vec_size = _select_aux_mod_vec_size(
+        graph_module,
+        other_buffers,
+        q_idx_placeholder=2,
+        kv_idx_placeholder=3,
+        max_vec_size=32,
+        min_index_rank_for_contiguous_load=2,
+        allow_gather_loads=True,
+        require_contiguous_load=True,
+    )
+    return vec_size if vec_size > 1 else None
+
+
+def select_score_mod_vec_size(
+    *,
+    has_score_mod: bool,
+    has_aux_tensors: bool,
+    is_sm100_or_later: bool,
+    graph_module: GraphModule | None,
+    other_buffers: Sequence[TensorBox],
+) -> int | None:
+    if not has_score_mod or not has_aux_tensors:
+        return None
+    if not is_sm100_or_later:
+        return 1
+    return _select_aux_mod_vec_size(
+        graph_module,
+        other_buffers,
+        q_idx_placeholder=3,
+        kv_idx_placeholder=4,
+        max_vec_size=8,
+    )
+
+
+def _select_aux_mod_vec_size(
+    graph_module: GraphModule | None,
+    other_buffers: Sequence[TensorBox],
+    *,
+    q_idx_placeholder: int,
+    kv_idx_placeholder: int,
+    max_vec_size: int,
+    min_index_rank_for_contiguous_load: int = 1,
+    allow_gather_loads: bool = False,
+    require_contiguous_load: bool = False,
+) -> int:
+    """Choose a safe vector width for captured tensor loads.
+
+    Vectorization is enabled from captured tensor loads that can be emitted as
+    direct contiguous vector loads or lane-uniform scalar loads. By default, any
+    load requiring gather semantics disables vectorization. Mask mods can allow
+    gather loads so one vectorizable aux load still enables packed/R2P mask
+    application while unrelated aux loads stay on the per-lane gather path.
     """
     if graph_module is None:
         return 1
@@ -89,78 +177,99 @@ def _select_aux_score_mod_vec_size(
     placeholders = [
         node for node in graph_module.graph.nodes if node.op == "placeholder"
     ]
-    if len(placeholders) < 5:
+    num_fixed_placeholders = kv_idx_placeholder + 1
+    if len(placeholders) < num_fixed_placeholders:
         return 1
 
-    capture_to_buffer = dict(zip(placeholders[5:], score_mod_other_buffers))
-    selected_vec_size = 8
+    capture_to_buffer = dict(zip(placeholders[num_fixed_placeholders:], other_buffers))
+    selected_vec_size = max_vec_size
     found_vectorizable_load = False
+    found_contiguous_load = False
     for node in graph_module.graph.nodes:
         if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
             continue
         buffer_node, indices = node.args
         if buffer_node not in capture_to_buffer:
             continue
-        max_vec_size = _max_direct_aux_load_vec_size(
-            indices, capture_to_buffer[buffer_node], placeholders[3], placeholders[4]
+        aux_load_vec_info = direct_aux_load_vec_size_and_kind(
+            indices,
+            capture_to_buffer[buffer_node],
+            placeholders[q_idx_placeholder],
+            placeholders[kv_idx_placeholder],
+            max_vec_size=max_vec_size,
+            min_index_rank_for_contiguous_load=min_index_rank_for_contiguous_load,
         )
-        if max_vec_size is None:
+        if aux_load_vec_info.vec_size is None:
+            if allow_gather_loads:
+                continue
             return 1
-        selected_vec_size = min(selected_vec_size, max_vec_size)
+        selected_vec_size = min(selected_vec_size, aux_load_vec_info.vec_size)
         found_vectorizable_load = True
+        found_contiguous_load = (
+            found_contiguous_load or aux_load_vec_info.is_direct_contiguous
+        )
 
+    if require_contiguous_load and not found_contiguous_load:
+        return 1
     return selected_vec_size if found_vectorizable_load else 1
 
 
-def _max_direct_aux_load_vec_size(
+def direct_aux_load_vec_size_and_kind(
     indices: object,
     buffer: TensorBox,
     q_idx_node: torch.fx.Node,
     kv_idx_node: torch.fx.Node,
-) -> int | None:
+    max_vec_size: int = 8,
+    min_index_rank_for_contiguous_load: int = 1,
+) -> AuxLoadVecInfo:
+    """Return vector-load information for a captured aux load.
+
+    vec_size is the largest safe KV-lane vector width, or None if the load cannot
+    use a direct vector/scalar load. is_direct_contiguous is True only when the
+    vector lanes map to consecutive memory locations; lane-uniform scalar loads
+    return False. min_index_rank_for_contiguous_load excludes lower-rank loads
+    from contiguous-vector consideration while still allowing uniform loads.
+    """
     if not isinstance(indices, (list, tuple)) or not indices:
-        return None
+        return AuxLoadVecInfo(None, False)
 
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
     kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
+    last_expr = _fx_aux_index_to_sympy(
+        indices[-1], q_idx_node, kv_idx_node, q_idx, kv_idx
+    )
+    if last_expr is None:
+        return AuxLoadVecInfo(None, False)
+    if kv_idx not in last_expr.free_symbols:
+        return AuxLoadVecInfo(max_vec_size, False)
+    if len(indices) < min_index_rank_for_contiguous_load:
+        return AuxLoadVecInfo(None, False)
+
     prefix_exprs = [
         _fx_aux_index_to_sympy(index, q_idx_node, kv_idx_node, q_idx, kv_idx)
         for index in indices[:-1]
     ]
     if any(expr is None or kv_idx in expr.free_symbols for expr in prefix_exprs):
-        return None
-
-    last_expr = _fx_aux_index_to_sympy(
-        indices[-1], q_idx_node, kv_idx_node, q_idx, kv_idx
-    )
-    if last_expr is None:
-        return None
-    if kv_idx not in last_expr.free_symbols:
-        # All score_mod vector lanes read the same element, so the load can use
-        # the uniform-broadcast path even though it is not a direct vector copy.
-        return 8
+        return AuxLoadVecInfo(None, False)
 
     sizes = buffer.get_size()
     strides = buffer.get_stride()
     if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
-        return None
+        return AuxLoadVecInfo(None, False)
 
-    # FlashAttention's score_mod loop groups consecutive flattened score entries.
-    # On SM100, those entries have consecutive KV coordinates for a fixed Q row.
+    # FlashAttention groups vectorized mod calls across consecutive KV lanes.
     offset = buffer.get_layout().offset
     lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(last_expr, kv_idx)
-    for vec_size in (8, 4, 2):
-        if not (
+    vec_size = max_vec_size
+    while vec_size >= 2:
+        if (
             V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
             and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
             and all(
                 V.graph.sizevars.statically_known_multiple_of(stride, vec_size)
                 for stride in strides[:-1]
             )
-        ):
-            continue
-        if (
-            (
+            and (
                 isinstance(last_expr, ModularIndexing)
                 or V.graph.sizevars.statically_known_equals(
                     stride_at(last_expr, kv_idx), 1
@@ -170,8 +279,9 @@ def _max_direct_aux_load_vec_size(
             and _lane_group_start_is_aligned(last_expr, kv_idx, vec_size)
             and _lane_group_start_is_nonnegative(last_expr, kv_idx)
         ):
-            return vec_size
-    return None
+            return AuxLoadVecInfo(vec_size, True)
+        vec_size //= 2
+    return AuxLoadVecInfo(None, False)
 
 
 def _fx_aux_index_to_sympy(
@@ -392,45 +502,28 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 @functools.lru_cache(maxsize=1)
 def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
-    """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
     from torch._dynamo.source import TensorPropertySource
 
     sources = shape_env.var_to_sources.get(symbol, [])
     return any(isinstance(s, TensorPropertySource) for s in sources)
 
 
-def _has_unsupported_captured_scalars(
+def has_unsupported_captured_scalars(
     score_mod_other_buffers: Sequence[Any],
     mask_mod_other_buffers: Sequence[Any],
 ) -> bool:
-    """Check if any captured buffers are dynamic scalars that cannot be inlined.
-
-    When compiling with dynamic=True, captured Python scalars in score_mod or
-    mask_mod may become:
-    - sympy symbols from LocalSource (captured ints) - NOT from tensor shapes
-    - 0-dim CPU tensors (captured floats)
-
-    Symbols from TensorPropertySource (tensor size/stride) are fine because they
-    get resolved at runtime.
-
-    The FLASH backend cannot inline captured scalar symbolic values into the CuteDSL template.
-    """
-    from torch._inductor.virtualized import V
-
+    """Return True when FLASH captures dynamic scalars it cannot inline."""
     shape_env = V.graph.sizevars.shape_env
 
     for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
-        # Captured int becomes sympy.Symbol - check if it's NOT from a tensor shape
         if isinstance(buf, sympy.Expr):
             for symbol in buf.free_symbols:
                 if not _is_symbol_from_tensor_shape(symbol, shape_env):
                     return True
-        # Captured float becomes 0-dim TensorBox on CPU
         if isinstance(buf, TensorBox):
             device = buf.get_device()
             size = buf.get_size()
             if device is not None and device.type == "cpu" and len(size) == 0:
-                # 0-dimensional CPU tensor (scalar) - can't be inlined into CUDA kernel
                 return True
     return False
 
@@ -589,12 +682,18 @@ def create_flex_flash_attention_kernel(
         subgraphs.append(subgraph_buffer)
     subgraphs.append(mask_graph_buffer)
 
-    configs = _get_flex_flash_fwd_configs(
-        has_score_mod,
-        len(score_mod_other_buffers) > 0,
-        device,
-        subgraph.graph_module if has_score_mod and subgraph is not None else None,
-        score_mod_other_buffers,
+    configs = get_flex_flash_fwd_configs(
+        has_score_mod=has_score_mod,
+        has_aux_tensors=len(score_mod_other_buffers) > 0,
+        device=device,
+        score_mod_graph_module=(
+            subgraph.graph_module if has_score_mod and subgraph is not None else None
+        ),
+        score_mod_other_buffers=score_mod_other_buffers,
+        has_mask_mod=needs_block_mask,
+        has_mask_aux_tensors=len(mask_mod_other_buffers) > 0,
+        mask_mod_graph_module=mask_graph.graph_module,
+        mask_mod_other_buffers=mask_mod_other_buffers,
     )
 
     error: NotImplementedError | None = None
@@ -609,6 +708,7 @@ def create_flex_flash_attention_kernel(
                 SM_SCALE=scale,
                 HAS_SCORE_MOD=has_score_mod,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
+                MASK_MOD_VEC_SIZE=conf.mask_mod_vec_size,
                 NEEDS_BLOCK_MASK=needs_block_mask,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,

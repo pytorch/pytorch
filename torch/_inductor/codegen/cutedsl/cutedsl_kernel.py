@@ -954,14 +954,15 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         start_expr = V.graph.sizevars.simplify(
             expr.xreplace({vector_index: sympy.Integer(0)})
         )
-        for width in (max_width, 4, 2):
+        width = max_width
+        while width >= 2:
             if (
-                width <= max_width
-                and lane_contiguity.is_contiguous_for(width)
+                lane_contiguity.is_contiguous_for(width)
                 and V.graph.sizevars.statically_known_multiple_of(start_expr, width)
                 and V.graph.sizevars.statically_known_geq(start_expr, 0)
             ):
                 return width
+            width //= 2
         return None
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
