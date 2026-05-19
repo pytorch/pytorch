@@ -93,6 +93,14 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #endif
 }
 
+#if !defined(USE_ROCM)
+bool grouped_bf16_mm_cutlass_fast_path_supported_cuda() {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  const int major = dprops->major;
+  return major == 9 || major == 10 || major == 11 || major == 12;
+}
+#endif
+
 // 2d-2d and 2d-3d
 // scaling=MXFP8
 // CUDA-only
@@ -698,7 +706,8 @@ std::optional<c10::ScalarType> out_dtype) {
     out_dtype.value_or(at::kBFloat16) == at::kBFloat16
   );
 #ifndef USE_ROCM
-  bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
+  bool use_fast_path =
+      grouped_bf16_mm_cutlass_fast_path_supported_cuda() && a_b_and_out_are_bf16;
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
