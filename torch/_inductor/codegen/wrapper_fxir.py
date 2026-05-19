@@ -5,7 +5,7 @@ import operator
 import textwrap
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
@@ -1035,7 +1035,7 @@ class FxConverter:
             )
 
         triton_meta = tuner.triton_meta
-        signature = triton_meta["signature"]
+        signature = cast(dict[str, Any], triton_meta["signature"])
 
         def add_constants_to_call_args(
             call_args: Sequence[Any], cfg: Config
@@ -1046,7 +1046,7 @@ class FxConverter:
             # Add args from the proper Triton signature.
             # Exclude constants and config kwargs, as those are tracked separately.
             new_call_args = []
-            constants = triton_meta["constants"]
+            constants = cast(dict[str, Any], triton_meta["constants"])
             call_kwargs = {
                 key: val
                 for key, val in zip(signature, call_args)

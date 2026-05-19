@@ -2943,6 +2943,7 @@ class PythonWrapperCodegen(CodeGen):
                 config_of(
                     signature,
                     indices=arg_indices,
+                    pointer_range_override=(),
                 )
             ],
         }
@@ -3067,6 +3068,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("\\", "\\\\")
         if config.cpp_wrapper:
             # With cpp_wrapper + autotune_at_compile_time=False, the source is
             # further embedded in a C++ raw string inside a Python r"""...""" wrapper.

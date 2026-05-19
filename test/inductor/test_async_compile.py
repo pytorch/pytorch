@@ -48,6 +48,15 @@ class TestAsyncCompile(TestCase):
             warp_size=32,
         )
 
+    @staticmethod
+    def _config():
+        return types.SimpleNamespace(
+            kwargs={},
+            num_warps=1,
+            num_stages=1,
+            pre_hook=None,
+        )
+
     def test_device_properties_repr_uses_runtime_lookup(self):
         stale_props = self._device_props(cc=80)
         runtime_props = self._device_props(cc=90, multi_processor_count=2, index=1)
@@ -106,7 +115,7 @@ class TestAsyncCompile(TestCase):
                     "constants": {},
                     "configs": [object()],
                 },
-                [Config({}, num_warps=1, num_stages=1)],
+                [self._config()],
                 save_cache_hook=None,
                 mutated_arg_names=[],
                 optimize_mem=False,
@@ -163,7 +172,7 @@ class TestAsyncCompile(TestCase):
                     "constants": {},
                     "configs": [object()],
                 },
-                [Config({}, num_warps=1, num_stages=1)],
+                [self._config()],
                 save_cache_hook=None,
                 mutated_arg_names=[],
                 optimize_mem=False,
