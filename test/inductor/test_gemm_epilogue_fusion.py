@@ -1738,6 +1738,104 @@ class GemmEpilogueFusionTests(TestCase):
         ).run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_keepdim_scale_aux_only_fuses(self):
+        M = 64
+        N = 64
+        group = 16
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, group)
+                scale = x.abs().amax(-1, keepdim=True) / 448.0
+                return acc.relu(), scale.view(M, -1)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual[1], expected[1], atol=1e-3, rtol=1e-3)
+        FileCheck().check(f"local_reduce_group={group}").check(
+            "local_reduce_out="
+        ).check("local_reduce_op='amax_abs'").check_not("extern_kernels.mm").run(
+            code
+        )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_mx_scale_aux_only_fuses(self):
+        M = 64
+        N = 64
+        group = 16
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, group)
+                scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
+                return acc.relu(), scale.view(M, -1)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual[1].dtype, torch.float8_e8m0fnu)
+        torch.testing.assert_close(actual[1].float(), expected[1].float(), atol=0.0, rtol=0.0)
+        FileCheck().check(f"local_reduce_group={group}").check(
+            "local_reduce_out="
+        ).check("local_reduce_op='mx_e8m0_scale'").check_not("extern_kernels.mm").run(
+            code
+        )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_addmm_fp8_main_output_fuses(self):
+        def fn(c, a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.addmm.default,
+                (c, a, b),
+                lambda acc: acc.clamp(min=-448.0, max=448.0).to(torch.float8_e4m3fn),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        c = torch.randn(64, 64, device="cuda", dtype=torch.float16)
+        a = torch.randn(64, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), c, a, b
+        )
+        expected = fn(c, a, b)
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        torch.testing.assert_close(
+            actual.float(), expected.float(), atol=32.0, rtol=1.25e-1
+        )
+        FileCheck().check("out_dtype=torch.float8_e4m3fn").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_honors_epilogue_add_alpha(self):
         def fn(a, b):
             return gemm_epilogue_fusion(
