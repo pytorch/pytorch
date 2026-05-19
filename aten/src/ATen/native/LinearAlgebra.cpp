@@ -1352,8 +1352,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
-// Used by default on x86 platforms and on AArch64+ACL
+#if !defined(__aarch64__) || AT_MKLDNN_ENABLED()
+// Used by default on x86 platforms and on AArch64 when oneDNN matmul is available.
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1501,11 +1501,11 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   bool dispatched = false;
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_MKLDNN_ENABLED()
+  // TODO: reassess this after removing ACL
   // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
-  // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
-  // additionally have support for running kernel with BF16 instructions
+  // so the backend can select the most appropriate AArch64 GEMM implementation.
   if (transpose_c) {
     bool apply_heur =
         apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
@@ -1515,7 +1515,7 @@ static void addmm_impl_cpu_(
          result.scalar_type() == at::ScalarType::Half)) {
       try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
-        // We have dispatched to ACL GEMM for single precision float
+        // We have dispatched to oneDNN GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
       } catch (const std::exception& e) {
@@ -1761,8 +1761,6 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
-#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
-  // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1773,7 +1771,6 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       at::globalContext().setUserEnabledMkldnn(false);
     }
   }
-#endif
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
