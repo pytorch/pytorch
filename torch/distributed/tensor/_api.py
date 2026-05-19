@@ -613,7 +613,15 @@ class DTensor(torch.Tensor):
         # Preserve nn.Parameter-ness: if self is an nn.Parameter (i.e. has the
         # _is_param flag, which is how Parameter is represented for custom
         # tensor subclasses like DTensor), make the returned local tensor also
-        # satisfy isinstance(result, nn.Parameter).
+        # satisfy isinstance(result, nn.Parameter). See gh-166156.
+        #
+        # BC: this branch only runs when self has `_is_param` set, i.e. self
+        # is already a Parameter(DTensor). All raw-DTensor call sites are
+        # byte-for-byte unchanged, including the historical identity guarantee
+        # `to_local() is self._local_tensor` in the no-grad path. The only
+        # observable change is the targeted bug fix: Parameter(DTensor) inputs
+        # no longer return a plain Tensor.
+        #
         # We probe `_is_param` via getattr rather than isinstance(self,
         # nn.Parameter) for two reasons: (1) it avoids importing torch.nn at
         # this layer, and (2) it matches the exact mechanism that
