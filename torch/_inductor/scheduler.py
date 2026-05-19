@@ -8620,6 +8620,24 @@ class Scheduler:
 
             returned_output_names.update(extra_output_names)
 
+            # In-place view ops such as set_.source_Tensor can repoint an input
+            # tensor at storage allocated inside this partition.  If the mutated
+            # input is a graph/partition input, user code may keep that storage
+            # alive even after the local partition input is dead, so cudagraph
+            # liveness must track the op result as a hidden partition output.
+            for node in partition:
+                ir_node = node.node
+                if not isinstance(ir_node, ir.ExternKernelAlloc):
+                    continue
+
+                op_overload = ir_node.op_overload
+                if (
+                    isinstance(op_overload, torch._ops.OpOverload)
+                    and torch.Tag.inplace_view in op_overload.tags
+                    and ir_node.input_name(0) in partition_input_names
+                ):
+                    returned_output_names.add(ir_node.get_name())
+
             returned_output_names = OrderedSet(
                 self.mutation_real_name.get(name, name)
                 for name in returned_output_names

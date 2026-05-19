@@ -99,7 +99,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
@@ -717,6 +717,7 @@ class CUDAWarmupNode:
         self.id = id
 
     def run(self, new_inputs: Any) -> OutputType:
+        "Run one eager warmup invocation while tracking private-pool outputs."
         assert not self.has_run, "Wrapped function should never be run twice"
 
         # See: output_is_alias_of_persistent_static_inputs below. We should only be returning freshly created
@@ -738,6 +739,12 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
+            refs.extend(
+                get_live_pool_tensor_refs(
+                    self.cuda_graphs_pool,
+                    itertools.chain(new_inputs, self.wrapped_function.constants),
+                )
+            )
             check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
         with (
@@ -786,6 +793,11 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             out_refs = list(self.path_live_weakrefs())
+            out_refs.extend(
+                get_live_pool_tensor_refs(
+                    self.cuda_graphs_pool, self.wrapped_function.constants
+                )
+            )
             check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
 
         return out
@@ -1119,6 +1131,11 @@ class CUDAGraphNode:
         # are aliases of parameters that are always live.
         self.static_output_tensors: OutputList[Tensor | None] = []
 
+        # CUDA graph replay skips CPU-side metadata mutations.  If recording
+        # observes a mutated input move to an output storage, replay will repeat
+        # that metadata mutation after graph replay.
+        self.mutated_input_output_indices: dict[int, int] = {}
+
         # Cleared after recording
         with dynamo_timed_cudagraph("CUDAGraphNode.record", compile_id, mode):
             self.recording_outputs: OutputType | None = self._record(
@@ -1203,6 +1220,7 @@ class CUDAGraphNode:
         self.run_graph()
 
         outputs = self.reconstruct_outputs()
+        self.replay_metadata_mutations(new_inputs, outputs)
         new_inputs.clear()
 
         if config.triton.fast_path_cudagraph_asserts:
@@ -1215,6 +1233,16 @@ class CUDAGraphNode:
         self.static_inputs_stable = False
 
         return outputs
+
+    def replay_metadata_mutations(
+        self, new_inputs: list[InputType], outputs: OutputType
+    ) -> None:
+        for input_idx, output_idx in self.mutated_input_output_indices.items():
+            inp = new_inputs[input_idx]
+            out = outputs[output_idx]
+            assert isinstance(inp, torch.Tensor)
+            assert isinstance(out, torch.Tensor)
+            torch.ops.aten.set_.source_Tensor(inp, out)
 
     def reconstruct_outputs(self) -> OutputType:
         "Reconstruct output tensors according to their saved metadata and alias information"
@@ -1333,11 +1361,20 @@ class CUDAGraphNode:
                     yield _inp
 
         # see: output_is_alias_of_persistent_static_inputs above
+        static_inputs = list(static_input_iter())
         static_input_persistent_storage_ptrs: dict[int, StorageWeakRefWrapper] = {
             inp.untyped_storage().data_ptr(): StorageWeakRefWrapper(inp)
-            for inp in itertools.chain(
-                static_input_iter(), self.wrapped_function.constants
-            )
+            for inp in itertools.chain(static_inputs, self.wrapped_function.constants)
+        }
+        mutated_input_tensors: dict[int, torch.Tensor] = {}
+        for idx in self.wrapped_function.mutated_input_idxs:
+            inp = inputs[idx]
+            if isinstance(inp, torch.Tensor):
+                mutated_input_tensors[idx] = inp
+
+        mutated_input_data_ptrs = {
+            idx: inp.untyped_storage().data_ptr()
+            for idx, inp in mutated_input_tensors.items()
         }
 
         if config.triton.slow_path_cudagraph_asserts:
@@ -1345,6 +1382,11 @@ class CUDAGraphNode:
             memory = (
                 [] if self.parent is None else list(self.parent.path_live_weakrefs())
             )
+            static_live_pool_refs = get_live_pool_tensor_refs(
+                self.cuda_graphs_pool,
+                itertools.chain(static_inputs, self.wrapped_function.constants),
+            )
+            memory += static_live_pool_refs
             memory += [
                 StorageWeakRefWrapper(elem)
                 for i, elem in enumerate(inputs)
@@ -1353,6 +1395,8 @@ class CUDAGraphNode:
                 and elem.untyped_storage().data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
+        else:
+            static_live_pool_refs = []
 
         with (
             preserve_rng_state(),
@@ -1375,18 +1419,72 @@ class CUDAGraphNode:
         assert len(inputs) == 0
 
         if not isinstance(static_outputs, (list, tuple)):
-            static_outputs = (static_outputs,)
+            static_outputs = [static_outputs]
+        else:
+            static_outputs = list(static_outputs)
+        static_outputs = cast(OutputType, static_outputs)
+
+        self.record_metadata_mutation_output_indices(
+            static_outputs,
+            mutated_input_tensors,
+            mutated_input_data_ptrs,
+        )
 
         # pyrefly: ignore [bad-argument-type]
-        self._add_first_outputs(static_outputs, static_input_persistent_storage_ptrs)
+        self._add_first_outputs(
+            static_outputs,
+            static_input_persistent_storage_ptrs,
+            static_live_pool_refs,
+        )
 
-        # pyrefly: ignore [bad-return]
         return static_outputs
+
+    def record_metadata_mutation_output_indices(
+        self,
+        outputs: Sequence[torch.Tensor | int | None],
+        mutated_input_tensors: dict[int, torch.Tensor],
+        mutated_input_data_ptrs: dict[int, int],
+    ) -> None:
+        def same_metadata_and_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
+            return (
+                x.untyped_storage().data_ptr() == y.untyped_storage().data_ptr()
+                and x.shape == y.shape
+                and x.stride() == y.stride()
+                and x.storage_offset() == y.storage_offset()
+                and x.dtype == y.dtype
+                and x.device == y.device
+            )
+
+        for input_idx, inp in mutated_input_tensors.items():
+            data_ptr = inp.untyped_storage().data_ptr()
+            if data_ptr == mutated_input_data_ptrs[input_idx]:
+                continue
+
+            output_idx = next(
+                (
+                    idx
+                    for idx, out in enumerate(outputs)
+                    if isinstance(out, torch.Tensor)
+                    and same_metadata_and_storage(inp, out)
+                ),
+                None,
+            )
+            if output_idx is None:
+                torch._check(
+                    False,
+                    lambda: (
+                        "Expected metadata-mutated CUDA graph input to appear "
+                        "in graph outputs for replay."
+                    ),
+                )
+            else:
+                self.mutated_input_output_indices[input_idx] = output_idx
 
     def _add_first_outputs(
         self,
         outputs: OutputType,
         static_input_persistent_storage_ptrs: dict[int, StorageWeakRefWrapper],
+        extra_live_pool_refs: Sequence[StorageWeakRefWrapper],
     ) -> None:
         "Add the outputs from the first invocation of the node and set up metadata"
 
@@ -1481,7 +1579,9 @@ class CUDAGraphNode:
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
-                self.device, self.cuda_graphs_pool, list(self.path_live_weakrefs())
+                self.device,
+                self.cuda_graphs_pool,
+                [*self.path_live_weakrefs(), *extra_live_pool_refs],
             )
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex) -> None:
@@ -1897,6 +1997,19 @@ def get_block_addrs(pool_id: tuple[int, int], live_only: bool = True) -> list[in
     return blocks
 
 
+def get_live_pool_tensor_refs(
+    pool_id: tuple[int, int], tensors: Iterable[Any]
+) -> list[StorageWeakRefWrapper]:
+    live_blocks = OrderedSet(get_block_addrs(pool_id))
+    return [
+        StorageWeakRefWrapper(t)
+        for t in tensors
+        if isinstance(t, torch.Tensor)
+        and t.is_cuda
+        and t.untyped_storage().data_ptr() in live_blocks
+    ]
+
+
 def format_tb(frames: list[Any]) -> str:
     formatted_traceback = [
         traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
@@ -2230,10 +2343,10 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            self.try_end_curr_recording(function_id, new_inputs)
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            self.try_end_curr_warmup(function_id, new_inputs)
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2313,7 +2426,7 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                self.try_end_curr_execution(function_id, new_inputs)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2353,7 +2466,7 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            self.try_end_curr_execution(function_id, new_inputs)
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2555,7 +2668,25 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def mutated_input_data_ptrs_in_current_path(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> OrderedSet[int]:
+        data_ptrs: OrderedSet[int] = OrderedSet()
+        if self.current_node is None:
+            return data_ptrs
+
+        for idx in self.ids_to_funcs[function_id].mutated_input_idxs:
+            inp = new_inputs[idx]
+            if isinstance(
+                inp, torch.Tensor
+            ) and self.current_node._is_cuda_graph_recorded_tensor(inp):
+                data_ptrs.add(inp.untyped_storage().data_ptr())
+
+        return data_ptrs
+
+    def try_end_curr_recording(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2566,7 +2697,10 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
-            self.dealloc_current_path_weakrefs()
+            preserve_data_ptrs = self.mutated_input_data_ptrs_in_current_path(
+                function_id, new_inputs
+            )
+            self.dealloc_current_path_weakrefs(preserve_data_ptrs)
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2576,7 +2710,11 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(
+        self,
+        function_id: FunctionID,
+        new_inputs: list[InputType],
+    ) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2594,8 +2732,20 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+    def try_end_curr_warmup(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         if self.can_start_new_generation():
+            preserve_data_ptrs = self.mutated_input_data_ptrs_in_current_path(
+                function_id, new_inputs
+            )
+            if preserve_data_ptrs:
+                # The caller kept a warmup output alive by repointing a mutated
+                # input at it.  Keep that storage valid, but clear WARMUP so the
+                # next invocation can record the graph.
+                self.dealloc_current_path_weakrefs(preserve_data_ptrs)
+                self.current_node = None
+                return
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
@@ -2655,18 +2805,31 @@ class CUDAGraphTreeManager:
             "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
         )
 
-    def dealloc_current_path_weakrefs(self) -> None:
+    def dealloc_current_path_weakrefs(
+        self, preserve_data_ptrs: OrderedSet[int] | None = None
+    ) -> None:
         assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        preserve_data_ptrs = preserve_data_ptrs or OrderedSet()
 
         stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
-            for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
+            for i, (t, stack_trace) in enumerate(
+                zip(node.tensor_weakrefs, node.stack_traces)
+            ):
                 ten = None if t is None else t()
                 if ten is None:
+                    continue
+                output_ref = (
+                    node.outputs_weakrefs[i] if i < len(node.outputs_weakrefs) else None
+                )
+                if (
+                    output_ref is not None
+                    and output_ref.data_ptr() in preserve_data_ptrs
+                ):
                     continue
 
                 torch._C._set_storage_access_error_msg(
@@ -2685,18 +2848,21 @@ class CUDAGraphTreeManager:
             ):
                 if not storage_ref:
                     continue
+                if storage_ref.data_ptr() in preserve_data_ptrs:
+                    continue
 
                 stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
-            if _storage_deref and storage_ref.data_ptr() not in deleted:
-                deleted.add(storage_ref.data_ptr())
+            data_ptr = storage_ref.data_ptr()
+            if _storage_deref and data_ptr not in deleted:
+                deleted.add(data_ptr)
+                if data_ptr in preserve_data_ptrs:
+                    continue
 
-                msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
-                )
+                msg = self.format_dealloc_msg(stor_stack_trace.get(data_ptr))
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 
                 if self.disable_invalidate_aliases:

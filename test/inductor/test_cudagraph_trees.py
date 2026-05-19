@@ -408,6 +408,34 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertIsNotNone(self.get_manager())
 
+        def test_set_input_mutation_tracks_storage_liveness(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.register_buffer("buf", torch.empty(8, device="cuda"))
+
+                def forward(self, x):
+                    y = x + 1
+                    torch.ops.aten.set_.source_Tensor(self.buf, y)
+                    return y * 2
+
+            compiled_mod = Mod()
+            eager_mod = Mod()
+            opt = torch.compile(compiled_mod, mode="reduce-overhead", fullgraph=True)
+
+            for _ in range(5):
+                x = torch.randn(8, device="cuda")
+                self.assertEqual(opt(x), eager_mod(x))
+                self.assertEqual(compiled_mod.buf, eager_mod.buf)
+
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertGreater(sum(len(roots) for roots in manager.roots.values()), 0)
+            self.assertEqual(
+                manager.path_state,
+                torch._inductor.cudagraph_trees.ExecutionState.EXECUTION,
+            )
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", False)
