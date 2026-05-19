@@ -191,7 +191,7 @@ class TestOrigami(TestCase):
         # InductorTestCase caps test_configs.max_mm_configs=2, which would
         # collapse both branches to 0 benchmark calls; restore the unlimited
         # default so the differential comparison is meaningful.
-        with config.patch("test_configs.max_mm_configs", None):
+        with config.patch({"test_configs.max_mm_configs": None}):
             for op_name in ("mm", "addmm", "bmm"):
                 with self.subTest(op_name=op_name):
                     origami_case = self._compile_with_config(
