@@ -1636,5 +1636,66 @@ class TestCuteDSLSubprocessCompile(TestCase):
         )
 
 
+try:
+    from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+    from torch._inductor.utils import ensure_cute_available
+
+    HAS_BLACKWELL_CUTEDSL = ensure_cute_available() and is_datacenter_blackwell_arch()
+except Exception:
+    HAS_BLACKWELL_CUTEDSL = False
+
+import unittest
+
+
+@unittest.skipIf(
+    not HAS_BLACKWELL_CUTEDSL,
+    "CuTeDSL library or Blackwell device not available",
+)
+class TestCuteDSLSubprocessGroupedGemm(TestCase):
+    """End-to-end test: grouped GEMM through torch.compile with subprocess compilation.
+
+    Exercises the full path: CuTe DSL template selection -> codegen ->
+    subprocess compilation -> precompile metadata -> disk cache -> correctness.
+    """
+
+    def test_grouped_gemm_subprocess_e2e(self):
+        shutdown_compile_workers()
+
+        device = "cuda"
+        dtype = torch.bfloat16
+        group_size, K, N = 4, 64, 128
+        alignment = 16
+
+        M_sizes = torch.randint(1, 17, (group_size,), dtype=torch.int) * alignment
+        M_total = int(torch.sum(M_sizes).item())
+        A = torch.randn(M_total, K, dtype=dtype, device=device) * 0.1
+        B = torch.randn(group_size, K, N, dtype=dtype, device=device) * 0.01
+        offsets = torch.cumsum(M_sizes, dim=0).to(dtype=torch.int32, device=device)
+
+        def grouped_gemm_fn(A_packed, B_batched, offs):
+            return torch.nn.functional.grouped_mm(A_packed, B_batched, offs=offs)
+
+        c_eager = grouped_gemm_fn(A, B, offsets)
+
+        with config.patch(
+            {
+                "worker_start_method": "subprocess",
+                "compile_threads": 4,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            AsyncCompile.wait_pool_ready()
+            with fresh_cache():
+                compiled_fn = torch.compile(
+                    grouped_gemm_fn, backend="inductor", dynamic=False
+                )
+                c_compiled = compiled_fn(A, B, offsets)
+
+        torch.testing.assert_close(c_eager, c_compiled)
+
+
 if __name__ == "__main__":
     run_tests()
