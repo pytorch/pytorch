@@ -60,6 +60,13 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 Expr = sympy.Expr
 
+_FP8_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+)
+
 
 def _sanitize_kernel_options_for_triton(
     kernel_options: dict[str, Any],
@@ -851,8 +858,16 @@ def flex_attention_backward(*args, **kwargs):
         stride=[sympy.sympify(s) for s in key_strides],
     )
 
-    # Create delta which will is needed for the bwd's kernel
-    mul_delta = lowerings[aten.mul](out, grad_out)
+    # Create delta which is needed for the bwd's kernel. Triton cannot do
+    # elementwise fp8 multiplication, and delta is consumed as fp32.
+    delta_out = out
+    delta_grad_out = grad_out
+    if out.get_dtype() in _FP8_DTYPES:
+        delta_out = to_dtype(delta_out, torch.float32)
+    if grad_out.get_dtype() in _FP8_DTYPES:
+        delta_grad_out = to_dtype(delta_grad_out, torch.float32)
+
+    mul_delta = lowerings[aten.mul](delta_out, delta_grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
     delta = lowerings[prims.convert_element_type](delta, torch.float32)
     if grad_logsumexp is not None:
