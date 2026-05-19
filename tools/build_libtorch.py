@@ -23,6 +23,8 @@ if "CMAKE_BUILD_TYPE" not in os.environ:
         os.environ["CMAKE_BUILD_TYPE"] = "Debug"
     elif _check_env_flag("REL_WITH_DEB_INFO"):
         os.environ["CMAKE_BUILD_TYPE"] = "RelWithDebInfo"
+    else:
+        os.environ["CMAKE_BUILD_TYPE"] = "Release"
 
 
 def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
