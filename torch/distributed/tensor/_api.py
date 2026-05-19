@@ -614,6 +614,11 @@ class DTensor(torch.Tensor):
         # _is_param flag, which is how Parameter is represented for custom
         # tensor subclasses like DTensor), make the returned local tensor also
         # satisfy isinstance(result, nn.Parameter).
+        # We probe `_is_param` via getattr rather than isinstance(self,
+        # nn.Parameter) for two reasons: (1) it avoids importing torch.nn at
+        # this layer, and (2) it matches the exact mechanism that
+        # nn.parameter._ParameterMeta.__instancecheck__ uses to recognize
+        # Parameter-ness on custom tensor subclasses.
         if getattr(self, "_is_param", False) and not getattr(
             result, "_is_param", False
         ):

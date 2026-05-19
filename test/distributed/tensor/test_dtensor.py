@@ -8,8 +8,8 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -535,7 +535,8 @@ class DTensorTest(DTensorTestBase):
     def test_to_local_preserves_parameter(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/166156:
         # nn.Parameter wrapping a DTensor must remain isinstance(nn.Parameter)
-        # after calling .to_local() (both with and without grad enabled).
+        # after calling .to_local() (both with and without grad enabled), and
+        # autograd must continue to flow back into the DTensor parameter.
         device_mesh = self.build_device_mesh()
         global_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
         dtensor_param = nn.Parameter(
@@ -545,8 +546,15 @@ class DTensorTest(DTensorTestBase):
 
         local = dtensor_param.to_local()
         self.assertTrue(isinstance(local, nn.Parameter))
+        # requires_grad must follow the DTensor parameter.
+        self.assertTrue(local.requires_grad)
         # Internal storage must not be mutated into a Parameter.
         self.assertFalse(getattr(dtensor_param._local_tensor, "_is_param", False))
+
+        # Gradient must still propagate through the returned local Parameter
+        # back into the DTensor parameter (to_local is differentiable).
+        local.sum().backward()
+        self.assertIsNotNone(dtensor_param.grad)
 
         with torch.no_grad():
             local_no_grad = dtensor_param.to_local()
