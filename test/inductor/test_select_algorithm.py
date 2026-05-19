@@ -23,7 +23,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
@@ -98,6 +98,10 @@ def _test_extern_tensor_kwarg_non_out(*, bias):
     if not isinstance(bias, torch.Tensor):
         raise TypeError(f"bias must be Tensor, not {type(bias).__name__}")
     return torch.ones_like(bias)
+
+
+def _test_extern_no_tensor_kwarg(x, *, batch_size, out):
+    out.copy_(x)
 
 
 def _test_extern_second_tensor_kwarg(x, *, first=None, second=None, out):
@@ -895,6 +899,24 @@ class TestExternKernelTensorKwargs(TestCase):
 
         torch.testing.assert_close(result, fn(x, y))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    def test_extern_kernel_without_tensor_kwargs_allows_unnamed_inputs(self):
+        choice = _get_test_extern_kernel_choice(
+            "_test_extern_no_tensor_kwarg",
+            _test_extern_no_tensor_kwarg,
+        )
+        layout = FixedLayout(
+            torch.device("cpu"), torch.float32, size=[4, 4], stride=[4, 1]
+        )
+        unnamed = Buffer(name=None, layout=layout)
+
+        caller = choice.bind([unnamed], layout, batch_size=4)
+
+        self.assertEqual(caller.input_nodes, [unnamed])
+        self.assertEqual(caller.call_input_nodes, [unnamed])
+        self.assertEqual(
+            select_algorithm.add_choice_input_nodes([unnamed], [caller]), [unnamed]
+        )
 
     def test_extern_kernel_benchmark_materializes_later_tensor_kwarg(self):
         import torch._inductor.lowering as inductor_lowering

@@ -3287,6 +3287,13 @@ class ExternKernelCaller(ChoiceCaller):
             return unwrapped
         return None
 
+    @staticmethod
+    def _maybe_get_name(node: ir.IRNode) -> str | None:
+        try:
+            return node.get_name()
+        except (AssertionError, NotImplementedError):
+            return None
+
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -3304,9 +3311,7 @@ class ExternKernelCaller(ChoiceCaller):
         self.tensor_kwarg_nodes: dict[str, ir.Buffer | ir.ReinterpretView] = {}
         self.static_kwargs: dict[str, Any] = {}
         benchmark_input_nodes = list(self.call_input_nodes)
-        benchmark_input_name_to_idx = {
-            node.get_name(): i for i, node in enumerate(benchmark_input_nodes)
-        }
+        benchmark_input_name_to_idx: dict[str, int] = {}
 
         for name, value in raw_kwargs.items():
             tensor_kwarg_node = self._realize_tensor_kwarg(value)
@@ -3317,8 +3322,16 @@ class ExternKernelCaller(ChoiceCaller):
 
             self.kwargs[name] = tensor_kwarg_node
             self.tensor_kwarg_nodes[name] = tensor_kwarg_node
-            if tensor_kwarg_node.get_name() not in benchmark_input_name_to_idx:
-                benchmark_input_name_to_idx[tensor_kwarg_node.get_name()] = len(
+
+            if not benchmark_input_name_to_idx:
+                for i, node in enumerate(benchmark_input_nodes):
+                    node_name = self._maybe_get_name(node)
+                    if node_name is not None:
+                        benchmark_input_name_to_idx[node_name] = i
+
+            tensor_kwarg_node_name = tensor_kwarg_node.get_name()
+            if tensor_kwarg_node_name not in benchmark_input_name_to_idx:
+                benchmark_input_name_to_idx[tensor_kwarg_node_name] = len(
                     benchmark_input_nodes
                 )
                 benchmark_input_nodes.append(tensor_kwarg_node)
@@ -3639,16 +3652,29 @@ def create_inputs_key(input_nodes) -> str:
 
 def add_choice_input_nodes(input_nodes, choices: Sequence[ChoiceCaller]):
     benchmark_input_nodes = list(input_nodes)
-    input_names = OrderedSet([node.get_name() for node in benchmark_input_nodes])
+    tensor_kwarg_nodes = [
+        node
+        for choice in choices
+        if isinstance(choice, ExternKernelCaller)
+        for node in choice.tensor_kwarg_nodes.values()
+    ]
+    if not tensor_kwarg_nodes:
+        return benchmark_input_nodes
 
+    input_names = OrderedSet(
+        node_name
+        for node in benchmark_input_nodes
+        if (node_name := ExternKernelCaller._maybe_get_name(node)) is not None
+    )
     for choice in choices:
         if not isinstance(choice, ExternKernelCaller):
             continue
-        for node in choice.input_nodes:
-            if node.get_name() in input_names:
+        for node in choice.tensor_kwarg_nodes.values():
+            node_name = node.get_name()
+            if node_name in input_names:
                 continue
             benchmark_input_nodes.append(node)
-            input_names.add(node.get_name())
+            input_names.add(node_name)
 
     return benchmark_input_nodes
 
@@ -4690,9 +4716,15 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        default_input_names = list(OrderedSet(node.get_name() for node in input_nodes))
-        default_input_names_extern = [node.get_name() for node in input_nodes]
         benchmark_input_nodes = add_choice_input_nodes(input_nodes, choices)
+        if len(benchmark_input_nodes) != len(input_nodes):
+            default_input_names = list(
+                OrderedSet(node.get_name() for node in input_nodes)
+            )
+            default_input_names_extern = [node.get_name() for node in input_nodes]
+        else:
+            default_input_names = None
+            default_input_names_extern = None
 
         # de-duplicate args
         unique_example_inputs = {
@@ -5491,9 +5523,32 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
+    def _flex_attention_log_dim(dim: int | torch.SymInt | sympy.Expr) -> int:
+        if isinstance(dim, torch.SymInt):
+            dim = dim.node.expr
+
+        if type(dim) is int or isinstance(dim, sympy.Integer):
+            return int(dim)
+
+        if isinstance(dim, sympy.Expr):
+            return V.graph.sizevars.optimization_hint(dim)
+
+        raise TypeError(
+            f"Unexpected flex attention log dimension type {type(dim).__name__}: {dim}"
+        )
+
+    @staticmethod
+    def _flex_attention_log_shape(
+        size: Sequence[int | torch.SymInt | sympy.Expr],
+    ) -> str:
+        dims = [AlgorithmSelectorCache._flex_attention_log_dim(dim) for dim in size]
+        return f"[{', '.join(map(str, dims))}]"
+
+    @staticmethod
     def maybe_log_flex_attention_results(
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
+        """Log flex attention autotuning choices when logging is enabled."""
         flex_attention_filename = get_flex_attention_log_filename()
         # Support both flex_attention and flex_decoding
         if not flex_attention_filename or (
@@ -5540,13 +5595,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Create shape info dictionary
         shape_info = {
             "kernel_type": kernel_type,
-            "B": int(B),
-            "Hq": int(Hq),
-            "Hkv": int(Hkv),
-            "seq_len_q": int(seq_len_q),
-            "seq_len_kv": int(seq_len_kv),
-            "qk_head_dim": int(qk_head_dim),
-            "v_head_dim": int(v_head_dim),
+            "B": AlgorithmSelectorCache._flex_attention_log_dim(B),
+            "Hq": AlgorithmSelectorCache._flex_attention_log_dim(Hq),
+            "Hkv": AlgorithmSelectorCache._flex_attention_log_dim(Hkv),
+            "seq_len_q": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_q),
+            "seq_len_kv": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_kv),
+            "qk_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(qk_head_dim),
+            "v_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(v_head_dim),
         }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
@@ -5562,9 +5617,9 @@ class AlgorithmSelectorCache(PersistentCache):
             choices_with_shapes.append(choice_info)
 
         out_dict = {
-            "query_shape": str(query_size),
-            "key_shape": str(key_size),
-            "value_shape": str(value_size),
+            "query_shape": AlgorithmSelectorCache._flex_attention_log_shape(query_size),
+            "key_shape": AlgorithmSelectorCache._flex_attention_log_shape(key_size),
+            "value_shape": AlgorithmSelectorCache._flex_attention_log_shape(value_size),
             "kernel_type": kernel_type,
             "choices": choices_with_shapes,
         }
