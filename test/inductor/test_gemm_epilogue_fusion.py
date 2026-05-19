@@ -1839,10 +1839,10 @@ class GemmEpilogueFusionTests(TestCase):
 
         def fn(a, b):
             def epilogue(acc):
-                pair = acc.view(M, -1, 2)
+                pair = acc.float().view(M, -1, 2)
                 gate = pair[..., 0]
                 up = pair[..., 1]
-                return torch.nn.functional.silu(gate) * up
+                return (torch.nn.functional.silu(gate) * up).to(acc.dtype)
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -1869,8 +1869,8 @@ class GemmEpilogueFusionTests(TestCase):
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_reglu_shape_changing_main_fuses(self):
-        M = 64
-        K = 64
+        M = 96
+        K = 96
         N = 64
 
         def fn(a, b):
@@ -1885,9 +1885,9 @@ class GemmEpilogueFusionTests(TestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
-        gate_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
-        up_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
+        a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        gate_w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
+        up_w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
         b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
 
         actual, (code,) = run_and_get_code(

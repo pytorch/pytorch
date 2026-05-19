@@ -8524,8 +8524,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
 
         alpha = gemm_kwargs.get("alpha", 1.0)
         beta = gemm_kwargs.get("beta", 1.0)
+        quack_args = tuple(arg for arg in args if hasattr(arg, "get_size"))
         if gemm_op == torch.ops.aten._scaled_mm.default and (
-            len(args) != 4
+            len(quack_args) != 4
             or gemm_kwargs.get("out_dtype") is None
             or gemm_kwargs.get("bias") is not None
             or gemm_kwargs.get("scale_result") is not None
@@ -8537,13 +8538,14 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             )
         if gemm_op == torch.ops.aten._grouped_mm.default:
             grouped_mm_supported = (
-                len(args) == 3
-                and len(args[0].get_size()) == 2
-                and len(args[1].get_size()) in (2, 3)
+                len(quack_args) == 3
+                and len(quack_args[0].get_size()) == 2
+                and len(quack_args[1].get_size()) in (2, 3)
                 and gemm_kwargs.get("bias") is None
             )
-            varlen_k_layout_supported = len(args[1].get_size()) != 2 or (
-                args[0].get_stride()[0] == 1 and args[1].get_stride()[1] == 1
+            varlen_k_layout_supported = grouped_mm_supported and (
+                len(quack_args[1].get_size()) != 2
+                or (quack_args[0].get_stride()[0] == 1 and quack_args[1].get_stride()[1] == 1)
             )
             if not grouped_mm_supported or not varlen_k_layout_supported:
                 raise NotImplementedError(
@@ -8558,7 +8560,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             aux_output,
             main_output_transform,
         ) = materialize_quack_epilogue(subgraph.graph_module)
-        quack_args = tuple(arg for arg in args if hasattr(arg, "get_size"))
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = (
             quack_args[gemm_op_info.mat1_index],
@@ -8645,7 +8646,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 raise NotImplementedError(
                     "QUACK epilogues with captured tensor reads currently support only one mm aux tensor"
                 )
-            epilogue_arg_size = args[epilogue_arg_indices[0]].get_size()
+            epilogue_arg_size = quack_args[epilogue_arg_indices[0]].get_size()
             m, n = size
             if epilogue_arg_size not in (size, [1, n], [m, 1]):
                 raise NotImplementedError(

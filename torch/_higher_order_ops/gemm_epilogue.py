@@ -1090,8 +1090,7 @@ def _match_quack_grouped_n_select(
         return None
     shape = _normalize_quack_shape(view.shape)
     if not (
-        isinstance(shape, (list, tuple))
-        and len(shape) == 3
+        _is_quack_same_fragment_n_group_shape(shape)
         and isinstance(shape[-1], int)
         and 0 <= node.args[2] < shape[-1]
     ):
@@ -1132,6 +1131,14 @@ def _match_quack_grouped_n_contract_main(
 
     if not visit(output_value) or not saw_select or select_group != 2:
         return None
+    mm_meta = mm_node.meta.get("val")
+    output_meta = (
+        output_value.meta.get("val") if isinstance(output_value, torch.fx.Node) else None
+    )
+    if mm_meta is None or output_meta is None or len(mm_meta.shape) != 2:
+        return None
+    if tuple(output_meta.shape) != (mm_meta.shape[0], mm_meta.shape[1] // select_group):
+        return None
     return QuackMainOutputTransformInfo(
         kind="grouped_n_contract",
         group_size=select_group,
@@ -1141,7 +1148,6 @@ def _match_quack_grouped_n_contract_main(
 def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
     local_reduce = None
     aux_output = None
-    main_output_transform = None
     local_norm = _match_quack_local_n_norm(output_value, mm_node) or _match_quack_local_m_norm(
         output_value, mm_node
     )
@@ -1268,12 +1274,6 @@ def _emit_quack_tensorssa_broadcast_to(
     return _emit_quack_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
 
 
-def _emit_quack_tensorssa_select(
-    kernel: _QuackCuteDSLKernel, value: Any, coord: str
-) -> Any:
-    return _emit_quack_tensorssa_expr(kernel, f"{value}[{coord}]", like=value)
-
-
 def _is_quack_n_group_shape(shape: Any) -> bool:
     return (
         isinstance(shape, (list, tuple))
@@ -1338,10 +1338,10 @@ def _lower_quack_grouped_n_select_node(
     if info is None or not (0 <= node.args[2] < info.group_size):
         return None
     source = _quack_cute_arg(view_node, env)
-    return _emit_quack_tensorssa_select(
+    return _emit_quack_tensorssa_expr(
         kernel,
-        source,
-        f"((0, {node.args[2]}, None), None, None)",
+        f"{source}[((0, {node.args[2]}, None), None, None)]",
+        like=source,
     )
 
 
@@ -1452,10 +1452,6 @@ def _compile_quack_pointwise_nodes(
                 )
                 if select_value is not None:
                     env[node] = select_value
-                    grouped_tensors[node] = QuackGroupedTensorSSAInfo(
-                        group_size=1,
-                        groups_per_fragment=1,
-                    )
                     continue
                 reduce_match = _match_quack_tensorssa_reduce(node)
                 if reduce_match is not None:
@@ -1546,7 +1542,9 @@ def _quack_cute_epilogue_code(
         node for node in graph_module.graph.nodes if node.op == "placeholder"
     ]
     gemm_placeholder_nodes = {
-        arg for arg in mm_node.args if isinstance(arg, torch.fx.Node)
+        arg
+        for arg in pytree.tree_leaves((mm_node.args, mm_node.kwargs))
+        if isinstance(arg, torch.fx.Node)
     }
     aux_placeholder_nodes = [
         node
@@ -1576,7 +1574,7 @@ def _quack_cute_epilogue_code(
     if main_output_transform is not None:
         if local_reduce is not None or aux_output is not None or aux_placeholder_nodes:
             raise NotImplementedError(
-                "QUACK shape-changing main epilogues cannot be combined with aux outputs yet"
+                "QUACK shape-changing main epilogues cannot be combined with aux outputs or captured tensor reads yet"
             )
 
     _compile_quack_pointwise_nodes(
