@@ -4646,29 +4646,19 @@ class TestCustomOpFastPath(TestCase):
 
     @contextlib.contextmanager
     def _assert_fast_path_taken(self, opdef):
-        """Replace the C++ dispatcher fallback with one that errors, so the
-        test fails if the fast path doesn't handle the call."""
+        """Assert that the fast path handled the call (not the C++ dispatcher)."""
         if TEST_WITH_CROSSREF:
             # CrossRefMode is a TorchFunctionMode, so the fast path correctly
-            # falls back to the C++ dispatcher -- skip the poison.
+            # falls back to the C++ dispatcher -- skip the assertion.
             yield
             return
-        overload = opdef._opoverload
-        saved_overload_orig = overload._orig_op
-
-        def poison(*a, **kw):
-            raise AssertionError(
-                "slow path was called; fast path should have handled this"
-            )
-
-        # Poison overload._orig_op: read by fast_op when fast_path bails.
-        # We cannot poison opdef._opoverload because backend_impl (called
-        # internally via op.redispatch) references self._opoverload._schema.
-        overload._orig_op = poison
-        try:
-            yield
-        finally:
-            overload._orig_op = saved_overload_orig
+        before = opdef._fast_path_hits
+        yield
+        self.assertGreater(
+            opdef._fast_path_hits,
+            before,
+            "fast path was not taken; call went through the C++ dispatcher",
+        )
 
     def test_fast_path_basic(self):
         @torch.library.custom_op("_torch_testing::fp_add", mutates_args=())
@@ -4711,6 +4701,22 @@ class TestCustomOpFastPath(TestCase):
             self.assertEqual(torch.ops._torch_testing.fp_multi(x), x * 2)
         with self._assert_fast_path_taken(fp_multi_bias):
             self.assertEqual(torch.ops._torch_testing.fp_multi(x, bias), x * 2 + bias)
+
+    def test_fast_path_counter(self):
+        @torch.library.custom_op("_torch_testing::fp_counter", mutates_args=())
+        def fp_counter(x: Tensor) -> Tensor:
+            return x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(fp_counter._fast_path_hits, 0)
+        fp_counter(x)
+        fp_counter(x)
+        self.assertEqual(fp_counter._fast_path_hits, 2)
+
+        # Slow path (autocast active) should not increment
+        with torch.autocast("cpu"):
+            fp_counter(x)
+        self.assertEqual(fp_counter._fast_path_hits, 2)
 
     def test_fast_path_mutable(self):
         @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})

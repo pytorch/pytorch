@@ -237,6 +237,7 @@ class CustomOpDef:
         self._backend_fns: dict[str | None, Callable] = {}
         self._raw_fns: dict[str | None, Callable] = {}
         self._fast_path: Callable | None = None
+        self._fast_path_hits: int = 0
         self._autograd_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
@@ -761,6 +762,7 @@ class CustomOpDef:
         raw_fns = self._raw_fns
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
+        opdef = self
 
         def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -786,6 +788,7 @@ class CustomOpDef:
             if fn is None:
                 return _DO_SLOW_PATH
 
+            opdef._fast_path_hits += 1
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
             return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
 
