@@ -18218,8 +18218,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]
 
         self.assertEqual(eager_out, compiled_out)
-        self.assertEqual(len(eager_grads), len(compiled_grads))
-        for eg, cg in zip(eager_grads, compiled_grads):
+        for eg, cg in zip(eager_grads, compiled_grads, strict=True):
             self.assertEqual(eg, cg)
 
     def test_efficient_zero_tensor_avoids_oom(self):
