@@ -2136,6 +2136,11 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
+        # Autograd can run compiled backward nodes from multiple threads while
+        # sharing this manager through TLS.  The tree state and CUDA pool
+        # manager are per-manager resources, so runtime entry must be
+        # serialized.
+        self._run_lock = threading.RLock()
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -2163,22 +2168,24 @@ class CUDAGraphTreeManager:
         )
 
     def run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
-        assert self.graph is not None, "Running CUDAGraph after shutdown"
-        self.mode = self.id_to_mode[function_id]
-        self.compile_id = self.id_to_compile_id[function_id]
-        out = self._run(new_inputs, function_id)
+        with self._run_lock:
+            assert self.graph is not None, "Running CUDAGraph after shutdown"
+            self.mode = self.id_to_mode[function_id]
+            self.compile_id = self.id_to_compile_id[function_id]
+            out = self._run(new_inputs, function_id)
 
-        # The forwards are only pending following invocation, not before
-        if self.mode == CompilationMode.FORWARD:
-            self.running_forwards_with_pending_backwards = True
-        elif self.mode == CompilationMode.BACKWARD:
-            self.running_forwards_with_pending_backwards = False
+            # The forwards are only pending following invocation, not before
+            if self.mode == CompilationMode.FORWARD:
+                self.running_forwards_with_pending_backwards = True
+            elif self.mode == CompilationMode.BACKWARD:
+                self.running_forwards_with_pending_backwards = False
 
-        return out
+            return out
 
     def set_to_running_backward(self) -> None:
-        self.running_forwards_with_pending_backwards = False
-        self.mode = CompilationMode.BACKWARD
+        with self._run_lock:
+            self.running_forwards_with_pending_backwards = False
+            self.mode = CompilationMode.BACKWARD
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2489,23 +2496,26 @@ class CUDAGraphTreeManager:
         ModelType,
         OutputType,
     ]:
-        id = self.new_func_id()
-        self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(
-            model,
-            list(static_input_idxs),
-            id,
-            tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
-            placeholders,
-            mutated_input_idxs,
-        )
-        self.id_to_mode[id] = mode
-        self.id_to_compile_id[id] = compile_id
-        fn = functools.partial(self.run, function_id=id)
+        with self._run_lock:
+            id = self.new_func_id()
+            self.ids_to_stack_traces[id] = stack_traces
+            self.ids_to_funcs[id] = WrappedFunction(
+                model,
+                list(static_input_idxs),
+                id,
+                tuple(
+                    t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda
+                ),
+                placeholders,
+                mutated_input_idxs,
+            )
+            self.id_to_mode[id] = mode
+            self.id_to_compile_id[id] = compile_id
+            fn = functools.partial(self.run, function_id=id)
 
-        # container needs to set clean up when fn dies
-        get_container(self.device_index).add_strong_reference(fn)
-        return fn, fn(inputs)
+            # container needs to set clean up when fn dies
+            get_container(self.device_index).add_strong_reference(fn)
+            return fn, fn(inputs)
 
     @property
     def in_recording(self) -> bool:
