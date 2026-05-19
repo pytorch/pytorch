@@ -52,6 +52,7 @@ AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunner
 
 import sys
 
+
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)

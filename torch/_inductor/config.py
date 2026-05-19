@@ -13,6 +13,7 @@ from torch.utils._config_module import (
     install_config_module,
 )
 
+
 if TYPE_CHECKING:
     from torch._inductor.choices import InductorChoices
     from torch._inductor.cudagraph_utils import CUDAGraphPolicy
@@ -2837,6 +2838,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
