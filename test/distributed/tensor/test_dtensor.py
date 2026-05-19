@@ -8,6 +8,7 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -529,6 +530,32 @@ class DTensorTest(DTensorTestBase):
                 raise AssertionError(
                     "Expected local_no_grad to be sharded_tensor._local_tensor"
                 )
+
+    @with_comms
+    def test_to_local_preserves_parameter(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166156:
+        # nn.Parameter wrapping a DTensor must remain isinstance(nn.Parameter)
+        # after calling .to_local() (both with and without grad enabled).
+        device_mesh = self.build_device_mesh()
+        global_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
+        dtensor_param = nn.Parameter(
+            distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+        )
+        self.assertTrue(isinstance(dtensor_param, nn.Parameter))
+
+        local = dtensor_param.to_local()
+        self.assertTrue(isinstance(local, nn.Parameter))
+        # Internal storage must not be mutated into a Parameter.
+        self.assertFalse(getattr(dtensor_param._local_tensor, "_is_param", False))
+
+        with torch.no_grad():
+            local_no_grad = dtensor_param.to_local()
+        self.assertTrue(isinstance(local_no_grad, nn.Parameter))
+        self.assertFalse(getattr(dtensor_param._local_tensor, "_is_param", False))
+
+        # A plain DTensor (not a Parameter) must NOT become a Parameter.
+        plain = distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+        self.assertFalse(isinstance(plain.to_local(), nn.Parameter))
 
     @with_comms
     def test_to_local_grad_hint(self):

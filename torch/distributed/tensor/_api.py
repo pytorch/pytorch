@@ -602,13 +602,28 @@ class DTensor(torch.Tensor):
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            result = self._local_tensor
+        else:
+            if grad_placements is not None and not isinstance(grad_placements, tuple):
+                grad_placements = tuple(grad_placements)
+            result = _ToTorchTensor.apply(
+                self, grad_placements
+            )  # pyre-ignore[16]: autograd func
 
-        if grad_placements is not None and not isinstance(grad_placements, tuple):
-            grad_placements = tuple(grad_placements)
-        return _ToTorchTensor.apply(
-            self, grad_placements
-        )  # pyre-ignore[16]: autograd func
+        # Preserve nn.Parameter-ness: if self is an nn.Parameter (i.e. has the
+        # _is_param flag, which is how Parameter is represented for custom
+        # tensor subclasses like DTensor), make the returned local tensor also
+        # satisfy isinstance(result, nn.Parameter).
+        if getattr(self, "_is_param", False) and not getattr(
+            result, "_is_param", False
+        ):
+            if result is self._local_tensor:
+                # Avoid mutating the internal storage of this DTensor by
+                # returning a fresh view to attach the flag to.
+                result = result.view_as(result)
+            result._is_param = True
+
+        return result
 
     def redistribute(
         self,
