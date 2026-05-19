@@ -1224,12 +1224,12 @@ class ComboKernel(Kernel):
                     seed_specs_str = f"({seed_specs[0]},)"
                 else:
                     seed_specs_str = f"({', '.join(seed_specs)})"
-                # Emit into runtime call path. The bench fires on first fn_c(x).
-                # Seeds are already compiled by async_compile; only the bench
-                # (serial, ~50ms per unique seed) runs at first call.
-                wrapper.writeline(
-                    f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
-                )
+                # Emit into runtime call path (Python wrapper only).
+                # C++ wrappers can't call Python seed-bench functions.
+                if not V.graph.cpp_wrapper:
+                    wrapper.writeline(
+                        f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+                    )
 
         wrapper.generate_kernel_call(
             name,
