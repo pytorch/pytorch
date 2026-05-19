@@ -578,7 +578,7 @@ def _match_quack_local_n_amax_reduce(
         dim=1,
         kind="amax_abs",
         scale=scale,
-        extra_skip_nodes=frozenset((abs_node,)),
+        extra_skip_nodes=frozenset((abs_node, node)),
     )
 
 
@@ -729,7 +729,7 @@ def _match_quack_local_n_amax_scale_view(
         dim=1,
         kind="amax_abs",
         scale=scale,
-        extra_skip_nodes=frozenset(extra_skip_nodes),
+        extra_skip_nodes=frozenset(extra_skip_nodes | {reduce_node, abs_node}),
     )
 
 
@@ -791,7 +791,7 @@ def _match_quack_local_n_mx_scale_view(
         dim=1,
         kind="mx_e8m0_scale",
         max_power=max_power,
-        extra_skip_nodes=frozenset((scale_node, aux_view.node)),
+        extra_skip_nodes=frozenset((scale_node, reduce_node, abs_node, aux_view.node)),
     )
 
 
