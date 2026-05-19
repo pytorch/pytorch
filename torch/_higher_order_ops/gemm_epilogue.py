@@ -534,7 +534,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
         output_value, mm_node
     )
     skip_nodes: set[torch.fx.Node] = set()
-    if local_norm is not None:
+    if local_norm is not None and local_norm.dim == 0:
         skip_nodes.update(
             (
                 local_norm.output_node,
@@ -543,16 +543,15 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 local_norm.reduce_node,
             )
         )
-        if local_norm.dim == 0:
-            local_reduce = QuackLocalReduceInfo(
-                view_node=local_norm.view_node,
-                reduce_node=local_norm.reduce_node,
-                source_node=local_norm.source_node,
-                keepdim=True,
-                group_size=local_norm.group_size,
-                dim=0,
-                feeds_main=True,
-            )
+        local_reduce = QuackLocalReduceInfo(
+            view_node=local_norm.view_node,
+            reduce_node=local_norm.reduce_node,
+            source_node=local_norm.source_node,
+            keepdim=True,
+            group_size=local_norm.group_size,
+            dim=0,
+            feeds_main=True,
+        )
     if isinstance(output_value, (tuple, list)):
         if len(output_value) == 1:
             output_value = output_value[0]
@@ -626,47 +625,89 @@ def _emit_quack_tensorssa_broadcast_to(
     return _emit_quack_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
 
 
-def _emit_quack_tensorssa_div(
-    kernel: _QuackCuteDSLKernel, lhs: Any, rhs: Any
+def _is_quack_n_group_shape(shape: Any) -> bool:
+    return (
+        isinstance(shape, (list, tuple))
+        and len(shape) == 3
+        and shape[-2] == -1
+        and isinstance(shape[-1], int)
+        and shape[-1] > 0
+    )
+
+
+def _is_quack_same_fragment_n_group_shape(shape: Any) -> bool:
+    return _is_quack_n_group_shape(shape) and 32 % shape[-1] == 0
+
+
+def _lower_quack_view_or_reshape_node(
+    node: torch.fx.Node,
+    view_match: QuackViewMatch,
+    env: dict[torch.fx.Node, Any],
+    kernel: _QuackCuteDSLKernel,
+    mm_node: torch.fx.Node,
 ) -> Any:
-    return _emit_quack_tensorssa_expr(kernel, f"{lhs} / {rhs}", like=lhs)
+    source = _quack_cute_arg(view_match.base, env)
+    shape = _normalize_quack_shape(view_match.shape)
+    if _is_quack_n_group_shape(shape):
+        if not _is_quack_same_fragment_n_group_shape(shape):
+            raise NotImplementedError(
+                "QUACK reductions feeding the main output currently require a "
+                "power-of-two group size that divides the same-fragment N width 32; "
+                "aux reductions can use other static groups"
+            )
+        group_size = shape[-1]
+        return _emit_quack_tensorssa_reshape(
+            kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
+        )
+    mm_meta = mm_node.meta.get("val")
+    if (
+        mm_meta is not None
+        and isinstance(shape, (list, tuple))
+        and len(shape) == 2
+        and tuple(shape) == tuple(mm_meta.shape)
+    ):
+        return _emit_quack_tensorssa_reshape(kernel, source, f"{env[mm_node]}.shape")
+    raise NotImplementedError(f"unsupported QUACK epilogue view/reshape: {node.format_node()}")
 
 
-def _emit_quack_local_n_norm(
-    local_norm: QuackLocalNormInfo,
+def _lower_quack_sum_node(
+    sum_match: QuackSumMatch,
     env: dict[torch.fx.Node, Any],
     kernel: _QuackCuteDSLKernel,
 ) -> Any:
-    if 32 % local_norm.group_size != 0:
+    if sum_match.dims not in ((-1,), (2,)) or sum_match.dtype is not None:
         raise NotImplementedError(
-            "QUACK reductions feeding the main output currently require a "
-            "power-of-two group size that divides the same-fragment N width 32; "
-            "aux reductions can use other static groups"
+            f"unsupported QUACK epilogue reduction: {sum_match.node.format_node()}"
         )
-    source = _quack_cute_arg(local_norm.source_node, env)
-    groups_per_fragment = 32 // local_norm.group_size
-    grouped = _emit_quack_tensorssa_reshape(
+    view_match = _match_quack_view_or_reshape(sum_match.view_node)
+    if view_match is None:
+        raise NotImplementedError(
+            f"unsupported QUACK epilogue reduction input: {sum_match.node.format_node()}"
+        )
+    shape = _normalize_quack_shape(view_match.shape)
+    if not _is_quack_same_fragment_n_group_shape(shape):
+        raise NotImplementedError(
+            f"unsupported QUACK epilogue reduction shape: {sum_match.node.format_node()}"
+        )
+    group_size = shape[-1]
+    groups_per_fragment = 32 // group_size
+    source = _quack_cute_arg(sum_match.view_node, env)
+    reduced = _emit_quack_tensorssa_reduce(
         kernel,
         source,
-        f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1)",
-    )
-    group_sum = _emit_quack_tensorssa_reduce(
-        kernel,
-        grouped,
         op="cute.ReductionOp.ADD",
         init_val="0.0",
         reduction_profile="((None, 1, None), 1, 1)",
     )
-    broadcast = _emit_quack_tensorssa_broadcast_to(
-        kernel,
-        _emit_quack_tensorssa_reshape(
-            kernel, group_sum, f"((1, 1, {groups_per_fragment}), 1, 1)"
-        ),
-        f"{grouped}.shape",
-    )
-    return _emit_quack_tensorssa_reshape(
-        kernel, _emit_quack_tensorssa_div(kernel, grouped, broadcast), f"{source}.shape"
-    )
+    if bool(sum_match.keepdim):
+        return _emit_quack_tensorssa_broadcast_to(
+            kernel,
+            _emit_quack_tensorssa_reshape(
+                kernel, reduced, f"((1, 1, {groups_per_fragment}), 1, 1)"
+            ),
+            f"{source}.shape",
+        )
+    return reduced
 
 
 def _compile_quack_pointwise_nodes(
@@ -688,6 +729,16 @@ def _compile_quack_pointwise_nodes(
             ):
                 continue
             with V.set_current_node(node):
+                view_match = _match_quack_view_or_reshape(node)
+                if view_match is not None:
+                    env[node] = _lower_quack_view_or_reshape_node(
+                        node, view_match, env, kernel, mm_node
+                    )
+                    continue
+                sum_match = _match_quack_sum(node, allow_method_sum=True)
+                if sum_match is not None:
+                    env[node] = _lower_quack_sum_node(sum_match, env, kernel)
+                    continue
                 if node.op == "call_method":
                     arg = _quack_cute_arg(node.args[0], env)
                     if node.target == "relu":
@@ -758,11 +809,8 @@ def _quack_cute_epilogue_code(
         graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
     )
 
-    if local_norm is not None:
-        if local_norm.dim == 0:
-            output_value = local_norm.source_node
-        else:
-            output_value = _emit_quack_local_n_norm(local_norm, env, kernel)
+    if local_norm is not None and local_norm.dim == 0:
+        output_value = local_norm.source_node
 
     return (
         kernel.body.lines,
