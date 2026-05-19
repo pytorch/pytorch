@@ -1160,7 +1160,7 @@ if(USE_XPU)
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
-  set(TORCH_XPU_OPS_REPO_URL https://github.com/intel/torch-xpu-ops.git)
+  set(TORCH_XPU_OPS_REPO_URL https://github.com/xuhancn/torch-xpu-ops.git)
   file(READ "${TORCH_ROOT}/third_party/xpu.txt" TORCH_XPU_OPS_COMMIT)
   string(REGEX REPLACE "\n$" "" TORCH_XPU_OPS_COMMIT "${TORCH_XPU_OPS_COMMIT}")
   if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
@@ -1171,6 +1171,10 @@ if(USE_XPU)
       message(FATAL_ERROR "Fail to clone ${TORCH_XPU_OPS_REPO_URL}")
     endif()
   endif()
+  # Ensure origin URL matches TORCH_XPU_OPS_REPO_URL (handles cached dirs from prior runs)
+  execute_process(
+    COMMAND git remote set-url origin ${TORCH_XPU_OPS_REPO_URL}
+    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR})
   execute_process(
     COMMAND git fetch --quiet
     WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
