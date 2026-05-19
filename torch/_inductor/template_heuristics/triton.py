@@ -2631,16 +2631,31 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-            assert len(scale_a.get_size()) == len(scale_b.get_size())
-            # Need to unsqueeze scale from [] -> [1, 1]
-            scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
-            scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
+        def is_tensorwise_scale(scale: Any) -> bool:
+            size = scale.get_size()
+            return len(size) == 0 or all(
+                V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
+            )
+
+        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+            if not is_tensorwise_scale(scale):
+                return scale
+            if not allow_high_rank and len(scale.get_size()) > 2:
+                return scale
+            return L[aten.reshape](scale, [1, 1])
+
+        # The templates load scale suffixes with 2D output indices. Eager accepts
+        # high-rank all-ones scale_a, but scale_b is internally transposed and
+        # rank > 2 is invalid.
+        scale_a = normalize_tensorwise_scale(scale_a, allow_high_rank=True)
+        scale_b = normalize_tensorwise_scale(scale_b, allow_high_rank=False)
+
         nodes = [mat_a, mat_b, scale_a, scale_b]
         if bias:
             nodes.append(bias)
         return MMKernelInputs(
             nodes,
+            scalars=kernel_inputs._scalars,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
             out_dtype=kernel_inputs._out_dtype,
