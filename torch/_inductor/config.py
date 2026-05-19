@@ -531,6 +531,13 @@ incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
 
+# Pipeline the CachingAutotuner: overlap triton compile, make_launcher, and benchmarking.
+pipeline_caching_autotuner: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_PIPELINE_CACHING_AUTOTUNER",
+    justknob="pytorch/inductor:pipeline_caching_autotuner",
+)
+
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
 )

@@ -402,6 +402,8 @@ def get_caching_autotuner_plugins(
     Each plugin adds an entry here, gated on its own config flag, with
     imports kept inside the relevant branch.
     """
+    from torch._inductor import config
+
     plugins: list[CachingAutotunerPlugin] = []
     if autotuner.inductor_meta.get("incremental_autotune", False):
         try:
@@ -410,6 +412,16 @@ def get_caching_autotuner_plugins(
             plugins.append(IncrementalAutotunePlugin())
         except ImportError:
             pass
+    if config.pipeline_caching_autotuner:
+        # Lazy import: the plugin lives in ``async_compile`` (alongside
+        # the streaming setup helpers), and importing
+        # ``async_compile`` at module-load time would create an upward
+        # dependency from runtime/ into _inductor/.
+        from torch._inductor.async_compile import (
+            _make_pipeline_caching_autotuner_plugin,
+        )
+
+        plugins.append(_make_pipeline_caching_autotuner_plugin())
     return plugins
 
 
@@ -548,6 +560,14 @@ class CachingAutotuner(KernelInterface):
         # consulted by ``_precompile_worker`` to enrich the "all configs failed"
         # error message.
         self._last_compile_exception: BaseException | None = None
+
+        # Set by ``AsyncCompile.triton`` when the pipelined-autotuner path
+        # is active; consumed and reset to None by
+        # ``PipelineCachingAutotunerPlugin.pre_dispatch`` on first ``run()``.
+        # Typed as Any to dodge a forward-ref to ``async_compile``.
+        # TODO: side-channel; should flow through the plugin protocol
+        # (pre_compile/pre_dispatch arg) instead of a kernel attribute.
+        self._pipeline_caching_autotuner_handle: Any = None
 
         self._plugins = get_caching_autotuner_plugins(self)
 
