@@ -4355,7 +4355,6 @@ class AlgorithmSelectorCache(PersistentCache):
                         f"{k}={best_config[k]}" in choice.description
                         for k in important_keys
                     )
-                    for k in important_keys
                 ]
                 log.info("Filtered to %d choices based on best_config", len(choices))
 

@@ -617,8 +617,9 @@ class TestAlgorithmSelectorCleanup(TestCase):
         name = "choice"
         description = "choice"
 
-        def __init__(self, key="choice"):
+        def __init__(self, key="choice", description="choice"):
             self.key = key
+            self.description = description
             self.precompile_calls = 0
             self.released = 0
 
@@ -714,6 +715,68 @@ class TestAlgorithmSelectorCleanup(TestCase):
         self.assertIs(precompile_fn, precompile_fn2)
         self.assertEqual(choice.precompile_calls, 1)
         self.assertEqual(choice.released, 1)
+
+    def test_best_config_filter_does_not_duplicate_choices(self):
+        best_config = {
+            "ACC_TYPE": "tl.float32",
+            "ALLOW_TF32": "False",
+            "BLOCK_K": "32",
+            "BLOCK_M": "16",
+            "BLOCK_N": "32",
+            "EVEN_K": "True",
+            "GROUP_M": "8",
+            "USE_FAST_ACCUM": "False",
+            "num_stages": "3",
+            "num_warps": "4",
+            "num_consumer_groups": "0",
+            "num_buffers_warp_spec": "0",
+        }
+
+        async def get_best_config():
+            return best_config
+
+        matching_description = " ".join(
+            f"{key}={value}" for key, value in best_config.items()
+        )
+        nonmatching_description = matching_description.replace(
+            "BLOCK_M=16", "BLOCK_M=32"
+        )
+        matching_choices = [
+            self.Choice("match_0", matching_description),
+            self.Choice("match_1", matching_description),
+        ]
+        choices = [
+            matching_choices[0],
+            self.Choice("miss", nonmatching_description),
+            matching_choices[1],
+        ]
+        precompile_fn = self.PrecompileFn()
+        seen_choices = []
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            seen_choices.append(list(choices))
+            return {choice: index + 1.0 for index, choice in enumerate(choices)}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            timings = cache.do_autotuning(
+                "mm",
+                [],
+                None,
+                None,
+                "inputs_key",
+                choices,
+                precompile_fn,
+                best_config_future=get_best_config(),
+            )
+
+        self.assertEqual(seen_choices, [matching_choices])
+        self.assertEqual(list(timings), matching_choices)
+        self.assertEqual(precompile_fn.released, 1)
+        self.assertEqual([choice.released for choice in choices], [1, 1, 1])
 
 
 class TestExternKernelCaller(TestCase):
