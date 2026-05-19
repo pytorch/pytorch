@@ -125,28 +125,22 @@ def find_vcvarsall(vc_year: str) -> Path:
     )
 
 
-def capture_vcvars_env(vcvarsall: Path, args: str) -> dict[str, str]:
-    """Capture the env diff produced by `vcvarsall.bat <args>`.
+def _capture_cmd_env(command: str, fail_prefix: str) -> dict[str, str]:
+    """Run `command` under `cmd /u /c`, capture env, return diff vs current env.
 
-    Mirrors torch.utils.cpp_extension._jit._get_vc_env (gh-180707). The
-    `cmd /u /c` flag forces UTF-16LE output so non-ASCII paths in localized
-    Windows installs round-trip intact. We then diff against the current
-    environment so we only propagate variables vcvarsall actually changed.
-
-    Note: the upstream _get_vc_env short-circuits on DISTUTILS_USE_SDK to
-    pass through a pre-configured caller env. In CI we always run vcvarsall
-    (and set DISTUTILS_USE_SDK ourselves as part of COMMON_BUILD_ENV), so we
-    intentionally skip that check.
+    `cmd /u` forces UTF-16LE output so non-ASCII paths in localized Windows
+    installs round-trip intact. The diff is against the live `os.environ`,
+    so callers can pre-populate os.environ with any vars they want layered
+    on top of (rather than shadowed by) the command's exports.
     """
     try:
         raw = subprocess.check_output(
-            f'cmd /u /c "{vcvarsall}" {args} && set',
+            f"cmd /u /c {command}",
             stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as exc:
         sys.exit(
-            f"vcvarsall.bat {args} failed:\n"
-            f"{exc.output.decode('utf-16le', errors='replace')}"
+            f"{fail_prefix} failed:\n{exc.output.decode('utf-16le', errors='replace')}"
         )
     text = raw.decode("utf-16le", errors="replace")
 
@@ -160,6 +154,35 @@ def capture_vcvars_env(vcvarsall: Path, args: str) -> dict[str, str]:
 
     old_env = os.environ
     return {k: v for k, v in new_env.items() if old_env.get(k) != v}
+
+
+def capture_vcvars_env(vcvarsall: Path, args: str) -> dict[str, str]:
+    """Capture the env diff produced by `vcvarsall.bat <args>`.
+
+    Mirrors torch.utils.cpp_extension._jit._get_vc_env (gh-180707).
+
+    Note: the upstream _get_vc_env short-circuits on DISTUTILS_USE_SDK to
+    pass through a pre-configured caller env. In CI we always run vcvarsall
+    (and set DISTUTILS_USE_SDK ourselves as part of COMMON_BUILD_ENV), so we
+    intentionally skip that check.
+    """
+    return _capture_cmd_env(f'"{vcvarsall}" {args} && set', f"vcvarsall.bat {args}")
+
+
+def source_oneapi_vars(scripts: list[Path]) -> dict[str, str]:
+    """Source Intel oneAPI vars.bat scripts and return the env diff.
+
+    Windows analog of the Linux source_oneapi_env helper. Chains the env
+    setup scripts in one cmd invocation so each sees the previous's PATH
+    additions.
+    """
+    existing = [s for s in scripts if s.is_file()]
+    if not existing:
+        sys.exit(f"No oneAPI vars.bat scripts found; tried {scripts}")
+    chain = " && ".join(f'call "{s}"' for s in existing)
+    diff = _capture_cmd_env(f"{chain} && set", "oneAPI vars.bat")
+    print(f"Sourced {len(existing)} oneAPI vars.bat ({len(diff)} env vars changed)")
+    return diff
 
 
 def download(url: str, dest: Path, attempts: int = 5) -> None:
@@ -324,6 +347,55 @@ def setup_cuda() -> dict[str, str]:
     }
 
 
+def install_xpu_bundle() -> None:
+    """Run the legacy internal/xpu_install.bat which downloads + installs
+    the Intel Deep Learning Essentials bundle.
+
+    Kept as a .bat invocation for the same reason as install_cuda_toolkit:
+    multiple installer.exe orchestrations with Windows-only side effects.
+    """
+    bat = WIN_CI_DIR / "internal" / "xpu_install.bat"
+    subprocess.run(["cmd", "/c", str(bat)], cwd=WIN_CI_DIR, check=True)
+
+
+def setup_xpu() -> dict[str, str]:
+    install_xpu_bundle()
+
+    xpu_root = Path(
+        os.environ.get(
+            "XPU_BUNDLE_ROOT",
+            os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+            + r"\Intel\oneAPI",
+        )
+    )
+    if not xpu_root.is_dir():
+        sys.exit(f"XPU bundle root not found at {xpu_root}")
+
+    # VS2022INSTALLDIR alias for downstream tools that look there instead
+    # of VS15INSTALLDIR (carried over from xpu.bat).
+    vs15 = os.environ.get("VS15INSTALLDIR")
+    pre_env: dict[str, str] = {
+        "USE_CUDA": "0",
+        "USE_ONEMKL": "1",
+        "XPU_BUNDLE_ROOT": str(xpu_root),
+    }
+    if vs15:
+        pre_env["VS2022INSTALLDIR"] = vs15
+
+    # Push the static vars into os.environ before sourcing oneAPI so its
+    # PATH/CMAKE_PREFIX_PATH extensions layer on top.
+    os.environ.update(pre_env)
+
+    oneapi_env = source_oneapi_vars(
+        [
+            xpu_root / "compiler" / "latest" / "env" / "vars.bat",
+            xpu_root / "ocloc" / "latest" / "env" / "vars.bat",
+        ]
+    )
+
+    return {**pre_env, **oneapi_env}
+
+
 def shell_quote(value: str) -> str:
     if value and all(c.isalnum() or c in "_-./:=" for c in value):
         return value
@@ -367,12 +439,12 @@ def main() -> None:
         print("CPU environment configured")
     elif gpu_arch_type == "cuda":
         env_out.update(setup_cuda())
+    elif gpu_arch_type == "xpu":
+        env_out.update(setup_xpu())
     else:
-        # XPU branch is added in a follow-up commit; fail loudly so the CI
-        # surface is unambiguous while the refactor is in progress.
         sys.exit(
-            f"build_env_setup.py: GPU_ARCH_TYPE={gpu_arch_type!r} not yet ported "
-            "from the legacy .bat scripts. Supported: cpu, cuda."
+            f"build_env_setup.py: GPU_ARCH_TYPE={gpu_arch_type!r} not supported. "
+            "Expected one of: cpu, cuda, xpu."
         )
 
     # Push our env into the current process so vcvarsall's PATH extension
