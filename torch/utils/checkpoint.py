@@ -627,7 +627,7 @@ def checkpoint(
             raise ValueError(
                 "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
             )
-        factory = functools.partial(
+        factory: Any = functools.partial(
             _checkpoint_decorator,
             use_reentrant=use_reentrant,
             preserve=preserve,
