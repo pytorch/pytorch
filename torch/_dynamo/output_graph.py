@@ -192,6 +192,38 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 RootGuardManager = guards.RootGuardManager
 
 
+def _clear_non_cpu_fake_tensor_constants(gm: fx.GraphModule) -> None:
+    """
+    FakeTensor.constant is only needed while Dynamo is tracing. Leaving a real
+    non-CPU tensor in compiled graph metadata lets backend caches pin device
+    memory after the user tensor has gone out of scope.
+    """
+    seen: set[int] = set()
+
+    def visit(value: object) -> None:
+        obj_id = id(value)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+
+        if isinstance(value, FakeTensor):
+            constant = value.constant
+            if isinstance(constant, Tensor) and constant.device.type != "cpu":
+                value.constant = None
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+
+    for module in gm.modules():
+        if isinstance(module, fx.GraphModule):
+            for node in module.graph.nodes:
+                for value in node.meta.values():
+                    visit(value)
+
+
 # Capture fn pointer at import time
 # This is to guard against trying to mark the iterated tensors
 # as static in case user overrides fn ptr
@@ -2838,6 +2870,9 @@ class OutputGraph(OutputGraphCommon):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if not self.export:
+                _clear_non_cpu_fake_tensor_constants(gm)
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
