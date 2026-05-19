@@ -1,5 +1,6 @@
 import itertools
 import logging
+import re
 import textwrap
 from collections import defaultdict
 from collections.abc import Callable
@@ -33,12 +34,18 @@ from .common import (
     PythonPrinter,
     RemovedArg,
     SizeArg,
+    TensorArg,
     WorkspaceArg,
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import TritonKernel
-from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    is_unaligned_buffer,
+    signature_to_meta,
+)
 
 
 # Default block sizes used when combo kernel autotuning is disabled.
@@ -173,10 +180,34 @@ class PartitionState:
             self.partitions.append(self.cur_partition)
 
 
+@dataclass
+class SubKernelCode:
+    setup: IndentedBuffer
+    body: IndentedBuffer
+
+
+@dataclass
+class SharedBody:
+    body: IndentedBuffer
+    placeholder_names: list[str]
+    args_by_subkernel: list[list[str]]
+    setup_lhs_names: list[str]
+
+
 class ComboKernel(Kernel):
     """
     A kernel that combines multiple sub-kernels into a single fused kernel.
     """
+
+    _ARG_NAME_RE = re.compile(r"\b[A-Za-z_]\w*\b")
+    _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*(?::[^=]+)?=")
+    _NUMBERED_SYMBOL_PATTERNS = (
+        (re.compile(r"\btmp\d+\b"), "tmp"),
+        (re.compile(r"\br\d+_\d+\b"), "r"),
+        (re.compile(r"\bx\d+\b"), "x"),
+        (re.compile(r"\by\d+\b"), "y"),
+        (re.compile(r"\bz\d+\b"), "z"),
+    )
 
     @staticmethod
     def _update_partition(
@@ -918,6 +949,240 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
+    def _can_share_body(
+        self,
+        heuristics_list: list[str],
+    ) -> bool:
+        if len(self.sub_kernels) < 2:
+            return False
+        if self.enable_autotune or config.combo_kernel_per_subkernel_blocks:
+            return False
+        if self.dispatch_class is not ComboKernel.SequentialDispatch:
+            return False
+        if self.dynamic_shape_args or any(self.y_tree_list):
+            return False
+        if any(
+            sub_kernel.no_x_dim
+            or sub_kernel.inside_reduction
+            or sub_kernel.persistent_reduction
+            for sub_kernel in self.sub_kernels
+        ):
+            return False
+        return all(heuristic == "pointwise" for heuristic in heuristics_list)
+
+    @staticmethod
+    def _plain_lines(code: IndentedBuffer) -> list[str] | None:
+        lines: list[str] = []
+        for line in code._lines:
+            if isinstance(line, str):
+                lines.append(line)
+            elif isinstance(line, DeferredLine):
+                evaluated = line()
+                if evaluated is not None:
+                    lines.append(evaluated)
+            else:
+                return None
+        return lines
+
+    @classmethod
+    def _canonicalize_numbered_symbols(cls, lines: list[str]) -> list[str]:
+        replacements: list[dict[str, str]] = [{} for _ in cls._NUMBERED_SYMBOL_PATTERNS]
+        canonicalized: list[str] = []
+
+        for line in lines:
+            new_line = line
+            for i, (pattern, prefix) in enumerate(cls._NUMBERED_SYMBOL_PATTERNS):
+                mapping = replacements[i]
+
+                def replace(match: re.Match[str]) -> str:
+                    name = match.group(0)
+                    if name not in mapping:
+                        mapping[name] = f"{prefix}{len(mapping)}"
+                    return mapping[name]
+
+                new_line = pattern.sub(replace, new_line)
+            canonicalized.append(new_line)
+
+        return canonicalized
+
+    @classmethod
+    def _replace_args_with_placeholders(
+        cls,
+        lines: list[str],
+        arg_names: OrderedSet[str],
+    ) -> tuple[list[str], list[str]]:
+        used_args: list[str] = []
+        replacements: dict[str, str] = {}
+
+        def replace(match: re.Match[str]) -> str:
+            name = match.group(0)
+            if name not in arg_names:
+                return name
+            if name not in replacements:
+                replacements[name] = f"foreach_arg{len(used_args)}"
+                used_args.append(name)
+            return replacements[name]
+
+        return [cls._ARG_NAME_RE.sub(replace, line) for line in lines], used_args
+
+    @staticmethod
+    def _compatible_shared_arg_properties(
+        args_by_subkernel: list[list[str]],
+        tensor_args: dict[str, TensorArg],
+    ) -> bool:
+        if not args_by_subkernel:
+            return False
+        num_args = len(args_by_subkernel[0])
+        if num_args == 0:
+            return False
+        if any(len(args) != num_args for args in args_by_subkernel):
+            return False
+
+        for arg_index in range(num_args):
+            properties = OrderedSet(
+                [
+                    (
+                        tensor_args[args[arg_index]].dtype,
+                        is_unaligned_buffer(tensor_args[args[arg_index]]),
+                    )
+                    for args in args_by_subkernel
+                ]
+            )
+            if len(properties) != 1:
+                return False
+
+        return True
+
+    @classmethod
+    def _setup_lhs_names(
+        cls, sub_kernel_codes: list[SubKernelCode]
+    ) -> list[str] | None:
+        names: list[str] = []
+        seen: OrderedSet[str] = OrderedSet()
+        for sub_kernel_code in sub_kernel_codes:
+            for line in sub_kernel_code.setup._lines:
+                if not isinstance(line, str):
+                    return None
+                stripped = line.strip()
+                if ": tl.constexpr" in stripped:
+                    return None
+                match = cls._ASSIGNMENT_RE.match(stripped)
+                if match:
+                    name = match.group(1)
+                    if name not in seen:
+                        seen.add(name)
+                        names.append(name)
+        return names
+
+    def _try_get_shared_body(
+        self,
+        sub_kernel_codes: list[SubKernelCode],
+        signature: list[Any],
+        heuristics_list: list[str],
+    ) -> SharedBody | None:
+        if not self._can_share_body(heuristics_list):
+            return None
+
+        tensor_args = {arg.name: arg for arg in signature if isinstance(arg, TensorArg)}
+        arg_names = OrderedSet(tensor_args)
+        if not arg_names:
+            return None
+
+        transformed_bodies: list[list[str]] = []
+        normalized_bodies: list[list[str]] = []
+        args_by_subkernel: list[list[str]] = []
+
+        for sub_kernel_code in sub_kernel_codes:
+            lines = self._plain_lines(sub_kernel_code.body)
+            if lines is None or any("'" in line or '"' in line for line in lines):
+                return None
+
+            transformed, used_args = self._replace_args_with_placeholders(
+                lines, arg_names
+            )
+            if any(arg not in tensor_args for arg in used_args):
+                return None
+
+            transformed_bodies.append(transformed)
+            args_by_subkernel.append(used_args)
+            normalized_bodies.append(self._canonicalize_numbered_symbols(transformed))
+
+        if any(body != normalized_bodies[0] for body in normalized_bodies[1:]):
+            return None
+
+        if not self._compatible_shared_arg_properties(args_by_subkernel, tensor_args):
+            return None
+
+        setup_lhs_names = self._setup_lhs_names(sub_kernel_codes)
+        if setup_lhs_names is None:
+            return None
+
+        body = IndentedBuffer()
+        body.writelines(transformed_bodies[0])
+        return SharedBody(
+            body=body,
+            placeholder_names=[
+                f"foreach_arg{i}" for i in range(len(args_by_subkernel[0]))
+            ],
+            args_by_subkernel=args_by_subkernel,
+            setup_lhs_names=setup_lhs_names,
+        )
+
+    def _codegen_sub_kernel_bodies(
+        self,
+    ) -> list[SubKernelCode]:
+        sub_kernel_codes: list[SubKernelCode] = []
+        for num, sub_kernel in enumerate(self.sub_kernels):
+            setup = IndentedBuffer()
+            uniquify = self.codegen_static_numels_sub_kernel(setup, sub_kernel, num)
+            sub_kernel.codegen_body()
+            sub_kernel._filter_pdl(sub_kernel.body)
+            body = self.uniquify_block_sizes(sub_kernel.body, num, uniquify)
+            sub_kernel_codes.append(SubKernelCode(setup=setup, body=body))
+        return sub_kernel_codes
+
+    def _codegen_branch(
+        self,
+        code: IndentedBuffer,
+        num: int,
+        sub_kernel_code: SubKernelCode,
+    ) -> None:
+        assert self.dispatch_class is not None
+        self.dispatch_class.codegen_pid_range(self, num, code)
+        with code.indent():
+            code.splice(sub_kernel_code.setup)
+            code.splice(sub_kernel_code.body)
+
+    def _codegen_shared_branches(
+        self,
+        code: IndentedBuffer,
+        sub_kernel_codes: list[SubKernelCode],
+        shared_body: SharedBody,
+    ) -> None:
+        assert self.dispatch_class is not None
+        for num, sub_kernel_code in enumerate(sub_kernel_codes):
+            self.dispatch_class.codegen_pid_range(self, num, code)
+            with code.indent():
+                code.splice(sub_kernel_code.setup)
+                for placeholder, arg in zip(
+                    shared_body.placeholder_names,
+                    shared_body.args_by_subkernel[num],
+                ):
+                    code.writeline(f"{placeholder} = {arg}")
+
+        code.splice("else:")
+        with code.indent():
+            code.splice("pid_offset = 0")
+            for name in shared_body.setup_lhs_names:
+                code.writeline(f"{name} = 0")
+            for placeholder, arg in zip(
+                shared_body.placeholder_names,
+                shared_body.args_by_subkernel[0],
+            ):
+                code.writeline(f"{placeholder} = {arg}")
+
+        code.splice(shared_body.body)
+
     def codegen_kernel(self, name: str | None = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
@@ -979,23 +1244,19 @@ class ComboKernel(Kernel):
             if not self.enable_autotune:
                 self.codegen_blocks(code)
 
-            for num, sub_kernel in enumerate(self.sub_kernels):
-                assert self.dispatch_class is not None
-                self.dispatch_class.codegen_pid_range(self, num, code)
-                with code.indent():
-                    uniquify = self.codegen_static_numels_sub_kernel(
-                        code, sub_kernel, num
-                    )
-                    sub_kernel.codegen_body()
-                    sub_kernel._filter_pdl(sub_kernel.body)
-                    uniquified_body = self.uniquify_block_sizes(
-                        sub_kernel.body, num, uniquify
-                    )
-                    code.splice(uniquified_body)
+            sub_kernel_codes = self._codegen_sub_kernel_bodies()
+            shared_body = self._try_get_shared_body(
+                sub_kernel_codes, signature, heuristics_list
+            )
+            if shared_body is not None:
+                self._codegen_shared_branches(code, sub_kernel_codes, shared_body)
+            else:
+                for num, sub_kernel_code in enumerate(sub_kernel_codes):
+                    self._codegen_branch(code, num, sub_kernel_code)
 
-            code.splice("else:")
-            with code.indent():
-                code.splice("pass")
+                code.splice("else:")
+                with code.indent():
+                    code.splice("pass")
             if config.triton.proton_profiling:
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
