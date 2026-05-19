@@ -18222,6 +18222,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for eg, cg in zip(eager_grads, compiled_grads):
             self.assertEqual(eg, cg)
 
+    def test_efficient_zero_tensor_avoids_oom(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA OOM regression test")
+
+        element_size = torch.empty((), dtype=torch.float32).element_size()
+        numel = (
+            torch.cuda.get_device_properties(self.device).total_memory // element_size
+        )
+        numel += 1024
+
+        def fn():
+            return torch.ops.aten._efficientzerotensor.default(
+                [numel],
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=torch.device(self.device),
+                pin_memory=False,
+            )
+
+        out = torch.compile(fn, fullgraph=True)()
+        self.assertFalse(out._is_zerotensor())
+        self.assertEqual(out.size(0), numel)
+        self.assertEqual(out.stride(), (0,))
+        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+
     # end of class CommonTemplate - add new tests here
 
 
