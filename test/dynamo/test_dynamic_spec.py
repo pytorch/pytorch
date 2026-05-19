@@ -648,7 +648,9 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             m,
             backend=backend,
-            shapes_spec={"self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})},
+            shapes_spec={
+                "self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+            },
         )
 
         compiled()
@@ -663,7 +665,6 @@ class TestObjectSpecCompile(TestCase):
 
 
 class TestDictSpecCompile(TestCase):
-
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -686,7 +687,6 @@ class TestDictSpecCompile(TestCase):
         compiled({"x": torch.randn(8, 3)})
 
         self.assertEqual(len(backend.graphs), 1)
-
 
         # Captured placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
@@ -786,7 +786,6 @@ class TestWalkSpecRaises(TestCase):
         )
 
         root = ObjectSpec({"x": TensorSpec([ShapeVar("h"), None])})
-        ShapesSpec(params=ParamsSpec({"cfg": root}))
         with self.assertRaisesRegex(
             RuntimeError, r"ObjectSpec.*expects an attribute access"
         ):
@@ -804,7 +803,6 @@ class TestWalkSpecRaises(TestCase):
         )
 
         root = DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
-        ShapesSpec(params=ParamsSpec({"cfg": root}))
         with self.assertRaisesRegex(RuntimeError, r"DictSpec.*expects.*subscript"):
             _walk_spec(root, [_AttrToken("x")])
         # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
@@ -816,7 +814,6 @@ class TestWalkSpecRaises(TestCase):
         from torch._dynamo.variables.builder import _AttrToken, _walk_spec
 
         root = TensorSpec([ShapeVar("h"), None])
-        ShapesSpec(params=ParamsSpec({"cfg": root}))
         with self.assertRaisesRegex(
             RuntimeError, r"leaf spec.*cannot consume further token"
         ):

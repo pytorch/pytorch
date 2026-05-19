@@ -238,6 +238,11 @@ class DictSpec:
         self._entries: dict[str | int, IntermediateSpec] = (
             dict(entries) if entries else {}
         )
+        for k in self._entries:
+            if not isinstance(k, (str, int)):
+                raise TypeError(
+                    f"DictSpec entries must have str or int keys, got {type(k).__name__}: {k!r}"
+                )
 
     def __contains__(self, key: object) -> bool:
         return key in self._entries

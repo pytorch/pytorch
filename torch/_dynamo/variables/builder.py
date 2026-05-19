@@ -377,8 +377,8 @@ class _AttrToken:
 class _SubscriptToken:
     """Subscript access (``obj[key]``).
 
-    ``int`` keys correspond to list / ``*args`` indexing; ``str`` keys
-    correspond to dict / ``**kwargs`` indexing.
+    Emitted for ``dict`` key lookups (matched against ``DictSpec`` entries).
+    The key may be ``int`` or ``str`` — both are valid dict keys.
     """
 
     key: int | str
@@ -393,12 +393,13 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
 
     Walks ``source.base`` from leaf to root, then reverses so the path
     reads root-first. The returned path always starts with a single
-    ``_LocalToken`` (the input arg) followed by zero or more attribute
-    tokens.
+    ``_LocalToken`` (the input arg) followed by zero or more access
+    tokens, each of which is either an ``_AttrToken`` (attribute
+    access) or a ``_SubscriptToken`` (``dict[key]`` access with an
+    ``int`` or ``str`` key).
 
-    Returns ``None`` for any source pattern that isn't a top-level
-    function-argument access reachable via ``AttrSource`` /
-    ``NNModuleSource`` / the parameter-dict collapse below.
+    Returns ``None`` for sources that we know we can'r represent them
+    in our sepecs.
     """
     path: list[_AccessToken] = []
     cur: Source = source
@@ -480,7 +481,7 @@ def _walk_spec(
                     f"at path {remaining_tokens!r} cannot consume further token {token!r}; "
                     f"the spec is too shallow for this access"
                 )
-    if isinstance(current_spec, (ObjectSpec, DictSpec)):
+    if not isinstance(current_spec, LeafSpec):
         raise RuntimeError(
             f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
             f"for access path {remaining_tokens!r}; expected a leaf spec"
@@ -493,11 +494,8 @@ def lookup_spec_from_dynamo_source(
 ) -> LeafSpec:
     """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Thin wrapper over a two-step pipeline:
-    ``source → _AccessPath → _walk_spec → leaf spec | None``.
-
-    Returns the leaf ``TensorSpec`` / ``IntVar`` / ``int`` at the
-    corresponding path, or ``None`` if the source isn't covered. See
+    Returns the ``LeafSpec`` at the corresponding path, or ``None``
+    if the source isn't covered. See
     ``_source_to_access_path`` for the set of supported source kinds.
     """
     if shapes_spec is None or shapes_spec._params is None:
