@@ -930,6 +930,34 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     return cflags, ldflags
 
 
+def _get_cpu_arch_cflags() -> list[str]:
+    if config.is_fbcode():
+        return []
+
+    march = config.cpp.march
+    if march == "":
+        return []
+
+    # -march=native is not recognized on Apple Silicon, so the default macOS
+    # behavior is no architecture flag unless the user explicitly configures one.
+    if sys.platform == "darwin" and march is None:
+        return []
+
+    machine = platform.machine()
+    if march is None:
+        if machine == "ppc64le":
+            return ["mcpu=native"]
+        if machine == "riscv64":
+            return ["march=rv64gc"]
+        if machine == "riscv32":
+            return ["march=rv32gc"]
+        return ["march=native"]
+
+    if machine == "ppc64le":
+        return [f"mcpu={march}"]
+    return [f"march={march}"]
+
+
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
 ) -> tuple[list[str], list[str]]:
@@ -976,21 +1004,10 @@ def _get_optimization_cflags(
     if _IS_WINDOWS:
         pass
     else:
-        if sys.platform != "darwin":
-            # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if _is_gcc(cpp_compiler):
-                cflags.append("fno-tree-loop-vectorize")
-            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-            # `-march=native` is unrecognized option on M1
-            if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
-                elif platform.machine() == "riscv64":
-                    cflags.append("march=rv64gc")
-                elif platform.machine() == "riscv32":
-                    cflags.append("march=rv32gc")
-                else:
-                    cflags.append("march=native")
+        # on macos, unknown argument: '-fno-tree-loop-vectorize'
+        if sys.platform != "darwin" and _is_gcc(cpp_compiler):
+            cflags.append("fno-tree-loop-vectorize")
+        cflags += _get_cpu_arch_cflags()
 
         if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
             cflags.append("flto=thin")

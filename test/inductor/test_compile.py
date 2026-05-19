@@ -7,8 +7,10 @@ from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
+from torch._inductor import config
 from torch._inductor.codecache import write
-from torch._inductor.cpp_builder import CppBuilder, CppOptions
+from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
+from torch._inductor.cpu_vec_isa import invalid_vec_isa
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
@@ -229,6 +231,42 @@ class TestStandaloneInductor(TestCase):
             pass  # MacOS not sure that if it should be works.
         else:
             check_linux_debug_section(binary_path)
+
+    def test_aot_cpp_march_config(self):
+        with (
+            config.patch({"cpp.march": "x86-64"}),
+            mock.patch(
+                "torch._inductor.cpp_builder.platform.machine",
+                return_value="x86_64",
+            ),
+        ):
+            build_option = CppTorchOptions(
+                aot_mode=True,
+                compile_only=True,
+                vec_isa=invalid_vec_isa,
+            )
+
+        arch_flags = [
+            flag
+            for flag in build_option.get_cflags()
+            if flag.startswith(("march=", "mcpu="))
+        ]
+        self.assertEqual(arch_flags, ["march=x86-64"])
+
+    def test_cpp_march_config_can_disable_arch_flag(self):
+        with config.patch({"cpp.march": ""}):
+            build_option = CppTorchOptions(
+                aot_mode=True,
+                compile_only=True,
+                vec_isa=invalid_vec_isa,
+            )
+
+        arch_flags = [
+            flag
+            for flag in build_option.get_cflags()
+            if flag.startswith(("march=", "mcpu="))
+        ]
+        self.assertEqual(arch_flags, [])
 
 
 if __name__ == "__main__":
