@@ -203,11 +203,11 @@ static variable_list call_function(
     const ivalue_list& packed_args,
     const c10::IValue& output_metadata) {
   // convert ivalue_list -> PyObject*
-  py::object py_packed_args = py::reinterpret_steal<py::object>(
-      PyTuple_New(static_cast<Py_ssize_t>(packed_args.size())));
-  for (const auto i : c10::irange(packed_args.size())) {
-    py::object obj = jit::toPyObject(packed_args[i]);
-    PyTuple_SET_ITEM(py_packed_args.ptr(), i, obj.release().ptr());
+  py::tuple py_packed_args(packed_args.size());
+  size_t i = 0;
+  for (const auto& arg : packed_args) {
+    PyTuple_SET_ITEM(
+        py_packed_args.ptr(), i++, jit::toPyObject(arg).release().ptr());
   }
 
   // call the corresponding method on the py_compiler
@@ -370,8 +370,11 @@ struct PythonLogger {
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    THPObjectPtr result(PyObject_CallFunction(
-        pyfunc.get(), "s#", msg.data(), static_cast<Py_ssize_t>(msg.size())));
+    THPObjectPtr py_msg(PyUnicode_FromStringAndSize(msg.data(), msg.size()));
+    if (py_msg == nullptr) {
+      throw_python_error();
+    }
+    THPObjectPtr result(PyObject_CallOneArg(pyfunc.get(), py_msg.get()));
     if (result == nullptr) {
       throw_python_error();
     }
