@@ -285,7 +285,7 @@ static void upsample_nearest2d_out_cuda_template(
     int block_y = std::min<int>(
         {maxThreadsDim[1], lastPow2(output_height), max_threads / block_x});
     int block_z = std::min<int>(
-        {maxThreadsDim[2], nc, max_threads / block_x / block_y});
+        {maxThreadsDim[2], static_cast<int>(nc), max_threads / block_x / block_y});
     const dim3 block(block_x, block_y, block_z);
 
     int grid_x = ceil_div(output_width, block_x);
