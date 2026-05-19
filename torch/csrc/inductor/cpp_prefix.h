@@ -627,6 +627,15 @@ inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
   return argmin_vec_impl(a, next_value, next_idx, tail_size);
 }
 
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
 template <typename T, int NV, int NI, bool horizontal>
 inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     IndexValueVec<T, NV, NI>& a,
@@ -635,6 +644,15 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     std::optional<int64_t> tail_size = std::nullopt) {
   auto next_idx = create_index<T, NI, horizontal>(next_index);
   return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
 template <typename T, int NV, int NI>
