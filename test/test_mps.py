@@ -14670,6 +14670,24 @@ class TestErrorInputs(TestCase):
 
 
 class TestComplex(TestCase):
+    def test_conj_imag(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184379
+        # MPS copy ignored the neg bit, so `.imag` on a conjugate view returned
+        # the original imaginary values instead of their negation.
+        x = torch.tensor([1 + 2j, 3 - 4j], device="mps")
+        self.assertEqual(x.conj().imag.cpu(), x.cpu().conj().imag)
+
+    def test_neg_bit_materialized_by_clone(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184379
+        # clone() must materialize the neg bit on MPS so downstream consumers
+        # (the math-bit fallback, .cpu() via _to_copy, etc.) see negated data.
+        y = torch.tensor([1.0, 2.0, 3.0], device="mps")._neg_view()
+        self.assertTrue(y.is_neg())
+        expected = torch.tensor([-1.0, -2.0, -3.0])
+        self.assertEqual(y.clone(), expected)
+        self.assertEqual(y.resolve_neg(), expected)
+        self.assertEqual(y.cpu(), expected)
+
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
         def to_cpu(x):
