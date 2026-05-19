@@ -332,7 +332,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
                 *args,
                 **kwargs,
             )
-            rs_input, rs_event, *rest = result
+            rs_input, rs_event, post_reduce_stream, *rest = result
             if reduce_scatter_group not in delay_streams:
                 delay_streams[reduce_scatter_group] = device_module.Stream()
             ds = delay_streams[reduce_scatter_group]
@@ -340,7 +340,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             with device_module.stream(ds):
                 device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
                 delayed_event = ds.record_event()
-            return (rs_input, delayed_event, *rest)
+            return (rs_input, delayed_event, post_reduce_stream, *rest)
 
         dist.barrier()
         _pg_mod.foreach_reduce = wrapped

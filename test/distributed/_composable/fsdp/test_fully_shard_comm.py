@@ -290,6 +290,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         (
             _,
             _,
+            _,
             post_reduce_event,
             _,
             _,
