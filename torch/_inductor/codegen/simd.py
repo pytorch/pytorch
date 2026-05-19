@@ -2566,8 +2566,6 @@ class SIMDScheduling(BaseScheduling):
             else:
                 # Multi-node: create ComboKernel with combo subkernels.
                 # Combo is horizontal fusion — all subkernels are independent.
-                # No shared intermediate buffers, so process_kernel for one
-                # subkernel cannot affect another's seed codegen.
                 kernel = ComboKernel(
                     triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
@@ -2575,6 +2573,7 @@ class SIMDScheduling(BaseScheduling):
                     per_subkernel_blocks=per_subkernel_blocks,
                 )
                 node_info_group: list[NodeInfo] = []
+                gen_seeds = per_subkernel_blocks and not only_gen_src_code
                 for pn in node_group:
                     node_info = node_schedule_map[pn]
                     node_info_group.append(node_info)
@@ -2586,6 +2585,21 @@ class SIMDScheduling(BaseScheduling):
                         tiling_scores=node_info.tiling_scores,
                         per_subkernel_blocks=per_subkernel_blocks,
                     )
+                    # Seed codegen must precede process_kernel: the latter's
+                    # mark_run -> codegen_inplace_reuse adds the inplaced input
+                    # to V.graph.wrapper_code.freed, which then blocks the
+                    # seed's own decide_inplace_update.can_reuse() and forces
+                    # a non-inplace signature that diverges from the combo
+                    # subkernel's (bench skips cloning -> NaN under AMP on T5).
+                    if gen_seeds:
+                        seed_src_code, seed_kernel = (
+                            self.generate_kernel_code_and_kernel_from_node_info(
+                                node_info
+                            )
+                        )
+                        kernel.standalone_autotune_seed_kernels.append(
+                            (seed_src_code, seed_kernel, node_info.node_schedule)
+                        )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
                         node_info.node_schedule,
@@ -2625,16 +2639,20 @@ class SIMDScheduling(BaseScheduling):
                 assert len(kernel.sub_kernels) > 1
                 assert len(node_group) == len(node_info_group)
                 if per_subkernel_blocks:
+                    # Seeds were codegened in generate_combo_kernel_code; here
+                    # we just define + pack args.
+                    assert len(kernel.standalone_autotune_seed_kernels) == len(
+                        node_info_group
+                    )
                     seed_infos = []
-                    for node_info in node_info_group:
-                        seed_src_code, seed_kernel = (
-                            self.generate_kernel_code_and_kernel_from_node_info(
-                                node_info
-                            )
-                        )
+                    for (
+                        seed_src_code,
+                        seed_kernel,
+                        seed_node_schedule,
+                    ) in kernel.standalone_autotune_seed_kernels:
                         seed_kernel_name = self.define_kernel(
                             seed_src_code,
-                            node_info.node_schedule,
+                            seed_node_schedule,
                             seed_kernel,
                         )
                         _, seed_call_args, _, seed_arg_types = (
