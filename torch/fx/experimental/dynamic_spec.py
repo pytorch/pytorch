@@ -308,22 +308,7 @@ class ParamsSpec:
             }
         )
 
-    Key conventions:
-
-    * **Regular named arg** — key is the parameter's Python name
-      (``"x"``, ``"n"`` above). Value is a leaf spec (``TensorSpec`` /
-      ``IntVar`` / ``int`` / ``None``).
-    * **``*args`` slot** — key is the literal sentinel ``"*args"``,
-      regardless of the function's actual ``*args`` Python name. Value
-      is a ``list[LeafSpec]`` indexed positionally: position ``N`` of the
-      list applies to ``args[N]``. The spec does not constrain
-      ``len(args)`` — positions past the end of the list are static.
-    * **``**kwargs`` slot** — key is the literal sentinel ``"**kwargs"``.
-      Value is a ``dict[str, LeafSpec]`` keyed by the actual keyword name
-      (so the ``"**kwargs"`` entry ``"foo"`` applies to
-      ``kwargs["foo"]``).
-
-    **Anything not expressed in ``ParamsSpec`` is STATIC.**
+    Anything not expressed in ``ParamsSpec`` is STATIC.**
     """
 
     _VARARGS_KEY = "*args"

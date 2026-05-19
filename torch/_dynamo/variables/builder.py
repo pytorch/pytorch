@@ -401,7 +401,7 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
     ``int`` or ``str`` key).
 
     Returns ``None`` for sources that we know we can't represent them
-    in our specs.
+    in shapes specs.
     """
     path: list[_AccessToken] = []
     cur: Source = source
@@ -414,24 +414,19 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         # ``self.weight`` → dynamo emits
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
         # '_parameters'), 'weight')``. Collapse that pair into a single
-        # attr token so the user's ``ObjectSpec({"weight": ...})``
-        # matches the user-facing attribute name.
+        # attr token.
         if isinstance(cur, DictGetItemSource) and isinstance(
             cur.base, UnspecializedParamBufferSource
         ):
             path.append(_AttrToken(cur.index))
             cur = cur.base.base
             continue
-        # Plain ``dict[key]`` access on a function-arg dict — emit a
-        # subscript token so ``DictSpec`` can be walked.
+        # Plain ``dict[key]`` access.
         if isinstance(cur, DictGetItemSource) and isinstance(cur.index, (int, str)):
             path.append(_SubscriptToken(cur.index))
             cur = cur.base
             continue
-        # Integer ``obj[i]`` access on a function-arg (notably the ``*args``
-        # tuple, but also a regular list/tuple-typed input). Emit a subscript
-        # token; for ``*args`` it will index into ``ParamsSpec._varargs``,
-        # for a regular input it falls through (no spec registered).
+        # Integer subscript (e.g. *args[i] or list[i]).
         if isinstance(cur, GetItemSource) and type(cur.index) is int:
             path.append(_SubscriptToken(cur.index))
             cur = cur.base
@@ -504,30 +499,8 @@ def _walk_spec(
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Walk a dynamo ``Source`` chain against the spec tree.
-
-    Returns the ``LeafSpec`` at the corresponding path, or ``None`` if the
-    source isn't covered. See ``_source_to_access_path`` for the set of
-    supported source kinds.
-
-    The root ``_LocalToken`` chooses which ``ParamsSpec`` map seeds the walk:
-
-    * regular named arg (``is_varargs=False``, ``is_varkw=False``) →
-      ``params._named_args[name]``, then walk ``path[1:]``;
-    * ``*args`` element (``is_varargs=True``) → the next token must be a
-      ``_SubscriptToken(int)``; seed from ``params._varargs[index]``
-      (out-of-range or missing ``_varargs`` ⇒ ``None``), then walk
-      ``path[2:]``;
-    * ``**kwargs`` element (``is_varkw=True``) → the next token must be a
-      ``_SubscriptToken(str)``; seed from ``params._varkw[key]`` (missing
-      key or ``_varkw`` ⇒ ``None``), then walk ``path[2:]``.
-
-    Note: indexed access into a regular list/tuple-typed input (e.g. ``def
-    forward(self, lst): return lst[0]``) produces the same shape as ``*args``
-    at the source level, but its root ``_LocalToken`` has ``is_varargs=False``
-    and the lookup falls through ``params._named_args`` (no spec registered ⇒
-    ``None``). Same for keyed access into a regular dict-typed input vs
-    ``**kwargs``.
+    """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
+    Returns ``None`` if the source isn't covered.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
@@ -537,11 +510,15 @@ def lookup_spec_from_dynamo_source(
     params = shapes_spec._params
     root = path[0]
     if root.is_varargs:
-        # ``*args`` element access: root is the varargs local, next token is
-        # the int index. Non-int here would mean ``_source_to_access_path``
-        # mis-tokenized the chain.
-        if len(path) < 2 or not isinstance(path[1], _SubscriptToken):
-            return None
+        # ``*args`` element access: root is the varargs local, next token must
+        # be an int subscript. A varargs local is always followed by a
+        # subscript token in ``_source_to_access_path``; anything else means
+        # the chain was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after *args local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
         key = path[1].key
         if type(key) is not int:
             raise RuntimeError(
@@ -552,10 +529,15 @@ def lookup_spec_from_dynamo_source(
             return None
         return _walk_spec(params._varargs[key], path[2:])
     if root.is_varkw:
-        # ``**kwargs`` element access: root is the varkw local, next token is
-        # the str key.
-        if len(path) < 2 or not isinstance(path[1], _SubscriptToken):
-            return None
+        # ``**kwargs`` element access: root is the varkw local, next token must
+        # be a str subscript. A varkw local is always followed by a subscript
+        # token in ``_source_to_access_path``; anything else means the chain
+        # was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after **kwargs local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
         key = path[1].key
         if not isinstance(key, str):
             raise RuntimeError(
@@ -564,8 +546,10 @@ def lookup_spec_from_dynamo_source(
             )
         if params._varkw is None or key not in params._varkw:
             return None
+
         return _walk_spec(params._varkw[key], path[2:])
     # Regular named arg: seed at the named-arg root and descend the rest.
+
     current_spec: IntermediateSpec = params._named_args.get(root.name)
     return _walk_spec(current_spec, path[1:])
 

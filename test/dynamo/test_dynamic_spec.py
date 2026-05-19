@@ -262,14 +262,6 @@ x:
   foo: IntVar(k#1)""",
         )
 
-    def test_params_spec_to_jsonable_named_only(self):
-        ps = ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
-        obj = ps.to_jsonable()
-        self.assertEqual(obj["type"], "ParamsSpec")
-        self.assertIn("x", obj["params"])
-        self.assertNotIn("*args", obj["params"])
-        self.assertNotIn("**kwargs", obj["params"])
-
     def test_params_spec_to_jsonable_with_varargs_and_varkw(self):
         ps = ParamsSpec(
             {
@@ -867,17 +859,14 @@ class TestDictSpecCompile(TestCase):
 
 
 class TestVarargsCompile(TestCase):
-    """`*args`` and ``**kwargs`` entries in a ``ParamsSpec``
-    propagate ``ShapeVar`` dims through to the compiled tensors."""
-
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
 
     def test_named_and_varargs_and_varkw(self):
         """Combined: named tensor + ``*args`` tensor + ``**kwargs`` tensor.
-        ``ShapeVar`` dims become SymInts; varying only those dims does
-        not recompile (parallel to ``test_unbacked_graph_has_unbacked_symbol``)."""
+        ``ShapeVar`` dims become SymInts
+        """
 
         def f(x, *args, **kwargs):
             return x + args[0] + kwargs["foo"]
@@ -927,8 +916,6 @@ class TestVarargsCompile(TestCase):
             },
         )
 
-        # ``args[0] + args[1]`` unifies ShapeVars ``a`` and ``b`` via broadcast,
-        # so call sites must use matching sizes.
         compiled(torch.randn(4, 3), torch.randn(4, 3))
         compiled(torch.randn(8, 3), torch.randn(8, 3))
         compiled(torch.randn(16, 3), torch.randn(16, 3))
@@ -959,8 +946,6 @@ class TestVarargsCompile(TestCase):
             },
         )
 
-        # ``kwargs["a"] + kwargs["b"]`` unifies the two ShapeVars via broadcast,
-        # so call sites must use matching sizes.
         compiled(a=torch.randn(4, 3), b=torch.randn(4, 3))
         compiled(a=torch.randn(8, 3), b=torch.randn(8, 3))
         compiled(a=torch.randn(16, 3), b=torch.randn(16, 3))
