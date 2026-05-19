@@ -195,8 +195,11 @@ if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'default' ]]; then
-  export CUDA_VISIBLE_DEVICES=0
-  export HIP_VISIBLE_DEVICES=0
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export HIP_VISIBLE_DEVICES=0
+  else
+    export CUDA_VISIBLE_DEVICES=0
+  fi
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -642,6 +645,15 @@ test_inductor_shard() {
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  # ROCm origami GEMM tests: rocm.origami / max_autotune are read once at config
+  # import (env-var-driven, see torch/_inductor/config.py); without these set
+  # before the process starts, the test_origami.py test class self-skips. Run
+  # only on shard 1 to avoid duplicate execution across shards.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] && [[ "$1" -eq 1 ]]; then
+    TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 \
+      python test/run_test.py --include inductor/test_origami --verbose
+  fi
 }
 
 test_inductor_aoti_cpp() {
@@ -656,7 +668,7 @@ test_inductor_aoti_cpp() {
     TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
   fi
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -1098,9 +1110,17 @@ collect_tlparse_output() {
     return
   fi
 
-  echo "Collecting tlparse output from $trace_dir"
+  echo "Collecting torch trace output from $trace_dir"
 
-  # Install tlparse if not already available
+  # Always preserve raw trace logs (gzipped) for downstream analysis
+  mkdir -p "$test_reports_dir/tlparse_output"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    gzip -c "$f" > "$test_reports_dir/tlparse_output/$(basename "$f").gz"
+  done
+  echo "Raw trace logs saved to $test_reports_dir/tlparse_output/"
+
+  # Try to generate HTML report via tlparse (best-effort)
   if ! command -v tlparse &>/dev/null; then
     pip install tlparse 2>/dev/null || {
       echo "Warning: failed to install tlparse, skipping HTML generation"
@@ -1108,14 +1128,12 @@ collect_tlparse_output() {
     }
   fi
 
-  # Run tlparse to generate HTML report
-  mkdir -p "$test_reports_dir/tlparse_output"
-  tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$trace_dir" 2>&1 || {
-    echo "Warning: tlparse failed to generate HTML output"
-    return
-  }
-
-  echo "TLParse output generated in $test_reports_dir/tlparse_output/"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$f" 2>&1 || {
+      echo "Warning: tlparse failed on $(basename "$f")"
+    }
+  done
 }
 
 test_dynamo_benchmark() {
@@ -1342,6 +1360,14 @@ test_unbacked_parity_smoketest() {
 }
 
 test_inductor_set_cpu_affinity(){
+  # `nproc` from coreutils honors $OMP_NUM_THREADS and returns the smaller of
+  # that and the real cpuset count. The USE_ARC block earlier in this script
+  # sets OMP_NUM_THREADS=nproc/4 for general tests; if we leave it set, every
+  # subsequent `nproc` call here returns the quartered value instead of the
+  # pod's true CPU allocation. Unset it so we can re-derive OMP_NUM_THREADS
+  # from the actual cgroup cpuset below.
+  unset OMP_NUM_THREADS
+
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -1359,10 +1385,6 @@ test_inductor_set_cpu_affinity(){
   thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
   cores=$((cpus / thread_per_core))
 
-  # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
-    cores=16
-  fi
   export OMP_NUM_THREADS=$cores
 
   # Handle cgroups slice start and end CPU

@@ -939,6 +939,44 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
+    @skipIfXpu
+    def test_linear_add_bias_float_constant(self, device="cpu"):
+        # Regression test: is_linear_add_bias should not crash when
+        # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
+        # See https://github.com/pytorch/pytorch/pull/183514
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaLN_modulation = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.Linear(64, 64, bias=True),
+                )
+
+            def forward(self, c):
+                return 1.0 + self.adaLN_modulation(c)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().eval()
+            v = torch.randn(2, 64)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+                # The float constant should NOT be folded as bias
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_bias_matcher_count"], 0
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
+
     @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
