@@ -52,7 +52,6 @@ AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunner
 
 import sys
 
-
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -985,6 +984,9 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def test_inductor_all_reduce_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42

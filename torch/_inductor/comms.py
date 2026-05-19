@@ -2222,8 +2222,8 @@ def _swap_nodes(
 
 
 def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
-    """Move collectives earlier and waits later. No collective reordering,
-    no memory regression (each swap verified via incremental tracking)."""
+    """Move collectives earlier and waits later via adjacent swaps.
+    Each swap is safe: no collective reordering, no memory regression."""
     import time as _time
 
     if len(snodes) < 2:
