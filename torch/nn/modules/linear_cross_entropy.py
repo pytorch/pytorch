@@ -155,8 +155,9 @@ class LinearCrossEntropyOptions:
         if self.acc_policy not in {"auto", "accurate", "balanced", "compact"}:
             raise ValueError(f"invalid acc_policy: {self.acc_policy!r}")
         if self.chunking_method is not None and self.chunking_method != "auto":
-            name, _, factor = self.chunking_method.partition(":")
-            factor = factor or "1"
+            name, sep, factor = self.chunking_method.partition(":")
+            if not sep:
+                factor = "1"
             if not (name == "aspect_ratio" and factor.isdigit() and int(factor) > 0):
                 raise ValueError(f"invalid chunking_method: {self.chunking_method!r}")
         if not (
