@@ -354,19 +354,13 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 } // namespace utils
                 } // namespace ck
 
-                const std::vector<std::size_t>& HostTensorDescriptor::GetLengths() const { return mLens; }
-                const std::vector<std::size_t>& HostTensorDescriptor::GetStrides() const { return mStrides; }
-                std::size_t HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
-                void HostTensorDescriptor::CalculateStrides() {
-                    mStrides.clear();
-                    mStrides.resize(mLens.size(), 0);
-                    if(mStrides.empty())
-                        return;
-
-                    mStrides.back() = 1;
-                    std::partial_sum(
-                        mLens.rbegin(), mLens.rend() - 1, mStrides.rbegin() + 1, std::multiplies<std::size_t>());
-                }
+                // NOTE: HostTensorDescriptor methods are declared in CK headers but defined
+                // in CK's utility library. For architectural reasons, generated code doesn't
+                // link with this library, so we provide local definitions here.
+                // CalculateStrides is omitted as it became a template method in CK 4266f867.
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetLengths() const { return mLens; }
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetStrides() const { return mStrides; }
+                std::size_t ck::HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
             """
         )
         return res
@@ -437,7 +431,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-    def filter_op(self, op: "CKGroupedConvFwdOp"):
+    def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
         metas = [
             T.get_layout()
             for T in [*self.input_nodes, self.output_node]
@@ -466,6 +460,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         # disable 1x1 and odd-channels conv specializations for now
         if "Default" not in op.conv_forward_specialization:
             return None
+        if self.is_blocked_by_tf32_setting(op):
+            return None
         return op
 
     def gen_ops(self):
@@ -492,7 +488,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:  # type: ignore[name-defined]
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -527,7 +523,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: ROCmTemplateKernel,
-        op: "CKGroupedConvFwdOp",
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
         **kwargs,
     ) -> str:
         template_buffer_node = kwargs.get("template_buffer_node")
