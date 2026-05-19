@@ -67,9 +67,13 @@ def _get_flex_flash_fwd_configs(
         return [FlexFlashConfig(score_mod_vec_size=1)]
     if not torch._inductor.config.max_autotune:
         return [FlexFlashConfig()]
-    return [
+    configs = [
         FlexFlashConfig(score_mod_vec_size=v) for v in (1, 2, 4, 8, 16, 32, 64, 128)
     ]
+    max_configs = torch._inductor.config.test_configs.max_flex_configs
+    if max_configs is not None and len(configs) > max_configs:
+        configs = configs[:max_configs]
+    return configs
 
 
 def _select_aux_score_mod_vec_size(
