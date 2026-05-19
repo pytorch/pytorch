@@ -116,6 +116,7 @@ class CoordescTuner:
             # does not have the R0_BLOCK field to guarantee that.
             "R0_BLOCK",
             "R1_BLOCK",
+            "R2_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",

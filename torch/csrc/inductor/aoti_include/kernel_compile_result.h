@@ -15,6 +15,8 @@ struct LazyKernelCompileResult {
   std::vector<int> yblocks;
   std::vector<int> zblocks;
   std::vector<int> r0blocks;
+  std::vector<int> r1blocks;
+  std::vector<int> r2blocks;
   int rsplit;
   int rsplit_size;
   int config_index;

@@ -34,6 +34,8 @@ class TritonKernelCompileResult:
     yblocks: list[int]
     zblocks: list[int]
     r0blocks: list[int]
+    r1blocks: list[int]
+    r2blocks: list[int]
     rsplit: int
     rsplit_size: int
     config_index: int | None
@@ -191,11 +193,15 @@ def run_triton_kernel_with_autotune(
         yblocks = [config.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
         zblocks = [config.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
         r0blocks = [config.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+        r1blocks = [config.get(f"R1_BLOCK_{i}", 1) for i in range(num_kernels)]
+        r2blocks = [config.get(f"R2_BLOCK_{i}", 1) for i in range(num_kernels)]
     else:
         xblocks = [config.get("XBLOCK", 128)]
         yblocks = [config.get("YBLOCK", 1)]
         zblocks = [config.get("ZBLOCK", 1)]
         r0blocks = [config.get("R0_BLOCK", 1)]
+        r1blocks = [config.get("R1_BLOCK", 1)]
+        r2blocks = [config.get("R2_BLOCK", 1)]
     rsplit = config.get("RSPLIT", 1)
     rsplit_size = config.get("RSPLIT_SIZE", 1)
 
@@ -216,8 +222,9 @@ def run_triton_kernel_with_autotune(
 
     log.debug(
         "Successfully autotuned Triton kernel: cubin_path=%s, mangled_name=%s, "
-        "num_warps=%d, shared_mem=%d, xblocks=%s, yblocks=%s, zblocks=%s, r0blocks=%s, "
-        "rsplit=%d, rsplit_size=%d, config_index=%s, global_scratch=%s, profile_scratch=%s",
+        "num_warps=%d, shared_mem=%d, xblocks=%s, yblocks=%s, zblocks=%s, "
+        "r0blocks=%s, r1blocks=%s, r2blocks=%s, rsplit=%d, rsplit_size=%d, "
+        "config_index=%s, global_scratch=%s, profile_scratch=%s",
         cubin_path,
         mangled_name,
         num_warps,
@@ -226,6 +233,8 @@ def run_triton_kernel_with_autotune(
         yblocks,
         zblocks,
         r0blocks,
+        r1blocks,
+        r2blocks,
         rsplit,
         rsplit_size,
         config_index,
@@ -242,6 +251,8 @@ def run_triton_kernel_with_autotune(
         yblocks=yblocks,
         zblocks=zblocks,
         r0blocks=r0blocks,
+        r1blocks=r1blocks,
+        r2blocks=r2blocks,
         rsplit=rsplit,
         rsplit_size=rsplit_size,
         config_index=config_index,

@@ -107,6 +107,8 @@ static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
   compile_result.yblocks = getIntListAttr(result, "yblocks");
   compile_result.zblocks = getIntListAttr(result, "zblocks");
   compile_result.r0blocks = getIntListAttr(result, "r0blocks");
+  compile_result.r1blocks = getIntListAttr(result, "r1blocks");
+  compile_result.r2blocks = getIntListAttr(result, "r2blocks");
   compile_result.rsplit = getIntAttr(result, "rsplit");
   compile_result.rsplit_size = getIntAttr(result, "rsplit_size");
   compile_result.config_index = getOptionalIntAttr(result, "config_index");

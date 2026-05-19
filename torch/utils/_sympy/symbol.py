@@ -36,7 +36,7 @@ class SymT(Enum):
     # Inductor: An indexing variable i0 in loops IR which ranges over non-reduced
     # dim in the loop
     INDEX = auto()
-    # Inductor: A reduction indexing (r0, r1) variables in loops IR which ranges over
+    # Inductor: Reduction indexing variables in loops IR which range over
     # reduced dim(s) in the loop
     R0_INDEX = auto()
     R1_INDEX = auto()
@@ -53,6 +53,9 @@ class SymT(Enum):
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
     HALIDE = auto()
+    # Inductor: third reduction indexing variable. Keep this after the existing
+    # symbols so their enum values do not change.
+    R2_INDEX = auto()
 
 
 # Invariant: there must not be a prefix which is a prefix of another string,
@@ -77,6 +80,7 @@ prefix_str = {
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
+    SymT.R2_INDEX: "r2_",
 }
 
 
