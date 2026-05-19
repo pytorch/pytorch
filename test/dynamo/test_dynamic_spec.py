@@ -10,6 +10,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.dynamic_spec import (
     IntVar,
+    ObjectSpec,
     ParamsSpec,
     ShapesSpec,
     ShapeVar,
@@ -499,6 +500,172 @@ class TestShapeVarCompile(TestCase):
         self.assertIsNotNone(sym)
         expr = sym.node.expr
         self.assertEqual(sym.node.shape_env.var_to_hint_override.get(expr), 128)
+
+
+class TestObjectSpec(TestCase):
+    """``ObjectSpec`` data class — construction, access, repr."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_dict_construction(self):
+        """Fields supplied via the constructor preserve identity and order."""
+        spec = TensorSpec([ShapeVar("h"), None])
+        os = ObjectSpec({"weight": spec, "bias": None})
+        self.assertEqual(len(os), 2)
+        self.assertIn("weight", os)
+        self.assertIs(os._fields["weight"], spec)
+        self.assertIsNone(os._fields["bias"])
+
+    def test_iter_and_items(self):
+        """Iteration walks fields in insertion order; items() yields pairs."""
+        sv_w = ShapeVar("h")
+        sv_b = ShapeVar("h")
+        ts_w = TensorSpec([sv_w, None])
+        ts_b = TensorSpec([sv_b])
+        os = ObjectSpec({"weight": ts_w, "bias": ts_b})
+        self.assertEqual(list(os), ["weight", "bias"])
+        self.assertEqual(list(os.items()), [("weight", ts_w), ("bias", ts_b)])
+
+    def test_recursive_nesting(self):
+        """A field's value may itself be an ``ObjectSpec``."""
+        inner_spec = TensorSpec([ShapeVar("h"), None])
+        inner = ObjectSpec({"weight": inner_spec})
+        outer = ObjectSpec({"inner": inner})
+        self.assertIs(outer._fields["inner"], inner)
+        self.assertIs(inner._fields["weight"], inner_spec)
+
+    def test_repr_with_none_leaf(self):
+        """Single-field repr with a ``None`` leaf renders inline."""
+        os = ObjectSpec({"weight": None})
+        self.assertEqual(
+            repr(os),
+            """\
+object_spec:
+  .weight: None""",
+        )
+
+    def test_repr_with_tensorspec(self):
+        """Multi-line leaf repr is indented under its field name."""
+        os = ObjectSpec({"weight": TensorSpec([ShapeVar("batch"), None])})
+        self.assertEqual(
+            repr(os),
+            """\
+object_spec:
+  .weight:
+    Tensor:
+      0: ShapeVar(batch#0, min=0)
+      1: None""",
+        )
+
+    def test_repr_nested(self):
+        """Nested ``ObjectSpec`` repr indents recursively."""
+        inner = ObjectSpec({"weight": None})
+        outer = ObjectSpec({"inner": inner})
+        self.assertEqual(
+            repr(outer),
+            """\
+object_spec:
+  .inner:
+    object_spec:
+      .weight: None""",
+        )
+
+    def test_to_jsonable(self):
+        """``to_jsonable`` recurses into spec children; raw leaves pass through."""
+        os = ObjectSpec(
+            {
+                "weight": TensorSpec([ShapeVar("h"), None]),
+                "bias": None,
+            }
+        )
+        out = os.to_jsonable()
+        self.assertEqual(out["type"], "ObjectSpec")
+        self.assertIsInstance(out["fields"]["weight"], dict)
+        self.assertEqual(out["fields"]["weight"]["type"], "TensorSpec")
+        self.assertIsNone(out["fields"]["bias"])
+
+
+class TestObjectSpecCompile(TestCase):
+    """End-to-end: ``ObjectSpec`` routes through to a tensor reached
+    via attribute access on a function arg (``obj.w``)."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_attr_tensor_dim_dynamic(self):
+        """A tensor reached via attribute access (``obj.w``) honors the
+        ``ShapeVar`` in its ``ObjectSpec`` field; varying that dim does
+        not recompile."""
+
+        class Container:
+            def __init__(self, w):
+                self.w = w
+
+        def fn(obj):
+            return obj.w + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec(
+                    {"obj": ObjectSpec({"w": TensorSpec([ShapeVar("h"), None])})}
+                )
+            ),
+        )
+
+        compiled(Container(torch.randn(4, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Different dim 0 size — dynamic absorbs it, no recompile.
+        compiled(Container(torch.randn(8, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Captured weight placeholder has a SymInt at dim 0.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+
+    def test_nn_module_parameter_dim_dynamic(self):
+        """An ``nn.Parameter`` reached via ``self.weight`` honors the
+        spec. Parameters are normally force-marked static and routed
+        as graph attributes, bypassing ``_automatic_dynamic``; the
+        spec-aware specialization fixes in ``wrap_module`` /
+        ``wrap_tensor`` skip those fast paths when a spec applies, so
+        the Parameter flows through the dynamic-shape path."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3))
+
+            def forward(self):
+                return self.weight + 1
+
+        m = M()
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            m,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec(
+                    {"self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})}
+                )
+            ),
+        )
+
+        compiled()
+        self.assertEqual(len(backend.graphs), 1)
+        m.weight = torch.nn.Parameter(torch.randn(8, 3))
+        compiled()
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Captured weight placeholder has a SymInt at dim 0.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
 
 
 if __name__ == "__main__":
