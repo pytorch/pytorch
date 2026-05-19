@@ -2751,6 +2751,115 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
                 self.assertEqual(accumulated_count, count1 + count2)
 
+    def test_list_tensor_pattern_replacement(self):
+        with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
+            lib.define("list_op(Tensor[] xs) -> Tensor[]")
+            lib.impl(
+                "list_op",
+                lambda xs: [x + 1 for x in xs],
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("_test_pm_list::list_op", lib=lib)
+            def list_op_fake(xs):
+                return xs
+
+            def src_pattern(xs: list[torch.Tensor]):
+                return torch.ops._test_pm_list.list_op.default(xs)
+
+            def target_pattern(xs: list[torch.Tensor]):
+                return xs
+
+            class Backend:
+                def __init__(self, example_inputs) -> None:
+                    self.pm = PatternMatcherPass()
+                    self.count = 0
+                    self.graph = None
+                    register_replacement(
+                        src_pattern,
+                        target_pattern,
+                        [example_inputs],
+                        fwd_only,
+                        self.pm,
+                    )
+
+                def __call__(self, gm, example_inputs):
+                    self.count = self.pm.apply(gm.graph)
+                    gm.graph.lint()
+                    gm.recompile()
+                    self.graph = gm.graph
+                    return gm.forward
+
+            def run_case(length):
+                torch._dynamo.reset()
+                backend = Backend([torch.empty(4, 5) for _ in range(length)])
+
+                def fn(xs):
+                    return torch.ops._test_pm_list.list_op.default(xs)
+
+                xs = [torch.randn(4, 5) for _ in range(length)]
+                result = torch.compile(fn, backend=backend)(xs)
+
+                self.assertEqual(backend.count, 1)
+                self.assertEqual(len(result), length)
+                for actual, expected in zip(result, xs):
+                    self.assertEqual(actual, expected)
+
+                if backend.graph is None:
+                    self.fail("Expected the custom backend to record a graph")
+                op_targets = [
+                    n.target for n in backend.graph.nodes if n.op == "call_function"
+                ]
+                self.assertNotIn(torch.ops._test_pm_list.list_op.default, op_targets)
+
+            run_case(1)
+            run_case(2)
+
+    def test_scalar_workaround_arg_survives_specific_match(self):
+        def src_pattern(x, dim):
+            xmax = x.amax(dim=dim, keepdim=True)
+            xsub = x - xmax
+            xexp = xsub.exp()
+            xsum = xexp.sum(dim=dim, keepdim=True)
+            return xexp / xsum
+
+        def target_pattern(x, dim):
+            return torch.softmax(x, dim=dim)
+
+        def fn(x):
+            xmax = x.amax(dim=1, keepdim=True)
+            xsub = x - xmax
+            xexp = xsub.exp()
+            xsum = xexp.sum(dim=1, keepdim=True)
+            return xexp / xsum
+
+        patterns = PatternMatcherPass()
+        dims = []
+
+        def extra_check(match):
+            dims.append(match.kwargs["dim"])
+            return True
+
+        register_replacement(
+            src_pattern,
+            target_pattern,
+            [torch.empty(4, 8)],
+            fwd_only,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround={"dim": -1},
+        )
+
+        x = torch.randn(4, 8)
+        gm = fwd_only(fn, [x])
+        count = patterns.apply(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(dims, [1])
+        self.assertEqual(gm(x), torch.softmax(x, dim=1))
+
     def test_opaque_obj_custom_op(self):
         with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
             lib.define(
