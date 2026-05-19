@@ -406,12 +406,9 @@ def get_caching_autotuner_plugins(
 
     plugins: list[CachingAutotunerPlugin] = []
     if autotuner.inductor_meta.get("incremental_autotune", False):
-        try:
-            from .fb.incremental import IncrementalAutotunePlugin
+        from .incremental import IncrementalAutotunePlugin
 
-            plugins.append(IncrementalAutotunePlugin())
-        except ImportError:
-            pass
+        plugins.append(IncrementalAutotunePlugin())
     if config.pipeline_caching_autotuner:
         # Lazy import: the plugin lives in ``async_compile`` (alongside
         # the streaming setup helpers), and importing
