@@ -2918,8 +2918,12 @@ def _compile_fx_main(
         )
         fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
-        if config.freezing and not torch.is_grad_enabled():
-            inference_compiler: Callable[..., Any] = functools.partial(
+        # AOTAutograd determines whether the traced graph needs autograd after
+        # running the user code.  Ambient grad mode here may still be enabled
+        # for graphs that enter no_grad/inference_mode inside the compiled
+        # region, so make the inference compiler choice independent of it.
+        if config.freezing:
+            freezing_compiler: Callable[..., Any] = functools.partial(
                 fw_compiler_freezing,
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
@@ -2928,6 +2932,13 @@ def _compile_fx_main(
                 graph_id=compiler_config_extra.graph_id,
                 forward_device=compiler_config_extra.forward_device,
             )
+
+            def inference_compiler(
+                gm: GraphModule, example_inputs: Sequence[InputType]
+            ) -> Any:
+                with torch.no_grad():
+                    return freezing_compiler(gm, example_inputs)
+
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
             inference_compiler = SerializableAOTDispatchCompiler(
