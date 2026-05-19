@@ -222,6 +222,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "partitioned_scatter",
+    "Inductor partitioned scatter pass decisions and memory accounting",
+    off_by_default=True,
+)
+register_artifact(
     "sym_node",
     "Logs extra info for various SymNode operations",
     off_by_default=True,
