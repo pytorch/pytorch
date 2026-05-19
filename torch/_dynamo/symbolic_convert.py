@@ -67,6 +67,7 @@ from . import (
 )
 from .bytecode_analysis import (
     get_indexof,
+    inst_reads_all_locals,
     JUMP_OPNAMES,
     livevars_analysis,
     propagate_line_nums,
@@ -1105,6 +1106,36 @@ def break_graph_if_unsupported(
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
+            current_frame_meta = all_stack_locals_metadata[0]
+            if current_frame_meta.locals_names and inst_reads_all_locals(
+                self.instructions, get_indexof(self.instructions)[inst]
+            ):
+                # locals()/vars() inspects the active frame before the resume
+                # function reloads fast locals, so materialize the current
+                # frame's live locals before we execute the unsupported call.
+                current_num_stack = len(self.stack) - len(
+                    current_frame_meta.stack_null_idxes
+                )
+                cg = PyCodegen(self.output.root_tx)
+                self.output.add_output_instructions(
+                    [
+                        *create_copy(current_num_stack + 1),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                    ]
+                )
+                for local, idx in current_frame_meta.locals_names.items():
+                    self.output.add_output_instructions(
+                        [
+                            create_dup_top(),
+                            cg.create_load_const(idx),
+                            cg.create_binary_subscr(),
+                            cg.create_store(local),
+                        ]
+                    )
+                self.output.add_output_instructions([create_instruction("POP_TOP")])
+                del cg
+
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
                     self.kw_names.as_python_constant()
@@ -1399,7 +1430,11 @@ class InstructionTranslatorBase(
             if k in self.cell_and_freevars()
         }
         # Only keep the locals that must remain on the stack.
-        reads = livevars_analysis(self.instructions, self.current_instruction)
+        reads = livevars_analysis(
+            self.instructions,
+            self.current_instruction,
+            set(self.symbolic_locals),
+        )
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in reads
         }
@@ -3229,7 +3264,11 @@ class InstructionTranslatorBase(
         # There should not be any pruning in the other frames since
         # the current instruction there should be a CALL.
         if is_leaf:
-            reads = livevars_analysis(self.instructions, resume_inst)
+            reads = livevars_analysis(
+                self.instructions,
+                resume_inst,
+                set(self.symbolic_locals),
+            )
             all_argnames = tuple(
                 k
                 for k in self.symbolic_locals

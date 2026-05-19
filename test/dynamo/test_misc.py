@@ -13617,6 +13617,30 @@ fn
 
         self.assertEqual(torch.compile(fn, backend="eager")().shape, (3, 5))
 
+    def test_locals_after_graph_break_preserves_live_locals(self):
+        cnts = CompileCounterWithBackend("eager")
+        counters.clear()
+
+        def fn(x):
+            if x.dim() > 2:
+                batch_size, seq_len, hidden_dim = x.shape
+                x = x.view(-1, hidden_dim)
+
+            x = x.sin()
+
+            if "batch_size" in locals() and "seq_len" in locals():
+                x = x.view(batch_size, seq_len, -1)
+
+            return x
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+        res = torch.compile(fn, backend=cnts, fullgraph=False)(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(res.shape, ref.shape)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):
