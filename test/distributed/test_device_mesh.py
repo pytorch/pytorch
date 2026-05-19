@@ -203,7 +203,7 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl" or self.backend == "xccl":
+        if self.backend == torch.distributed.get_default_backend_for_device(self.device_type)
             curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
