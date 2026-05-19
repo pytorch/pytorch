@@ -165,7 +165,7 @@ inline int aotriton_max_hdim() {
   }();
   return max_hdim;
 }
-#endif
+#endif // USE_ROCM_ATTENTION
 
 // For AOTriton <= 0.11:
 // On ROCM, ME and FA share the backend, and hence they share the checking
@@ -291,7 +291,8 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     }
     return false;
   }
-#if USE_ROCM_ATTENTION && AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+#if USE_ROCM_ATTENTION
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
   const auto max_size = c10::SymInt(aotriton_max_hdim());
   if (!(query_size_last <= max_size && value_size_last <= max_size)) {
     if (debug) {
@@ -309,7 +310,8 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     }
     return false;
   }
-#endif
+#endif // AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+#endif // USE_ROCM_ATTENTION
   return true;
 }
 
@@ -986,12 +988,17 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-#if USE_ROCM_ATTENTION && AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
-      check_head_dim_size_flash<true /* caller_is_meff */>
+#if USE_ROCM_ATTENTION
+#if AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
+      check_head_dim_size_flash<true /* caller_is_meff */>,
 #else
       // hdim_qk != hdim_vo is supported since AOTriton 0.12
       check_head_dim_size_mem_efficient,
 #endif
+#endif // AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
+#else
+      check_head_dim_size_mem_efficient,
+#endif // USE_ROCM_ATTENTION
       check_data_ptr_alignment_mem_efficient
   );
   for (auto& constraint : general_constraints) {
