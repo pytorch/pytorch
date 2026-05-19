@@ -25,6 +25,21 @@ def define_tools_targets(
     )
 
     python_library(
+        name = "emit_selected_operators_yaml_lib",
+        srcs = ["emit_selected_operators_yaml.py"],
+        base_module = "",
+    )
+
+    python_binary(
+        name = "emit_selected_operators_yaml",
+        main_module = "emit_selected_operators_yaml",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":emit_selected_operators_yaml_lib",
+        ],
+    )
+
+    python_library(
         name = "jit",
         srcs = glob([
             "jit/*.py",
