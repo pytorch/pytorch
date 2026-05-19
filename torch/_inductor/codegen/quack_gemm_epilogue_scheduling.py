@@ -92,6 +92,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 local_reduce_kwargs += f", local_reduce_op={qtb.local_reduce_op!r}"
             if qtb.local_reduce_scale != 1.0:
                 local_reduce_kwargs += f", local_reduce_scale={qtb.local_reduce_scale!r}"
+            if qtb.local_reduce_op == "mx_e8m0_scale" or qtb.local_reduce_max_power != 8:
+                local_reduce_kwargs += f", local_reduce_max_power={qtb.local_reduce_max_power!r}"
             if qtb.local_reduce_feeds_main:
                 local_reduce_kwargs += ", local_reduce_feeds_main=True"
         if qtb.gemm_op in ("mm", "bmm"):

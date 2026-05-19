@@ -8715,6 +8715,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             ),
             local_reduce_op=local_reduce.kind if local_reduce is not None else None,
             local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
+            local_reduce_max_power=local_reduce.max_power if local_reduce is not None else 8,
             local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
             mutated_inputs=mutated_inputs or None,
         )
