@@ -472,8 +472,10 @@ def _write_files_from_queue(
                     stream.flush()
                     try:
                         os.fsync(stream.fileno())
-                    except (AttributeError, UnsupportedOperation):
-                        pass  # flush() already did what was possible for this stream
+                    except (AttributeError, UnsupportedOperation) as e:
+                        warnings.warn(
+                            f"fsync not supported for this stream, relying on flush(): {e}"
+                        )
                 stream.close()
             result_queue.put(write_results)
     except queue.Empty:
@@ -779,8 +781,10 @@ class _FileSystemWriter(StorageWriter):
                 metadata_file.flush()
                 try:
                     os.fsync(metadata_file.fileno())
-                except (AttributeError, UnsupportedOperation):
-                    pass  # flush() already did what was possible for this stream
+                except (AttributeError, UnsupportedOperation) as e:
+                    warnings.warn(
+                        f"fsync not supported for this stream, relying on flush(): {e}"
+                    )
 
         # delete in-case other checkpoints were present.
         if not self.use_collectives and self.rank is not None:

@@ -5,6 +5,9 @@ import tempfile
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
+from unittest.mock import patch
+
+import fsspec
 
 import torch
 import torch.distributed as dist
@@ -208,9 +211,10 @@ class TestFileSystem(TestCase):
                 raise OSError("fail")
         self.assertTrue(fs.exists(read_file))
 
-    def test_fsspec_without_fileno_support(self):
+    @patch("os.sync")
+    def test_fsspec_without_fileno_support(self, mock_os_sync):
         """
-        fsspec's "memory://" protocol simulates cloud storage like GCS or S3
+        fsspec's "memory://" protocol simulates cloud storage
         by not supporting .fileno() and raising io.UnsupportedOperation.
         This tests that the stream is flushed and fsync degrades gracefully.
         """
@@ -219,13 +223,22 @@ class TestFileSystem(TestCase):
         # Create a dummy state dict
         state_dict = {"tensor": torch.randn(10)}
 
-        # Save using FsspecWriter
-        dcp.save(
-            state_dict=state_dict,
-            storage_writer=FsspecWriter(checkpoint_dir),
-            planner=dcp.DefaultSavePlanner(),
-            no_dist=True,
-        )
+        # Spy on the MemoryFile flush method to ensure it gets called
+        with patch.object(
+            fsspec.implementations.memory.MemoryFile, "flush", autospec=True
+        ) as mock_flush:
+            # Save using FsspecWriter
+            dcp.save(
+                state_dict=state_dict,
+                storage_writer=FsspecWriter(checkpoint_dir),
+                planner=dcp.DefaultSavePlanner(),
+                no_dist=True,
+            )
+
+            # Assert that flush() was explicitly called on the stream
+            self.assertTrue(
+                mock_flush.called, "Expected stream.flush() to be called explicitly."
+            )
 
         # Verify it saved properly and can be loaded
         load_dict = {"tensor": torch.zeros(10)}
@@ -237,6 +250,9 @@ class TestFileSystem(TestCase):
         )
 
         self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
+
+        # Assert that os.sync() was NEVER called
+        mock_os_sync.assert_not_called()
 
 
 if __name__ == "__main__":
