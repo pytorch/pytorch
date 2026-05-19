@@ -32,7 +32,6 @@ import torch.distributed.algorithms.model_averaging.utils as model_averaging_uti
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.xpu
 from torch._utils_internal import (
     TEST_MASTER_ADDR as MASTER_ADDR,
     TEST_MASTER_PORT as MASTER_PORT,
