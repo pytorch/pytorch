@@ -575,6 +575,21 @@ graph_partition: bool = (
     == "1"
 )
 
+# Enable Dynamo graph deduplication before Inductor sees the graph. This turns
+# repeated regions, such as transformer layers in a full-model compile, into
+# invoke_subgraph calls so Inductor can compile the repeated body once and reuse
+# it. cpp_wrapper does not support invoke_subgraph codegen yet, and the runtime
+# overhead is not always worthwhile for inference. The torch.compile Inductor
+# wrapper ignores this option when grad mode is disabled, cpp_wrapper is active,
+# dynamic=True is set, fallback_by_default is active, cudagraphs are active,
+# invoke_subgraph regional compile is active, autograd ops are traced into the
+# graph, or compiled autograd is compiling the backward graph. It is also
+# disabled for the Inductor subprocess compile mode because nested GraphModule
+# subgraphs are not yet supported across that compile-worker boundary.
+graph_deduplication: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_DEDUPLICATION", "1") == "1"
+)
+
 # Pluggable CUDAGraph wrapping policy.  When set to a ``CUDAGraphPolicy``
 # instance, ``post_compile`` delegates cudagraph wrapping to the policy
 # instead of the built-in ``cudagraphify`` pipeline.  This allows custom

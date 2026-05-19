@@ -54,7 +54,7 @@ GlobalStateKey = tuple[
     tuple[bool, bool],
     torch.dtype,
     bool,
-    bool,
+    str,
     bool,
     bool,
 ]
@@ -86,6 +86,15 @@ class NodeHashException(Exception):
     pass
 
 
+def _normalize_target(target: Any) -> tuple[Any, ...]:
+    if isinstance(target, str):
+        return ("str", target)
+    if isinstance(target, torch._ops.OpOverload):
+        return ("op_overload", str(target))
+
+    return (type(target).__name__, id(target))
+
+
 class InputPickler(pickle.Pickler):
     def __init__(self) -> None:
         from torch._inductor.codecache import _ident
@@ -111,7 +120,21 @@ class InputPickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError) as e:
+        except (
+            TypeError,
+            AttributeError,
+            NotImplementedError,
+            pickle.PickleError,
+            ValueError,
+        ) as e:
+            raise NodeHashException from e
+        except RuntimeError as e:
+            # Some tensor subclass picklers call numel(), which is invalid for
+            # symbolic sizes/strides.
+            if "Cannot call numel() on tensor with symbolic sizes/strides" not in str(
+                e
+            ):
+                raise
             raise NodeHashException from e
         finally:
             self._stream.seek(0)
@@ -159,7 +182,7 @@ def get_global_state_key() -> GlobalStateKey:
         torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
         torch.get_default_dtype(),
         torch.are_deterministic_algorithms_enabled(),
-        torch._C._get_cublas_allow_tf32(),
+        torch.backends.cuda.matmul.fp32_precision,
         torch.is_deterministic_algorithms_warn_only_enabled(),
         torch._C._autograd._saved_tensors_hooks_is_enabled(),  # type: ignore[attr-defined]
     )
@@ -242,6 +265,8 @@ class GraphRegionTracker:
             filename,
             lineno,
             instruction_pointer,
+            node.op,
+            _normalize_target(node.target),
             _normalize_args(node),
         )
         return sha256_hash(self.input_pickler.dumps(key))

@@ -1751,6 +1751,7 @@ def _optimize(
             shapes_spec=shapes_spec,
         )
 
+    backend = _maybe_wrap_inductor_backend(backend, dynamic)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2665,6 +2666,8 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
+    if backend is not None:
+        backend = _maybe_wrap_inductor_backend(backend, dynamic)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2698,6 +2701,15 @@ def _optimize_assert(
         isolate_recompiles=isolate_recompiles,
         shapes_spec=shapes_spec,
     )
+
+
+def _maybe_wrap_inductor_backend(
+    backend: str | Callable[..., Any],
+    dynamic: bool | None,
+) -> str | Callable[..., Any]:
+    if backend == "inductor":
+        return torch._TorchCompileInductorWrapper(None, None, dynamic)
+    return backend
 
 
 class TorchPatcher:

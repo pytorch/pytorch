@@ -196,68 +196,88 @@ class NNModuleToString:
         from torch.nn.modules.module import _addindent
 
         tab = " " * 4
+        used_class_names = {"Repro"}
 
-        model_str = textwrap.dedent(
-            """
-            from torch.nn import *
-            class Repro(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-            """
-        )
+        def unique_class_name(module_name: str) -> str:
+            name = re.sub(r"\W|^(?=\d)", "_", module_name)
+            class_name = f"Repro_{name or 'submodule'}"
+            while class_name in used_class_names:
+                class_name += "_"
+            used_class_names.add(class_name)
+            return class_name
 
-        for module_name, module in gm.named_children():
-            module_str = f"{module.__repr__()}"
-            # module should be a core torch.nn.Module, so all parameters
-            # should be on the same device.
-            example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
-
-        for buffer_name, buffer in gm._buffers.items():
-            if buffer is None:
-                continue
-            # Serialize full data for small buffers
-            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
-                from torch._tensor_str import PRINT_OPTS
-
-                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
-                    raise AssertionError(
-                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
-                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
-                    )
-                tensor_str = repr(buffer)
-            elif torch.is_floating_point(buffer):
-                tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
-            else:
-                tensor_str = (
-                    f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
-                )
-            if buffer.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
-            model_str += (
-                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+        def convert_graph_module(
+            graph_module: torch.fx.GraphModule, class_name: str
+        ) -> str:
+            child_class_defs = ""
+            model_str = textwrap.dedent(
+                f"""
+                class {class_name}(torch.nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                """
             )
 
-        for param_name, param in gm._parameters.items():
-            if param is None:
-                continue
-            maybe_device = ""
-            if param.is_cuda:
-                maybe_device = ', device="cuda"'
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+            for module_name, module in graph_module.named_children():
+                if isinstance(module, torch.fx.GraphModule):
+                    child_class_name = unique_class_name(module_name)
+                    child_class_defs += convert_graph_module(module, child_class_name)
+                    model_str += f"{tab * 2}self.{module_name} = {child_class_name}()\n"
+                    continue
 
-        # TODO - Keep this code for now. But, I don't think we will need this.
-        # attrs = dir(gm)
-        # for attr in attrs:
-        #     if "_tensor_constant" in attr:
-        #         val = getattr(gm, attr)
-        #         model_str += f"    {attr} = {val!r}\n"
+                module_str = f"{module.__repr__()}"
+                # module should be a core torch.nn.Module, so all parameters
+                # should be on the same device.
+                example_param = next(module.parameters(), None)
+                if example_param is not None and example_param.is_cuda:
+                    module_str = f"{module_str}.cuda()"
+                model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
-        model_str += f"{_addindent(gm.code, 4)}\n"
-        return model_str
+            for buffer_name, buffer in graph_module._buffers.items():
+                if buffer is None:
+                    continue
+                # Serialize full data for small buffers
+                if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                    from torch._tensor_str import PRINT_OPTS
+
+                    if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                        raise AssertionError(
+                            f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                            f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                        )
+                    tensor_str = repr(buffer)
+                elif torch.is_floating_point(buffer):
+                    tensor_str = (
+                        f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+                    )
+                else:
+                    tensor_str = f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                if buffer.is_cuda:
+                    tensor_str = f"{tensor_str}.cuda()"
+                model_str += (
+                    f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+                )
+
+            for param_name, param in graph_module._parameters.items():
+                if param is None:
+                    continue
+                maybe_device = ""
+                if param.is_cuda:
+                    maybe_device = ', device="cuda"'
+                tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
+                model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+
+            # TODO - Keep this code for now. But, I don't think we will need this.
+            # attrs = dir(gm)
+            # for attr in attrs:
+            #     if "_tensor_constant" in attr:
+            #         val = getattr(gm, attr)
+            #         model_str += f"    {attr} = {val!r}\n"
+
+            model_str += f"{_addindent(graph_module.code, 4)}\n"
+            return child_class_defs + model_str
+
+        return "from torch.nn import *\n" + convert_graph_module(gm, "Repro")
 
 
 @functools.cache  # subprocess is expensive

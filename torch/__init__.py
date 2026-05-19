@@ -2487,6 +2487,36 @@ class _TorchCompileInductorWrapper:
             compile_region_name=self.name,
         )
 
+    def backend_ctx_ctor(self):
+        from contextlib import nullcontext
+
+        import torch._dynamo.compiled_autograd as compiled_autograd
+        import torch._dynamo.config as dynamo_config
+        import torch._inductor.config as inductor_config
+        from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
+
+        if not is_grad_enabled():
+            return nullcontext()
+        if self.config.get("cpp_wrapper", inductor_config.cpp_wrapper):
+            return nullcontext()
+        if self.dynamic is True:
+            return nullcontext()
+        if self.config.get("fallback_by_default", inductor_config.fallback_by_default):
+            return nullcontext()
+        if self.config.get("triton.cudagraphs", inductor_config.triton.cudagraphs):
+            return nullcontext()
+        if dynamo_config.enable_invoke_subgraph_regional_compile:
+            return nullcontext()
+        if dynamo_config.trace_autograd_ops:
+            return nullcontext()
+        if compiled_autograd.in_compiled_autograd_region:
+            return nullcontext()
+        if fx_compile_mode == FxCompileMode.SUBPROCESS:
+            return nullcontext()
+        if self.config.get("graph_deduplication", inductor_config.graph_deduplication):
+            return dynamo_config.patch(use_graph_deduplication=True)
+        return nullcontext()
+
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
 
