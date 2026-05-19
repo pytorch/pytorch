@@ -1467,11 +1467,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Inplace update to inference tensor outside InferenceMode is not allowed",
-        ):
-            opt_fn(x, y)
+        expected = fn(x.clone(), y)
+        result = opt_fn(x.clone(), y)
+        self.assertEqual(expected, result)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
