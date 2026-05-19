@@ -206,6 +206,21 @@ class TestCuda(TestCase):
     def expandable_segments(self):
         return EXPANDABLE_SEGMENTS
 
+    def test_embedding_renorm_negative_indices(self):
+        indices = torch.arange(-32, 32, dtype=torch.int32).repeat(8).reshape(32, 16)
+        weight = torch.full((1000, 64), 0.01)
+        weight[torch.arange(968, 1000)] = 1.0
+        weight[torch.arange(0, 32)] = 1.0
+
+        expected = torch.ops.aten.embedding_renorm_.default(
+            weight.clone(), indices, 1.0, 1.0
+        )
+        actual = torch.ops.aten.embedding_renorm_.default(
+            weight.cuda(), indices.cuda(), 1.0, 1.0
+        )
+
+        self.assertEqual(actual.cpu(), expected, rtol=1e-4, atol=1e-6)
+
     def test_pinned_memory_with_cudaregister(self):
         try:
             torch.cuda.memory._set_allocator_settings(
@@ -1364,6 +1379,15 @@ print(t.is_pinned())
         tensor1 = torch.ByteTensor(5).pin_memory()
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
+
+    def test_stream_invalid_device_index(self):
+        # Regression test for #184034: constructing a CUDAStream with an
+        # out-of-range device_index must not OOB-index the static stream pool.
+        num_devices = torch.cuda.device_count()
+        for di in (-2, -8, num_devices, num_devices + 16, 128):
+            s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
+            with self.assertRaisesRegex(RuntimeError, "Device index value"):
+                _ = s.cuda_stream
 
     def test_stream_event_repr(self):
         s = torch.cuda.current_stream()
