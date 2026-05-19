@@ -1077,6 +1077,38 @@ class CPUReproTests(TestCase):
                     self.common(fn, (_x,))
                     check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
+    def test_asinh_large_float32_inplace(self):
+        # https://github.com/pytorch/pytorch/issues/152299
+
+        def fn(input):
+            return input.asinh_()
+
+        x = torch.tensor(
+            [
+                [
+                    -1e30,
+                    1e30,
+                    -5e28,
+                    5e28,
+                    -7.5e29,
+                    7.5e29,
+                    -2e30,
+                    2e30,
+                    0.0,
+                ]
+            ],
+            dtype=torch.float32,
+        ).repeat(3, 1)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for simdlen in bit_widths:
+            with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x.clone(),))
+                check_metrics_vec_kernel_count(1)
+
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
@@ -6623,6 +6655,35 @@ class CPUReproTests(TestCase):
         expected = f(buf, idx)
         actual = torch.compile(f, backend="inductor")(buf, idx)
         self.assertEqual(actual, expected)
+
+    def test_layernorm_nan_with_inf_cpu_float16(self):
+        # https://github.com/pytorch/pytorch/issues/173885
+        # LayerNorm with torch.compile on CPU produces NaN when input has Inf
+        # values due to inf - inf = NaN in Welford variance calculation.
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.ln = torch.nn.LayerNorm(4)
+
+                def forward(self, x):
+                    return self.ln(x)
+
+            mod = Model().to(dtype).eval()
+            # Create input that overflows during Welford M2 accumulation
+            x = torch.tensor(
+                [[65504.0, 65504.0, -65504.0, -65504.0]], dtype=torch.float32
+            ).to(dtype)
+
+            with torch.no_grad():
+                eager_out = mod(x)
+                compiled_mod = torch.compile(mod, backend="inductor")
+                compiled_out = compiled_mod(x)
+                # Compiled output should match eager mode (whether Eager produces
+                # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
+                self.assertEqual(eager_out, compiled_out)
 
 
 if __name__ == "__main__":
