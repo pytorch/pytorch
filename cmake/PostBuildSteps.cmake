@@ -126,7 +126,9 @@ endif()
 # --- macOS OpenMP embedding ---
 # Copy libomp.dylib / libiomp5.dylib into the wheel and fix rpaths so the
 # wheel is self-contained (replicates setup.py's _embed_libomp).
-if(APPLE AND BUILD_PYTHON AND OpenMP_FOUND)
+# Gated on USE_OPENMP as well as OpenMP_FOUND so that a user-forced
+# USE_OPENMP=OFF doesn't ship an orphan libomp.dylib in the wheel.
+if(APPLE AND BUILD_PYTHON AND USE_OPENMP AND OpenMP_FOUND)
   # OpenMP_libomp_LIBRARY is set by our FindOpenMP module to the full path
   # of the OpenMP shared library (e.g. /path/to/libomp.dylib).
   if(OpenMP_libomp_LIBRARY AND EXISTS "${OpenMP_libomp_LIBRARY}")
