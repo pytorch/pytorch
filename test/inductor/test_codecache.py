@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -4192,6 +4193,84 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestVecISACheckBuild(TestCase):
+    # Regression tests for the VecISA.check_build dlopen probe behavior:
+    # the parent must (1) bound the child with a timeout and retry on
+    # transient hangs, and (2) make libtorch findable in the child's
+    # loader path so the child can dlopen the probe .so without
+    # importing torch.
+
+    def _patched_check_build(self, fake_run):
+        from torch._inductor import cpu_vec_isa
+
+        # Swap only cpu_vec_isa's reference to the subprocess module so
+        # our fake_run does not intercept the unrelated compiler
+        # --version check that runs deeper in cpp_builder. Stub the
+        # fingerprint (its compiler version call would otherwise need a
+        # real g++) and short-circuit os.path.isfile for the inductor
+        # cache path so build() is skipped on a cold machine.
+        real_isfile = os.path.isfile
+
+        def fake_isfile(path):
+            if "torchinductor" in str(path):
+                return True
+            return real_isfile(path)
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(
+            cpu_vec_isa, "_get_isa_dry_compile_fingerprint", return_value="test-fp"
+        ):
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                with mock.patch("os.path.isfile", side_effect=fake_isfile):
+                    return instance.check_build(cpu_vec_isa.VecISA._avx_code)
+
+    def test_check_build_returns_false_after_repeated_timeouts(self):
+        timeouts: list[Any] = []
+
+        def fake_run(*args, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = self._patched_check_build(fake_run)
+
+        self.assertFalse(result)
+        # max_attempts in check_build is 2.
+        self.assertEqual(len(timeouts), 2)
+        self.assertTrue(
+            any("hung after 60s" in str(w.message) for w in caught),
+            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+        )
+
+    def test_check_build_prepends_torch_lib_dir_to_loader_path(self):
+        captured: dict[str, Any] = {}
+
+        def fake_run(*args, **kwargs):
+            captured["env"] = kwargs["env"]
+            return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+        result = self._patched_check_build(fake_run)
+        self.assertTrue(result)
+
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        env = captured["env"]
+        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+            value = env.get(var, "")
+            self.assertEqual(
+                value.split(os.pathsep)[0],
+                torch_lib,
+                msg=f"{var!r} should be prepended with {torch_lib!r}, got {value!r}",
+            )
 
 
 class TestCompilationEventLogging(TestCase):

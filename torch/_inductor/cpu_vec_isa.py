@@ -69,8 +69,21 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
+    # The probe does not `import torch`: that costs multiple seconds of
+    # startup per spawn and has hung under load in CI. On Linux/macOS
+    # the parent puts torch's lib dir on LD_LIBRARY_PATH /
+    # DYLD_LIBRARY_PATH so the dynamic linker resolves libtorch_cpu
+    # automatically. On Windows neither var is consulted by
+    # ctypes.cdll.LoadLibrary, so the script locates torch via
+    # importlib.util.find_spec (which doesn't execute torch/__init__.py)
+    # and registers the lib dir with os.add_dll_directory.
     _avx_py_load = """
-import torch
+import os
+if hasattr(os, "add_dll_directory"):
+    import importlib.util
+    spec = importlib.util.find_spec("torch")
+    if spec is not None and spec.origin:
+        os.add_dll_directory(os.path.join(os.path.dirname(spec.origin), "lib"))
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
@@ -121,23 +134,36 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = normalize_path_separator(
                     x86_isa_help_builder.get_target_file_path()
                 )
-                # Skip the dlopen probe if a prior process already verified
-                # this build. See the sentinel write below.
-                verified_path = output_path + ".loadok"
-                if os.path.isfile(verified_path):
-                    return True
-
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
-                # Bound the dlopen probe and retry on hang. A stuck
-                # `import torch` in the child has been observed in CI to
-                # hang the parent test process for the whole 30-minute
-                # outer timeout. Use subprocess.run so the child is killed
-                # on TimeoutExpired (check_call leaks the child). Only retry
-                # on TimeoutExpired (transient); CalledProcessError means
-                # the .so genuinely can't load and falls through to the
-                # broad except below.
+                # Make libtorch_cpu (and other torch shlibs) findable by
+                # the dynamic linker on Linux/macOS so the probe child
+                # does not need to `import torch` to bring them into its
+                # address space. Prepend rather than append so a
+                # successful probe is guaranteed to bind against the
+                # torch we are currently running, not an older install
+                # on the user's loader path. On Windows the equivalent
+                # registration happens inside the child via
+                # os.add_dll_directory (see _avx_py_load).
+                lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+                env = python_subprocess_env()
+                for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+                    existing = env.get(var, "")
+                    env[var] = (
+                        os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+                    )
+
+                # The root cause of the 30-minute CI hangs that motivated
+                # this code -- a multi-second `import torch` in the child
+                # stalling under load -- is fixed above by dropping that
+                # import. The 60s timeout and one retry below remain as
+                # defense in depth for any future child hang (e.g. a
+                # static initializer in the .so itself). Use
+                # subprocess.run so the child is killed on TimeoutExpired
+                # (check_call leaks it). Retry only on TimeoutExpired
+                # (transient); CalledProcessError means the .so genuinely
+                # can't load and falls through to the outer except.
                 probe_cmd = [
                     sys.executable,
                     "-c",
@@ -148,9 +174,8 @@ cdll.LoadLibrary("__lib_path__")
                     try:
                         subprocess.run(
                             probe_cmd,
-                            cwd=output_dir,
                             stderr=subprocess.DEVNULL,
-                            env=python_subprocess_env(),
+                            env=env,
                             timeout=60,
                             check=True,
                         )
@@ -162,19 +187,8 @@ cdll.LoadLibrary("__lib_path__")
                             stacklevel=2,
                         )
                 else:
+                    # for/else: every attempt timed out -- give up.
                     return False
-
-                # Persist the success signal as an empty sentinel file next
-                # to the .so. Its existence is the cache hit; contents are
-                # irrelevant. The codecache fingerprint (compiler + ISA
-                # flags + torch version) already pins all inputs, so once
-                # this combination loads it stays good. Write failure is
-                # non-fatal; next process just re-probes.
-                try:
-                    with open(verified_path, "w"):
-                        pass
-                except OSError:
-                    pass
             except Exception:
                 return False
 
