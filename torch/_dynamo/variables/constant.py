@@ -472,6 +472,44 @@ class ConstantVariable(VariableTracker):
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
 
+    def nb_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_lshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5489 (long_lshift)
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v << w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_rshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5526 (long_rshift)
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v >> w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_or_impl(
         self,
         tx: Any,
