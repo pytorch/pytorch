@@ -520,18 +520,22 @@ def generate_libtorch_extraction_configs(
             ".", "_"
         )
 
-        ret.append(
-            {
-                "source_wheel_build_name": source_config["build_name"],
-                "build_name": build_name,
-                "package_type": "libtorch",
-                "libtorch_variant": libtorch_variant,
-                "libtorch_config": RELEASE,
-                "desired_cuda": desired_cuda,
-                "gpu_arch_type": gpu_arch_type,
-                "gpu_arch_version": gpu_arch_version,
-            }
-        )
+        lt_config: dict[str, str] = {
+            "source_wheel_build_name": source_config["build_name"],
+            "build_name": build_name,
+            "package_type": "libtorch",
+            "libtorch_variant": libtorch_variant,
+            "libtorch_config": RELEASE,
+            "desired_cuda": desired_cuda,
+            "gpu_arch_type": gpu_arch_type,
+            "gpu_arch_version": gpu_arch_version,
+        }
+        if "container_image" in source_config:
+            lt_config["container_image"] = source_config["container_image"]
+            lt_config["container_image_tag_prefix"] = source_config[
+                "container_image_tag_prefix"
+            ]
+        ret.append(lt_config)
 
     return ret
 
