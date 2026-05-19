@@ -365,6 +365,25 @@ class TestShapeVarCompile(TestCase):
         ):
             compiled(torch.randn(4, 5))
 
+    def test_tensor_spec_dim_count_mismatch_raises(self):
+        """TensorSpec rank must match the tensor's rank."""
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={
+                "x": TensorSpec([ShapeVar("a"), ShapeVar("b"), ShapeVar("c")])
+            },
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"TensorSpec has 3 dims but tensor L\['x'\] has 2 dims",
+        ):
+            compiled(torch.randn(4, 5))
+
     def test_unbacked_graph_has_unbacked_symbol(self):
         """ShapeVar dim appears as an unbacked SymInt; single compile covers all shapes."""
         backend = EagerAndRecordGraphs()
