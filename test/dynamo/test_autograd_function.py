@@ -583,11 +583,12 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return MyMM.apply(a, b)
 
         a = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
-        grad = a.clone()
-        res = fn(a, a)
+        b = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
+        res = fn(a, b)
+        grad = torch.randn_like(res)
         res.backward(grad)
 
-        self.assertEqual(res, MyMM.apply(a, a))
+        self.assertEqual(res, MyMM.apply(a, b))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_set_materialize_grads_no_graph_break(self):
