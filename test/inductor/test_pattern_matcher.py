@@ -10,10 +10,11 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
-from torch._dynamo.utils import count_calls, counters
+from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -2644,6 +2645,55 @@ class TestPatternMatcher(TestCase):
                 node.meta["nn_module_stack"] = {"test": ("m", "M")}
                 node.meta["_numeric_debug_handle"] = 42
                 node.meta["custom"] = {"test_key": "test_value"}
+
+    def test_replace_random_pass_preserves_stack_trace_on_rng_prims(self):
+        def fn(x):
+            return x + torch.randn(x.shape, device=x.device)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        self.assertIsNotNone(fake_mode)
+
+        stack_trace = '  File "test_replace_random.py", line 1, in fn\n'
+        source_fn_stack = [("randn", torch.randn)]
+
+        randn_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.randn.default
+        )
+        randn_node.meta["stack_trace"] = stack_trace
+        randn_node.meta["source_fn_stack"] = source_fn_stack
+
+        with V.set_fake_mode(fake_mode):
+            replace_random_passes(gm)
+        gm.graph.lint()
+
+        for target in (
+            torch.ops.prims.inductor_seeds.default,
+            torch.ops.prims.inductor_lookup_seed.default,
+            torch.ops.prims.inductor_random.default,
+        ):
+            node = next(node for node in gm.graph.nodes if node.target == target)
+            self.assertEqual(
+                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+            )
+            self.assertEqual(
+                node.meta.get("source_fn_stack"),
+                source_fn_stack,
+                msg=f"{target}: {node.meta}",
+            )
+
+        seeds_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.prims.inductor_seeds.default
+        )
+        self.assertEqual(seeds_node.meta["val"].shape, torch.Size([1]))
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
