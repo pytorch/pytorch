@@ -197,7 +197,7 @@ mkldnn_gemm(
   ideep::tensor c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
   ideep::tensor src = b;
 
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_MKLDNN_ENABLED()
   if constexpr (std::is_same_v<scalar_t, c10::Half>) {
     const bool src_is_dense = transb == TransposeType::NoTranspose
         ? n == 1 || ldb == k
@@ -289,7 +289,7 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
-#if AT_MKLDNN_ACL_ENABLED()
+#if AT_MKLDNN_ENABLED()
   if (n == 1 && alpha == 1.0f && is_arm_neoverse()) {
     return false;
   }

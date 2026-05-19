@@ -134,15 +134,6 @@ def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
     CUDA builds link against NVPL.
     """
     candidates: list[Path] = [Path("/usr/lib64/libgfortran.so.5")]
-    if arch == "aarch64":
-        # Both CPU and CUDA builds pick up ARM Compute Library (ACL) for
-        # oneDNN acceleration on AArch64.
-        if Path("/acl/build").is_dir():
-            candidates += [
-                Path("/acl/build/libarm_compute.so"),
-                Path("/acl/build/libarm_compute_graph.so"),
-            ]
-
     if use_cuda:
         candidates += [
             Path(f"/usr/local/lib/{name}")
@@ -401,7 +392,7 @@ def repair_wheel(
                     str(sofile),
                 )
 
-        # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
+        # Bundle aarch64 BLAS/LAPACK dependencies (no-op on x86)
         for dep in arch_deps:
             shutil.copy(dep, torch_lib / dep.name)
 
