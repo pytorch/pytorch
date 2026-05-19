@@ -61,20 +61,19 @@ struct PyTensorIteratorConfig {
   }
 };
 
-py::tuple shape_as_tuple(at::IntArrayRef shape) {
-  py::tuple out(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) {
-    out[i] = shape[i];
-  }
-  return out;
-}
-
-py::tuple strides_as_tuple(at::IntArrayRef strides) {
-  py::tuple out(strides.size());
-  for (size_t i = 0; i < strides.size(); ++i) {
-    out[i] = strides[i];
-  }
-  return out;
+// Zero-copy view over an IntArrayRef whose backing storage outlives the
+// caller (TensorIterator's shape_ / operands_[i].stride_bytes are stable
+// after build). Pair with py::keep_alive<0, 1>() so the iterator survives
+// the returned memoryview. Hot path: dispatch conditionals key on these,
+// so allocating a fresh tuple on every call would be pure waste.
+py::memoryview int_array_as_memoryview(at::IntArrayRef arr) {
+  return py::memoryview::from_buffer(
+      const_cast<int64_t*>(arr.data()),
+      sizeof(int64_t),
+      "q",
+      {static_cast<py::ssize_t>(arr.size())},
+      {static_cast<py::ssize_t>(sizeof(int64_t))},
+      /*readonly=*/true);
 }
 
 void check_operand_index(const TensorIteratorBase& iter, int64_t i) {
@@ -313,16 +312,24 @@ void initTensorIteratorBindings(PyObject* module) {
             "used because the reduction shape is not derivable from the "
             "input shape alone. Pre-allocate the output(s) of the reduced "
             "shape and pass them via add_output.");
-        auto iter = self.config.build();
+        // Poison the wrapper *before* the move. populate_operands() inside
+        // build() std::moves out of config.tensors_; if any later check
+        // (compute_types, mem_overlap, etc.) throws, the operands are
+        // already gone and a retry would iterate moved-from MaybeOwneds.
+        // Single-shot regardless of success.
         self.built = true;
-        return iter;
+        return self.config.build();
       });
 
   py::class_<TensorIterator>(m, "_TensorIterator")
       .def_property_readonly("ndim", &TensorIterator::ndim)
       .def_property_readonly(
           "shape",
-          [](const TensorIterator& it) { return shape_as_tuple(it.shape()); })
+          py::cpp_function(
+              [](const TensorIterator& it) {
+                return int_array_as_memoryview(it.shape());
+              },
+              py::keep_alive<0, 1>()))
       .def_property_readonly("numel", &TensorIterator::numel)
       .def_property_readonly("ntensors", &TensorIterator::ntensors)
       .def_property_readonly("ninputs", &TensorIterator::ninputs)
@@ -332,7 +339,9 @@ void initTensorIteratorBindings(PyObject* module) {
       .def_property_readonly(
           "common_dtype",
           [](const TensorIterator& it) -> py::object {
-            // Promotion has to be opted into; surface None when it wasn't.
+            // None == TI couldn't infer a single common dtype. Populated
+            // both under promotion flags and when all inputs already share
+            // a dtype; see maybe_common_dtype() in TensorIterator.h.
             auto dtype = it.maybe_common_dtype();
             if (dtype.has_value()) {
               return py::cast(*dtype);
@@ -378,9 +387,10 @@ void initTensorIteratorBindings(PyObject* module) {
           "strides",
           [](const TensorIterator& it, int64_t i) {
             check_operand_index(it, i);
-            return strides_as_tuple(it.strides(i));
+            return int_array_as_memoryview(it.strides(i));
           },
-          py::arg("index"))
+          py::arg("index"),
+          py::keep_alive<0, 1>())
       .def(
           "element_strides",
           [](const TensorIterator& it, int64_t i) {
