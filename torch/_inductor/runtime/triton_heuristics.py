@@ -113,7 +113,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Hashable
+    from collections.abc import Callable, Container, Generator, Hashable
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -539,6 +539,11 @@ class CachingAutotuner(KernelInterface):
             and not self.dump_launch_tensors
         )
 
+        # Last per-config compile exception caught by ``_iter_compile_results``;
+        # consulted by ``_precompile_worker`` to enrich the "all configs failed"
+        # error message.
+        self._last_compile_exception: BaseException | None = None
+
         self._plugins = get_caching_autotuner_plugins(self)
 
         # Compile-time info included in runtime logginging
@@ -637,19 +642,77 @@ class CachingAutotuner(KernelInterface):
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
-        compile_results = []
-        exc = None
-        for c in self.configs:
-            try:
-                compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
-        if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
+        self.compile_results = list(self._iter_compile_results())
+        if not self.compile_results:
+            last_exc = self._last_compile_exception
+            exc_str = (
+                f" {type(last_exc).__name__}: {last_exc}"
+                if last_exc is not None
+                else ""
             )
-        self.compile_results = compile_results
+            raise NoTritonConfigsError(
+                f"No valid triton configs compiled for {self.fn.__name__}.{exc_str}"
+            )
         self.configs = None
+
+    def _iter_compile_results(
+        self, parallel: bool = False
+    ) -> Generator[CompileResult, None, None]:
+        """Yield successful ``CompileResult``s. OOM / PTXAS / IntelGPU
+        failures are dropped; the last one is kept on
+        ``self._last_compile_exception`` for the all-failed error.
+        ``parallel`` thread-pools the compile, sized to ``len(configs)``.
+        """
+        self._last_compile_exception = None
+        for _cfg, result, exc in self._iter_compile_results_tagged(parallel=parallel):
+            if exc is None:
+                yield result
+            else:
+                self._last_compile_exception = exc
+
+    def _iter_compile_results_tagged(
+        self, parallel: bool = False
+    ) -> Generator[
+        tuple[Config, CompileResult | None, BaseException | None], None, None
+    ]:
+        """Yield ``(config, result, exc)`` for every config:
+        ``exc is None`` -> ``result`` is a successful ``CompileResult``;
+        otherwise ``exc`` is an OOM / PTXAS / IntelGPU per-config failure
+        and ``result`` is None. The standard ``_iter_compile_results``
+        adapter discards failures and just stashes the last on
+        ``self._last_compile_exception``.
+        """
+        configs = list(self.configs or [])
+        if not configs:
+            return
+
+        # Skip the executor when there's nothing to parallelize: a single config
+        # gains nothing from a thread pool but pays the executor setup/teardown
+        # cost (matters per-kernel on graphs with many single-config kernels).
+        if parallel and len(configs) > 1:
+            from concurrent.futures import as_completed, ThreadPoolExecutor
+
+            # No upper bound on max_workers: Triton AST visit holds the GIL
+            # so extra threads above ~CPU-count add scheduler overhead, but
+            # ptxas / native compile releases the GIL and benefits from
+            # additional parallelism. Per-kernel config counts are small in
+            # practice (max_autotune_* tops out at a few dozen).
+            with ThreadPoolExecutor(max_workers=len(configs)) as executor:
+                fut_to_cfg = {
+                    executor.submit(self._precompile_config, c): c for c in configs
+                }
+                for fut in as_completed(fut_to_cfg):
+                    cfg = fut_to_cfg[fut]
+                    try:
+                        yield cfg, fut.result(), None
+                    except (OutOfResources, PTXASError, IntelGPUError) as e:
+                        yield cfg, None, e
+        else:
+            for c in configs:
+                try:
+                    yield c, self._precompile_config(c), None
+                except (OutOfResources, PTXASError, IntelGPUError) as e:
+                    yield c, None, e
 
     @functools.cached_property
     def _could_rblock_scale(self) -> bool:
