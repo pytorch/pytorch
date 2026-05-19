@@ -2627,6 +2627,126 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(tags.count(torch.Tag.pt2_compliant_tag), 1)
         self.assertIn(torch.Tag.pointwise, tags)
 
+    def test_custom_op_inplace_tag(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return x
+
+        self.assertIn(torch.Tag.inplace, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[0].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[0].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        expected = x + y
+        result = f(x, y)
+        self.assertIs(result, x)
+        self.assertEqual(x, expected)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_result = f(fake_x, fake_y)
+            self.assertIs(fake_result, fake_x)
+
+    def test_custom_op_inplace_tag_returns_wrong_tensor(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_returns_wrong_tensor",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return y
+
+        with self.assertRaisesRegex(RuntimeError, "must return its first argument"):
+            f(torch.randn(3), torch.randn(3))
+
+    def test_custom_op_inplace_tag_mutates_args_iterable(self):
+        def mutates_args():
+            yield "x"
+
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_mutates_args_iterable",
+            mutates_args=mutates_args(),
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x
+
+        x = torch.randn(3)
+        self.assertIs(f(x), x)
+
+    def test_custom_op_inplace_tag_no_positional_arg(self):
+        def f(*, x: Tensor) -> Tensor:
+            return x
+
+        with self.assertRaisesRegex(ValueError, "torch.Tag.inplace"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_no_positional_arg",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_first_arg_not_tensor(self):
+        def f(x: int, y: Tensor) -> Tensor:
+            return y
+
+        with self.assertRaisesRegex(ValueError, "first positional argument"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_first_arg_not_tensor",
+                f,
+                mutates_args={"y"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_mutates_non_first_arg(self):
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return y
+
+        with self.assertRaisesRegex(ValueError, "mutates_args"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_mutates_non_first_arg",
+                f,
+                mutates_args={"y"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_return_none(self):
+        def f(x: Tensor) -> None:
+            pass
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_return_none",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_multiple_returns(self):
+        def f(x: Tensor) -> tuple[Tensor, Tensor]:
+            return x, x
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_multiple_returns",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
