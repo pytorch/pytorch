@@ -105,7 +105,12 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
+from .output_graph import (
+    CodeOptions,
+    GraphCompileReason,
+    OutputGraph,
+    StackLocalsMetadata,
+)
 from .polyfills import (
     impl_IS_MAPPING,
     impl_MATCH_CLASS,
@@ -1367,10 +1372,10 @@ class InstructionTranslatorBase(
             cur_tx = cur_tx.parent
         return False
 
-    def cellvars(self) -> list[str]:
+    def cellvars(self) -> tuple[str, ...]:
         return self.code_options["co_cellvars"]
 
-    def freevars(self) -> list[str]:
+    def freevars(self) -> tuple[str, ...]:
         return self.code_options["co_freevars"]
 
     def new_pycode_varname(self, prefix: str) -> str:
@@ -4308,6 +4313,8 @@ class InstructionTranslatorBase(
         pass
 
     def KW_NAMES(self, inst: Instruction) -> None:
+        if inst.arg is None:
+            raise AssertionError("expected inst.arg is not None to be true")
         kw_names = self.code_options["co_consts"][inst.arg]
         if not isinstance(kw_names, tuple):
             raise AssertionError("expected isinstance(kw_names, tuple) to be true")
@@ -4880,7 +4887,7 @@ class InstructionTranslatorBase(
 
     def log_graph_break(
         self,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         reason: str,
         exc: Unsupported | UserError | StepUnsupported,
     ) -> None:
@@ -5077,7 +5084,7 @@ class InstructionTranslatorBase(
         )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
-        self.code_options: dict[str, Any] = code_options
+        self.code_options: CodeOptions = cast(CodeOptions, code_options)
         self.f_code: types.CodeType = f_code
         self.closure = closure
 
@@ -5187,7 +5194,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         super().__init__(
             output=OutputGraph(
-                code_options,
+                cast(CodeOptions, code_options),
                 compiler_fn,
                 self,
                 export,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 import logging
 import sys
@@ -5,7 +7,7 @@ import traceback
 import types
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -31,6 +33,7 @@ from torch.fx.node import Argument, Target
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 T = TypeVar("T")
@@ -242,7 +245,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_inputs: list[Any],
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
-        graph_output_map: dict[int, tuple[str, Any]],
+        graph_output_map: dict[int, OutputReturnInfo],
         fake_mode: Any | None = None,
         graph_inputs: dict[int, Any] | None = None,
     ) -> None:
@@ -377,9 +380,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             output_type, val = self.graph_output_map[i]
 
             if output_type == "graph_out":
-                new_outputs.append(original_outputs[val])
+                new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_idx = val.index
+                input_idx = cast(Any, val).index
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)

@@ -24,14 +24,14 @@ import sys
 import types
 import unittest
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, overload, TypeVar
+from typing import Any, cast, overload, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 from torch import fx
 from torch._dynamo.backends.debugging import aot_eager
-from torch._dynamo.output_graph import OutputGraph
+from torch._dynamo.output_graph import CodeOptions, OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
@@ -208,7 +208,7 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            code_options={},
+            code_options=cast(CodeOptions, {}),
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,
