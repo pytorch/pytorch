@@ -2563,6 +2563,7 @@ class AOTDispatchAutogradCompileSpec:
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2799,6 +2800,7 @@ class _AutogradBackwardCompiler:
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
     disable_amp: bool
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2845,9 +2847,9 @@ class _AutogradBackwardCompiler:
         ):
             CompileEventLogger.compilation_metric(is_forward=False)
             # See Note: [Backward graph lazy lowering]
-            if self.aot_config.bw_compiler is None:
-                raise AssertionError("aot_config.bw_compiler must not be None")
-            self.compiled_bw = self.aot_config.bw_compiler(
+            if self.bw_compiler is None:
+                raise AssertionError("bw_compiler must not be None")
+            self.compiled_bw = self.bw_compiler(
                 copy.deepcopy(bw_module), placeholder_list
             )
             # Maybe save cache entry
@@ -3266,6 +3268,7 @@ class _AOTDispatchAutogradFunctionFactory:
             compiled_bw=self.spec.compiled_bw_func,
             lazy_backward_info=self.spec.lazy_backward_info,
             disable_amp=self.spec.disable_amp,
+            bw_compiler=self.spec.bw_compiler,
             aot_config=self.spec.aot_config,
             fw_metadata=self.spec.fw_metadata,
             try_save_cache_entry=self.spec.try_save_cache_entry,
