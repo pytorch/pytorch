@@ -143,85 +143,32 @@ static std::vector<at::Tensor> toTensorList(
   return result;
 }
 
-// Binds a function (that represents some backward computation) to Python.
-// All of these functions have a common signature, which is
-// (in C++) (vector<Tensor>, vector<ivalue>) -> vector<Tensor>
-// (in Python) (List[Optional[Tensor]], *packed_args: IValue) ->
-// List[Optional[Tensor]]
-//
-// The vector<Tensor> are the list of gradient Tensors, each of which may be
-// undefined (in C++) which corresponds to None (in Python).
-static std::string bind_function(
-    PyObject* py_compiler,
-    const std::string& fn_name,
-    functional_apply_t fn,
-    std::vector<at::TypePtr> packed_args_schema,
-    bool is_custom_function,
-    bool is_traceable) {
-  // This is the function that can be called from Python.
-  auto py_func = py::cpp_function(
-      [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
-          std::vector<std::optional<at::Tensor>>& inputs,
-          const py::args& py_args) -> py::object {
-        // py_args is a tuple of PyObject*.
-        // We need to reconstruct a vector<IValue> to invoke `fn`.
-        // To do so, we use the packed_args_schema to convert each PyObject*
-        // to its corresponding C++ type that can be stored into IValue.
-        TORCH_INTERNAL_ASSERT(py_args.size() == packed_args_schema.size());
-        std::vector<at::IValue> args;
-        args.reserve(py_args.size());
-        auto tuple_args = jit::tuple_slice(py_args);
-        for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
-          if (packed_args_schema[idx]->isSubtypeOf(
-                  *at::ListType::ofTensors())) {
-            // List[Tensor] might have Nones, not handled in jit::toIValue
-            auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(
-                tuple_args[idx]);
-            args.emplace_back(toTensorList(tmp));
-          } else {
-            args.emplace_back(jit::toIValue(
-                tuple_args[idx], packed_args_schema[idx], std::nullopt));
-          }
-        }
-        // None in Python corresponds to undefined Tensor in C++
-        auto inputs_ = toTensorList(inputs);
-        auto outputs = fn(inputs_, args);
-        return jit::toPyObject(at::IValue(outputs));
-      });
-  py::handle handle(py_compiler);
-  auto result = handle.attr("bind_function")(
-      fn_name, py_func, is_custom_function, is_traceable);
-  return result.cast<std::string>();
-}
+struct PyCompilerInterfaceImpl : PyCompilerInterface {
+  // Cache bound methods to avoid repeated PyObject_GetAttr lookups across
+  // many call_function() invocations during one backward graph capture.
+  // Lifetime is tied to the PyCompilerGuard scope, so no manual invalidation
+  // is required. All callers within one capture pass the same py_compiler.
+  mutable ska::flat_hash_map<std::string, py::object> method_cache_;
 
-// Invokes py_compiler.method_name(fn_name, inputs, packed_args,
-// output_metadata)
-static variable_list call_function(
-    PyObject* py_compiler,
-    const char* method_name,
-    const std::string& fn_name,
-    const variable_list& inputs,
-    const ivalue_list& packed_args,
-    const c10::IValue& output_metadata) {
-  // convert ivalue_list -> PyObject*
-  py::tuple py_packed_args(packed_args.size());
-  size_t i = 0;
-  for (const auto& arg : packed_args) {
-    PyTuple_SET_ITEM(
-        py_packed_args.ptr(), i++, jit::toPyObject(arg).release().ptr());
+  // Returns by value (one refcount bump) rather than by reference so that
+  // callers cannot be invalidated by a recursive insertion that rehashes
+  // method_cache_.
+  py::object get_method(PyObject* py_compiler, const char* name) const {
+    auto it = method_cache_.find(name);
+    if (it != method_cache_.end()) {
+      return it->second;
+    }
+    py::object method = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(py_compiler, name));
+    if (!method) {
+      throw py::error_already_set();
+    }
+    return method_cache_.emplace(name, std::move(method)).first->second;
   }
 
-  // call the corresponding method on the py_compiler
-  py::handle handle(py_compiler);
-  py::object stuff = handle.attr(method_name)(
-      fn_name, inputs, py_packed_args, jit::toPyObject(output_metadata));
-
-  // Convert the output from PyObject* to vector<Tensor>
-  auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
-  return toTensorList(tmp);
-}
-
-struct PyCompilerInterfaceImpl : PyCompilerInterface {
+  // Binds a backward computation function to Python. The bound function has
+  // signature (in Python) (List[Optional[Tensor]], *packed_args: IValue) ->
+  // List[Optional[Tensor]]; undefined Tensors in C++ map to None in Python.
   std::string bind_function(
       PyObject* py_compiler,
       const std::string& fn_name,
@@ -229,13 +176,35 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
       bool is_traceable = true) const override {
-    return torch::dynamo::autograd::bind_function(
-        py_compiler,
-        fn_name,
-        std::move(fn),
-        std::move(packed_args_schema),
-        is_custom_function,
-        is_traceable);
+    auto py_func = py::cpp_function(
+        [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
+            std::vector<std::optional<at::Tensor>>& inputs,
+            const py::args& py_args) -> py::object {
+          // py_args is a tuple of PyObject*. Reconstruct a vector<IValue> to
+          // invoke `fn` using packed_args_schema to convert each PyObject*.
+          TORCH_INTERNAL_ASSERT(py_args.size() == packed_args_schema.size());
+          std::vector<at::IValue> args;
+          args.reserve(py_args.size());
+          auto tuple_args = jit::tuple_slice(py_args);
+          for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
+            if (packed_args_schema[idx]->isSubtypeOf(
+                    *at::ListType::ofTensors())) {
+              // List[Tensor] might have Nones, not handled in jit::toIValue
+              auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(
+                  tuple_args[idx]);
+              args.emplace_back(toTensorList(tmp));
+            } else {
+              args.emplace_back(jit::toIValue(
+                  tuple_args[idx], packed_args_schema[idx], std::nullopt));
+            }
+          }
+          auto inputs_ = toTensorList(inputs);
+          auto outputs = fn(inputs_, args);
+          return jit::toPyObject(at::IValue(outputs));
+        });
+    py::object result = get_method(py_compiler, "bind_function")(
+        fn_name, py_func, is_custom_function, is_traceable);
+    return result.cast<std::string>();
   }
   variable_list call_function(
       PyObject* py_compiler,
@@ -244,21 +213,25 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const variable_list& inputs,
       const ivalue_list& packed_args,
       const c10::IValue& output_metadata) const override {
-    return torch::dynamo::autograd::call_function(
-        py_compiler,
-        method_name,
-        fn_name,
-        inputs,
-        packed_args,
-        output_metadata);
+    // convert ivalue_list -> PyObject*
+    py::tuple py_packed_args(packed_args.size());
+    size_t i = 0;
+    for (const auto& arg : packed_args) {
+      PyTuple_SET_ITEM(
+          py_packed_args.ptr(), i++, jit::toPyObject(arg).release().ptr());
+    }
+    py::object stuff = get_method(py_compiler, method_name)(
+        fn_name, inputs, py_packed_args, jit::toPyObject(output_metadata));
+    auto tmp =
+        py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
+    return toTensorList(tmp);
   }
   variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
       const at::TensorGeometry& view) const override {
-    py::handle handle(py_compiler);
-    py::object stuff = handle.attr("call_copy_slices_prologue")(
+    py::object stuff = get_method(py_compiler, "call_copy_slices_prologue")(
         inputs,
         base.sym_sizes(),
         base.sym_strides(),
@@ -274,8 +247,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const at::Tensor& result,
       const variable_list& res,
       const at::Tensor& grad_slice) const override {
-    py::handle handle(py_compiler);
-    py::object stuff = handle.attr("call_copy_slices_epilogue")(
+    py::object stuff = get_method(py_compiler, "call_copy_slices_epilogue")(
         needs_input_grad, result, res, grad_slice);
     auto output =
         py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
@@ -285,8 +257,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
       size_t hook_input_id) const override {
-    py::handle handle(py_compiler);
-    py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
+    py::object proxy =
+        get_method(py_compiler, "unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(std::move(proxy));
     TORCH_INTERNAL_ASSERT(tmp.has_value());
     return tmp.value();
@@ -296,10 +268,23 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const at::Tensor& variable,
       const at::Tensor& grad,
       bool has_post_hooks) const override {
-    py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
+    py::object stuff = get_method(py_compiler, "accumulate_grad")(
+        variable, grad, has_post_hooks);
     TORCH_INTERNAL_ASSERT(stuff.is_none());
+  }
+  at::Tensor call_accumulate(
+      PyObject* py_compiler,
+      const at::Tensor& old_var,
+      const at::Tensor& new_var) const override {
+    if (!old_var.defined()) {
+      return new_var;
+    }
+    if (!new_var.defined()) {
+      return old_var;
+    }
+    py::object stuff =
+        get_method(py_compiler, "accumulate")(old_var, new_var);
+    return py::cast<at::Tensor>(std::move(stuff));
   }
 };
 
@@ -764,21 +749,6 @@ static void set_ivalue_proxies(
   }
 }
 
-static at::Tensor call_accumulate(
-    PyObject* py_compiler,
-    const at::Tensor& old_var,
-    const at::Tensor& new_var) {
-  if (!old_var.defined()) {
-    return new_var;
-  }
-  if (!new_var.defined()) {
-    return old_var;
-  }
-  py::handle handle(py_compiler);
-  py::object stuff = handle.attr("accumulate")(old_var, new_var);
-  return py::cast<at::Tensor>(std::move(stuff));
-}
-
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -1064,7 +1034,7 @@ static CacheNode* _compiled_autograd_impl(
       static bool flag [[maybe_unused]] = [&]() {
         auto schema = std::vector<at::TypePtr>{IValuePacker<
             std::vector<std::optional<InputMetadata>>>::packed_type()};
-        bind_function(
+        getPyCompilerInterface()->bind_function(
             py_compiler.get(),
             "validate_outputs",
             validate_outputs,
@@ -1092,7 +1062,7 @@ static CacheNode* _compiled_autograd_impl(
         PackedArgs args;
         args.pack(input_metadata);
         ivalue_list input_metadata_state = std::move(args).vec();
-        outputs = call_function(
+        outputs = getPyCompilerInterface()->call_function(
             py_compiler,
             "validate_outputs",
             "validate_outputs",
@@ -1123,7 +1093,7 @@ static CacheNode* _compiled_autograd_impl(
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
           auto& buffer = input_buffers.lookup(next.function.get());
-          buffer.buffer[next.input_nr] = call_accumulate(
+          buffer.buffer[next.input_nr] = getPyCompilerInterface()->call_accumulate(
               py_compiler, buffer.buffer[next.input_nr], output);
         }
       }
