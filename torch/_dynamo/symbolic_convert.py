@@ -5020,7 +5020,7 @@ class InstructionTranslatorBase(
         f_locals: dict[str, Any],
         f_globals: dict[str, Any],
         f_builtins: dict[str, Any],
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
@@ -5084,7 +5084,7 @@ class InstructionTranslatorBase(
         )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
-        self.code_options: CodeOptions = cast(CodeOptions, code_options)
+        self.code_options: CodeOptions = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
 
@@ -5177,7 +5177,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_builtins: dict[str, Any],
         closure: tuple[Any, ...] | None,
         torch_function_mode_stack: Any,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         compiler_fn: Any,
         one_graph: bool,
         export: bool,
@@ -5194,7 +5194,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         super().__init__(
             output=OutputGraph(
-                cast(CodeOptions, code_options),
+                code_options,
                 compiler_fn,
                 self,
                 export,

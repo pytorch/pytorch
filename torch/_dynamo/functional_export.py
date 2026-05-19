@@ -17,6 +17,7 @@ from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_tr
 from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
+from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
@@ -353,7 +354,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             placeholder_idx = self.placeholders.index(self.current_node)
             if placeholder_idx in self.graph_inputs:
                 source = self.graph_inputs[placeholder_idx]
-                if not isinstance(source, torch._dynamo.source.GetItemSource):
+                if not isinstance(source, GetItemSource):
                     example_val = self.current_node.meta.get(
                         "val"
                     ) or self.current_node.meta.get("example_value")
@@ -383,7 +384,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if output_type == "graph_out":
                 new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_idx = cast(Any, val).index
+                input_idx = cast(GetItemSource, val).index
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
