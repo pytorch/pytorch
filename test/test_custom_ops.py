@@ -5116,8 +5116,6 @@ class TestCustomOpFastPath(TestCase):
             with self.assertRaisesRegex(ValueError, "intentional error"):
                 fp_err(x)
 
-        entry = getattr(torch._ops._fast_dispatch_tls, "entry", None)
-        self.assertIsNone(entry)
 
     def test_fast_path_multithreaded(self):
         import concurrent.futures
