@@ -2789,15 +2789,25 @@ class CSEProxy(DefaultHandler):
         assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
 
-        if var.bounds.lower < 0 and wrap_neg:
-            stm = ops.add(var, ops.index_expr(size, torch.long))
-            # Mixed negative and non-negative
-            if var.bounds.upper >= 0:
-                lt = ops.lt(var, 0)
-                stm = ops.where(lt, stm, var)
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+        if var.bounds.lower < 0:
+            if wrap_neg:
+                stm = ops.add(var, ops.index_expr(size, torch.long))
+                # Mixed negative and non-negative
+                if var.bounds.upper >= 0:
+                    lt = ops.lt(var, 0)
+                    stm = ops.where(lt, stm, var)
+            else:
+                stm = var
+
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond
