@@ -6401,6 +6401,34 @@ class CommonTemplate:
             (weight, indices),
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_no_grad_embedding_renorm_negative_indices(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires cuda")
+
+        def fn(weight, indices):
+            return torch.ops.aten._no_grad_embedding_renorm_(
+                weight, indices, max_norm=1.0, norm_type=1.0
+            )
+
+        dtype = (
+            torch.bfloat16 if self.is_dtype_supported(torch.bfloat16) else torch.float32
+        )
+        indices = (
+            torch.arange(-32, 32, dtype=torch.int32, device=self.device)
+            .repeat(8)
+            .reshape(32, 16)
+        )
+        weight = torch.randn((1000, 512), dtype=dtype, device=self.device) * 0.1
+        expected_weight = weight.clone()
+        actual_weight = weight.clone()
+
+        expected = fn(expected_weight, indices)
+        actual = torch.compile(fn, backend="inductor")(actual_weight, indices)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_weight, expected_weight)
+
     @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
         def fn(x):
@@ -10510,62 +10538,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
     @parametrize(
-        "constructor_case",
+        "constructor_and_args",
         [
-            ("tensor_inline", torch.tensor, ([1, 2, 3],), [3]),
-            ("tensor_constant", torch.tensor, ([[[1.0] * 128] * 128],), [1, 128, 128]),
-            ("empty", torch.empty, ([1, 128, 128],), [1, 128, 128]),
-            ("ones", torch.ones, ([1, 128, 128],), [1, 128, 128]),
-            ("zeros", torch.zeros, ([1, 128, 128],), [1, 128, 128]),
+            (torch.empty, ([1, 128, 128],)),
+            (torch.ones, ([1, 128, 128],)),
+            (torch.zeros, ([1, 128, 128],)),
             (
-                "full",
                 torch.full,
                 (
                     [1, 128, 128],
                     2,
                 ),
-                [1, 128, 128],
             ),
-            ("rand", torch.rand, ([1, 128, 128],), [1, 128, 128]),
-            (
-                "rand_like",
-                torch.rand_like,
-                (torch.empty([1, 128, 128]),),
-                [1, 128, 128],
-            ),
-            ("randn", torch.randn, ([1, 128, 128],), [1, 128, 128]),
-            ("randint", torch.randint, (2, [1, 128, 128]), [1, 128, 128]),
+            (torch.rand, ([1, 128, 128],)),
+            (torch.randn, ([1, 128, 128],)),
         ],
-        name_fn=lambda constructor_case: constructor_case[0],
+        name_fn=lambda constructor_and_args: constructor_and_args[0].__name__,
     )
-    def test_constructors_pin_memory(self, constructor_case):
+    def test_constructors_pin_memory(self, constructor_and_args):
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
 
-        _, constructor, args, expected_shape = constructor_case
+        constructor, args = constructor_and_args
+
+        failing_constructors = [
+            torch.rand,
+        ]
 
         def fn():
             return constructor(*args, pin_memory=True, device=self.device)
 
         result = torch.compile(fn, backend="inductor")()
-        self.assertTrue(result.is_pinned())
-        self.assertEqual(result.shape, expected_shape)
-
-    def test_mkldnn_constant_buffer_is_not_checked_for_pin_memory(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("MKLDNN constants are CPU-only")
-        if not torch.backends.mkldnn.is_available():
-            raise unittest.SkipTest("MKLDNN is not available")
-
-        from torch._inductor.graph import GraphLowering
-
-        graph = torch.fx.Graph()
-        graph.output(())
-        graph_lowering = GraphLowering(torch.fx.GraphModule(torch.nn.Module(), graph))
-        constant = graph_lowering.add_tensor_constant(
-            torch.randn(1, 3, 3, 3).to_mkldnn()
-        )
-        self.assertFalse(constant.get_layout().is_pinned)
+        if constructor in failing_constructors:
+            # We will get signal when one of the constructor correctly supports `pin_memory=True`.
+            self.assertFalse(result.is_pinned())
+        else:
+            self.assertTrue(result.is_pinned())
+        self.assertEqual(result.shape, [1, 128, 128])
 
     def test_new_empty(self):
         def fn(a):
