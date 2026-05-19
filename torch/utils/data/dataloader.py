@@ -1677,8 +1677,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # we kill the worker.
                         w.terminate()
                         w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                    if not w.is_alive():
-                        w.close()
 
     @staticmethod
     def _clean_up_persistent_workers_atexit() -> None:
