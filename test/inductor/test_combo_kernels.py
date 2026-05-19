@@ -2162,6 +2162,50 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertIsNotNone(combo)
 
+    def test_threshold_gating_detects_growth_outside_global_peak_region(self):
+        # When the global baseline_peak lives in a different region from
+        # the gated combo, the gate must still detect per-region growth.
+        ONE_MB = 1024 * 1024
+        BIG = 100 * ONE_MB
+        SMALL = 1024
+        warm_alloc = _PeakMemFakeNode("warm_alloc")
+        warm_free = _PeakMemFakeNode("warm_free")
+        a = _PeakMemFakeNode("a")
+        consume_a = _PeakMemFakeNode("consume_a")
+        b = _PeakMemFakeNode("b")
+        consume_b = _PeakMemFakeNode("consume_b")
+        nodes = [warm_alloc, warm_free, a, consume_a, b, consume_b]
+
+        buf_warm = _PeakMemFakeBuffer("buf_warm", {warm_free}, BIG, BIG)
+        buf_a = _PeakMemFakeBuffer("buf_a", {consume_a}, SMALL, SMALL)
+        buf_b = _PeakMemFakeBuffer("buf_b", {consume_b}, SMALL, SMALL)
+        warm_alloc._outputs = [buf_warm]
+        a._outputs = [buf_a]
+        b._outputs = [buf_b]
+        warm_free.mpi_node.pred_buffers = {buf_warm}
+        consume_a.mpi_node.pred_buffers = {buf_a}
+        consume_b.mpi_node.pred_buffers = {buf_b}
+
+        baseline_live_before = [0, BIG, 0, SMALL, 0, SMALL, 0]
+
+        combo, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [a, b],
+            baseline_peak=BIG,
+            baseline_live_before=baseline_live_before,
+            thresholds=self._thresholds(abs_thr_gb=None, pct_thr=0.0),
+        )
+        self.assertIsNone(combo)
+
+        combo, _ = self._try_combo_with_fake_scheduler(
+            nodes,
+            [a, b],
+            baseline_peak=BIG,
+            baseline_live_before=baseline_live_before,
+            thresholds=self._thresholds(abs_thr_gb=1.0, pct_thr=None),
+        )
+        self.assertIsNotNone(combo)
+
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
     @requires_cuda_and_triton
     def test_combo_kernel_peak_memory_wide_resnet(self):
