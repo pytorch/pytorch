@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import ast
 import contextlib
 import dataclasses
 import functools
@@ -639,6 +640,9 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        self._load_input_loop_invariant_code = IndentedBuffer()
+        self._load_input_loop_invariant_index_replacements: dict[str, str] = {}
+        self._load_input_loop_invariant_enabled = False
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -1127,6 +1131,7 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
+        loop_varying_indices: Sequence[str] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1137,6 +1142,9 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
+            loop_varying_indices (Optional[Sequence[str]]): Template index names
+                that vary across the surrounding template loop.  Used to hoist
+                prologue loads that only depend on loop-invariant indices.
         """
 
         input_node = self.named_input_nodes[input_name]
@@ -1157,6 +1165,7 @@ class TritonTemplateKernel(TritonKernel):
             no_x_dim=False,
         )
         load_code = None
+        original_indices = tuple(indices)
 
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             assert isinstance(indices, (list, tuple))
@@ -1277,11 +1286,200 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(load_code)
 
                 result = self.body.getvalue()
+                if input_node.get_name() in self.prologue_fused_inputs:
+                    result = self._hoist_loop_invariant_load_input_code(
+                        input_name,
+                        result,
+                        original_indices,
+                        index_shape,
+                        loop_varying_indices,
+                    )
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
 
         return self._register_hook(hook_key, hook)
+
+    def load_input_loop_invariant_code(self, **index_replacements: str):
+        """Hook point for loop-invariant prologue loads.
+
+        ``load_input`` hooks are finalized before this hook, so they can append
+        loads that are safe to compute before the template's inner loop.
+        """
+        assert all(
+            isinstance(name, str) and isinstance(expr, str)
+            for name, expr in index_replacements.items()
+        )
+        hook_key = "<LOAD_INPUT_LOOP_INVARIANT>"
+        self._load_input_loop_invariant_enabled = True
+        self._load_input_loop_invariant_index_replacements = {
+            name: f"_loop_invariant_{name}" for name in index_replacements
+        }
+        preamble_lines = tuple(
+            f"{self._load_input_loop_invariant_index_replacements[name]} = {expr}"
+            for name, expr in index_replacements.items()
+        )
+        self._load_input_loop_invariant_code = IndentedBuffer()
+
+        def hook():
+            hoisted_code = self._load_input_loop_invariant_code.getvalue().rstrip()
+            self._load_input_loop_invariant_code = IndentedBuffer()
+            self._load_input_loop_invariant_enabled = False
+            self._load_input_loop_invariant_index_replacements = {}
+            if not hoisted_code:
+                return ""
+            if not preamble_lines:
+                return hoisted_code
+            return "\n".join(preamble_lines) + ("\n" + hoisted_code)
+
+        return self._register_hook(hook_key, hook)
+
+    @staticmethod
+    def _assignment_lhs_and_rhs_names(line: str) -> tuple[str | None, OrderedSet[str]]:
+        # This parser only sees assignment lines emitted by Inductor's own
+        # Triton codegen for prologue subgraphs.  Any line outside that narrow
+        # shape is treated as non-hoistable.
+        try:
+            parsed = ast.parse(line.strip())
+        except SyntaxError:
+            return None, OrderedSet()
+
+        if len(parsed.body) != 1 or not isinstance(parsed.body[0], ast.Assign):
+            return None, OrderedSet()
+
+        node = parsed.body[0]
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            return None, OrderedSet()
+
+        rhs_names = OrderedSet(
+            name.id for name in ast.walk(node.value) if isinstance(name, ast.Name)
+        )
+        return node.targets[0].id, rhs_names
+
+    @staticmethod
+    def _is_generated_prologue_temp(name: str) -> bool:
+        return (
+            re.fullmatch(r"tmp\d+", name) is not None
+            or re.fullmatch(r"_tmp_var\d+", name) is not None
+            or name in {"xindex", "xmask"}
+        )
+
+    @staticmethod
+    def _remove_loop_invariant_broadcast(
+        line: str,
+        invariant_indices: Sequence[str],
+        index_shape: tuple[str] | None,
+        index_replacements: dict[str, str],
+    ) -> str:
+        if not index_shape:
+            return line
+
+        shape_pattern = (
+            r"\[\s*" + r"\s*,\s*".join(re.escape(dim) for dim in index_shape) + r"\s*\]"
+        )
+        for index in invariant_indices:
+            index_pattern = re.escape(index)
+            replacement = index_replacements.get(index, index)
+            line = re.sub(
+                rf"tl\.broadcast_to\(\s*\(?\s*{index_pattern}\s*\)?\s*,\s*{shape_pattern}\s*\)",
+                replacement,
+                line,
+            )
+        return line
+
+    @staticmethod
+    def _rename_code_names(line: str, renames: dict[str, str]) -> str:
+        for old, new in renames.items():
+            line = re.sub(rf"\b{re.escape(old)}\b", new, line)
+        return line
+
+    def _hoist_loop_invariant_load_input_code(
+        self,
+        input_name: str,
+        code: str,
+        indices: Sequence[str],
+        index_shape: tuple[str] | None,
+        loop_varying_indices: Sequence[str] | None,
+    ) -> str:
+        if not (
+            self._load_input_loop_invariant_enabled
+            and loop_varying_indices
+            and code.strip()
+        ):
+            return code
+
+        loop_dependent_names = OrderedSet(["k_idx", "k", *loop_varying_indices])
+        index_names = OrderedSet(index for index in indices if isinstance(index, str))
+        removable_loop_masks = OrderedSet(loop_varying_indices) - index_names
+        invariant_indices = [
+            index
+            for index in indices
+            if isinstance(index, str) and index not in loop_dependent_names
+        ]
+        if not invariant_indices:
+            return code
+
+        lines = code.splitlines()
+        parsed_assignments = [
+            self._assignment_lhs_and_rhs_names(line) for line in lines
+        ]
+        assigned_names = OrderedSet(
+            lhs for lhs, _ in parsed_assignments if lhs is not None
+        )
+        assignment_counts: defaultdict[str, int] = defaultdict(int)
+        for lhs, _ in parsed_assignments:
+            if lhs is not None:
+                assignment_counts[lhs] += 1
+
+        kept_lines: list[str] = []
+        hoisted_lines: list[str] = []
+        renames: dict[str, str] = {}
+
+        for line, (lhs, rhs_names) in zip(lines, parsed_assignments):
+            loop_deps_in_rhs = rhs_names & loop_dependent_names
+            generated_temp_deps = OrderedSet(
+                name for name in rhs_names if self._is_generated_prologue_temp(name)
+            )
+            # Keep this intentionally narrow: only direct tl.load assignments
+            # whose RHS does not mention a symbol assigned in this generated
+            # prologue body are hoisted.  Loads needing an invariant temp stay
+            # in place rather than moving before their dependency.  K-tail
+            # masks are dropped only for otherwise-invariant loads; the data
+            # loads that actually depend on the K index remain masked in-loop.
+            should_hoist = (
+                lhs is not None
+                and assignment_counts[lhs] == 1
+                and "tl.load(" in line
+                and loop_deps_in_rhs <= removable_loop_masks
+                and not (rhs_names & assigned_names)
+                and not generated_temp_deps
+            )
+            if should_hoist:
+                new_lhs = f"_loop_invariant_{input_name}_{lhs}"
+                renames[lhs] = new_lhs
+                hoisted_line = self._remove_loop_invariant_broadcast(
+                    line.strip(),
+                    invariant_indices,
+                    index_shape,
+                    self._load_input_loop_invariant_index_replacements,
+                )
+                hoisted_line = self._rename_code_names(
+                    hoisted_line,
+                    self._load_input_loop_invariant_index_replacements,
+                )
+                hoisted_line = self._rename_code_names(
+                    hoisted_line,
+                    dict.fromkeys(loop_deps_in_rhs, "None"),
+                )
+                hoisted_line = self._rename_code_names(hoisted_line, {lhs: new_lhs})
+                hoisted_lines.append(hoisted_line)
+            else:
+                kept_lines.append(self._rename_code_names(line, renames))
+
+        for line in hoisted_lines:
+            self._load_input_loop_invariant_code.writeline(line)
+
+        return "\n".join(kept_lines)
 
     def _generate_index_from_tma_index(
         self,
@@ -1623,6 +1821,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
+                self.load_input_loop_invariant_code,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
