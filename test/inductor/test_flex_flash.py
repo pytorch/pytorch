@@ -280,6 +280,16 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind(
                     [q_idx, kv_idx],
+                    FakeAuxBuffer((128, 48), (48, 1)),
+                    q_idx,
+                    kv_idx,
+                    max_vec_size=32,
+                ),
+                AuxLoadVecInfo(16, True),
+            )
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
+                    [q_idx, kv_idx],
                     FakeAuxBuffer((128, 128), (1, 128)),
                     q_idx,
                     kv_idx,
@@ -484,6 +494,40 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                         False, False, has_mask_mod=True
                     ),
                     [expected_config],
+                )
+
+    def test_flex_flash_config_skips_cuda_capability_without_vectorizable_mods(self):
+        with mock.patch.object(torch.cuda, "is_available", return_value=True):
+            with mock.patch.object(
+                torch.cuda,
+                "get_device_capability",
+                side_effect=AssertionError("unexpected capability query"),
+            ):
+                self.assertEqual(
+                    flex_flash_attention_module.get_flex_flash_fwd_configs(
+                        False, False
+                    ),
+                    [flex_flash_attention_module.FlexFlashConfig()],
+                )
+
+    @torch._inductor.config.patch(
+        {"max_autotune": True, "test_configs.max_flex_configs": None}
+    )
+    def test_flex_flash_config_skips_cuda_capability_for_score_mod_without_aux(self):
+        with mock.patch.object(torch.cuda, "is_available", return_value=True):
+            with mock.patch.object(
+                torch.cuda,
+                "get_device_capability",
+                side_effect=AssertionError("unexpected capability query"),
+            ):
+                self.assertEqual(
+                    flex_flash_attention_module.get_flex_flash_fwd_configs(True, False),
+                    [
+                        flex_flash_attention_module.FlexFlashConfig(
+                            score_mod_vec_size=vec_size
+                        )
+                        for vec_size in (1, 2, 4, 8, 16, 32, 64, 128)
+                    ],
                 )
 
     @torch._inductor.config.patch(
@@ -1717,6 +1761,63 @@ class TestFlexFlash(InductorTestCase):
         self._assert_sm100_mask_vec_matches_scalar(
             fn, q, k, v, mask_bias, expect_legacy_vec_attr=True
         )
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        mask_bias = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, score_bias, mask_bias):
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) | (mask_bias[q_idx, kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, score_bias, mask_bias)
+        expected = fn(*args)
+        with force_flex_flash_mask_mod_vec_size(None):
+            torch._dynamo.reset()
+            scalar_mask, scalar_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *args
+            )
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(scalar_mask, expected, atol=3e-2, rtol=3e-2)
+        self.assertEqual(actual, scalar_mask, atol=0, rtol=0)
+        self.assertNotIn("mask_mod.__mask_vec_size__", "\n".join(scalar_code))
+        src = "\n".join(code)
+        self.assertIn("score_mod.__vec_size__ = 8", src)
+        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("cute.autovec_copy", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),

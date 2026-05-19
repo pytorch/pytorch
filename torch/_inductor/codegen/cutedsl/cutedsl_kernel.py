@@ -951,6 +951,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         max_width: int,
     ) -> int | None:
         """Narrow contiguous width until the first lane is statically aligned."""
+        assert max_width >= 2 and max_width.bit_count() == 1
         start_expr = V.graph.sizevars.simplify(
             expr.xreplace({vector_index: sympy.Integer(0)})
         )

@@ -73,12 +73,12 @@ def get_flex_flash_fwd_configs(
     mask_mod_graph_module: GraphModule | None = None,
     mask_mod_other_buffers: Sequence[TensorBox] = (),
 ) -> list[FlexFlashConfig]:
-    device_index = None if device is None else device.index
-    cuda_major = (
-        torch.cuda.get_device_capability(device_index)[0]
-        if torch.cuda.is_available()
-        else None
-    )
+    cuda_major = None
+    if torch.cuda.is_available() and (
+        has_mask_mod or (has_score_mod and has_aux_tensors)
+    ):
+        device_index = None if device is None else device.index
+        cuda_major = torch.cuda.get_device_capability(device_index)[0]
     mask_mod_vec_size = select_mask_mod_vec_size(
         has_mask_mod=has_mask_mod,
         has_mask_aux_tensors=has_mask_aux_tensors,
@@ -300,6 +300,7 @@ def direct_aux_load_vec_size_and_kind(
     """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo(None, False)
+    assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
 
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
     kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
