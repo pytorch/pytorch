@@ -398,8 +398,8 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
     access) or a ``_SubscriptToken`` (``dict[key]`` access with an
     ``int`` or ``str`` key).
 
-    Returns ``None`` for sources that we know we can'r represent them
-    in our sepecs.
+    Returns ``None`` for sources that we know we can't represent them
+    in our specs.
     """
     path: list[_AccessToken] = []
     cur: Source = source
@@ -463,9 +463,7 @@ def _walk_spec(
                     )
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
-                if not isinstance(token, _SubscriptToken) or not isinstance(
-                    token.key, (int, str)
-                ):
+                if not isinstance(token, _SubscriptToken):
                     raise RuntimeError(
                         f"shapes_spec walk: DictSpec at path {remaining_tokens!r} expects "
                         f"a str/int subscript (_SubscriptToken), got "
