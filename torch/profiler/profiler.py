@@ -426,6 +426,11 @@ class _KinetoProfile:
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
+        if self.experimental_config is not None and self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:

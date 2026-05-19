@@ -69,7 +69,10 @@ class _ExperimentalConfig:
         record_python_gc_info: bool = ...,
         expose_kineto_event_metadata: bool = ...,
         custom_profiler_config: str = ...,
+        adjust_timestamps: bool = ...,
+        trace_only: bool = ...,
     ) -> None: ...
+    trace_only: bool
 
 class ProfilerConfig:
     def __init__(
