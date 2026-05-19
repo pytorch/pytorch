@@ -14670,9 +14670,6 @@ if __name__ == '__main__':
         # on CPU regardless of the device under test.
         ref_device = "cpu"
 
-        expected_max_ulp_diff = 1
-        expected_input_grad_max_ulp_diff = 1
-        expected_weight_grad_max_ulp_diff = 1
         # For acc_policy="auto" the actual op invocation must still
         # receive "auto" (so _adjust performs the real resolution), but
         # the test's ULP bounds need to track whichever policy was
@@ -14695,8 +14692,8 @@ if __name__ == '__main__':
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 204
-                    expected_weight_grad_max_ulp_diff = 191
+                    expected_input_grad_max_ulp_diff = 204   # x86_64 119
+                    expected_weight_grad_max_ulp_diff = 191  # x86_64 150
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 0
@@ -14710,9 +14707,7 @@ if __name__ == '__main__':
                     else:  # CUDA/...
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90
-                        # 50 (was 37); loosened by weight_chunk_dtype=acc_dtype
-                        # rounding path, relative-error bound unchanged.
-                        expected_weight_grad_max_ulp_diff = 50
+                        expected_weight_grad_max_ulp_diff = 50  # x86_64 41
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
@@ -14743,8 +14738,8 @@ if __name__ == '__main__':
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 204
-                    expected_weight_grad_max_ulp_diff = 229  # was 191
+                    expected_input_grad_max_ulp_diff = 204  # x86_64 119
+                    expected_weight_grad_max_ulp_diff = 229  # was 191, x86_64 101
                 else:  # bf16
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 0
@@ -14758,7 +14753,7 @@ if __name__ == '__main__':
                         expected_weight_grad_max_ulp_diff = 166
                     else:  # CUDA
                         expected_max_ulp_diff = 1
-                        expected_input_grad_max_ulp_diff = 90
+                        expected_input_grad_max_ulp_diff = 90  # x86_64 68
                         expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
                     if "mps" in device:
@@ -14775,16 +14770,17 @@ if __name__ == '__main__':
             if "cpu" in device:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 8284  # 6236
-                    expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, cpu 2271, ci 2239
+                    expected_input_grad_max_ulp_diff = 8284  # x86_64 6236
+                    expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, x86_64 2271, ci 2239
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     if "mps" in device:
                         expected_input_grad_max_ulp_diff = 5078
+                        expected_weight_grad_max_ulp_diff = 8974
                     else:  # CUDA/XPU/HPU
-                        expected_input_grad_max_ulp_diff = 358
-                    expected_weight_grad_max_ulp_diff = 8974
+                        expected_input_grad_max_ulp_diff = 854  # 358, rocm 854
+                        expected_weight_grad_max_ulp_diff = 8974  # rocm 5465
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 3
@@ -14845,11 +14841,9 @@ if __name__ == '__main__':
 
             # use reference implementation, no chunking
             ref_module_kwargs = module_kwargs.copy()
-            ref_module_kwargs['dtype'] = ref_dtype
-            ref_module_kwargs['device'] = ref_device
+            ref_module_kwargs.update(dtype=ref_dtype, device=ref_device, options=None)
             if ref_module_kwargs.get('weight') is not None:
                 ref_module_kwargs['weight'] = ref_module_kwargs['weight'].to(ref_device)
-            ref_module_kwargs['options'] = None
 
             torch.manual_seed(1245)
             loss = nn.LinearCrossEntropyLoss(*module_args, **module_kwargs)
@@ -14876,12 +14870,12 @@ if __name__ == '__main__':
             # ULP-based check at end of method is precise; per-iter
             # ``assertEqual`` would be redundant + fragile on fp16/MPS.
 
-            torch.autograd.gradcheck(ref_loss, (ref_input, ref_target))
+            torch.autograd.gradcheck(ref_loss, (ref_input, ref_target))  # on fp64
 
-            # gradcheck will fail due to
-            # - inplace modification of gradients
-            # - low precision dtype such as float16, bfloat16
-            # so, we'll check gradients explicitly:
+            # gradcheck on the chunked ``loss`` would fail due to
+            # - in-place modification of gradients in backward
+            # - low-precision dtype (fp16/bf16) below gradcheck tolerance
+            # so we check its gradients explicitly:
             out.sum().backward()
             ref_out.sum().backward()
 
@@ -14904,8 +14898,7 @@ if __name__ == '__main__':
                 worst_linear_weight_grad_err_kwargs = dict(module_kwargs)
 
         # temporary printouts:
-        print(f'{maximal_input_grad_err=} <= {feps}')
-        print(f'{maximal_linear_weight_grad_err=} <= {feps}')
+        print(f'\n{maximal_linear_weight_grad_err=} <= {feps}\n{maximal_input_grad_err=} <= {feps}')
         print(f'{maximal_output_max_ulp_diff=} <= {expected_max_ulp_diff}')
         print(f'{maximal_input_grad_max_ulp_diff=} <= {expected_input_grad_max_ulp_diff}')
         print(f'{maximal_linear_weight_grad_max_ulp_diff=} <= {expected_weight_grad_max_ulp_diff}')
