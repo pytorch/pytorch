@@ -2143,6 +2143,7 @@ def _compile(
                     TorchRuntimeError,
                     BackendCompilerFailed,
                     AssertionError,
+                    IndexError,
                     ConstraintViolationError,
                     GuardOnDataDependentSymNode,
                     ValidationException,
