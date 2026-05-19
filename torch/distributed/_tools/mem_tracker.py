@@ -880,8 +880,9 @@ class MemTracker(TorchDispatchMode):
 
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
-            # Record whether the tracker itself started under FakeTensorMode.
-            self._entered_under_fake_mode = active_fake_mode() is not None
+            # None in eager, a FakeTensorMode instance in SAC.  Used in
+            # __torch_dispatch__ to skip DTensor propagation ops.
+            self._fake_mode_on_entry = active_fake_mode()
             self._register_global_optimizer_hook()
             self._mod_tracker.register_user_hooks(
                 self._pre_fw_hook,
@@ -927,14 +928,17 @@ class MemTracker(TorchDispatchMode):
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
-        # Track either:
-        # 1) tracker contexts entered under FakeTensorMode; or
-        # 2) dispatches with no active FakeTensorMode.
-        # If the tracker was entered under FakeTensorMode, track those
-        # fake-mode dispatches normally.
-        # If the tracker was not entered under FakeTensorMode, ignore later
-        # dispatches in this context that run under FakeTensorMode.
-        if self._entered_under_fake_mode or not active_fake_mode():
+        # DTensor sharding propagation may use a nested FakeTensorMode to
+        # compute output metadata (shapes, placements).  The real memory
+        # usage comes from the local op on shard data, which
+        # runs outside DTensor's fake mode.  We use identity comparison
+        # against the fake mode at tracker entry to skip propagation ops
+        # while still tracking local ops in both eager and SAC contexts.
+        #   - Eager (entry mode is None): real ops have no fake mode
+        #     (None is None), DTensor propagation ops are skipped (B is not None).
+        #   - SAC (entry mode is A): SAC ops run under mode A (A is A),
+        #     DTensor propagation ops are skipped (B is not A).
+        if active_fake_mode() is self._fake_mode_on_entry:
             # If we are tracking an optimizer state, we use the optimizer reference type.
             # If we are in backward region and not in AC region, we use the backward reference type.
             # Else we use the forward reference type.
