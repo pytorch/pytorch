@@ -142,14 +142,25 @@ def _check_batch_size_nested(
     # num_heads is not ragged
     same_batch_size = q_batch_size == k_batch_size and q_batch_size == v_batch_size
     if not same_batch_size:
-        _record_sdp_failure(
-            "For NestedTensor inputs, query, key, and value must have the same batch size. "
-            f"Got query batch size: {q_batch_size}, key batch size: {k_batch_size}, "
-            f"value batch size: {v_batch_size} instead.",
+        if (
+            params.query.requires_grad
+            or params.key.requires_grad
+            or params.value.requires_grad
+        ):
+            _record_sdp_failure(
+                "Both fused kernels do not support training with broadcasted NT inputs.",
+                debug,
+                reason_collector,
+            )
+            return False
+        return _try_broadcast_param_size(
+            q_batch_size,
+            k_batch_size,
+            v_batch_size,
+            "batch size",
             debug,
             reason_collector,
         )
-        return False
     return True
 
 
@@ -308,10 +319,11 @@ def _check_for_seq_len_0_nested(
             or params.key.requires_grad
             or params.value.requires_grad
         ):
-            if debug:
-                log.warning(
-                    "Both fused kernels do not support training with broadcasted NT inputs."
-                )
+            _record_sdp_failure(
+                "Both fused kernels do not support training with broadcasted NT inputs.",
+                debug,
+                reason_collector,
+            )
             return False
         return _try_broadcast_param_size(
             q_num_heads,

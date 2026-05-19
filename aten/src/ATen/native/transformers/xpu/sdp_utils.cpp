@@ -162,8 +162,15 @@ inline bool check_flash_attention_head_dim_size(
 inline bool check_flash_attention_layout(
     sdp_params const& params,
     c10::OptionalRef<SDPDiagnostics> diagnostics) {
-  return sycltla::check_flash_attention_layout(
+  const bool is_supported_layout = sycltla::check_flash_attention_layout(
       params, diagnostics.has_value() && diagnostics.get().emit_warnings);
+  if (!is_supported_layout && diagnostics.has_value() &&
+      !diagnostics.get().emit_warnings) {
+    report_failure(
+        diagnostics,
+        "FlashAttentionXPU requires query, key, and value to use a supported layout.");
+  }
+  return is_supported_layout;
 }
 
 inline bool check_flash_attention_layout(sdp_params const& params, bool debug) {

@@ -1204,6 +1204,7 @@ if(USE_XPU)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
+    target_compile_definitions(torch_xpu_ops PRIVATE TORCH_XPU_OPS_USE_SDPA_OPTIONALREF_DIAGNOSTICS)
     # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
     if(USE_C10D_XCCL)
       target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
