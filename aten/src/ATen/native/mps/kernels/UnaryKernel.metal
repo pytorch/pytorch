@@ -580,6 +580,22 @@ struct rsqrt_functor {
   }
 };
 
+// x + T(0) cancels the sign of -0.0 so pow(-0.0, 0.5) returns +0.0.
+struct pow_half_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::sqrt(x + T(0)));
+  }
+};
+
+// x + T(0) cancels the sign of -0.0 so pow(-0.0, -0.5) returns +inf.
+struct pow_neg_half_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::rsqrt(x + T(0)));
+  }
+};
+
 struct neg_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -716,6 +732,13 @@ INSTANTIATE_UNARY_KERNELS2(float, char);
 INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
+
+REGISTER_UNARY_OP(pow_half, float, float);
+REGISTER_UNARY_OP(pow_half, half, half);
+REGISTER_UNARY_OP(pow_half, bfloat, bfloat);
+REGISTER_UNARY_OP(pow_neg_half, float, float);
+REGISTER_UNARY_OP(pow_neg_half, half, half);
+REGISTER_UNARY_OP(pow_neg_half, bfloat, bfloat);
 
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)        \
   REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);      \
