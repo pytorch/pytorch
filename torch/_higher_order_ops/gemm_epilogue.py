@@ -137,6 +137,7 @@ class QuackLocalReduceInfo:
     dim: int
     feeds_main: bool = False
     kind: str = "sum"
+    scale: float = 1.0
     extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
 
 
@@ -490,7 +491,7 @@ def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None
 
 
 def _match_quack_local_n_amax_reduce(
-    node: Any, mm_node: torch.fx.Node
+    node: Any, mm_node: torch.fx.Node, *, scale: float = 1.0
 ) -> QuackLocalReduceInfo | None:
     reduce_match = _match_quack_tensorssa_reduce(node)
     if reduce_match is None or reduce_match.kind != "amax":
@@ -532,7 +533,62 @@ def _match_quack_local_n_amax_reduce(
         group_size=shape[-1],
         dim=1,
         kind="amax_abs",
+        scale=scale,
         extra_skip_nodes=frozenset((abs_node,)),
+    )
+
+
+def _match_quack_scaled_local_n_amax_reduce(
+    node: Any, mm_node: torch.fx.Node
+) -> QuackLocalReduceInfo | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op != "call_function":
+        return None
+    target = node.target
+    args = node.args
+    if target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        if len(args) < 2:
+            return None
+        lhs, rhs = args[:2]
+        if isinstance(rhs, (int, float)):
+            local_reduce = _match_quack_local_n_amax_reduce(
+                lhs, mm_node, scale=float(rhs)
+            )
+        elif isinstance(lhs, (int, float)):
+            local_reduce = _match_quack_local_n_amax_reduce(
+                rhs, mm_node, scale=float(lhs)
+            )
+        else:
+            return None
+    elif target in (
+        torch.ops.aten.div.Tensor,
+        torch.ops.aten.div.Scalar,
+        operator.truediv,
+    ):
+        if len(args) < 2:
+            return None
+        lhs, rhs = args[:2]
+        if not isinstance(rhs, (int, float)) or rhs == 0:
+            return None
+        local_reduce = _match_quack_local_n_amax_reduce(
+            lhs, mm_node, scale=1.0 / float(rhs)
+        )
+    else:
+        return None
+    if local_reduce is None:
+        return None
+    return QuackLocalReduceInfo(
+        view_node=local_reduce.view_node,
+        reduce_node=local_reduce.reduce_node,
+        source_node=local_reduce.source_node,
+        keepdim=local_reduce.keepdim,
+        group_size=local_reduce.group_size,
+        dim=local_reduce.dim,
+        feeds_main=local_reduce.feeds_main,
+        kind=local_reduce.kind,
+        scale=local_reduce.scale,
+        extra_skip_nodes=local_reduce.extra_skip_nodes | frozenset((node,)),
     )
 
 
@@ -699,6 +755,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 _match_quack_local_n_reduce(aux_value, mm_node)
                 or _match_quack_local_m_reduce(aux_value, mm_node)
                 or _match_quack_local_n_amax_reduce(aux_value, mm_node)
+                or _match_quack_scaled_local_n_amax_reduce(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
                 skip_nodes.update(
