@@ -19,7 +19,16 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Final,
+    Generic,
+    get_args,
+    Literal,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+)
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -127,7 +136,7 @@ _T = TypeVar(
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
-assert _KernelType.__args__ == _T.__constraints__
+assert get_args(_KernelType) == _T.__constraints__
 
 log = logging.getLogger(__name__)
 
