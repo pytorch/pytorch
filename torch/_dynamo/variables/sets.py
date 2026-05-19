@@ -591,6 +591,32 @@ class SetVariable(VariableTracker):
         self.items.update(other.items)  # type: ignore[missing-attribute]
         return self
 
+    def nb_subtract_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1801-L1812
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        result = self_.call_method(tx, "copy", [], {})
+        for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
+            result.items.pop(k, None)  # type: ignore[missing-attribute]
+        return result
+
+    def nb_inplace_subtract_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1814-L1828
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        tx.output.side_effects.mutation(self)
+        for k in list(other.items.keys()):  # type: ignore[missing-attribute]
+            self.items.pop(k, None)
+        return self
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -615,16 +641,25 @@ class SetVariable(VariableTracker):
             if not issubclass(other_type, (set, frozenset)):
                 return ConstantVariable.create(NotImplemented)
 
+        # Accessing set_items directly is correct: CPython's set_richcompare
+        # operates on the internal C struct (PySet_GET_SIZE, set_next,
+        # set_contains_entry) -- it never calls __len__ or __contains__.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2093-L2130
+        self_items = self.set_items
+        other_items = other.set_items  # type: ignore[attr-defined]
         if op == "__eq__":
-            r = self.call_method(tx, "symmetric_difference", [other], {})
-            return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
+            # len check + issubset: same length and subset implies equality.
+            if len(self_items) != len(other_items):
+                return ConstantVariable.create(False)
+            return VariableTracker.build(tx, self_items <= other_items)
         elif op == "__ne__":
-            eq = self.richcompare_impl(tx, other, "__eq__")
-            return VariableTracker.build(tx, not eq.value)  # type: ignore[attr-defined]
+            if len(self_items) != len(other_items):
+                return ConstantVariable.create(True)
+            return VariableTracker.build(tx, not (self_items <= other_items))
         else:
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[op](self.set_items, other.set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[op](self_items, other_items),
             )
 
 
@@ -733,10 +768,25 @@ class OrderedSetVariable(SetVariable):
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
 
+    def nb_subtract_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        self_, other_ = (other, self) if reverse else (self, other)
+        return self_.call_method(tx, "difference", [other_], {})
+
+    def nb_inplace_subtract_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        tx.output.side_effects.mutation(self)
+        self.call_method(tx, "difference_update", [other], {})
+        return self
+
 
 class FrozensetVariable(SetVariable):
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
+
+    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def debug_repr(self) -> str:
         if not self.items:

@@ -51,6 +51,7 @@ from ..utils import (
 from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
+    AttrMutationKind,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -788,13 +789,19 @@ class ConstDictVariable(VariableTracker):
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
         # Only supports eq/ne; returns NotImplemented for ordering.
         from .builder import SourcelessBuilder
+        from .user_defined import UserDefinedDictVariable
 
         if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
         if not isinstance(other, ConstDictVariable):
-            if hasattr(other, "_base_vt") and isinstance(
-                other._base_vt, ConstDictVariable
-            ):
+            # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
+            # This is correct because CPython's dict_equal operates on the
+            # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
+            # -- it never calls __getitem__ or __len__ on dict subclasses.
+            # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+            if isinstance(other, UserDefinedDictVariable):
+                if other._base_vt is None:
+                    raise AssertionError("expected _base_vt to be set")
                 other = other._base_vt
             else:
                 return ConstantVariable.create(NotImplemented)
@@ -1023,6 +1030,18 @@ class DictViewVariable(VariableTracker):
         s.call_method(tx, "update", [other], {})
         return s
 
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6036 (dictviews_sub)
+        self_, other_ = (other, self) if reverse else (self, other)
+        s = VariableTracker.build(tx, set).call_function(tx, [self_], {})
+        s.call_method(tx, "difference_update", [other_], {})
+        return s
+
 
 class DictKeysVariable(DictViewVariable):
     # PyDictKeys_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6365
@@ -1070,11 +1089,23 @@ class DictKeysVariable(DictViewVariable):
     def richcompare_impl(self, tx, other, op):
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+        # Uses a polyfill with len() and ``in`` so that Dynamo traces through
+        # sq_length/sq_contains, matching CPython's use of PyObject_Size and
+        # PySequence_Contains.
+        from .builder import SourcelessBuilder
+
         if not _is_set_or_dictview(other):
             return ConstantVariable.create(NotImplemented)
-        return VariableTracker.build(
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_richcompare
+        ).call_function(
             tx,
-            cmp_name_to_op_mapping[op](self.set_items, other.set_items),
+            [
+                SourcelessBuilder.create(tx, cmp_name_to_op_mapping[op]),
+                self,
+                other,
+            ],
+            {},
         )
 
     def call_method(
@@ -1087,8 +1118,6 @@ class DictKeysVariable(DictViewVariable):
         if name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
@@ -1119,9 +1148,11 @@ class DictValuesVariable(DictViewVariable):
     # Override DictViewVariable.hash_impl to restore the base identity hash.
     kv = "values"
 
-    # dict.values() do not implement nb_or and nb_inplace_or
+    # dict.values() do not implement tp_as_number
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None  # type: ignore[bad-override]
+    nb_inplace_or = None
+    nb_subtract_impl = None  # type: ignore[bad-override]
+    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1217,11 +1248,23 @@ class DictItemsVariable(DictViewVariable):
     def richcompare_impl(self, tx, other, op):
         # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+        # Uses a polyfill with len() and ``in`` so that Dynamo traces through
+        # sq_length/sq_contains, matching CPython's use of PyObject_Size and
+        # PySequence_Contains.
+        from .builder import SourcelessBuilder
+
         if not _is_set_or_dictview(other):
             return ConstantVariable.create(NotImplemented)
-        return VariableTracker.build(
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_richcompare
+        ).call_function(
             tx,
-            cmp_name_to_op_mapping[op](self.set_items, other.set_items),
+            [
+                SourcelessBuilder.create(tx, cmp_name_to_op_mapping[op]),
+                self,
+                other,
+            ],
+            {},
         )
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -1241,8 +1284,6 @@ class DictItemsVariable(DictViewVariable):
         if name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
@@ -1292,6 +1333,40 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def get_value___dict__(
         tx: "InstructionTranslator", vt: VariableTracker
     ) -> dict[str, VariableTracker]:
+        # GENERIC_SETATTR on "__dict__" means the whole instance dict was
+        # replaced through the __dict__ getset descriptor (obj.__dict__ = ...).
+        # Per-key obj.__dict__[name] mutations are tracked as INSTANCE_DICT.
+        if isinstance(
+            vt, variables.UserDefinedObjectVariable
+        ) and tx.output.side_effects.has_pending_mutation_of_attr(
+            vt, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            dict_vt = tx.output.side_effects.load_attr(vt, "__dict__")
+            if isinstance(dict_vt, ConstDictVariable):
+                result = {}
+                for key, value in dict_vt.items.items():
+                    try:
+                        key_value = key.vt.as_python_constant()
+                    except NotImplementedError:
+                        unimplemented(
+                            gb_type="non-constant key in object __dict__",
+                            context=f"key={key.vt}",
+                            explanation="Dynamo expects object __dict__ replacement keys to be constants.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    if not isinstance(key_value, str):
+                        unimplemented(
+                            gb_type="non-string key in object __dict__",
+                            context=f"key={key_value!r}",
+                            explanation="Dynamo expects object __dict__ keys to be strings.",
+                            hints=[*graph_break_hints.USER_ERROR],
+                        )
+                    result[key_value] = value
+                return result
+            # Other replacement forms are not materialized here yet. Leave
+            # them on the normal example-value path until Dynamo models their
+            # contents explicitly.
+
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
 
         return {
@@ -1314,11 +1389,21 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return key.vt.as_python_constant() if istype(key, Hasher) else key
 
     def side_effects_table(self) -> dict[str, VariableTracker]:
-        return self.side_effects.store_attr_mutations.get(self.item, {})
+        return {
+            name: value
+            for name, value in self.side_effects.store_attr_mutations.get(
+                self.item, {}
+            ).items()
+            if self.side_effects.has_pending_mutation_of_attr(
+                self.item, name, AttrMutationKind.INSTANCE_DICT
+            )
+        }
 
     def __getitem__(self, key: kV) -> VariableTracker:
         name = self._maybe_unwrap_key(key)
-        if self.side_effects.has_pending_mutation_of_attr(self.item, name):
+        if self.side_effects.has_pending_mutation_of_attr(
+            self.item, name, AttrMutationKind.INSTANCE_DICT
+        ):
             return self.side_effects.load_attr(self.item, name, deleted_ok=True)
         return self.item_dict[name]
 
@@ -1327,21 +1412,22 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         name = self._maybe_unwrap_key(key)
         if not istype(name, str):
             raise AssertionError(f"Expected str key, got {type(name)}")
-        self.side_effects.store_attr(self.item, name, value)
+        self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:
         name = self._maybe_unwrap_key(key)
-        self.side_effects.store_attr(self.item, name, variables.DeletedVariable())
+        self.side_effects.store_instance_dict_attr(
+            self.item, name, variables.DeletedVariable()
+        )
 
     def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
         name = self._maybe_unwrap_key(key)
-        table = self.side_effects_table()
-        # if name in side effects, then it is only contained if it's not a DeletedVariable
-        # even if the original dict contains it
-        if name in table:
-            return not isinstance(table[name], variables.DeletedVariable)
-        else:
-            return name in self.item_dict
+        if self.side_effects.has_pending_mutation_of_attr(
+            self.item, name, AttrMutationKind.INSTANCE_DICT
+        ):
+            value = self.side_effects.load_attr(self.item, name, deleted_ok=True)
+            return not isinstance(value, variables.DeletedVariable)
+        return name in self.item_dict
 
     def __len__(self) -> int:
         return sum(1 for _ in self)
@@ -1389,6 +1475,11 @@ class DunderDictVariable(ConstDictVariable):
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
+
+    def delitem(self, name: str) -> None:
+        if not self.contains(name):
+            raise KeyError(name)
+        del self.items[name]
 
     def getitem(self, name: str) -> VariableTracker:
         return self.items[name]

@@ -7,8 +7,8 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
-from functools import lru_cache
-from typing import TYPE_CHECKING
+from functools import lru_cache, partial
+from typing import NoReturn, TYPE_CHECKING
 
 from torch._C._dynamo import (
     get_type_slots,
@@ -96,28 +96,43 @@ def vt_identity_compare(
     return None
 
 
+def binop_type_error(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_symbol: str,
+) -> NoReturn:
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
 @lru_cache(maxsize=256)
 def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     """Get all type slots for a type (cached)."""
     return get_type_slots(obj_type)
 
 
-def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
+def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given sq slot."""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
     return has_slot(seq_slots, slot)
 
 
-def type_implements_sq_length(obj_type: type) -> bool:
-    """Check whether obj_type implements __len__ as sequence protocol"""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_LENGTH)
-
-
-def type_implements_sq_item(obj_type: type) -> bool:
-    """Check whether obj_type implements __getitem__ as sequence protocol"""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_ITEM)
+type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
+type_implements_sq_length = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
+)
+type_implements_sq_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONCAT
+)
+type_implements_sq_inplace_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_CONCAT
+)
+type_implements_sq_contains = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONTAINS
+)
 
 
 def type_implements_mp_length(obj_type: type) -> bool:
@@ -564,6 +579,10 @@ def generic_getiter(
 NB_SLOT_MAPPING = {
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
+    "nb_subtract": PyNumberSlots.NB_SUBTRACT,
+    "nb_inplace_subtract": PyNumberSlots.NB_INPLACE_SUBTRACT,
+    "nb_add": PyNumberSlots.NB_ADD,
+    "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
 }
 
 
@@ -608,8 +627,11 @@ def binary_op1(
     v_slot = getattr(type(v), impl_attr, None)
     w_slot = getattr(type(w), impl_attr, None)
 
-    # Same class -> only call once (CPython: slotw = NULL if same type)
-    if v.python_type() is w.python_type():
+    # Same class -> only call once (CPython: slotw = NULL if same type) don't use
+    # v.python_type() is w.python_type() here since v := ConstantVariable(int)
+    # and w := SymNodeVariable(int) have different VT types but the same
+    # Python type.
+    if type(v) is type(w):
         w_slot = None
     # Same implementation (inherited) -> skip w
     elif v_slot is w_slot:
@@ -649,10 +671,7 @@ def binary_op(
 
     result = binary_op1(tx, v, w, op_slot)
     if is_nb_not_implemented(result):
-        raise_type_error(
-            tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
-        )
+        binop_type_error(tx, v, w, op_symbol)
     return result
 
 
@@ -705,10 +724,44 @@ def binary_iop(
     """
     result = binary_iop1(tx, v, w, iop_slot, op_slot)
     if is_nb_not_implemented(result):
-        raise_type_error(
-            tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
-        )
+        binop_type_error(tx, v, w, op_symbol)
+    return result
+
+
+# add / inplace add needs special handling
+def vt_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements addition via nb_add / nb_inplace_add with binary_op dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1138-L1155
+    result = binary_op1(tx, v, w, "nb_add")
+    if not is_nb_not_implemented(result):
+        return result
+
+    T = maybe_get_python_type(v)
+    if type_implements_sq_concat(T):
+        return v.sq_concat_impl(tx, w)
+    binop_type_error(tx, v, w, "+")
+
+
+def vt_inplace_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements in-place addition via nb_inplace_add with binary_iop dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1307-L1328
+    result = binary_iop1(tx, v, w, "nb_inplace_add", "nb_add")
+    if is_nb_not_implemented(result):
+        obj_type = maybe_get_python_type(v)
+        if type_implements_sq_inplace_concat(obj_type):
+            return v.sq_inplace_concat_impl(tx, w)
+        elif type_implements_sq_concat(obj_type):
+            return v.sq_concat_impl(tx, w)
+        else:
+            binop_type_error(tx, v, w, "+=")
     return result
 
 
@@ -780,7 +833,7 @@ def object_richcompare(
     https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
     - __eq__: identity check, else NotImplemented
     - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering: NotImplemented
+    - ordering
     """
     if op == "__eq__":
         identity = vt_identity_compare(self, other)
@@ -811,7 +864,7 @@ def python_constant_richcompare_impl(
     try:
         result = getattr(type(self_val), op)(self_val, other_val)
     except TypeError as e:
-        raise_observed_exception(TypeError, tx, args=[str(e)])
+        raise_observed_exception(TypeError, tx, args=list(e.args))
     return ConstantVariable.create(result)
 
 
@@ -946,7 +999,7 @@ def generic_contains(
     """
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
     T = maybe_get_python_type(obj)
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONTAINS):
+    if type_implements_sq_contains(T):
         return obj.sq_contains(tx, item)
     else:
         # iter fallback handles both __iter__ and __getitem__ sequence protocol cases

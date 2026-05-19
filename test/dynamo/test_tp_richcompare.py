@@ -693,6 +693,46 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             lambda: {1: "b"}.items(),
         )
 
+    def test_dict_keys_vs_set(self):
+        self._assert_all_sourceless_cmp_equals(
+            lambda: {1: "a", 2: "b"}.keys(),
+            lambda: {1, 2},
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: {1: "a"}.keys(),
+            lambda: {1, 2},
+        )
+
+    def test_dict_keys_vs_frozenset(self):
+        self._assert_all_sourceless_cmp_equals(
+            lambda: {1: "a", 2: "b"}.keys(),
+            lambda: frozenset({1, 2}),
+        )
+
+    def test_dict_keys_vs_custom_set(self):
+        """dict_keys compared against a set subclass with custom __len__/__contains__.
+
+        CPython's dictview_richcompare calls PyObject_Size and
+        PySequence_Contains which go through sq_length/sq_contains slots.
+        Our polyfill must respect these overrides.
+        """
+
+        class LyingSet(set):
+            def __len__(self):
+                return 999
+
+            def __contains__(self, item):
+                return True
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: {1: "a", 2: "b"}.keys(),
+            lambda: LyingSet({1, 2}),
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: {1: "a", 2: "b"}.keys(),
+            lambda: LyingSet({1}),
+        )
+
     # =====================================================================
     # bytes comparison
     # =====================================================================
@@ -982,6 +1022,49 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self._assert_all_sourceless_cmp_equals(
             lambda: Counter(a=3, b=1),
             lambda: Counter(a=3, b=1, c=1),
+        )
+
+    def test_dict_subclass_cmp_bypasses_dunders(self):
+        """dict comparison uses C struct access, not __getitem__/__len__."""
+
+        class TrapDict(dict):
+            def __getitem__(self, key):
+                raise RuntimeError("__getitem__ should not be called")
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, key):
+                raise RuntimeError("__contains__ should not be called")
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: TrapDict(a=1, b=2),
+            lambda: TrapDict(a=1, b=2),
+            error_ops=self._ORDERING_OPS,
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: TrapDict(a=1),
+            lambda: TrapDict(a=1, b=2),
+            error_ops=self._ORDERING_OPS,
+        )
+
+    def test_set_subclass_cmp_bypasses_dunders(self):
+        """set comparison uses C struct access, not __len__/__contains__."""
+
+        class TrapSet(set):
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: TrapSet({1, 2, 3}),
+            lambda: TrapSet({3, 2, 1}),
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: TrapSet({1, 2}),
+            lambda: TrapSet({1, 2, 3}),
         )
 
     # =====================================================================

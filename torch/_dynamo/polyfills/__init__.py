@@ -10,7 +10,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ne
+from operator import eq, ge, gt, le, lt, ne
 from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
@@ -246,6 +246,43 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
             return False
 
     return True
+
+
+def dictview_richcompare(
+    op: Callable[[Any, Any], bool], self: Iterable[T], other: Iterable[T]
+) -> bool:
+    """Mirrors dictview_richcompare for dict_keys/dict_items vs set/frozenset.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+    Uses len() and ``in`` so that Dynamo traces through sq_length/sq_contains.
+    """
+    len_self = len(self)  # type: ignore[arg-type]
+    len_other = len(other)  # type: ignore[arg-type]
+
+    if op is eq:
+        if len_self != len_other:
+            return False
+        return all(item in other for item in self)
+    if op is ne:
+        if len_self != len_other:
+            return True
+        return not all(item in other for item in self)
+    if op is lt:
+        if len_self >= len_other:
+            return False
+        return all(item in other for item in self)
+    if op is le:
+        if len_self > len_other:
+            return False
+        return all(item in other for item in self)
+    if op is gt:
+        if len_self <= len_other:
+            return False
+        return all(item in self for item in other)
+    # ge
+    if len_self < len_other:
+        return False
+    return all(item in self for item in other)
 
 
 def set_symmetric_difference(
