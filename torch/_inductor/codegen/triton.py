@@ -7229,7 +7229,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
             )
         else:
             raise AssertionError(
-                f"Epilogue attempted to store from '{name}'. "
+                f"Epilogue attempted to store to '{name}'. "
                 "Inductor indexing variables are not defined in user kernel scope. "
             )
 
