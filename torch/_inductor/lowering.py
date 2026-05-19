@@ -46,6 +46,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -8140,8 +8141,36 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _is_symbolic_magic_arg(x: Any) -> bool:
+    return isinstance(x, (SymTypes, sympy.Basic))
+
+
+def _unwrap_symbolic_magic_arg(x: Any) -> Any:
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
+def _make_magic_method_lowering(func: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(func)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        has_symbolic_value = isinstance(meta_val, SymTypes) or any(
+            _is_symbolic_magic_arg(x) for x in itertools.chain(args, kwargs.values())
+        )
+        if has_symbolic_value:
+            args = tuple(_unwrap_symbolic_magic_arg(x) for x in args)
+            kwargs = {k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()}
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+    register_lowering(method_to_operator(method))(_make_magic_method_lowering(func))  # type: ignore[arg-type]
 
 
 @register_lowering(torch.sym_sum)

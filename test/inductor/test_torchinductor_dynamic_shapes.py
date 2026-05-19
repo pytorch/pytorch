@@ -873,6 +873,35 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
 
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (mod, floordiv, shifts, comparison, sym_min_max):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
