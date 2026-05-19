@@ -25,6 +25,7 @@ from torch._inductor.pattern_matcher import (
     PatternPrettyPrinter,
     register_graph_pattern,
     register_replacement,
+    ReplacementPatternEntry,
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -1502,7 +1503,8 @@ class TestPatternMatcher(TestCase):
             match.replace_by_example(repl, [inp, mat1, mat2])
 
         with inductor_config.patch(
-            pre_grad_custom_pass=lambda *args: test_pass.apply(*args)
+            pre_grad_custom_pass=lambda *args: test_pass.apply(*args),
+            pre_grad_pass_timing="early",
         ):
             counter = 0
             expected = fn(*copy.deepcopy(args))
@@ -1948,6 +1950,53 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
+    def test_nested_replacement_args_do_not_percolate_tags(self):
+        class DummyMatch:
+            def __init__(self, outputs):
+                self._outputs = outputs
+
+            def output_nodes(self):
+                return self._outputs
+
+            def erase_nodes(self):
+                pass
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        sin = graph.call_function(torch.ops.aten.sin.default, (x,))
+        old = graph.call_function(torch.ops.aten.add.Tensor, (sin, y))
+        graph.output(old)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def replacement(args):
+            a, b = args
+            return torch.mul(a, b)
+
+        replacement_gm = torch.fx.symbolic_trace(replacement)
+
+        old.meta["recompute"] = torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+        old.meta["ac_graph_id"] = 1
+
+        ReplacementPatternEntry.replace_with_graph(
+            DummyMatch([old]),
+            gm.graph,
+            replacement_gm,
+            args=[(sin, y)],
+        )
+
+        self.assertFalse(
+            "recompute" in sin.meta,
+            "recompute tag should not percolate past nested replacement inputs",
+        )
+        self.assertFalse(
+            "ac_graph_id" in sin.meta,
+            "ac_graph_id should not percolate past nested replacement inputs",
+        )
+        graph_str = str(gm.graph)
+        self.assertIn("torch.mul", graph_str)
+        self.assertIn("operator.getitem", graph_str)
+
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):
             return torch.ops.aten.sigmoid(x)
@@ -2312,6 +2361,41 @@ class TestPatternMatcher(TestCase):
             fn, options={"post_grad_custom_post_pass": custom_pass}
         )
         compiled_fn(x, y)
+
+    def test_replace_by_example_returns_inserted_nodes(self):
+        test_pass = PatternMatcherPass()
+        replacement_targets = []
+
+        @register_graph_pattern(
+            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+            pass_dict=test_pass,
+        )
+        def add_to_mul_add(match: Match, x, y):
+            def repl(a, b):
+                prod = a * b
+                return prod + b
+
+            with V.fake_mode:
+                replacement_nodes = match.replace_by_example(repl, [x, y])
+
+            replacement_targets.extend(
+                node.target for node in replacement_nodes if node.op == "call_function"
+            )
+
+        def custom_pass(graph: torch.fx.Graph):
+            test_pass.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        self.assertEqual(compiled_fn(x, y), x * y + y)
+        self.assertEqual(replacement_targets, [aten.mul.Tensor, aten.add.Tensor])
 
     def test_metadata_propagation_replace_by_example_multinode(self):
         """Verify metadata propagation for replace_by_example with a multi-node

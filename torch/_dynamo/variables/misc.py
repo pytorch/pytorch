@@ -31,7 +31,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, Literal, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -62,7 +62,6 @@ from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     identity,
-    is_tensor_base_attr_getter,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -407,6 +406,9 @@ class SuperVariable(VariableTracker):
             # e.g., tensor ops like `torch.Tensor.to`.
             fn_var = VariableTracker.build(tx, inner_fn, source, realize=True)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
+        elif isinstance(inner_fn, types.BuiltinFunctionType):
+            fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
+            return fn_vt.call_function(tx, args, kwargs)
 
         unimplemented(
             gb_type="Attempted to call a super() attribute that is "
@@ -1173,6 +1175,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         needs_input_grad: tuple[bool, ...] | None = None,
         non_differentiable: Any | None = None,
+        dirty_tensors: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1180,6 +1183,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
+        self.dirty_tensors = dirty_tensors
 
     @staticmethod
     def create(
@@ -1231,6 +1235,19 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
+        elif name == "mark_dirty":
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            if getattr(self, "proxy", None) is None:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function context `mark_dirty`",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo only supports tracing ctx.mark_dirty "
+                    "inside autograd.Function.apply.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self.dirty_tensors = args
+            return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
             unimplemented(
@@ -1238,8 +1255,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 context=f"call_method {self} {name}",
                 explanation="Dynamo does not support calling the method "
                 f"`{name}` on `autograd.Function` context objects. Supported "
-                "methods are `__setattr__`, `save_for_backward` and "
-                "`mark_non_differentiable`.",
+                "methods are `__setattr__`, `save_for_backward`, "
+                "`mark_dirty` and `mark_non_differentiable`.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self.saved_tensors is None:
@@ -1274,10 +1291,14 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in ["save_for_backward", "mark_non_differentiable"]:
+        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
+        if name == "dirty_tensors":
+            if self.dirty_tensors is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
         if name == "needs_input_grad":
@@ -1409,6 +1430,23 @@ class GetAttrVariable(VariableTracker):
         except AttributeError:
             raise NotImplementedError(f"{self} is not a constant") from None
 
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # GetAttrVariable can wrap various types (bound methods, descriptors,
+        # etc.) with different C tp_hash.  Resolve to the actual value and hash.
+        try:
+            val = self.as_python_constant()
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            from ..exc import unimplemented
+
+            unimplemented(
+                gb_type="Non-constant GetAttrVariable hash",
+                context=f"hash_impl {self}",
+                explanation=f"Cannot hash {self} because Dynamo doesn't know how to represent "
+                "the type of the getattr() result, which is not a constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return hash(val), False
+
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError
@@ -1440,171 +1478,6 @@ class GetAttrVariable(VariableTracker):
         if self.name == "__dict__" and hasattr(self.obj, "get_dict_vt"):
             return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
-
-
-class MethodWrapperVariable(VariableTracker):
-    def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.method_wrapper = method_wrapper
-
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.method_wrapper
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
-            args[0], variables.TensorVariable
-        ):
-            if not (len(args) == 1 and len(kwargs) == 0):
-                raise_type_error(
-                    tx, "tensor attribute getter takes exactly one argument"
-                )
-            # type: ignore[arg-type, attr-defined]
-            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
-
-        # method-wrapper variables are common in __init__ calls. For example,
-        # str("foo").__init__ is a method-wrapper. These method wrappers point
-        # to C functions.  Here we intercept if these method-wrappers are from
-        # builtins and then call the function counterpart directly by obtaining
-        # the self object.
-        self_obj = self.method_wrapper.__self__
-        wrapper_name = self.method_wrapper.__name__
-        # TODO(dynamo-team) - We can perhaps expand the scope to more names and
-        # more builtins.
-        if wrapper_name == "__init__":
-            fn_obj = type(self_obj).__init__
-            if fn_obj is object.__init__:
-                return VariableTracker.build(tx, object).call_method(
-                    tx,
-                    wrapper_name,
-                    # type: ignore[arg-type, list-item]
-                    [self_obj, *args],
-                    kwargs,
-                )
-        elif (
-            sys.version_info >= (3, 14)
-            # for some reason, even if the below check passes,
-            # self.method_wrapper may not be the same as type.__dict__["__annotations__"].__get__
-            and self_obj is type.__dict__["__annotations__"]
-            and wrapper_name == "__get__"
-        ):
-            from .builder import SourcelessBuilder
-
-            if len(args) == 1 and not kwargs:
-                try:
-                    return SourcelessBuilder.create(
-                        tx, self.method_wrapper(args[0].as_python_constant())
-                    )
-                except AttributeError:
-                    raise_observed_exception(AttributeError, tx)
-                except AsPythonConstantNotImplementedError:
-                    pass
-
-            unimplemented(
-                gb_type="unsupported type.__dict__['__annotations__'].__get__ call",
-                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
-                explanation="`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ "
-                "on a single constant argument (i.e. a type).",
-                hints=[
-                    "Make sure your call to type.__dict__['__annotations__'] only has "
-                    "one positional argument (no keyword arguments).",
-                    "Make sure the argument to type.__dict__['__annotations__'] is a constant "
-                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-        elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
-            self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
-        ):
-            attr_name = (
-                "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
-            )
-
-            if len(args) == 1 and not kwargs:
-                try:
-                    value = self.method_wrapper(args[0].as_python_constant())
-                except AsPythonConstantNotImplementedError:
-                    pass
-                else:
-                    # Use a sourced variable when the descriptor is the
-                    # standard one from type (not overridden by a metaclass).
-                    source = args[0].source
-                    if source is not None:
-                        cls_val = args[0].as_python_constant()
-                        static_desc = inspect.getattr_static(type(cls_val), attr_name)
-                        if static_desc is self_obj:
-                            if attr_name == "__mro__":
-                                source = TypeMROSource(source)
-                            else:
-                                source = AttrSource(source, attr_name)
-                            return VariableTracker.build(tx, value, source)
-
-                    from .builder import SourcelessBuilder
-
-                    return SourcelessBuilder.create(tx, value)
-
-            unimplemented(
-                gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
-                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
-                explanation=f"`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ "
-                "on a single constant argument (i.e. a type).",
-                hints=[
-                    f"Make sure your call to type.__dict__['{attr_name}'].__get__ only has "
-                    "one positional argument (no keyword arguments).",
-                    f"Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant "
-                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-        return super().call_function(tx, args, kwargs)
-
-    def is_python_constant(self) -> Literal[True]:
-        return True
-
-    def as_python_constant(self) -> types.MethodWrapperType:
-        return self.method_wrapper
-
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
-
-
-class GetSetDescriptorVariable(VariableTracker):
-    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.desc = desc
-
-    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
-        return self.desc
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "__get__" and self.source:
-            source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.desc.__get__, source)
-        elif name in ("__objclass__", "__name__"):
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, getattr(self.desc, name), source)
-        else:
-            return super().var_getattr(tx, name)
-
-    def is_python_constant(self) -> Literal[True]:
-        return True
-
-    def as_python_constant(self) -> types.GetSetDescriptorType:
-        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
@@ -1737,6 +1610,9 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
+
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
@@ -1767,12 +1643,6 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
-
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -1980,12 +1850,6 @@ class NumpyVariable(VariableTracker):
 
         return super().as_proxy()
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
     def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, VariableTracker)
@@ -2013,6 +1877,9 @@ class NullVariable(VariableTracker):
                 ],
             )
         codegen.append_output(create_instruction("PUSH_NULL"))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "None"
 
 
 class DeletedVariable(VariableTracker):
@@ -2297,6 +2164,9 @@ class ConstantLikeVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        return hash(self.value), False
 
     def call_method(
         self,
@@ -2611,12 +2481,12 @@ class WeakRefVariable(VariableTracker):
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
 
-    def is_python_hashable(self) -> bool:
-        return self.referent_vt.is_python_hashable()
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # CPython weakref_hash: hash(referent)
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/weakrefobject.c#L186
+        from .object_protocol import generic_hash_impl
 
-    def get_python_hash(self) -> int:
-        # weakref relies on the referent's hash
-        return self.referent_vt.get_python_hash()
+        return generic_hash_impl(tx, self.referent_vt)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):

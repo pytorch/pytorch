@@ -16,7 +16,7 @@ For overrides that always apply (no predicate), pass `unconditional_override=Tru
 
 ## A Note on Imports
 
-All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get it's version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
+All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get its version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
 
 First, we're going to write the registration function, and a top-level call, being very careful to not pull in the `triton` package early:
 
@@ -249,6 +249,19 @@ def example_ordering_fn(op_symbol, dispatch_key, nodes):
 
     return out_nodes
 ```
+
+# Logging
+
+All modules under `torch._native` route through Python's standard `logging` and are wired into `TORCH_LOGS` under the `native_dsl` shorthand. Use it to surface registration-time diagnostics (missing optional deps, version mismatches, DSL availability checks) without spamming stderr on stock `import torch`.
+
+```
+# show INFO and above from torch._native
+TORCH_LOGS=+native_dsl python my_script.py
+```
+
+When adding new code under `torch/_native`, follow the existing pattern:
+* Use `log = logging.getLogger(__name__)` per module.
+* Default to `log.info(...)` for registration-time diagnostics that the average user does not need to see; reserve `log.warning(...)` for genuine misuse (e.g. user-supplied callbacks that fail).
 
 # Testing Native Ops
 

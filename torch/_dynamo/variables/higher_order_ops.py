@@ -1152,6 +1152,8 @@ def validate_args_and_maybe_create_graph_inputs(
                 args.append(a)
                 continue
             elif set_subgraph_inputs == "automatic_with_forced_inputs":
+                if isinstance(a, LazyVariableTracker):
+                    a = a.realize()
                 if isinstance(a, variables.TensorVariable):
                     node = a.maybe_fx_node()
                     if node is None:
@@ -2314,12 +2316,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def as_python_constant(self) -> HigherOrderOperator:
         return self.value
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
     def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, VariableTracker)
@@ -3473,6 +3469,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         description: str,
         *,
         subgraph_name: str = "wrap_body",
+        set_subgraph_inputs: Literal[
+            "automatic", "automatic_with_forced_inputs"
+        ] = "automatic",
     ) -> tuple[
         tuple[Proxy, ...],
         dict[str, VariableTracker],
@@ -3497,6 +3496,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
+            set_subgraph_inputs=set_subgraph_inputs,
             allow_side_effects=self.allow_side_effects,
             filter_aliased_intermediates=getattr(
                 self, "filter_aliased_intermediates", False
@@ -3516,9 +3516,17 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
-        # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars)
+        if set_subgraph_inputs == "automatic_with_forced_inputs":
+            # Forced mode creates placeholders eagerly (in user arg order) and
+            # rewraps the tensor VTs with child-tracer proxies, so these args
+            # never go through the freevar lift path. Build the outer p_args
+            # from fn_args_vt directly, then append any closure captures that
+            # were auto-lifted during body tracing.
+            forced_args = tuple(a.as_proxy() for a in fn_args_vt if a.is_tensor())
+            lifted_args = forced_args + tuple(body_lifted_freevars)
+        else:
+            # With "automatic", all args flow through the freevar lift path.
+            lifted_args = tuple(body_lifted_freevars)
 
         proxy_args = (body_node,) + lifted_args
 
@@ -4795,6 +4803,37 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if x.is_tensor() and x.as_proxy() in non_differentiable_set:
                     non_differentiable_idx.append(i)
 
+        dirty_idx: list[int] = []
+        if ctx.dirty_tensors is not None:
+            dirty_tensor_set: set[Proxy] = {
+                x.as_proxy() for x in ctx.dirty_tensors if x.is_tensor()
+            }
+            matched_dirty_tensor_set: set[Proxy] = set()
+            if fwd_out.is_tensor():
+                fwd_out_proxy = fwd_out.as_proxy()
+                if fwd_out_proxy in dirty_tensor_set:
+                    dirty_idx.append(0)
+                    matched_dirty_tensor_set.add(fwd_out_proxy)
+            else:
+                if not isinstance(fwd_out, variables.BaseListVariable):
+                    raise AssertionError("Expected fwd_out to be a BaseListVariable")
+                for i, x in enumerate(fwd_out.items):
+                    if x.is_tensor():
+                        x_proxy = x.as_proxy()
+                        if x_proxy in dirty_tensor_set:
+                            dirty_idx.append(i)
+                            matched_dirty_tensor_set.add(x_proxy)
+            if dirty_tensor_set - matched_dirty_tensor_set:
+                unimplemented(
+                    gb_type="autograd.Function.apply: mark_dirty input not returned",
+                    context="",
+                    explanation="Dynamo only supports ctx.mark_dirty when each "
+                    "dirty input is also returned from forward.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+
         # See Note [Activations with no version counter checks in eager]
         # Compute which tensors in bwd_freevars came from ctx.save_for_backward.
         # This allows AOT autograd to distinguish between tensors saved via
@@ -4839,6 +4878,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
+        # Preserve the existing HOP call shape for the common no-mark_dirty case.
+        if dirty_idx:
+            kwargs_for_fn["dirty_idx"] = dirty_idx
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
@@ -5199,6 +5241,22 @@ class AutogradFunctionApplyVariable(VariableTracker):
             # Backward tensor vt here can be - (1) an intermediate, or (2) input
             # to the backward graph. If it is an input to the backward graph, we have to lookup bwd_freevars to get the inner proxy.
             return bwd_freevars.get(vt.proxy, vt.proxy).node  # type: ignore[attr-defined]
+
+        tensor_args_seen: list[Any] = []
+        for arg in orig_fwd_args:
+            if arg.is_tensor():
+                fake_tensor = _get_fake_value(arg)
+                if any(fake_tensor is seen for seen in tensor_args_seen):
+                    unimplemented(
+                        gb_type="autograd.Function.apply: duplicate tensor input",
+                        context="",
+                        explanation="Dynamo does not support tracing autograd.Function.apply "
+                        "when the same tensor is passed to multiple forward inputs.",
+                        hints=[
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                tensor_args_seen.append(fake_tensor)
 
         # Find the mapping between orig_fwd_args and bwd_out
         # pyrefly: ignore [implicit-any]
@@ -5728,6 +5786,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             vt.synchronize_attributes(tx)
 
         # Step 3: Trace local_map subgraph with local tensors
+        #
+        # Use "automatic_with_forced_inputs" so subgraph placeholders are
+        # created eagerly in the user's call-site arg order. Under "automatic",
+        # Dynamo lifts freevars in first-use order, which diverges between
+        # static and dynamic shapes (e.g. `x.shape[-1]` early in the body lifts
+        # `x` first under dynamic shapes but constant-folds under static). The
+        # forced mode keeps `in_placements` aligned with user args regardless.
         (
             p_args,
             p_kwargs,
@@ -5738,7 +5803,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_graph_output_vts,
             _,
         ) = self.create_wrapped_node(
-            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+            tx,
+            user_func,
+            user_args,
+            kwargs,
+            self.value._name,
+            subgraph_name="subgraph",
+            set_subgraph_inputs="automatic_with_forced_inputs",
         )
 
         # Step 4: Validate traced graph signature still matches placement information
@@ -5789,18 +5860,14 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             raise AssertionError(
                 "Expected 'subgraph' in first actual input node target"
             )
-        if len(expected_input_nodes) != len(actual_input_nodes) - 1:
+        if expected_input_nodes != actual_input_nodes[1:]:
             raise AssertionError(
-                "Expected input node count mismatch between expected and actual"
+                "local_map: unexpected argument ordering. Outer HOP args did "
+                "not match user call-site order "
+                f"(expected={expected_input_nodes}, actual={actual_input_nodes[1:]}). "
+                "automatic_with_forced_inputs should have preserved order; "
+                "please file an issue at https://github.com/pytorch/pytorch/issues."
             )
-        for expected_order, actual_order in zip(
-            expected_input_nodes, actual_input_nodes[1:]
-        ):
-            if expected_order != actual_order:
-                raise AssertionError(
-                    "Dynamo changed the order of inputs to the local_map function, please adjust "
-                    f"the order of inputs and input_placements from {expected_input_nodes}, to: {actual_input_nodes[1:]}"
-                )
         if len(p_kwargs) != 0:
             raise AssertionError("Expected p_kwargs to be empty")
 
