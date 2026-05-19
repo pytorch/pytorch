@@ -19,6 +19,7 @@ from torch.distributed.pipelining._utils import (
     _DTensorMeta,
     _make_tensor_from_meta,
     _MeshCache,
+    _SPMDTensorMeta,
     _StageBackwardMeta,
     _StageForwardMeta,
     _StageMeta,
@@ -629,6 +630,21 @@ class _PipelineStageBase(ABC):
                         stride=info.tensor_meta.global_stride,
                         run_check=False,
                     ).requires_grad_(effective_requires_grad)
+                elif isinstance(info.tensor_meta, _SPMDTensorMeta):
+                    activation = info.buffer.requires_grad_(effective_requires_grad)
+                    if info.tensor_meta.local_type:
+                        import spmd_types as spmd
+
+                        ps = (
+                            spmd.PartitionSpec(*info.tensor_meta.partition_spec)
+                            if info.tensor_meta.partition_spec
+                            else None
+                        )
+                        spmd.assert_type(
+                            activation,
+                            info.tensor_meta.local_type,
+                            partition_spec=ps,
+                        )
                 else:
                     activation = info.buffer.requires_grad_(effective_requires_grad)
                 # Activation must be a leaf so backward terminates here.
@@ -1665,13 +1681,14 @@ class PipelineStage(_PipelineStageBase):
     def _recv_meta(self, src_stage: int) -> Any:
         """Receive metadata object from a stage on a different rank via P2P."""
         objects: list[Any] = [None]
-        dist.recv_object_list(
-            objects,
-            src=self._resolve_peer_global_rank(src_stage),
-            group=self.group,
-            device=self.device,
-            use_batch=True,
-        )
+        with dist.spmd_no_typecheck():
+            dist.recv_object_list(
+                objects,
+                src=self._resolve_peer_global_rank(src_stage),
+                group=self.group,
+                device=self.device,
+                use_batch=True,
+            )
         if len(objects) != 1:
             raise PipeliningMetadataError(
                 f"Expected exactly one object to be received but got: {len(objects)}"
@@ -1680,13 +1697,14 @@ class PipelineStage(_PipelineStageBase):
 
     def _send_meta(self, meta: Any, dst_stage: int) -> None:
         """Send metadata object to a stage on a different rank via P2P."""
-        dist.send_object_list(
-            [meta],
-            dst=self._resolve_peer_global_rank(dst_stage),
-            group=self.group,
-            device=self.device,
-            use_batch=True,
-        )
+        with dist.spmd_no_typecheck():
+            dist.send_object_list(
+                [meta],
+                dst=self._resolve_peer_global_rank(dst_stage),
+                group=self.group,
+                device=self.device,
+                use_batch=True,
+            )
 
     def _is_same_rank(self, other_stage: int) -> bool:
         """Check if another stage is on the same rank as this stage."""
@@ -1779,11 +1797,12 @@ class PipelineStage(_PipelineStageBase):
         grad_outputs: list[torch.Tensor | None] | None = None,
     ) -> tuple[torch.Tensor | None, ...]:
         """Compute input gradients via :func:`_autograd_grad_for_inputs`."""
-        return _autograd_grad_for_inputs(
-            outputs,
-            all_fwd_inputs,
-            grad_outputs,
-        )
+        with dist.spmd_no_typecheck():
+            return _autograd_grad_for_inputs(
+                outputs,
+                all_fwd_inputs,
+                grad_outputs,
+            )
 
     def _to_tensor(self, arg: torch.Tensor | TensorMeta) -> torch.Tensor:
         """Convert a tensor or metadata to a real tensor on ``self.device``.
@@ -1917,6 +1936,7 @@ class PipelineStage(_PipelineStageBase):
             self._send_meta(fwd_meta, self.stage_index + 1)
             return None
 
+    @dist.spmd_no_typecheck()
     def _backward_metadata_inference(
         self,
         loss_fn: Callable[..., torch.Tensor] | None = None,
@@ -1924,7 +1944,7 @@ class PipelineStage(_PipelineStageBase):
         received_grad_meta: _StageBackwardMeta | None = None,
         loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
-        """Run backward metadata inference (Stage N → 0).
+        """Run backward metadata inference (Stage N -> 0).
 
         Args:
             loss_fn: Loss function (required for the last stage).

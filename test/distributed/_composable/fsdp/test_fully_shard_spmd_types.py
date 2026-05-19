@@ -15,6 +15,8 @@ if dist._is_spmd_types_available():
     import spmd_types._checker
     import spmd_types._type_attr
 
+from torch.distributed.pipelining.schedules import ScheduleGPipe
+from torch.distributed.pipelining.stage import PipelineStage
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
@@ -227,7 +229,9 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
+            spmd._type_attr.set_local_type(
+                param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]}
+            )
 
         def shard_fn(param):
             lt = spmd.get_local_type(param)
@@ -271,6 +275,105 @@ class TestFullyShardSpmdTypes(FSDPTest):
         inp = torch.randn((2, 16), device=device_type)
         with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
+
+
+class TwoLayerMLP(nn.Module):
+    def __init__(self, dim, device=None):
+        super().__init__()
+        self.layer0 = TestMLP(dim, device=device)
+        self.layer1 = TestMLP(dim, device=device)
+
+    def forward(self, x):
+        return self.layer1(self.layer0(x))
+
+
+@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
+class TestPipelineSpmdTypes(FSDPTest):
+    @property
+    def world_size(self):
+        return min(4, torch.cuda.device_count())
+
+    def setUp(self):
+        super().setUp()
+        from spmd_types._mesh_axis import _reset
+
+        _reset()
+
+    @skip_if_lt_x_gpu(4)
+    def test_pp_tp(self):
+        """PP + TP: verify TP annotations survive through pipeline stages."""
+        pp_size = 2
+        tp_size = self.world_size // pp_size
+        mesh = init_device_mesh(
+            device_type.type,
+            (pp_size, tp_size),
+            mesh_dim_names=("pp", "tp"),
+        )
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
+        tp_pg = mesh.get_group("tp")
+        pp_group = mesh["pp"].get_group()
+        pp_rank = dist.get_rank(pp_group)
+
+        mlp_dim = 16
+        torch.manual_seed(42)
+        model = TwoLayerMLP(mlp_dim, device=device_type)
+        stage_module = model.layer0 if pp_rank == 0 else model.layer1
+        _tp_init(stage_module, tp_pg)
+
+        tp_plan = {
+            "in_proj.weight": spmd.S(0),
+            "out_proj.weight": spmd.S(1),
+        }
+        for fqn, param in stage_module.named_parameters():
+            spmd._type_attr.set_local_type(param, {tp_axis: tp_plan[fqn]})
+
+        # Track whether TP annotations are alive during compute
+        annotations_seen = []
+
+        def check_tp_hook(module, args):
+            for name, param in module.named_parameters(recurse=False):
+                self.assertNotIsInstance(param.data, DTensor)
+                self.assertTrue(
+                    spmd._checker.has_local_type(param),
+                    f"{name} should have spmd_types annotation in compute",
+                )
+                lt = spmd.get_local_type(param)
+                self.assertIn(tp_axis, lt, f"{name} missing TP axis annotation")
+                annotations_seen.append(name)
+
+        for m in stage_module.modules():
+            if isinstance(m, nn.Linear):
+                m.register_forward_pre_hook(check_tp_hook)
+
+        stage = PipelineStage(
+            submodule=stage_module,
+            stage_index=pp_rank,
+            num_stages=pp_size,
+            device=device_type,
+            group=pp_group,
+        )
+
+        chunks = 2
+        schedule = ScheduleGPipe(
+            stage,
+            n_microbatches=chunks,
+            loss_fn=lambda out, tgt: out.sum(),
+        )
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((4, mlp_dim), device=device_type)
+        target = torch.randn((4, mlp_dim), device=device_type)
+
+        with spmd.set_current_mesh(mesh):
+            if pp_rank == 0:
+                schedule.step(inp)
+            else:
+                schedule.step(target=target)
+
+        self.assertGreater(
+            len(annotations_seen), 0,
+            "TP annotations should have been checked during compute",
+        )
 
 
 if __name__ == "__main__":

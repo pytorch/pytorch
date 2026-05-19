@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import local_map
 from torch.fx.node import map_aggregate
@@ -206,6 +207,11 @@ def _split_tensor(
         )
 
     _is_dtensor = isinstance(tensor, DTensor)
+    _has_spmd_types = False
+    if not _is_dtensor and dist._is_spmd_types_available():
+        import spmd_types as spmd
+
+        _has_spmd_types = spmd.runtime.has_local_type(tensor)
 
     if _is_dtensor:
         # Use local_map to split locally and preserve placements.
@@ -219,6 +225,15 @@ def _split_tensor(
             in_placements=(placements,),
         )
         chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)  # type: ignore[assignment]
+    elif _has_spmd_types:
+        import spmd_types as spmd
+
+        local_type = spmd.get_local_type(tensor)
+        partition_spec = spmd._checker.get_partition_spec(tensor)
+        with spmd.no_typecheck():
+            chunk_tensors = list(torch.tensor_split(tensor, num_chunks, spec.split_dim))
+        for chunk in chunk_tensors:
+            spmd.assert_type(chunk, local_type, partition_spec)
     else:
         chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
@@ -256,6 +271,16 @@ def _split_tensor(
             in_placements=(placements,) + (placements,) * n,
         )
         return list(expand_fn(tensor, *chunk_tensors))  # type: ignore[arg-type]
+    elif _has_spmd_types:
+        import spmd_types as spmd
+
+        local_type = spmd.get_local_type(tensor)
+        partition_spec = spmd._checker.get_partition_spec(tensor)
+        with spmd.no_typecheck():
+            expanded_chunks = list(_expand_chunks(tensor, *chunk_tensors))
+        for chunk in expanded_chunks:
+            spmd.assert_type(chunk, local_type, partition_spec)
+        return expanded_chunks
     else:
         return list(_expand_chunks(tensor, *chunk_tensors))
 

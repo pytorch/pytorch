@@ -350,6 +350,7 @@ class FSDPParamGroup:
         )
 
     # Runtime #
+    @dist.spmd_no_typecheck()
     @_disable_functorch_if_active
     def unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
@@ -395,6 +396,7 @@ class FSDPParamGroup:
                 self._all_gather_comm,
             )
 
+    @dist.spmd_no_typecheck()
     @_disable_functorch_if_active
     def wait_for_unshard(self):
         """
@@ -477,6 +479,7 @@ class FSDPParamGroup:
         if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
+    @dist.spmd_no_typecheck()
     @_disable_functorch_if_active
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
