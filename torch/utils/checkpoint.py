@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 import itertools
 import platform
-import sys
 import uuid
 import warnings
 import weakref
@@ -518,22 +517,26 @@ def checkpoint(
         next(gen)
         try:
             ret = function(*args, **kwargs)
-        except BaseException:
+        except BaseException as e:
             try:
-                gen.throw(*sys.exc_info())
-            except StopIteration as e:
+                gen.throw(e)
+            except StopIteration as stop:
                 raise RuntimeError(
                     "torch.utils.checkpoint: the forward context provided by "
                     "context_fn suppressed an exception raised during the "
                     "checkpointed forward. This is not supported because "
                     "checkpoint cannot return a value for a failed forward."
-                ) from e
+                ) from stop
             raise
         # Runs post-forward logic
         try:
             next(gen)
         except StopIteration:
             return ret
+        raise AssertionError(
+            "torch.utils.checkpoint: expected context_fn generator to yield "
+            "exactly twice, but it yielded more than twice."
+        )
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
