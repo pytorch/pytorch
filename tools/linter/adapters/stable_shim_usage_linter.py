@@ -41,15 +41,20 @@ def get_shim_functions(
     Functions without version guards are ignored.
 
     Args:
-        shim_files: List of paths to shim header files. If None, will use the default
-                    paths to torch/csrc/stable/c/shim.h and
-                    torch/csrc/inductor/aoti_torch/c/shim.h based on the repository root.
+        shim_files: List of paths to shim header files. If None, will use the
+                    default set of shim headers under torch/csrc/stable and
+                    torch/csrc/inductor/aoti_torch (including generated shims)
     """
     if shim_files is None:
         repo_root = Path(__file__).resolve().parents[3]
         shim_files_to_check = [
             repo_root / "torch/csrc/stable/c/shim.h",
             repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.h",
         ]
     else:
         shim_files_to_check = [Path(f) for f in shim_files]

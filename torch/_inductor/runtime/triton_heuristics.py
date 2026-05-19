@@ -46,10 +46,13 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import (
     cache_dir,
@@ -395,6 +398,13 @@ def get_caching_autotuner_plugins(
     imports kept inside the relevant branch.
     """
     plugins: list[CachingAutotunerPlugin] = []
+    if autotuner.inductor_meta.get("incremental_autotune", False):
+        try:
+            from .fb.incremental import IncrementalAutotunePlugin
+
+            plugins.append(IncrementalAutotunePlugin())
+        except ImportError:
+            pass
     return plugins
 
 
@@ -577,14 +587,13 @@ class CachingAutotuner(KernelInterface):
                     self.compile_results = [compile_result]
                     return
 
-            # If the best config isn't in our list of compile results,
-            # it's likely because it was found by coordesc after the cache
-            # already saved
-            if found_by_coordesc:
-                with dynamo_timed("CachingAutotuner.slow_precompile_config"):
-                    if self.fn.fn is None:
-                        self.fn = reload_kernel_from_src().fn
-                    self.compile_results = [self._precompile_config(best_config)]
+            # The best config isn't in our compile results — it was
+            # found dynamically (coordesc tuning or _dynamic_scale_rblock)
+            # after the static autotuner was saved. Compile it now.
+            with dynamo_timed("CachingAutotuner.slow_precompile_config"):
+                if self.fn.fn is None:
+                    self.fn = reload_kernel_from_src().fn
+                self.compile_results = [self._precompile_config(best_config)]
 
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
@@ -732,13 +741,21 @@ class CachingAutotuner(KernelInterface):
             if total_block <= max_blocks_per_sm * device_prop.multi_processor_count:
                 # no need to improve occupancy
                 continue
-            new_config = copy.deepcopy(triton_config)
 
             # Reduce the largest Rn_BLOCK by a factor of 2.
             largest_rkwarg: str = max(
                 reduction_kwargs, key=triton_config.kwargs.__getitem__
             )
-            new_config.kwargs[largest_rkwarg] //= 2
+            new_rblock = triton_config.kwargs[largest_rkwarg] // 2
+            min_rblock = self.inductor_meta.get("min_rblock")
+            if (
+                min_rblock is not None
+                and largest_rkwarg == "R0_BLOCK"
+                and new_rblock < min_rblock
+            ):
+                continue
+            new_config = copy.deepcopy(triton_config)
+            new_config.kwargs[largest_rkwarg] = new_rblock
 
             if seen_config_hashes is None:
                 seen_config_hashes = OrderedSet(
@@ -758,6 +775,11 @@ class CachingAutotuner(KernelInterface):
             yield new_config
 
     def _dynamic_scale_rblock(self):
+        if (
+            self.autotune_cache_info
+            and self.autotune_cache_info.get("autotune_cache_state") == "hit"
+        ):
+            return
         if not self._could_rblock_scale:
             return
         for new_config in self._iter_rblock_scale_candidates():
@@ -2098,8 +2120,9 @@ class CachingAutotuner(KernelInterface):
                 if val is not None:
                     setattr(new_launcher, attr, val)
             return new_launcher
-        except (AttributeError, TypeError, KeyError):
-            # Expected failures - silent fallback is OK
+        except (AttributeError, TypeError, KeyError, ValueError):
+            # Expected failures - silent fallback is OK.
+            # ValueError is raised when nArgs > MAX_ARGS in the C extension.
             return None
         except Exception:
             # Unexpected failures - log for debugging
@@ -2842,9 +2865,16 @@ def cached_autotune(
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    if size_hints is not None and heuristic_type in (
+        HeuristicType.REDUCTION,
+        HeuristicType.PERSISTENT_REDUCTION,
+    ):
+        configs = _enforce_reduction_config_block_minimums(
+            configs, size_hints, inductor_meta
+        )
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
-    inductor_meta = {} if inductor_meta is None else inductor_meta
 
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
         configs, filename, inductor_meta
@@ -2954,6 +2984,104 @@ def check_max_block(cfg: dict[str, int]):
             assert val <= max_block, (
                 f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
             )
+
+
+def _check_native_matmul_block_numel(
+    kwargs: dict[str, int], r0_block: int | None = None
+) -> None:
+    block_numel = native_matmul_block_numel(kwargs, r0_block=r0_block)
+    if block_numel > TRITON_MAX_TENSOR_NUMEL:
+        raise AssertionError(
+            f"Block numel {block_numel} exceeds Triton maximum "
+            f"{TRITON_MAX_TENSOR_NUMEL}"
+        )
+
+
+def _native_matmul_config_under_numel_limit(
+    cfg: Config, r0_block: int | None = None
+) -> bool:
+    return (
+        native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        <= TRITON_MAX_TENSOR_NUMEL
+    )
+
+
+def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Config]:
+    capped_configs: list[Config] = []
+    for cfg in configs:
+        cfg = copy.deepcopy(cfg)
+        while not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            shrinkable_fields = [
+                field for field in ("XBLOCK", "YBLOCK") if cfg.kwargs.get(field, 1) > 16
+            ]
+            if not shrinkable_fields:
+                break
+            field = max(shrinkable_fields, key=lambda field: cfg.kwargs[field])
+            cfg.kwargs[field] //= 2
+
+        if _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            capped_configs.append(cfg)
+
+    return unique_configs(capped_configs)
+
+
+def _enforce_reduction_config_block_minimums(
+    configs: list[Config],
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any],
+) -> list[Config]:
+    min_xblock = inductor_meta.get("min_xblock")
+    min_rblock = inductor_meta.get("min_rblock")
+    if min_xblock is None and min_rblock is None:
+        return configs
+
+    for cfg in configs:
+        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
+            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+        )
+        has_xblock = "XBLOCK" in cfg.kwargs
+        has_rblock = "R0_BLOCK" in cfg.kwargs
+        if not (has_xblock or has_rblock):
+            continue
+
+        x_floor = min_xblock if min_xblock is not None else 1
+        r_floor = min_rblock if min_rblock is not None else 1
+        target_tile_product = (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+            cfg.kwargs["R0_BLOCK"] if has_rblock else 1
+        )
+
+        if has_xblock:
+            cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], x_floor)
+        if has_rblock:
+            cfg.kwargs["R0_BLOCK"] = max(cfg.kwargs["R0_BLOCK"], r_floor)
+
+        def current_tile_product() -> int:
+            return (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+                cfg.kwargs["R0_BLOCK"] if has_rblock else 1
+            )
+
+        def shrink_to_budget(name: str, floor: int) -> None:
+            while (
+                name in cfg.kwargs
+                and current_tile_product() > target_tile_product
+                and cfg.kwargs[name] > floor
+            ):
+                cfg.kwargs[name] //= 2
+
+        # Preserve the autotuner's original tile-size budget where possible:
+        # raising one block to satisfy a floor should shrink the other block.
+        shrink_to_budget("R0_BLOCK", r_floor)
+        shrink_to_budget("XBLOCK", x_floor)
+
+        check_max_block(cfg.kwargs)
+        check_config(
+            cfg.kwargs,
+            xnumel=size_hints.get("x") if "XBLOCK" in cfg.kwargs else None,
+            ynumel=size_hints.get("y") if "YBLOCK" in cfg.kwargs else None,
+            znumel=size_hints.get("z") if "ZBLOCK" in cfg.kwargs else None,
+        )
+
+    return configs
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -3174,13 +3302,12 @@ def triton_config_reduction(
 
     # shrink sizes to size hints
     x = min(x, size_hints["x"])
+    target = conditional_product(x, *rnumels.values())
+    if conditional_product(*size_hints.values()) < target:
+        target //= 8
 
     def total_numel() -> int:
         return conditional_product(x, *rnumels.values())
-
-    target = total_numel()
-    if conditional_product(*size_hints.values()) < target:
-        target //= 8
 
     # if we are below original block size, scale up where we can
     while x < size_hints["x"] and total_numel() < target:
@@ -3449,7 +3576,13 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
 
 def triton_config_tiled_reduction(
-    size_hints, x, y, r, num_stages=1, register_intensive=False, waves_per_eu=None
+    size_hints,
+    x,
+    y,
+    r,
+    num_stages=1,
+    register_intensive=False,
+    waves_per_eu=None,
 ):
     """
     Construct a tile reduction triton config with some adjustment
@@ -3511,7 +3644,9 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
         # Add a config that is guaranteed to compile
         example_config = configs[0]
         config_block_sizes = {**example_config.kwargs}
-        config_block_sizes.update(tma_min_block_sizes)
+        for block_type, min_block_value in tma_min_block_sizes.items():
+            existing = config_block_sizes.get(block_type, 1)
+            config_block_sizes[block_type] = max(existing, min_block_value)
         new_configs = [
             Config(
                 config_block_sizes,
@@ -3735,6 +3870,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     }
     # Remove keys with None values (i.e., missing in sizes)
     config = {k: v for k, v in config.items() if v is not None}
+    _check_native_matmul_block_numel(config)
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -4328,12 +4464,13 @@ def _persistent_reduction_configs(
     inductor_meta=None,
     triton_meta=None,
 ):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
     # Under deterministic mode, canonicalize the batch-dim hint so the
     # candidate-config branching below (e.g. xnumel // 8 < 128) doesn't pick
     # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
     # change the bf16 reduction order and break batch invariance in
     # persistent reductions like LayerNorm.
-    if inductor_meta and inductor_meta.get("batch_invariant"):
+    if inductor_meta.get("batch_invariant"):
         size_hints = dict(size_hints)
         if "x" in size_hints:
             size_hints["x"] = max(size_hints["x"], 4096)
@@ -4344,16 +4481,22 @@ def _persistent_reduction_configs(
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
     if triton_meta.get("native_matmul"):
+        native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
+        if native_matmul_rblock is None:
+            native_matmul_rblock = native_matmul_persistent_rblock(rnumel)
+
         if len(size_hints) == 3:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         elif len(size_hints) == 4:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
@@ -4392,7 +4535,10 @@ def _persistent_reduction_configs(
             )
             configs.append(
                 triton_config_tiled_reduction(
-                    size_hints, block_sizes["x"], block_sizes["y"], rnumel
+                    size_hints,
+                    block_sizes["x"],
+                    block_sizes["y"],
+                    rnumel,
                 )
             )
 
