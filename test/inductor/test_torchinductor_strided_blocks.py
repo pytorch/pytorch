@@ -113,7 +113,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
         return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
 
     def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
@@ -952,10 +952,10 @@ class CommonTemplate:
         # Check for a single reduction dimension.
         self._assert_reduction_ndims(code, 1)
 
+    @xfail_if_use_tensor_descriptor
     def test_reduction_multiple_discontiguous_dims(self):
         """
-        Test reducing a tensor with more than one discontiguous dimension. This case
-        won't generate a block pointer, since we don'allow enough tiling dimensions.
+        Test reducing a tensor with more than one discontiguous dimension.
         """
         # Use odd shapes to frustrate block pointer analysis.
         view = self._discontiguous_tensor((3, 7, 11), self.device)
@@ -963,13 +963,36 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             torch.sum,
             view,
-            expected_num_block_pointers=0,
+            expected_num_block_pointers=1,
             expected_num_triton_kernels=1,
             config_patches=tiled_reduction_config,
         )
 
-        # Check for 2 reduction dimensions.
-        self._assert_reduction_ndims(code, 2)
+        # Check for 3 reduction dimensions.
+        self._assert_reduction_ndims(code, 3)
+
+    @test_torchinductor.skip_if_triton_cpu("cpp_wrapper requires CUDA")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON or torch.version.hip,
+        "cpp_wrapper lazy Triton path requires CUDA",
+    )
+    def test_reduction_multiple_discontiguous_dims_cpp_wrapper(self):
+        if self.device != "cuda":
+            self.skipTest("cpp_wrapper lazy Triton path requires CUDA")
+
+        view = self._discontiguous_tensor((3, 7, 11), self.device)
+
+        with config.patch(
+            {
+                "cpp_wrapper": True,
+                "triton.use_block_ptr": True,
+                "triton.use_tensor_descriptor": False,
+                **tiled_reduction_config,
+            }
+        ):
+            result = torch.compile(torch.sum, backend="inductor")(view)
+
+        self.assertTrue(torch.allclose(torch.sum(view), result))
 
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):

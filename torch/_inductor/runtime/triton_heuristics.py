@@ -2994,9 +2994,9 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
-            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
-        )
+        assert not (
+            frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys()
+        ), f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
         if not (has_xblock or has_rblock):
@@ -4961,6 +4961,8 @@ class GridExpr:
             "YBLOCK": f"{kernel_name}_result.yblocks[0]",
             "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
             "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
+            "R1_BLOCK": f"{kernel_name}_result.r1blocks[0]",
+            "R2_BLOCK": f"{kernel_name}_result.r2blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
