@@ -21,13 +21,13 @@ namespace at::native {
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto divDown(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
   return (a / b);
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
   // Overflow safe variant of (a + b - 1) / b
   const uint64_t blocks = a / b + (a % b != 0);
   return blocks;
@@ -35,19 +35,19 @@ constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto roundDown(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
   return divDown(a, b) * b;
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto roundUp(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
   return divUp(a, b) * b;
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ bool isEvenDivisor(U a, V b) {
-  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
   return (a % V(b) == 0) && ((a / V(b)) >= 1);
 }
 
@@ -74,7 +74,7 @@ static_assert(log2(4) == 2, "log2");
 
 template <typename T>
 constexpr __host__ __device__ bool isPowerOf2(T v) {
-  static_assert(std::is_integral_v<T>, "");
+  static_assert(std::is_integral_v<T>);
   return (v && !(v & (v - 1)));
 }
 
@@ -83,7 +83,7 @@ static_assert(!isPowerOf2(3333), "isPowerOf2");
 
 template <typename T>
 constexpr __host__ __device__ T nextHighestPowerOf2(T v) {
-  static_assert(std::is_integral_v<T>, "");
+  static_assert(std::is_integral_v<T>);
   return (isPowerOf2(v) ? (T)2 * v : ((T)1 << (log2(v) + 1)));
 }
 
@@ -105,7 +105,7 @@ static_assert(
 
 template <typename T>
 constexpr __host__ __device__ T nextLowestPowerOf2(T v) {
-  static_assert(std::is_integral_v<T>, "");
+  static_assert(std::is_integral_v<T>);
   return (isPowerOf2(v) ? v / (T)2 : ((T)1 << (log2(v))));
 }
 
@@ -126,7 +126,7 @@ inline __host__ __device__ bool isPointerAligned(const void* p, int align) {
 // aligned address
 template <int Align>
 inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
-  static_assert(isPowerOf2(Align), "");
+  static_assert(isPowerOf2(Align));
   const uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
@@ -382,7 +382,7 @@ struct ALayout_RM {
       int32_t nTile,
       int32_t laneId,
       const float4& out) {
-    static_assert(ReduceType == KReductionType::None, "");
+    static_assert(ReduceType == KReductionType::None);
 
     if constexpr (ReduceType == KReductionType::None) {
 #if defined(USE_ROCM)
@@ -504,10 +504,10 @@ struct BLayout_TC_int4 {
 
     // Load needed info for dequantization
 
-    static_assert(isPowerOf2(QGroupSize), "");
-    static_assert(isEvenDivisor(QGroupSize, kKTileSize), "");
+    static_assert(isPowerOf2(QGroupSize));
+    static_assert(isEvenDivisor(QGroupSize, kKTileSize));
     // smallest quantization group size is 32 (2 k-tiles are packed in an int32)
-    static_assert(QGroupSize >= kKTileSize * 2, "");
+    static_assert(QGroupSize >= kKTileSize * 2);
     constexpr int kKTilesPerQGroup = (QGroupSize / kKTileSize);
     // a q-group could be larger than what we are handling in a single warp
     constexpr int kNumQGroups = (KTilesToLoad / kKTilesPerQGroup) < 1
@@ -573,7 +573,7 @@ struct BLayout_TC_int4 {
 
           // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and
           // can't be used as a 32-bit asm register argument for `mma`
-          static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]), "");
+          static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]));
           // On Windows with ROCm, std::memcpy resolves to a __host__-only
           // function and cannot be called from __device__ code. Use the raw
           // memcpy which the HIP compiler provides as a __device__ builtin.
@@ -638,30 +638,26 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
   static_assert(
       ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
-          ALayout::kKTileSize == kKTileSize,
-      "");
+      ALayout::kKTileSize == kKTileSize);
 
   static_assert(
       BLayout::kMTileSize == kMTileSize && BLayout::kNTileSize == kNTileSize &&
-          BLayout::kKTileSize == kKTileSize,
-      "");
+      BLayout::kKTileSize == kKTileSize);
 
   static_assert(
       CLayout::kMTileSize == kMTileSize && CLayout::kNTileSize == kNTileSize &&
-          CLayout::kKTileSize == kKTileSize,
-      "");
+      CLayout::kKTileSize == kKTileSize);
 
   constexpr int kInnerKTiles = BLayout::kInnerKTiles;
 
   // 2/4/8 inner k-tiles correspond to 4, 8 and 16 byte innermost loads
   static_assert(
-      kInnerKTiles == 2 || kInnerKTiles == 4 || kInnerKTiles == 8, "");
+      kInnerKTiles == 2 || kInnerKTiles == 4 || kInnerKTiles == 8);
 
   // We always process at least kInnerKTiles k-tiles back to back in a warp
   static_assert(
       KTilesPerIteration >= kInnerKTiles &&
-          isEvenDivisor(KTilesPerIteration, kInnerKTiles),
-      "");
+      isEvenDivisor(KTilesPerIteration, kInnerKTiles));
 
   auto warpId = threadIdx.y;
   auto laneId = threadIdx.x;
@@ -717,7 +713,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     // We accumulate across k-tiles here
 #pragma unroll
     for (int i = 0; i < KTilesPerIteration / kInnerKTiles; ++i) {
-      static_assert(isEvenDivisor(kInnerKTiles, 2) && kInnerKTiles >= 2, "");
+      static_assert(isEvenDivisor(kInnerKTiles, 2) && kInnerKTiles >= 2);
 #pragma unroll
       for (int j = 0; j < kInnerKTiles / 2; ++j) {
         // We don't simply accumulate into `c` as this creates a too-strong
@@ -793,7 +789,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
   // remaining. We guarantee that the number of warps is >= KTilesPerIteration /
   // kInnerKTiles, so that each warp can simply load kInnerKTiles and do its
   // thing without needing more warps
-  static_assert(Warps >= KTilesPerIteration / kInnerKTiles, "");
+  static_assert(Warps >= KTilesPerIteration / kInnerKTiles);
 
   auto kTileBaseRemaining = kTilesLimit + warpId * kInnerKTiles;
 
@@ -1008,7 +1004,7 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   // int4 values are packed into int32 values, which require at least 8. Given
   // m16n8k16 B layout requires 4 scalar values/lane, the minimum number of
   // innermost k-tiles that we can use is 2.
-  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles), "");
+  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles));
 
 #if defined(USE_ROCM)
   constexpr int32_t kNTileSize = 16;
