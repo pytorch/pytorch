@@ -1,17 +1,6 @@
-import functools
-import importlib.util
-
 import torch
 
 from ... import triton_utils as tu
-
-
-@functools.cache
-def _has_triton() -> bool:
-    try:
-        return importlib.util.find_spec("triton") is not None
-    except ModuleNotFoundError:
-        return False
 
 
 def _is_outer_product(a: torch.Tensor, b: torch.Tensor) -> bool:
@@ -46,8 +35,7 @@ def _bmm_outer_product_cond(
     a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
     b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
     if (
-        _has_triton()
-        and a.is_cuda
+        a.is_cuda
         and b.is_cuda
         and _is_outer_product(a, b)
         and not (a_is_cow or b_is_cow)
@@ -68,9 +56,6 @@ def _register_for_dispatch_key(dispatch_key: str) -> None:
 
 
 def register_to_dispatch() -> None:
-    if not _has_triton():
-        return
-
     _register_for_dispatch_key("CUDA")
     if torch.xpu._is_compiled():
         _register_for_dispatch_key("XPU")
