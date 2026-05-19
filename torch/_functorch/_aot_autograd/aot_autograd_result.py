@@ -270,7 +270,7 @@ class GenericCompiledBackward(InductorOutput[TOut]):
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(
+        return torch._dynamo.disable(  # type: ignore[return-value]
             compiled_bw, reason="do not trace generated backwards pass"
         )
 
@@ -564,6 +564,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 disable_amp=disable_amp,
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
                 lazy_backward_info=cached_lazy_backward,
+                bw_compiler=None,
                 aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
