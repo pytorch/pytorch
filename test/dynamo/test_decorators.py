@@ -1982,6 +1982,45 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_error_on_graph_break_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        with mock.patch(
+            "torch._dynamo.decorators._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            with torch._dynamo.error_on_graph_break(False):
+                pass
+
+    def test_error_on_graph_break_reentrant_context_restores_outer_state(self):
+        torch._dynamo.utils._set_error_on_graph_break(True)
+        cm = torch._dynamo.error_on_graph_break(False)
+
+        try:
+            with cm:
+                self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+                with cm:
+                    self.assertFalse(torch._dynamo.utils._get_error_on_graph_break())
+
+            self.assertTrue(torch._dynamo.utils._get_error_on_graph_break())
+        finally:
+            torch._dynamo.utils._set_error_on_graph_break(False)
+
+    def test_error_on_graph_break_compile_wrapper_skips_redundant_set(self):
+        torch._dynamo.utils._set_error_on_graph_break(False)
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch._dynamo.optimize("eager", error_on_graph_break=False)(fn)
+        x = torch.ones(3)
+
+        with mock.patch(
+            "torch._dynamo.eval_frame._set_error_on_graph_break",
+            side_effect=AssertionError("redundant error_on_graph_break set"),
+        ):
+            self.assertEqual(opt_fn(x), fn(x))
+
     def test_error_on_graph_break_nested(self):
         # error_on_graph_break in a nested frame
         cnts = torch._dynamo.testing.CompileCounter()
