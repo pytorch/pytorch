@@ -2,7 +2,6 @@
 
 import os
 import pickle
-import unittest
 from io import BytesIO
 from typing import cast
 
@@ -11,6 +10,7 @@ import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
@@ -165,8 +165,8 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
-    def test_cuda(self) -> None:
+    @requires_gpu
+    def test_gpu(self) -> None:
         device = torch.device(f"{torch.accelerator.current_accelerator().type}:0")
 
         tensor = torch.tensor(42, dtype=torch.float, device=device)

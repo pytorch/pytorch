@@ -1005,7 +1005,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @requires_gpu_and_triton
-    @requires_gpu_and_triton
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
