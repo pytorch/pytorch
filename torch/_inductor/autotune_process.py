@@ -1429,7 +1429,8 @@ class PrecompileThreadPool:
         cls._lock = threading.RLock()
 
 
-os.register_at_fork(after_in_child=PrecompileThreadPool._after_fork_in_child)
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=PrecompileThreadPool._after_fork_in_child)
 
 
 class AsyncAutotuner:
