@@ -55,11 +55,16 @@ __all__ = [
     "TORCHELASTIC_ENABLE_FILE_TIMER",
     "TORCHELASTIC_TIMER_FILE",
     "TORCHELASTIC_HEALTH_CHECK_PORT",
+    "TORCHELASTIC_D_STATE_TIMEOUT",
 ]
 
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+# Seconds a worker may spend in Linux D-state (uninterruptible kernel sleep)
+# before the agent marks the worker group UNHEALTHY. Unset / non-positive
+# disables the check. Linux-only.
+TORCHELASTIC_D_STATE_TIMEOUT = "TORCHELASTIC_D_STATE_TIMEOUT"
 
 
 class _AliveCallbackProxy:
@@ -192,6 +197,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
         self._health_check_server = health_check_server
+        # Maps PID -> monotonic timestamp when the PID was first observed in
+        # D-state. Cleared per-PID when the worker leaves D-state or exits.
+        self._d_state_first_seen: dict[int, float] = {}
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -485,6 +493,87 @@ class LocalElasticAgent(SimpleElasticAgent):
         if self._pcontext:
             self._pcontext.close(death_sig, timeout)
 
+    @staticmethod
+    def _read_proc_state(pid: int) -> str | None:
+        """Read the process state char from /proc/<pid>/stat. Linux-only.
+
+        Returns the single-letter state (e.g. 'R', 'S', 'D', 'Z') or None if
+        the file is unreadable (non-Linux, process gone, permission denied,
+        or parse error). The comm field can contain spaces and parentheses,
+        so we parse based on the last ')'.
+        """
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                data = f.read()
+            rparen = data.rfind(")")
+            if rparen == -1:
+                return None
+            # Fields after comm are space-separated; state is field 3 overall
+            # i.e. the first token after the closing ')'.
+            rest = data[rparen + 1 :].split()
+            if not rest:
+                return None
+            return rest[0]
+        except OSError:
+            return None
+
+    def _check_d_state_timeout(
+        self, worker_group: WorkerGroup, timeout: float
+    ) -> RunResult | None:
+        """Return UNHEALTHY RunResult if any worker has been in D-state past
+        ``timeout`` seconds; otherwise update bookkeeping and return None.
+        """
+        if self._pcontext is None:
+            return None
+        now = time.monotonic()
+        live_pids = set(self._pcontext.pids().values())
+        # Drop bookkeeping for pids no longer running.
+        for pid in list(self._d_state_first_seen):
+            if pid not in live_pids:
+                self._d_state_first_seen.pop(pid, None)
+
+        timed_out: list[tuple[int, float]] = []
+        for pid in live_pids:
+            state = self._read_proc_state(pid)
+            if state is None:
+                continue
+            if state.startswith("D"):
+                first = self._d_state_first_seen.get(pid)
+                if first is None:
+                    self._d_state_first_seen[pid] = now
+                    logger.warning(
+                        "[%s] Worker pid=%s entered D-state (uninterruptible"
+                        " sleep); will mark UNHEALTHY if it remains for %.1fs.",
+                        worker_group.spec.role,
+                        pid,
+                        timeout,
+                    )
+                else:
+                    elapsed = now - first
+                    if elapsed >= timeout:
+                        timed_out.append((pid, elapsed))
+            else:
+                self._d_state_first_seen.pop(pid, None)
+
+        if timed_out:
+            for pid, elapsed in timed_out:
+                logger.error(
+                    "[%s] Worker pid=%s stuck in D-state for %.1fs"
+                    " (>= %.1fs); marking worker group UNHEALTHY and"
+                    " disabling restarts.",
+                    worker_group.spec.role,
+                    pid,
+                    elapsed,
+                    timeout,
+                )
+            # Disable restarts: a D-state worker is wedged on a kernel
+            # resource (GPU, NIC) that a fresh worker on the same host
+            # would conflict with. Force the supervising loop into the
+            # _stop_workers branch so the agent can exit promptly.
+            self._remaining_restarts = 0
+            return RunResult(state=WorkerState.UNHEALTHY)
+        return None
+
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
@@ -527,4 +616,12 @@ class LocalElasticAgent(SimpleElasticAgent):
                     return_values=workers_ret_vals,
                 )
         else:
+            try:
+                timeout = float(os.environ.get(TORCHELASTIC_D_STATE_TIMEOUT, "") or 0)
+            except ValueError:
+                timeout = 0
+            if timeout > 0:
+                d_state_result = self._check_d_state_timeout(worker_group, timeout)
+                if d_state_result is not None:
+                    return d_state_result
             return RunResult(state=WorkerState.HEALTHY)

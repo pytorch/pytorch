@@ -1030,5 +1030,76 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
 
 
+class BoundedCloseTest(TestCase):
+    """Verify that _close in MultiprocessContext / SubprocessContext returns
+    within a bounded time when child processes refuse to die (simulating a
+    Linux D-state worker, which SIGKILL cannot reap).
+    """
+
+    def _make_multiprocess_context(self) -> MultiprocessContext:
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return MultiprocessContext(
+            name="test",
+            entrypoint=time.sleep,
+            args={0: (0,)},
+            envs={0: {}},
+            start_method="spawn",
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+
+    def test_multiprocess_context_close_bounded_when_unkillable(self):
+        ctx = self._make_multiprocess_context()
+        unkillable = mock.Mock()
+        unkillable.pid = 99999
+        unkillable.is_alive.return_value = True
+        # Simulate a process that honors the bounded join's timeout but
+        # never actually exits (the kernel-level D-state symptom).
+        unkillable.join.side_effect = lambda t=None: (
+            time.sleep(t) if t is not None else None
+        )
+        ctx._pc = mock.Mock()
+        ctx._pc.processes = [unkillable]
+        with mock.patch("os.kill"):
+            start = time.monotonic()
+            ctx._close(death_sig=signal.SIGTERM, timeout=1)
+            elapsed = time.monotonic() - start
+        # Two bounded joins of 1s each (SIGTERM wait + SIGKILL wait) plus
+        # a small epsilon. Without the fix this would never return.
+        self.assertLess(elapsed, 5.0)
+
+    def test_subprocess_context_close_bounded_when_unkillable(self):
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        from torch.distributed.elastic.multiprocessing.api import SubprocessContext
+
+        ctx = SubprocessContext(
+            name="test",
+            entrypoint="/bin/true",
+            args={0: ()},
+            envs={0: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+        handler = mock.Mock()
+        handler.proc = mock.Mock()
+        handler.proc.pid = 99999
+        handler.proc.poll.return_value = None  # always "alive"
+
+        import subprocess as _subprocess
+
+        def _wait(t=None):
+            if t is None:
+                return None
+            time.sleep(t)
+            raise _subprocess.TimeoutExpired(cmd="test", timeout=t)
+
+        handler.proc.wait.side_effect = _wait
+        ctx.subprocess_handlers = {0: handler}
+        start = time.monotonic()
+        ctx._close(death_sig=signal.SIGTERM, timeout=1)
+        elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 5.0)
+
+
 if __name__ == "__main__":
     run_tests()

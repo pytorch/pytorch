@@ -34,6 +34,7 @@ from torch.distributed.elastic.agent.server.api import (
 )
 from torch.distributed.elastic.agent.server.local_elastic_agent import (
     LocalElasticAgent,
+    TORCHELASTIC_D_STATE_TIMEOUT,
     TORCHELASTIC_ENABLE_FILE_TIMER,
     TORCHELASTIC_HEALTH_CHECK_PORT,
     TORCHELASTIC_TIMER_FILE,
@@ -1750,6 +1751,138 @@ class LocalElasticAgentTest(unittest.TestCase):
                     del os.environ[healthcheck_port_env_name]
             else:
                 os.environ[healthcheck_port_env_name] = original_healthcheck
+
+
+class LocalElasticAgentDStateTest(unittest.TestCase):
+    """Unit tests for D-state detection helpers in LocalElasticAgent.
+
+    These tests do not require etcd or a real rendezvous and directly
+    exercise the helpers with a mocked process context.
+    """
+
+    def _make_agent(self) -> LocalElasticAgent:
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role="default",
+            local_world_size=1,
+            entrypoint=_happy_function,
+            args=(),
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        log_dir = tempfile.mkdtemp(prefix="LocalElasticAgentDStateTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return LocalElasticAgent(
+            spec,
+            start_method="spawn",
+            exit_barrier_timeout=5,
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+
+    @staticmethod
+    def _stat_data(state: str) -> str:
+        # /proc/<pid>/stat format: pid (comm) state ppid ...
+        return f"1234 (python) {state} 1 1 0 0 -1 0 0 0\n"
+
+    def test_read_proc_state_parses_state(self):
+        with mock.patch(
+            "builtins.open",
+            mock.mock_open(read_data=self._stat_data("D")),
+        ):
+            self.assertEqual(LocalElasticAgent._read_proc_state(1234), "D")
+
+    def test_read_proc_state_handles_comm_with_spaces(self):
+        # comm field can contain spaces and parens; parser must use last ')'
+        data = "1234 (py (worker)) R 1 1 0 0 -1 0 0 0\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=data)):
+            self.assertEqual(LocalElasticAgent._read_proc_state(1234), "R")
+
+    def test_read_proc_state_returns_none_when_missing(self):
+        with mock.patch("builtins.open", side_effect=FileNotFoundError):
+            self.assertIsNone(LocalElasticAgent._read_proc_state(1234))
+
+    def test_check_d_state_timeout_below_threshold(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        with mock.patch.object(agent, "_read_proc_state", return_value="D"):
+            # First observation: just records timestamp, returns None.
+            self.assertIsNone(
+                agent._check_d_state_timeout(agent._worker_group, timeout=300)
+            )
+            self.assertIn(4321, agent._d_state_first_seen)
+
+    def test_check_d_state_timeout_fires(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        # Pre-seed the first-seen timestamp far in the past.
+        agent._d_state_first_seen[4321] = time.monotonic() - 600
+        agent._remaining_restarts = 3
+        with mock.patch.object(agent, "_read_proc_state", return_value="D"):
+            result = agent._check_d_state_timeout(agent._worker_group, timeout=60)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.state, WorkerState.UNHEALTHY)
+        # D-state workers wedge the host; restarting on the same host would
+        # conflict. _check_d_state_timeout should disable restarts so the
+        # supervising loop exits via _stop_workers instead of relaunching.
+        self.assertEqual(agent._remaining_restarts, 0)
+
+    def test_check_d_state_timeout_clears_on_recovery(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._d_state_first_seen[4321] = time.monotonic() - 5
+        with mock.patch.object(agent, "_read_proc_state", return_value="S"):
+            result = agent._check_d_state_timeout(agent._worker_group, timeout=1)
+        self.assertIsNone(result)
+        self.assertNotIn(4321, agent._d_state_first_seen)
+
+    def test_check_d_state_timeout_drops_dead_pids(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        # No live pids; bookkeeping for stale pid should be removed.
+        agent._pcontext.pids.return_value = {}
+        agent._d_state_first_seen[9999] = time.monotonic() - 10
+        result = agent._check_d_state_timeout(agent._worker_group, timeout=1)
+        self.assertIsNone(result)
+        self.assertNotIn(9999, agent._d_state_first_seen)
+
+    def test_monitor_workers_disabled_when_env_unset(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.wait.return_value = None
+        # Build a minimal worker group whose pids match the pcontext.
+        agent._worker_group.workers = [
+            type("W", (), {"id": 4321, "global_rank": 0, "local_rank": 0})()
+        ]
+        env = {k: v for k, v in os.environ.items() if k != TORCHELASTIC_D_STATE_TIMEOUT}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(agent, "_check_d_state_timeout") as check_mock:
+                result = agent._monitor_workers(agent._worker_group)
+        check_mock.assert_not_called()
+        self.assertEqual(result.state, WorkerState.HEALTHY)
+
+    def test_monitor_workers_calls_check_when_env_set(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.wait.return_value = None
+        agent._worker_group.workers = [
+            type("W", (), {"id": 4321, "global_rank": 0, "local_rank": 0})()
+        ]
+        with mock.patch.dict(os.environ, {TORCHELASTIC_D_STATE_TIMEOUT: "5"}):
+            with mock.patch.object(
+                agent,
+                "_check_d_state_timeout",
+                return_value=RunResult(state=WorkerState.UNHEALTHY),
+            ) as check_mock:
+                result = agent._monitor_workers(agent._worker_group)
+        check_mock.assert_called_once()
+        self.assertEqual(result.state, WorkerState.UNHEALTHY)
 
 
 if __name__ == "__main__":
