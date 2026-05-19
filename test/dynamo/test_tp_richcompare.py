@@ -1091,6 +1091,22 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         mp = MappingProxyType(d)
         self._assert_all_cmp_equals(mp, mp, error_ops=self._ORDERING_OPS)
 
+    def test_mappingproxy_vs_dict(self):
+        """MappingProxyType delegates comparison to its underlying mapping."""
+        from types import MappingProxyType
+
+        d = {1: "a"}
+        p = MappingProxyType({1: "a"})
+        self._assert_all_cmp_equals(d, p, error_ops=self._ORDERING_OPS)
+
+    def test_mappingproxy_vs_mappingproxy(self):
+        """Two MappingProxyType with equal contents compare equal."""
+        from types import MappingProxyType
+
+        a = MappingProxyType({1: "a"})
+        b = MappingProxyType({1: "a"})
+        self._assert_all_cmp_equals(a, b, error_ops=self._ORDERING_OPS)
+
     # =====================================================================
     # dict_values comparison (identity-based, no tp_richcompare)
     # =====================================================================

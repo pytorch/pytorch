@@ -922,10 +922,11 @@ class MappingProxyVariable(VariableTracker):
         return self.dv_dict.mp_length(tx)
 
     def richcompare_impl(self, tx, other, op):
-        # mappingproxy has identity-based comparison (inherits object's).
-        from .object_protocol import object_richcompare
+        # mappingproxy_richcompare delegates to the underlying mapping:
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1436
+        from .object_protocol import generic_richcompare
 
-        return object_richcompare(self, tx, other, op)
+        return generic_richcompare(tx, self.dv_dict, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str

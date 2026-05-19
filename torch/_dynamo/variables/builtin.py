@@ -112,8 +112,10 @@ from .object_protocol import (
     generic_bool,
     generic_float,
     generic_getiter,
+    generic_inplace_multiply,
     generic_int,
     generic_len,
+    generic_multiply,
     generic_neg,
     generic_pos,
     vt_add,
@@ -535,7 +537,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
             operator.truediv: (
                 ["__truediv__", "__rtruediv__", "__itruediv__"],
                 operator.itruediv,
@@ -695,39 +696,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
-
-        # List-like expansion (e.g. [1, 2, 3] * 3)
-        def expand_list_like(
-            tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
-        ) -> VariableTracker:
-            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
-                lst, const = const, lst
-            try:
-                if not isinstance(lst, BaseListVariable):
-                    raise AssertionError(f"Expected BaseListVariable, got {type(lst)}")
-                return lst.__class__(
-                    items=lst.items * const.as_python_constant(),
-                    mutation_type=ValueMutationNew(),
-                )
-            except MemoryError as exc:
-                raise_observed_exception(
-                    type(exc),
-                    tx,
-                    args=list(exc.args),
-                )
-
-        list_like_expansion_handlers: list[
-            tuple[
-                tuple[type[VariableTracker], type[VariableTracker]],
-                _HandlerCallback,
-            ]
-        ] = [
-            ((ListVariable, ConstantVariable), expand_list_like),
-            ((TupleVariable, ConstantVariable), expand_list_like),
-            ((ConstantVariable, ListVariable), expand_list_like),
-            ((ConstantVariable, TupleVariable), expand_list_like),
-        ]
-        op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
         def create_cmp_op_handlers(
             op: Callable[..., Any],
@@ -2831,6 +2799,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, _SET_LIKE_OP_SUPPORT):
             return a.call_method(tx, "__ixor__", [b], {})
         return None
+
+    def call_mul(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_multiply(tx, a, b)
+
+    def call_imul(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_inplace_multiply(tx, a, b)
 
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker

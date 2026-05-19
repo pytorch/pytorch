@@ -515,6 +515,53 @@ class ConstantVariable(VariableTracker):
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
+    def nb_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # int, float, and complex all define nb_multiply (bool inherits int's slot).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4242-L4260 (long_mul)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L608-L616 (float_mul)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L506 (complex_mul)
+        # str/bytes/bytearray do NOT have nb_multiply — they go through sq_repeat,
+        # so this method should not see them as ``self``.
+        if not isinstance(self.value, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        other_val = other.as_python_constant()
+        # CPython's nb_multiply (e.g. long_mul, float_mul) returns NotImplemented
+        # whenever the other operand isn't numeric — sequence repetition is
+        # then handled by PyNumber_Multiply's sq_repeat fallback.
+        if not isinstance(other_val, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        # Numeric multiplication is commutative; ignore reverse.
+        try:
+            res = self.value * other_val
+        except OverflowError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, res)
+
+    def sq_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # Only str / bytes are reachable via ConstantVariable since list, tuple,
+        # bytearray have their own VTs.  ``count`` was already validated as an
+        # index by sequence_repeat -> nb_index_impl.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L12371 (unicode_repeat)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L1448 (bytes_repeat)
+        if not isinstance(self.value, (str, bytes)):
+            raise AssertionError("Expected str or bytes in sq_repeat_impl")
+        n = count.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value * n)
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_negative_impl(
         self,
         tx: Any,
