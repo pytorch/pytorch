@@ -188,6 +188,10 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   return {std::move(final_out), std::move(final_attn)};
 }
 
+static std::string sdpa_vector_mask_suffix(const std::optional<Tensor>& mask) {
+  return mask.has_value() ? mps::scalarToMetalTypeString(mask.value()) : "none";
+}
+
 // Vector mode (One–pass variant)
 static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        const Tensor& k_,
@@ -230,10 +234,14 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
       auto computeEncoder = mpsStream->commandEncoder();
       auto group_dims = MTLSizeMake(1024, 1, 1);
       auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
-      bool has_mask = mask_.has_value();
+      const bool has_mask = mask_.has_value();
 
-      const std::string kname = fmt::format(
-          "sdpa_vector_{}_{}_{}{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1), is_causal ? "_causal" : "");
+      const std::string kname = fmt::format("sdpa_vector_{}_{}_{}_mask{}{}",
+                                            scalarToMetalTypeString(q_),
+                                            q_.size(-1),
+                                            v_.size(-1),
+                                            sdpa_vector_mask_suffix(mask_),
+                                            is_causal ? "_causal" : "");
       auto attentionPSO = lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
@@ -255,8 +263,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
         mtl_setArgs<9>(
             computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<11>(
-          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
+      mtl_setArgs<11>(computeEncoder,
+                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -310,16 +318,17 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
-  bool has_mask = mask_.has_value();
+  const bool has_mask = mask_.has_value();
 
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1_{}_{}_{}{}",
+      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1_{}_{}_{}_mask{}{}",
                                                   scalarToMetalTypeString(q_),
                                                   q_.size(-1),
                                                   v_.size(-1),
+                                                  sdpa_vector_mask_suffix(mask_),
                                                   is_causal ? "_causal" : "");
       const std::string kname_pass2 =
           fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), v_.size(-1));
@@ -351,8 +360,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
         uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
         mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<13>(
-          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
+      mtl_setArgs<13>(computeEncoder,
+                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
@@ -729,9 +738,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   int query_seq_len = q_.size(2);
   // Fast vector attention: when the sequence length is very short,
   // the key sequence length is large,
-  // the mask is boolean and head dims are supported
-  bool supports_sdpa_vector = (query_seq_len <= 8) && (query_seq_len <= k_.size(2)) &&
-      ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
+  // the mask is boolean/float and head dims are supported
+  bool sdpa_vector_mask_ok =
+      !mask_.has_value() || mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype();
+  bool supports_sdpa_vector =
+      (query_seq_len <= 8) && (query_seq_len <= k_.size(2)) && sdpa_vector_mask_ok && sdpa_vector_supported_head_dim;
 
   // boolean to decide if we can use kernel paths
   bool supports_fast_sdpa = supports_sdpa_vector && !(is_causal && mask_.has_value());
