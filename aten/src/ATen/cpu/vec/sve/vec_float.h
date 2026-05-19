@@ -181,9 +181,9 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos));
   }
+  // Sleef acoshf overflows for large float inputs where std::acosh is finite
   Vectorized<float> acosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acoshfx_u10sve(values)), map(std::acosh));
+    return map(std::acosh);
   }
   Vectorized<float> asin() const {
     return USE_SLEEF(
@@ -428,17 +428,18 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
   }
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinhfx_u10sve(values)), map(std::sinh));
+    return map(std::sinh);
   }
   Vectorized<float> cos() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
   }
   Vectorized<float> cosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_coshfx_u10sve(values)), map(std::cosh));
+    return map(std::cosh);
   }
   Vectorized<float> ceil() const {
     return svrintp_f32_x(ptrue, values);
