@@ -79,7 +79,15 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
-from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
+from torch.fx.experimental.dynamic_spec import (
+    DictSpec,
+    IntermediateSpec,
+    IntVar,
+    LeafSpec,
+    ObjectSpec,
+    ShapesSpec,
+    TensorSpec,
+)
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -136,6 +144,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -146,6 +155,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -349,19 +359,199 @@ def safe_has_grad(t: object) -> bool:
         return hasattr(t, "grad")
 
 
+@dataclasses.dataclass(frozen=True)
+class _LocalToken:
+    """Root token: a top-level function-argument access."""
+
+    name: str
+    is_varargs: bool = False
+    is_varkw: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class _AttrToken:
+    """Attribute access (``obj.name``)."""
+
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubscriptToken:
+    """Subscript access (``obj[key]``).
+
+    Emitted for ``dict`` key lookups (matched against ``DictSpec`` entries).
+    The key may be ``int`` or ``str`` — both are valid dict keys.
+    """
+
+    key: int | str
+
+
+_AccessToken = _LocalToken | _AttrToken | _SubscriptToken
+_AccessPath = list[_AccessToken]
+
+
+def _source_to_access_path(source: Source) -> _AccessPath | None:
+    """Translate a dynamo ``Source`` chain into a flat ``_AccessPath``.
+
+    Walks ``source.base`` from leaf to root, then reverses so the path
+    reads root-first. The returned path always starts with a single
+    ``_LocalToken`` (the input arg) followed by zero or more access
+    tokens, each of which is either an ``_AttrToken`` (attribute
+    access) or a ``_SubscriptToken`` (``dict[key]`` access with an
+    ``int`` or ``str`` key).
+
+    Returns ``None`` for sources that we know we can't represent them
+    in shapes specs.
+    """
+    path: list[_AccessToken] = []
+    cur: Source = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, NNModuleSource):
+            # ``NNModuleSource`` is a guard-semantics marker, not an
+            # access step — transparently unwrap.
+            cur = cur.base
+            continue
+        # ``self.weight`` → dynamo emits
+        # ``DictGetItemSource(UnspecializedParamBufferSource(_,
+        # '_parameters'), 'weight')``. Collapse that pair into a single
+        # attr token.
+        if isinstance(cur, DictGetItemSource) and isinstance(
+            cur.base, UnspecializedParamBufferSource
+        ):
+            path.append(_AttrToken(cur.index))
+            cur = cur.base.base
+            continue
+        # Plain ``dict[key]`` access.
+        if isinstance(cur, DictGetItemSource) and isinstance(cur.index, (int, str)):
+            path.append(_SubscriptToken(cur.index))
+            cur = cur.base
+            continue
+        # Integer subscript (e.g. *args[i] or list[i]).
+        if isinstance(cur, GetItemSource) and type(cur.index) is int:
+            path.append(_SubscriptToken(cur.index))
+            cur = cur.base
+            continue
+        if isinstance(cur, AttrSource):
+            path.append(_AttrToken(cur.member))
+            cur = cur.base
+            continue
+        return None
+    if not cur.is_input:
+        return None
+    path.append(
+        _LocalToken(cur.local_name, is_varargs=cur.is_varargs, is_varkw=cur.is_varkw)
+    )
+    path.reverse()
+    return path
+
+
+def _walk_spec(
+    current_spec: IntermediateSpec,
+    remaining_tokens: _AccessPath,
+) -> LeafSpec:
+    """Walk down a spec tree starting at ``current_spec``, consuming each
+    token in order. Returns the leaf spec at the end of the walk, or
+    ``None`` if a key/field along the way wasn't specified by the user.
+    Raises on type-mismatch (the existing tight invariants).
+    """
+    for token in remaining_tokens:
+        if current_spec is None:
+            # Under-specified: a previous descent (DictSpec key lookup or
+            # ObjectSpec field lookup) returned None because the user didn't
+            # provide a spec for this entry. Treat as static.
+            return None
+        match current_spec:
+            case ObjectSpec():
+                if not isinstance(token, _AttrToken):
+                    raise RuntimeError(
+                        f"shapes_spec walk: ObjectSpec at path {remaining_tokens!r} expects "
+                        f"an attribute access (_AttrToken), got "
+                        f"{type(token).__name__}"
+                    )
+                current_spec = current_spec._fields.get(token.name)
+            case DictSpec():
+                if not isinstance(token, _SubscriptToken) or not isinstance(
+                    token.key, (int, str)
+                ):
+                    raise RuntimeError(
+                        f"shapes_spec walk: DictSpec at path {remaining_tokens!r} expects "
+                        f"a str/int subscript (_SubscriptToken), got "
+                        f"{type(token).__name__}"
+                        f"({getattr(token, 'key', None)!r})"
+                    )
+                current_spec = current_spec._entries.get(token.key)
+            case _:
+                # leaf spec (TensorSpec / IntVar / int / None) but path still
+                # has tokens → the user spec is too shallow for the access.
+                raise RuntimeError(
+                    f"shapes_spec walk: leaf spec ({type(current_spec).__name__}) "
+                    f"at path {remaining_tokens!r} cannot consume further token {token!r}; "
+                    f"the spec is too shallow for this access"
+                )
+    if not isinstance(current_spec, LeafSpec):
+        raise RuntimeError(
+            f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
+            f"for access path {remaining_tokens!r}; expected a leaf spec"
+        )
+    return current_spec
+
+
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
-
-    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
-    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
+    Returns ``None`` if the source isn't covered.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
+    path = _source_to_access_path(source)
+    if not path or not isinstance(path[0], _LocalToken):
         return None
-    return shapes_spec._params._named_args.get(source.local_name)
+    params = shapes_spec._params
+    root = path[0]
+    if root.is_varargs:
+        # ``*args`` element access: root is the varargs local, next token must
+        # be an int subscript. A varargs local is always followed by a
+        # subscript token in ``_source_to_access_path``; anything else means
+        # the chain was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after *args local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if type(key) is not int:
+            raise RuntimeError(
+                f"Unexpected non-int subscript for *args access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varargs is None or not (0 <= key < len(params._varargs)):
+            return None
+        return _walk_spec(params._varargs[key], path[2:])
+    if root.is_varkw:
+        # ``**kwargs`` element access: root is the varkw local, next token must
+        # be a str subscript. A varkw local is always followed by a subscript
+        # token in ``_source_to_access_path``; anything else means the chain
+        # was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after **kwargs local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if not isinstance(key, str):
+            raise RuntimeError(
+                f"Unexpected non-str subscript for **kwargs access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varkw is None or key not in params._varkw:
+            return None
+
+        return _walk_spec(params._varkw[key], path[2:])
+    # Regular named arg: seed at the named-arg root and descend the rest.
+
+    current_spec: IntermediateSpec = params._named_args.get(root.name)
+    return _walk_spec(current_spec, path[1:])
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
