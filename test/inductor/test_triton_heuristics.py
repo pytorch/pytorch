@@ -42,16 +42,22 @@ from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _enforce_reduction_config_block_minimums,
+    _persistent_reduction_configs,
+    _reduction_configs,
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
+    make_matmul_triton_config,
     template,
     triton_config,
 )
@@ -96,6 +102,67 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_native_matmul_config_block_numel_limit(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {"native_matmul": True, "device": device}
+
+        for size_hints in (
+            {"x": 1, "y": 1, "r0_": 1},
+            {"x": 1, "y": 1, "z": 1, "r0_": 1},
+        ):
+            cfgs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={},
+                triton_meta=triton_meta,
+            )
+            self.assertTrue(cfgs)
+            for cfg in cfgs:
+                self.assertLessEqual(
+                    native_matmul_block_numel(cfg.kwargs),
+                    TRITON_MAX_TENSOR_NUMEL,
+                )
+
+        for size_hints, inductor_meta in (
+            ({"x": 4096, "y": 4096, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "r0_": 2048}, {}),
+            (
+                {"x": 4096, "y": 4096, "r0_": 64},
+                {"native_matmul_persistent_rblock": 1024},
+            ),
+            ({"x": 4096, "y": 4096, "z": 128, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "z": 128, "r0_": 2048}, {}),
+            (
+                {"x": 4096, "y": 4096, "z": 128, "r0_": 64},
+                {"native_matmul_persistent_rblock": 1024},
+            ),
+        ):
+            cfgs = _persistent_reduction_configs(
+                size_hints=size_hints,
+                inductor_meta=inductor_meta,
+                triton_meta=triton_meta,
+            )
+            rblock = inductor_meta.get(
+                "native_matmul_persistent_rblock",
+                native_matmul_persistent_rblock(size_hints["r0_"]),
+            )
+            self.assertTrue(cfgs)
+            for cfg in cfgs:
+                self.assertLessEqual(
+                    native_matmul_block_numel(cfg.kwargs, r0_block=rblock),
+                    TRITON_MAX_TENSOR_NUMEL,
+                )
+
+        with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
+            make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
@@ -409,7 +476,12 @@ class TestTritonHeuristics(TestCase):
             heuristic.mm_configs = mm_configs
             heuristic.should_scale_configs = False
             with (
-                config.patch({"max_autotune_gemm_search_space": "DEFAULT"}),
+                config.patch(
+                    {
+                        "max_autotune_gemm_search_space": "DEFAULT",
+                        "test_configs.max_mm_configs": None,
+                    }
+                ),
                 patch("torch.cuda.is_available", return_value=True),
                 patch(
                     "torch.cuda.get_device_capability",
@@ -472,7 +544,12 @@ class TestTritonHeuristics(TestCase):
             for target_device in capabilities:
                 with (
                     self.subTest(target_device=target_device),
-                    config.patch({"max_autotune_gemm_search_space": "DEFAULT"}),
+                    config.patch(
+                        {
+                            "max_autotune_gemm_search_space": "DEFAULT",
+                            "test_configs.max_mm_configs": None,
+                        }
+                    ),
                     patch("torch.cuda.is_available", return_value=True),
                     patch(
                         "torch.cuda.get_device_capability",
@@ -490,6 +567,61 @@ class TestTritonHeuristics(TestCase):
                         )
                     )
                     self.assertEqual(len(configs), len(mm_configs))
+        finally:
+            heuristic.mm_configs = original_mm_configs
+            heuristic.should_scale_configs = original_should_scale_configs
+
+    def test_hopper_mm_pruning_is_default_search_only(self):
+        from torch._inductor.template_heuristics.triton import (
+            CUDAMMTemplateConfigHeuristic,
+            GemmConfig,
+        )
+
+        mm_configs = [
+            GemmConfig(64, 128, 32, 5, 4, group_m=8),
+            GemmConfig(64, 128, 32, 4, 8, group_m=8),
+            GemmConfig(128, 128, 64, 3, 4, group_m=8),
+        ]
+        heuristic = CUDAMMTemplateConfigHeuristic()
+        original_mm_configs = heuristic.mm_configs
+        original_should_scale_configs = heuristic.should_scale_configs
+        target_device = torch.device("cuda:1")
+
+        def get_target_device_capability(device=None):
+            if device is None:
+                return (8, 0)
+            self.assertEqual(device, target_device)
+            return (9, 0)
+
+        try:
+            heuristic.mm_configs = mm_configs
+            heuristic.should_scale_configs = False
+            for search_space, expected_count in (("DEFAULT", 1), ("EXHAUSTIVE", 3)):
+                with (
+                    self.subTest(search_space=search_space),
+                    config.patch(
+                        {
+                            "max_autotune_gemm_search_space": search_space,
+                            "test_configs.max_mm_configs": None,
+                        }
+                    ),
+                    patch("torch.cuda.is_available", return_value=True),
+                    patch(
+                        "torch.cuda.get_device_capability",
+                        side_effect=get_target_device_capability,
+                    ),
+                ):
+                    configs = list(
+                        heuristic.get_mm_configs()(
+                            9717,
+                            512,
+                            1152,
+                            dtype_size=2,
+                            op_name="mm",
+                            target_device=target_device,
+                        )
+                    )
+                    self.assertEqual(len(configs), expected_count)
         finally:
             heuristic.mm_configs = original_mm_configs
             heuristic.should_scale_configs = original_should_scale_configs

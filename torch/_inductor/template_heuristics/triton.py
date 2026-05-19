@@ -37,6 +37,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    triton_type,
     using_b200,
 )
 from ..virtualized import V
@@ -63,13 +64,13 @@ def _is_hopper_cuda(device: torch.device | None) -> bool:
     if device is None or device.type != "cuda":
         return False
     try:
-        return torch.cuda.is_available() and torch.cuda.get_device_capability(
-            device
-        ) == (
-            9,
-            0,
-        )
+        if not torch.cuda.is_available():
+            return False
+        major, _ = torch.cuda.get_device_capability(device)
+        return major == 9
     except (AssertionError, RuntimeError, TypeError):
+        # Capability lookup can fail for fake or invalid CUDA devices while
+        # constructing candidate configs; leave pruning disabled in that case.
         return False
 
 
@@ -1191,12 +1192,18 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
+    def _limit_flex_configs(self, configs: list) -> list:
+        max_configs = config.test_configs.max_flex_configs
+        if max_configs is not None and len(configs) > max_configs:
+            return configs[:max_configs]
+        return configs
+
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1213,7 +1220,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return flex_attn_fwd_configs
+        return self._limit_flex_configs(flex_attn_fwd_configs)
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1222,7 +1229,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -1230,7 +1237,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return flex_attn_bwd_configs
+        return self._limit_flex_configs(flex_attn_bwd_configs)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1239,7 +1246,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_decode_configs
+                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(block_n=64, num_stages=1, num_warps=2)
@@ -1247,7 +1254,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return flex_decode_configs
+        return self._limit_flex_configs(flex_decode_configs)
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
@@ -1406,7 +1413,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1440,7 +1447,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return flex_attn_fwd_configs
+        return self._limit_flex_configs(flex_attn_fwd_configs)
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1449,7 +1456,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
@@ -1514,7 +1521,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return flex_attn_bwd_configs
+        return self._limit_flex_configs(flex_attn_bwd_configs)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1527,7 +1534,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_decode_configs
+                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
             flex_decode_configs += self.flex_decode_autotune_configs
 
         if capability in [(9, 0), (10, 0), (10, 3)]:  # sm_90, sm_100, sm_103
@@ -1543,7 +1550,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return flex_decode_configs
+        return self._limit_flex_configs(flex_decode_configs)
 
 
 class ROCmConfigHeuristic(BaseConfigHeuristic):
@@ -1843,7 +1850,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         capability = torch.cuda.get_device_capability()
@@ -1871,7 +1878,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return flex_attn_fwd_configs
+        return self._limit_flex_configs(flex_attn_fwd_configs)
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1880,7 +1887,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1909,7 +1916,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return flex_attn_bwd_configs
+        return self._limit_flex_configs(flex_attn_bwd_configs)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1918,7 +1925,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_decode_configs
+                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1927,7 +1934,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return flex_decode_configs
+        return self._limit_flex_configs(flex_decode_configs)
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
@@ -1991,7 +1998,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -2011,7 +2018,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return flex_attn_fwd_configs
+        return self._limit_flex_configs(flex_attn_fwd_configs)
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -2020,7 +2027,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
+                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
@@ -2038,7 +2045,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return flex_attn_bwd_configs
+        return self._limit_flex_configs(flex_attn_bwd_configs)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -2047,7 +2054,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_decode_configs
+                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(64, 1, 2)
@@ -2055,7 +2062,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return flex_decode_configs
+        return self._limit_flex_configs(flex_decode_configs)
 
     def _prune_exhaustive_configs(
         self,
@@ -2427,7 +2434,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     @staticmethod
     def _dtype_to_triton(dtype: torch.dtype) -> str:
         """Convert a torch dtype to a triton type string."""
-        return f"tl.{dtype}".replace("torch.", "")
+        return triton_type(dtype)
 
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
@@ -2668,6 +2675,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
