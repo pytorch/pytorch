@@ -751,14 +751,8 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
-    def test_fuse_split_reduction_with_tiled_pw(self):
-        def f(x):
-            y = torch.sum(x)
-            z = x / 10.0
-            z_t = z.t().contiguous().t()
-            return y, z, z_t
-
-        M, N = 2048, 4096
+    def _check_fuse_split_reduction_with_tiled_pw(self, f, shape):
+        M, N = shape
         x = torch.randn(M, N, device=GPU_TYPE)
         actual = f(x)
         opt_f = torch.compile(f)
@@ -774,6 +768,15 @@ class LoopOrderingTest(TestCase):
             metrics.num_bytes_accessed,
         )
 
+    def test_fuse_split_reduction_with_tiled_pw(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        self._check_fuse_split_reduction_with_tiled_pw(f, (2048, 4096))
+
     def test_fuse_split_reduction_with_pw_producer_and_tiled_pw(self):
         def f(x):
             y = x.abs().max()
@@ -781,13 +784,16 @@ class LoopOrderingTest(TestCase):
             z_t = z.t().contiguous().t()
             return y, z, z_t
 
-        M, N = 2048, 4096
-        x = torch.randn(M, N, device=GPU_TYPE)
-        actual = f(x)
-        opt_f = torch.compile(f)
-        expected = opt_f(x)
-        self.assertTrue(same(actual, expected, tol=1e-3))
-        self.assertEqual(2, metrics.generated_kernel_count)
+        self._check_fuse_split_reduction_with_tiled_pw(f, (2048, 4096))
+
+    def test_fuse_split_reduction_with_smaller_aligned_prefix(self):
+        def f(x):
+            y = torch.sum(x)
+            z = x / 10.0
+            z_t = z.t().contiguous().t()
+            return y, z, z_t
+
+        self._check_fuse_split_reduction_with_tiled_pw(f, (512, 16384))
 
     def test_factored_vs_expanded_pw_numel_in_fused_group(self):
         """
