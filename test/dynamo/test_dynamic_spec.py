@@ -663,8 +663,6 @@ class TestObjectSpecCompile(TestCase):
 
 
 class TestDictSpecCompile(TestCase):
-    """End-to-end: ``DictSpec`` routes through to a tensor reached via
-    subscript access on a function arg (``cfg["x"]``)."""
 
     def setUp(self):
         super().setUp()
@@ -681,19 +679,14 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})}
-                )
-            ),
+            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
         )
 
         compiled({"x": torch.randn(4, 3)})
+        compiled({"x": torch.randn(8, 3)})
+
         self.assertEqual(len(backend.graphs), 1)
 
-        # Different dim 0 size — dynamic absorbs it, no recompile.
-        compiled({"x": torch.randn(8, 3)})
-        self.assertEqual(len(backend.graphs), 1)
 
         # Captured placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
@@ -710,11 +703,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})}
-                )
-            ),
+            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
         )
 
         x = torch.randn(4, 3)
@@ -744,17 +733,10 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), None])})}
-                )
-            ),
+            shapes_spec={"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), None])})},
         )
 
         compiled({0: torch.randn(4, 3)})
-        self.assertEqual(len(backend.graphs), 1)
-
-        # Different dim 0 size — dynamic absorbs it, no recompile.
         compiled({0: torch.randn(8, 3)})
         self.assertEqual(len(backend.graphs), 1)
 
@@ -762,9 +744,11 @@ class TestDictSpecCompile(TestCase):
         self.assertIsInstance(shape[0], torch.SymInt)
 
     def test_walk_terminal_container_raises(self):
-        """Pointing the spec at a container but the runtime accessing
-        the argument itself as a tensor (path ends on the container)
-        must raise ``RuntimeError``."""
+        """The spec declares ``x`` as a ``DictSpec`` (a container), but the
+        compiled function is called with a plain tensor for ``x``. Because the
+        spec walk terminates on the container instead of a ``TensorSpec`` leaf,
+        compilation must raise ``RuntimeError`` with ``"shapes_spec walk ended
+        on a container"``."""
 
         def fn(x):
             return x + 1
@@ -775,11 +759,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    {"x": DictSpec({"k": TensorSpec([ShapeVar("h"), None])})}
-                )
-            ),
+            shapes_spec={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), None])})},
         )
 
         with self.assertRaisesRegex(
