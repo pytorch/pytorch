@@ -1966,9 +1966,11 @@ class triton:
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
 
-    # threshold between two-step variance and Welford variance for non-split
-    # CUDA Triton reductions. Larger reductions keep Welford to avoid another
-    # full pass over the input.
+    # Lower/upper bounds between two-step variance and Welford variance for
+    # non-split CUDA Triton reductions. Mid-sized reductions use two-step for
+    # throughput; smaller reductions keep the old heuristic because training
+    # gradients are more sensitive to the different accumulation order.
+    use_two_step_variance_min_numel = 1024
     use_two_step_variance_threshold = 32768
 
     # 0: disable
@@ -2834,6 +2836,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False

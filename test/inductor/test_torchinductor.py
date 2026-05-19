@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 import unittest.mock
+import warnings
 import weakref
 from collections.abc import Callable
 from pathlib import Path
@@ -4377,6 +4378,90 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skip_if_cpu
+    @skip_if_not_triton
+    def test_vmap_dot_decomposes_bmm(self):
+        def dot_based(a, b):
+            return torch.dot(a, b) + torch.dot(a, b)
+
+        fn = torch.vmap(dot_based)
+        bmm_codegen_call = (
+            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
+        )
+        bmm_fallback_call = (
+            'aoti_torch_call_dispatcher("aten::bmm"'
+            if config.cpp_wrapper
+            else "torch.ops.aten.bmm.default("
+        )
+        for dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        ):
+            if not self.is_dtype_supported(dtype):
+                continue
+            for k in (3, 32):
+                with self.subTest(dtype=dtype, k=k):
+                    a = torch.randn(64, k, device=self.device, dtype=dtype)
+                    b = torch.randn(64, k, device=self.device, dtype=dtype)
+
+                    expected = fn(a, b)
+                    actual, code = run_and_get_code(
+                        torch.compile(fn, fullgraph=True), a, b
+                    )
+                    self.assertEqual(actual, expected)
+                    code_str = "\n".join(code)
+                    self.assertNotIn(bmm_codegen_call, code_str)
+                    self.assertNotIn(bmm_fallback_call, code_str)
+
+    @skip_if_cpu
+    @skipIfXpu(msg="CUDA codegen check")
+    @skip_if_not_triton
+    def test_bmm_dot_shape_decompose_threshold(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        bmm_codegen_call = (
+            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
+        )
+        bmm_fallback_call = (
+            'aoti_torch_call_dispatcher("aten::bmm"'
+            if config.cpp_wrapper
+            else "torch.ops.aten.bmm.default("
+        )
+        for k, expect_extern_bmm in ((32, False), (33, True)):
+            with self.subTest(k=k):
+                a = torch.randn(4, 1, k, device=self.device)
+                b = torch.randn(4, k, 1, device=self.device)
+
+                expected = fn(a, b)
+                actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+                self.assertEqual(actual, expected)
+                code_str = "\n".join(code)
+                if expect_extern_bmm:
+                    self.assertIn(bmm_codegen_call, code_str)
+                else:
+                    self.assertNotIn(bmm_codegen_call, code_str)
+                    self.assertNotIn(bmm_fallback_call, code_str)
+
+    @skip_if_cpu
+    @skipIfXpu(msg="CUDA integer bmm error preservation")
+    @skip_if_cpp_wrapper("cpp wrapper reports AOTI API call failures")
+    @skip_if_not_triton
+    def test_bmm_dot_shape_int_preserves_eager_error(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.ones(4, 1, 3, device=self.device, dtype=torch.int64)
+        b = torch.ones(4, 3, 1, device=self.device, dtype=torch.int64)
+        msg = 'baddbmm_cuda" not implemented for'
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            fn(a, b)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.compile(fn, fullgraph=True)(a, b)
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):
@@ -6400,6 +6485,34 @@ class CommonTemplate:
             fn,
             (weight, indices),
         )
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_grad_embedding_renorm_negative_indices(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires cuda")
+
+        def fn(weight, indices):
+            return torch.ops.aten._no_grad_embedding_renorm_(
+                weight, indices, max_norm=1.0, norm_type=1.0
+            )
+
+        dtype = (
+            torch.bfloat16 if self.is_dtype_supported(torch.bfloat16) else torch.float32
+        )
+        indices = (
+            torch.arange(-32, 32, dtype=torch.int32, device=self.device)
+            .repeat(8)
+            .reshape(32, 16)
+        )
+        weight = torch.randn((1000, 512), dtype=dtype, device=self.device) * 0.1
+        expected_weight = weight.clone()
+        actual_weight = weight.clone()
+
+        expected = fn(expected_weight, indices)
+        actual = torch.compile(fn, backend="inductor")(actual_weight, indices)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_weight, expected_weight)
 
     @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
@@ -13840,6 +13953,109 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # because bucketize is computationally expensive.
         FileCheck().check("def triton").check("def triton").run(code[0])
 
+    def test_searchsorted_sliced_computed_boundaries(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[:-1], values + 10, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[1:], values, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence, values, out_int32=True, right=True, sorter=sorter[1:]
+            )
+
+        sequence = torch.tensor([4, 0, 8, 2, 6])
+        sorter = torch.tensor([0, 1, 3, 0, 4, 2])
+        values = torch.arange(10, 20)
+
+        self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_boundaries_offset(self):
+        def fn(sequence, values):
+            sequence = sequence + 10
+            return torch.searchsorted(
+                sequence[1:, 1:], values, out_int32=True, right=True
+            )
+
+        sequence = torch.arange(24).reshape(4, 6)
+        values = torch.tensor(
+            [[16, 17, 19, 21, 22], [22, 23, 25, 27, 28], [28, 29, 31, 33, 34]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence[1:, 1:],
+                values,
+                out_int32=True,
+                right=True,
+                sorter=sorter[1:, 1:],
+            )
+
+        sequence = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [99, 5, 1, 4, 2, 3],
+                [99, 15, 11, 14, 12, 13],
+                [99, 25, 21, 24, 22, 23],
+            ]
+        )
+        sorter = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+            ]
+        )
+        values = torch.tensor(
+            [[10, 11, 13, 15, 16], [20, 21, 23, 25, 26], [30, 31, 33, 35, 36]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.searchsorted(
+                base.expand(5), values, out_int32=True, right=True
+            )
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -13912,6 +14128,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries(self):
+        def fn(boundaries, count: int):
+            boundaries = boundaries + 10
+            values = torch.arange(count, device=boundaries.device)
+            return (
+                torch.bucketize(values, boundaries[:-1], out_int32=True, right=True) - 1
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+
+        self.common(fn, (boundaries, 10), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.bucketize(values, boundaries[1:], out_int32=True, right=True)
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_bucketize_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.bucketize(values, base.expand(5), out_int32=True, right=True)
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
 
     def test_bucketize_scalar_various_values(self):
         def fn(boundaries, scalar_val):
