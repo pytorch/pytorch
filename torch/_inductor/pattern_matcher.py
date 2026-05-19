@@ -280,7 +280,7 @@ class Match:
         Args:
             run_functional_passes (bool). If we should run passes that
                 assume functional IR (like DCE, remove_noop_ops), on the
-                replacement graph.
+                replacement graph when it is safe to do so.
 
         """
         from torch._inductor.virtualized import NullHandler, V
@@ -2303,19 +2303,43 @@ def fwd_only(
     from .fx_passes.post_grad import remove_noop_ops
 
     if run_functional_passes:
-        remove_noop_ops(gm.graph)
+        if not _graph_has_side_effects(gm):
+            # These passes rewrite aliasing relationships, which is only safe
+            # when there are no side effects observing the aliases.
+            remove_noop_ops(gm.graph)
 
-        # NOTE: applying early_patterns to user patterns cause
-        # duplicate patterns being found in vllm. Check
-        # https://github.com/pytorch/pytorch/pull/170649#issuecomment-3693427775
-        # for more details.
-        # from .fx_passes.joint_graph import early_patterns
-        # early_patterns.apply(gm.graph)
+            # NOTE: applying early_patterns to user patterns cause
+            # duplicate patterns being found in vllm. Check
+            # https://github.com/pytorch/pytorch/pull/170649#issuecomment-3693427775
+            # for more details.
+            # from .fx_passes.joint_graph import early_patterns
+            # early_patterns.apply(gm.graph)
 
-        gm.graph.eliminate_dead_code()
+            gm.graph.eliminate_dead_code()
 
     gm.recompile()
     return gm
+
+
+def _graph_has_side_effects(gm: torch.fx.GraphModule) -> bool:
+    submodules = dict(gm.named_modules())
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.higher_order.with_effects
+        ):
+            return True
+        if node.op not in ("placeholder", "output") and (
+            is_mutation_op(node) or node.is_impure()
+        ):
+            return True
+        if node.op == "get_attr" and isinstance(node.target, str):
+            sub_gm = submodules.get(node.target)
+            if isinstance(sub_gm, torch.fx.GraphModule) and _graph_has_side_effects(
+                sub_gm
+            ):
+                return True
+    return False
 
 
 @torch.enable_grad()
