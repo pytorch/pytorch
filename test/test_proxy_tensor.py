@@ -9,8 +9,8 @@ import warnings
 import operator
 from collections.abc import Iterable
 from torch.nn.utils import stateless
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
+from torch.testing._internal.common_methods_invocations import op_db
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
@@ -2189,33 +2189,29 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
+    @skipOps(make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
-             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
+    @skipOps(make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
         if not op.get_inplace():
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
 
     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Op doesn't support out")
