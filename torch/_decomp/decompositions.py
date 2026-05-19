@@ -3168,7 +3168,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
