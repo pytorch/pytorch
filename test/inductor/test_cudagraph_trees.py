@@ -436,6 +436,102 @@ if HAS_CUDA_AND_TRITON:
                 torch._inductor.cudagraph_trees.ExecutionState.EXECUTION,
             )
 
+        def test_set_input_mutation_preserves_shared_buffer_for_next_graph(self):
+            class Writer(torch.nn.Module):
+                def __init__(self, buf) -> None:
+                    super().__init__()
+                    self.register_buffer("buf", buf)
+
+                def forward(self, x):
+                    y = x + 1
+                    torch.ops.aten.set_.source_Tensor(self.buf, y)
+                    return y * 2
+
+            class Reader(torch.nn.Module):
+                def __init__(self, buf) -> None:
+                    super().__init__()
+                    self.register_buffer("buf", buf)
+
+                def forward(self, x):
+                    return self.buf + x
+
+            compiled_buf = torch.empty(8, device="cuda")
+            eager_buf = torch.empty(8, device="cuda")
+            writer = torch.compile(
+                Writer(compiled_buf), mode="reduce-overhead", fullgraph=True
+            )
+            reader = torch.compile(
+                Reader(compiled_buf), mode="reduce-overhead", fullgraph=True
+            )
+            eager_writer = Writer(eager_buf)
+            eager_reader = Reader(eager_buf)
+
+            for _ in range(5):
+                x = torch.randn(8, device="cuda")
+                z = torch.randn(8, device="cuda")
+                self.assertEqual(writer(x), eager_writer(x))
+                self.assertEqual(reader(z), eager_reader(z))
+                self.assertEqual(compiled_buf, eager_buf)
+
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertGreater(sum(len(roots) for roots in manager.roots.values()), 0)
+
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        def test_set_cudagraph_managed_input_to_fresh_output(self):
+            def producer(x):
+                return x + 1
+
+            def mutator(x):
+                y = x + 2
+                torch.ops.aten.set_.source_Tensor(x, y)
+                return y * 3
+
+            producer = torch.compile(producer, mode="reduce-overhead", fullgraph=True)
+            mutator = torch.compile(mutator, mode="reduce-overhead", fullgraph=True)
+
+            for _ in range(5):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(8, device="cuda")
+                produced = producer(x)
+                self.assertEqual(mutator(produced), (x + 3) * 3)
+                self.assertEqual(produced, x + 3)
+
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertEqual(
+                manager.path_state,
+                torch._inductor.cudagraph_trees.ExecutionState.EXECUTION,
+            )
+
+        def test_set_input_mutation_replays_metadata_only_change(self):
+            base = torch.randn(8, device="cuda")
+            inp = base.as_strided((8,), (1,), 0)
+
+            def metadata_mutator(args):
+                x = args[0]
+                args.clear()
+                y = x.as_strided((4,), (2,), 0)
+                torch.ops.aten.set_.source_Tensor(x, y)
+                return y * 2, y
+
+            metadata_mutator = self.cudagraphify_impl(
+                metadata_mutator,
+                [inp],
+                (0,),
+                mutated_input_idxs=(0,),
+            )
+
+            for _ in range(5):
+                torch.ops.aten.set_.source_Tensor(inp, base)
+                expected = base.as_strided((4,), (2,), 0)
+                out, _ = metadata_mutator([inp])
+                self.assertEqual(out, expected * 2)
+                self.assertEqual(inp, expected)
+                self.assertEqual(inp.stride(), (2,))
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", False)
