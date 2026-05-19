@@ -219,10 +219,6 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     return ret
 
 
-def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
-    return t.device.type == "cpu" and t.layout == torch.strided and t.is_pinned()
-
-
 def extend_user_visible_output_strides(
     user_visible_outputs: dict[Node, tuple[int, ...]],
 ) -> dict[Node, object]:
@@ -1192,10 +1188,7 @@ class GraphLowering(torch.fx.Interpreter):
             ir.ConstantBuffer(
                 name=new_name,
                 layout=FixedLayout(
-                    data.device,
-                    data.dtype,
-                    *self.static_sizes_strides(data),
-                    is_pinned=_is_cpu_strided_tensor_pinned(data),
+                    data.device, data.dtype, *self.static_sizes_strides(data)
                 ),
             )
         )
@@ -1570,12 +1563,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
-                return tensor(
-                    value.tolist(),
-                    dtype=value.dtype,
-                    device=value.device,
-                    pin_memory=_is_cpu_strided_tensor_pinned(value),
-                )
+                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
         return self.add_tensor_constant(value, target)
 
