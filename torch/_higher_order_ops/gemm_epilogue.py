@@ -591,6 +591,16 @@ def _quack_cute_epilogue_code(
                 local_norm.reduce_node,
             )
         )
+        if local_norm.dim == 0:
+            local_reduce = QuackLocalReduceInfo(
+                view_node=local_norm.view_node,
+                reduce_node=local_norm.reduce_node,
+                source_node=local_norm.source_node,
+                keepdim=True,
+                group_size=local_norm.group_size,
+                dim=0,
+                feeds_main=True,
+            )
     if isinstance(output_value, (tuple, list)):
         if len(output_value) == 1:
             output_value = output_value[0]
@@ -652,45 +662,41 @@ def _quack_cute_epilogue_code(
 
     if local_norm is not None:
         if local_norm.dim == 0:
-            raise NotImplementedError(
-                "local M-group reductions feeding the main output are not supported yet; "
-                "the current TensorSSA epilogue sees only one 32-wide N fragment and "
-                "cannot compute denominators across M lanes without a QuACK device-side "
-                "value-producing row reduction"
+            output_value = local_norm.source_node
+        else:
+            if 32 % local_norm.group_size != 0:
+                raise NotImplementedError(
+                    "QUACK reductions feeding the main output currently require a "
+                    "power-of-two group size that divides the same-fragment N width 32; "
+                    "aux reductions can use other static groups"
+                )
+            source = _quack_cute_arg(local_norm.source_node, env)
+            groups_per_fragment = 32 // local_norm.group_size
+            grouped_name = f"tmp{kernel.cse.index}"
+            kernel.cse.index += 1
+            sum_name = f"tmp{kernel.cse.index}"
+            kernel.cse.index += 1
+            broadcast_name = f"tmp{kernel.cse.index}"
+            kernel.cse.index += 1
+            out_name = f"tmp{kernel.cse.index}"
+            kernel.cse.index += 1
+            kernel.body.writeline(
+                f"{grouped_name} = {source}.reshape("
+                f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
             )
-        if 32 % local_norm.group_size != 0:
-            raise NotImplementedError(
-                "QUACK reductions feeding the main output currently require a "
-                "power-of-two group size that divides the same-fragment N width 32; "
-                "aux reductions can use other static groups"
+            kernel.body.writeline(
+                f"{sum_name} = {grouped_name}.reduce("
+                "cute.ReductionOp.ADD, init_val=0.0, "
+                "reduction_profile=((None, 1, None), 1, 1))"
             )
-        source = _quack_cute_arg(local_norm.source_node, env)
-        groups_per_fragment = 32 // local_norm.group_size
-        grouped_name = f"tmp{kernel.cse.index}"
-        kernel.cse.index += 1
-        sum_name = f"tmp{kernel.cse.index}"
-        kernel.cse.index += 1
-        broadcast_name = f"tmp{kernel.cse.index}"
-        kernel.cse.index += 1
-        out_name = f"tmp{kernel.cse.index}"
-        kernel.cse.index += 1
-        kernel.body.writeline(
-            f"{grouped_name} = {source}.reshape("
-            f"((1, {local_norm.group_size}, {groups_per_fragment}), 1, 1))"
-        )
-        kernel.body.writeline(
-            f"{sum_name} = {grouped_name}.reduce("
-            "cute.ReductionOp.ADD, init_val=0.0, "
-            "reduction_profile=((None, 1, None), 1, 1))"
-        )
-        kernel.body.writeline(
-            f"{broadcast_name} = {sum_name}.reshape("
-            f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
-        )
-        kernel.body.writeline(
-            f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
-        )
-        output_value = out_name
+            kernel.body.writeline(
+                f"{broadcast_name} = {sum_name}.reshape("
+                f"((1, 1, {groups_per_fragment}), 1, 1)).broadcast_to({grouped_name}.shape)"
+            )
+            kernel.body.writeline(
+                f"{out_name} = ({grouped_name} / {broadcast_name}).reshape({source}.shape)"
+            )
+            output_value = out_name
 
     return (
         kernel.body.lines,
