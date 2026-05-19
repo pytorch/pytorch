@@ -630,26 +630,14 @@ void fakeFallback(
   };
 
   // for ops with symbolic sizes, try decompositions before the meta kernel
-  // THIS IS CALLING BACK TO PYTHON
-  // we need to re-entry only for the specific op being decomposed
-  // since @register_decomposition can register the same fn as both decomp
-  // and meta kernel, so re-entering the decomp for the same op will infinite loop
-
-  // but sub-ops are different ops so they need to be able to use their own decomps
-  bool is_same_op_reentry = mode && mode->decomposing_op_ == &op;
-  if (has_symints && !cpp_meta_supports_symint(op) && mode &&
-      !is_same_op_reentry) {
+  if (has_symints && !cpp_meta_supports_symint(op) && mode) {
     if (mode->decomp_fn_) {
-      auto prev_decomposing = mode->decomposing_op_;
-      mode->decomposing_op_ = &op; // keep track of current op we are decomping
       bool found = false;
       try {
         found = mode->decomp_fn_(&op, stack);
       } catch (...) {
-        mode->decomposing_op_ = prev_decomposing;
         throw;
       }
-      mode->decomposing_op_ = prev_decomposing;
       if (found) {
         wrap_meta_outputs_with_default_device_logic();
         return;
@@ -671,22 +659,15 @@ void fakeFallback(
     }
   }
 
-  // prim ops with Meta kernels: redispatch to the Meta kernel with Fake
-  // removed from the keyset (so this op doesn't re-enter fakeFallback)
-  // prims can already handle Fake so we just need to re dispatch
-  // sub ops need to enter though so we keep Fake in TLS
-  // this matches Python's `with self: func.prim_meta_impl(...)` pattern
-  if (schema.name().rfind("prims::", 0) == 0 &&
-      op.hasKernelForDispatchKey(c10::DispatchKey::Meta)) {
-    // Python calls prim_meta_impl directly so scalar args stay as Python
-    // floats/ints. In C++, the dispatcher wraps them as tensors with default
-    // dtypes (float64 for floats, int64 for ints) before we get here, causing
-    // dtype mismatches. Get the target dtype from non-0-dim non-bool tensors.
-    // If all tensors are 0-dim, use the first whose dtype isn't a default
-    // wrapping dtype (float64/int64) since those are likely wrapped scalars.
-
-    // ed: there's like a correct way to do the IValue conversion here
-    // fix this later
+  // Prims: call prim_meta_impl directly via Python callback, matching
+  // Python FakeTensorMode's `with self: func.prim_meta_impl(*args, **kwargs)`.
+  // Sub-ops (e.g. torch.empty inside _iota_meta) still enter fakeFallback
+  // because Fake remains in TLS.
+  if (schema.name().rfind("prims::", 0) == 0 && mode && mode->prim_meta_fn_) {
+    // In Python, scalar args stay as Python floats/ints. In C++, the
+    // dispatcher wraps them as tensors with default dtypes (float64 for
+    // floats, int64 for ints), causing dtype mismatches in prim_meta_impl.
+    // Fix up by casting all tensors to a common dtype before calling.
     std::optional<c10::ScalarType> target_dtype;
     for_each_tensor(
         stack, arguments_begin, num_arguments,
@@ -725,14 +706,10 @@ void fakeFallback(
           });
     }
 
-    auto ks = dispatchKeySet;
-    ks = ks.remove(c10::DispatchKey::Fake);
-    ks = ks.remove(c10::DispatchKey::Python);
-    ks = ks.remove(c10::DispatchKey::PythonTLSSnapshot);
-    ks = ks | c10::DispatchKeySet(c10::DispatchKey::Meta);
-    op.redispatchBoxed(ks, stack);
-    wrap_meta_outputs_with_default_device_logic();
-    return;
+    if (mode->prim_meta_fn_(&op, stack)) {
+      wrap_meta_outputs_with_default_device_logic();
+      return;
+    }
   }
 
   // TODO: profiles

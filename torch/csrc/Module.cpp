@@ -3106,6 +3106,15 @@ Call this whenever a new thread is created in order to propagate values from
 
     py::handle py_op = torch::detail::getTorchApiFunction(op);
 
+    // Match Python FakeTensorMode: prefer meta_table over decomposition_table.
+    // Ops in meta_table have a proper Meta kernel (registered by
+    // activate_meta) that handles SymInt natively in Python.
+    static py::object meta_table =
+        py::module::import("torch._decomp").attr("meta_table");
+    if (meta_table.contains(py_op)) {
+      return false;
+    }
+
     static py::object decomp_table =
         py::module::import("torch._decomp").attr("decomposition_table");
 
@@ -3242,6 +3251,29 @@ Call this whenever a new thread is created in order to propagate values from
     return true;
   };
 
+  // Callback for C++ FakeTensor prims path to call prim_meta_impl directly,
+  // matching Python FakeTensorMode's `func.prim_meta_impl(*args, **kwargs)`.
+  static auto tryPythonPrimMeta = [](const void* op_ptr,
+                                     void* stack_ptr) -> bool {
+    const auto& op = *static_cast<const c10::OperatorHandle*>(op_ptr);
+    auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
+
+    py::gil_scoped_acquire gil;
+
+    py::handle py_op = torch::detail::getTorchApiFunction(op);
+    if (!py::hasattr(py_op, "prim_meta_impl")) {
+      return false;
+    }
+    py::object prim_meta_impl = py_op.attr("prim_meta_impl");
+
+    const auto& schema = op.schema();
+    auto arguments = torch::jit::pop(*stack, schema.arguments().size());
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+    auto result = prim_meta_impl(*args_kwargs.first, **args_kwargs.second);
+    pushPyOutToStack(op, stack, std::move(result), "prim_meta_impl");
+    return true;
+  };
+
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
@@ -3300,6 +3332,7 @@ Call this whenever a new thread is created in order to propagate values from
                 converter.ptr(), getPyInterpreter()));
         mode->decomp_fn_ = tryPythonDecomp;
         mode->op_impl_fn_ = tryPythonOpImpl;
+        mode->prim_meta_fn_ = tryPythonPrimMeta;
         c10::impl::FakeTensorModeTLS::create_state(std::move(mode));
       },
       py::arg("converter"),

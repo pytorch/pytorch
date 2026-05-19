@@ -256,9 +256,9 @@ struct C10_API FakeTensorMode {
   // returns true if a handler was found and executed
   std::function<bool(const void* op, void* stack)> op_impl_fn_;
 
-  // we need to guard against re-entries for the same op when its decomp
-  //  is also its meta kernel (@register_decomposition).
-  const void* decomposing_op_ = nullptr;
+  // callback to call func.prim_meta_impl directly for prims ops
+  // returns true if prim_meta_impl was found and executed
+  std::function<bool(const void* op, void* stack)> prim_meta_fn_;
 
   // maps StorageImpl* -> list of weak TensorImpl pointers for all fake tensors
   // whose constant shares that storage
