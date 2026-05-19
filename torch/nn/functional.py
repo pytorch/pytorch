@@ -5627,6 +5627,7 @@ def pad(
         ):
             # F.pad routes value through a C++ double; Python ints above
             # 2**53 lose precision. constant_pad_nd takes a Scalar.
+            # See https://github.com/pytorch/pytorch/issues/170798
             return torch.constant_pad_nd(input, pad, value)
     return torch._C._nn.pad(input, pad, mode, value)
 
