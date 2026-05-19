@@ -162,46 +162,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
 
-# These models currently fail accuracy with eager Adam optimizer
-# so we use SGD when running the full benchmarks
-# https://github.com/pytorch/pytorch/issues/115966
-BENCHMARK_USE_SGD = {
-    # TorchBench
-    "BERT_pytorch",
-    "LearningToPaint",
-    "alexnet",
-    "dcgan",
-    "demucs",
-    "densenet121",
-    "dlrm",
-    "fastNLP_Bert",
-    "mobilenet_v2",
-    "phlippe_densenet",
-    "phlippe_resnet",
-    "pytorch_stargan",
-    "resnet18",
-    "shufflenet_v2_x1_0",
-    "speech_transformer",
-    "squeezenet1_1",
-    "stable_diffusion_text_encoder",
-    "vgg16",
-    # HF
-    "AlbertForMaskedLM",
-    "BartForCausalLM",
-    "ElectraForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MBartForCausalLM",
-    "OPTForCausalLM",
-    "PLBartForCausalLM",
-    "PegasusForCausalLM",
-    "TrOCRForCausalLM",
-    "XGLMForCausalLM",
-    # TIMM
-    "adv_inception_v3",
-    "tf_efficientnet_b0",
-    "ghostnet_100",
-}
-
 # These models OOM in CI
 # due to the extra memory of Adam optimizer states,
 # so we fall back to SGD in CI
@@ -1855,7 +1815,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+            if name in CI_USE_SGD and self.args.ci:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
@@ -2090,10 +2050,26 @@ class BenchmarkRunner:
         return 1
 
     def run_n_iterations(self, mod, inputs, model_iter_fn):
-        n = self.args.iterations
+        n = (
+            1
+            if self.collect_training_outputs_before_optimizer_step()
+            else self.args.iterations
+        )
         for _ in range(n - 1):
             model_iter_fn(mod, inputs, collect_outputs=False)
         return model_iter_fn(mod, inputs, collect_outputs=True)
+
+    def collect_training_outputs_before_optimizer_step(self):
+        # Adam can amplify tiny gradient differences into large parameter
+        # deltas, so accuracy checks compare the training signal before step().
+        return (
+            self.args.accuracy
+            and self.args.training
+            and isinstance(self.optimizer, torch.optim.Adam)
+        )
+
+    def clone_tensors_for_accuracy(self, result):
+        return tree_map_only(torch.Tensor, lambda x: x.detach().clone(), result)
 
     @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
