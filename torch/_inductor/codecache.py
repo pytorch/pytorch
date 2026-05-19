@@ -845,49 +845,20 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def _collect_module_files(
-    roots: list[str] | None, prefix: str
-) -> list[tuple[str, str]]:
-    """Collect all (spec_name, file_path) pairs from a module tree."""
-    result: list[tuple[str, str]] = []
-    for lib in pkgutil.iter_modules(roots, prefix):
+def build_code_hash(
+    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
+    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
-        result.append((spec.name, module))
+        with open(module, "rb") as f:
+            hasher.update(spec.name.encode("utf-8"))
+            hasher.update(f.read())
         if lib.ispkg:
-            result.extend(
-                _collect_module_files(spec.submodule_search_locations, f"{spec.name}.")
-            )
-    return result
-
-
-def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
-    """Hash a single module file. Suitable for concurrent execution."""
-    h = hashlib.sha256()
-    h.update(name.encode("utf-8"))
-    with open(path, "rb") as f:
-        if sys.version_info >= (3, 11):
-            h.update(hashlib.file_digest(f, "sha256").digest())
-        else:
-            h.update(f.read())
-    return (name, h.digest())
-
-
-def build_code_hash(
-    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
-) -> None:
-    from concurrent.futures import ThreadPoolExecutor
-
-    files = _collect_module_files(roots, prefix)
-    if not files:
-        return
-    with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
-        per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
-    per_file_hashes.sort()
-    for _name, digest in per_file_hashes:
-        hasher.update(digest)
+            # need to also hash submodules
+            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
 @torch_key_cache
