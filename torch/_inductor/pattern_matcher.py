@@ -1434,6 +1434,114 @@ def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _TraceArgInfo:
+    argnames: list[str]
+    flat_argnames: list[str]
+    arg_specs: dict[str, Any]
+    arg_flat_names: dict[str, list[str]]
+
+
+def _unique_argname(name: str, used_names: OrderedSet[str]) -> str:
+    if name not in used_names:
+        used_names.add(name)
+        return name
+
+    i = 0
+    while f"{name}_{i}" in used_names:
+        i += 1
+    name = f"{name}_{i}"
+    used_names.add(name)
+    return name
+
+
+def _trace_args_for_initial_trace(
+    argnames: Sequence[str],
+    example_inputs: Sequence[Any],
+    scalar_workaround: dict[str, float | int],
+) -> list[Any]:
+    trace_args = []
+    input_idx = 0
+    for argname in argnames:
+        if argname in scalar_workaround:
+            trace_args.append(scalar_workaround[argname])
+        else:
+            trace_args.append(example_inputs[input_idx])
+            input_idx += 1
+    return trace_args
+
+
+def _trace_arg_info(argnames: Sequence[str], args: Sequence[Any]) -> _TraceArgInfo:
+    flat_argnames: list[str] = []
+    arg_specs: dict[str, Any] = {}
+    arg_flat_names: dict[str, list[str]] = {}
+    used_names: OrderedSet[str] = OrderedSet()
+
+    for argname, arg in zip(argnames, args):
+        flat_args, spec = pytree.tree_flatten(arg)
+        arg_specs[argname] = spec
+        if len(flat_args) == 0:
+            names: list[str] = []
+        elif len(flat_args) == 1:
+            names = [_unique_argname(argname, used_names)]
+        else:
+            names = [
+                _unique_argname(f"{argname}_{i}", used_names)
+                for i in range(len(flat_args))
+            ]
+        flat_argnames.extend(names)
+        arg_flat_names[argname] = names
+
+    return _TraceArgInfo(
+        argnames=list(argnames),
+        flat_argnames=flat_argnames,
+        arg_specs=arg_specs,
+        arg_flat_names=arg_flat_names,
+    )
+
+
+def _unflatten_match_kwargs(
+    kwargs: Mapping[str, Any],
+    arg_info: _TraceArgInfo,
+    defaults: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    kwargs = dict(kwargs)
+    result: dict[str, Any] = {}
+
+    for argname in arg_info.argnames:
+        flat_names = arg_info.arg_flat_names[argname]
+        found_names = [flat_name for flat_name in flat_names if flat_name in kwargs]
+        if len(found_names) != len(flat_names):
+            if defaults is not None and argname in defaults and not found_names:
+                result[argname] = defaults[argname]
+                continue
+            missing_names = [
+                flat_name for flat_name in flat_names if flat_name not in kwargs
+            ]
+            raise RuntimeError(
+                f"Not all inputs to pattern found in match.kwargs. Perhaps one "
+                f"of the inputs is unused? argname={argname}, "
+                f"flat_argnames={flat_names}, missing_argnames={missing_names}, "
+                f"match.kwargs={kwargs}"
+            )
+
+        flat_values = []
+        for flat_name in flat_names:
+            flat_values.append(kwargs.pop(flat_name))
+        result[argname] = pytree.tree_unflatten(
+            flat_values, arg_info.arg_specs[argname]
+        )
+
+    result.update(kwargs)
+    return result
+
+
+def _get_match_node_value(node: torch.fx.Node) -> Any:
+    if "val" in node.meta:
+        return node.meta["val"]
+    return node.meta["example_value"]
+
+
 def check_and_add_duplicate_pattern(
     pattern: PatternExpr,
     graph: torch.fx.Graph | None,
@@ -1516,6 +1624,15 @@ def register_replacement(
         raise TypeError(
             f"example_inputs must be a list or tuple, got {type(example_inputs)}"
         )
+    scalar_workaround = scalar_workaround or {}
+    initial_trace_args = _trace_args_for_initial_trace(
+        argnames_static, example_inputs, scalar_workaround
+    )
+    initial_arg_info = _trace_arg_info(argnames_static, initial_trace_args)
+    requires_grad = pytree.tree_map(
+        lambda x: isinstance(x, torch.Tensor) and x.requires_grad,
+        initial_trace_args,
+    )
 
     def check_fn(match: Match) -> bool:
         """
@@ -1524,17 +1641,14 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
-        argnames = list(argnames_static)
-        for name in argnames:
-            if name not in match.kwargs:
-                raise RuntimeError(
-                    f"Not all inputs to pattern found in match.kwargs. Perhaps one "
-                    f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
-                )
+        structured_match_kwargs = _unflatten_match_kwargs(
+            match.kwargs, initial_arg_info
+        )
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [structured_match_kwargs[name] for name in argnames_static],
+                _get_match_node_value,
             )
         )
 
@@ -1542,34 +1656,43 @@ def register_replacement(
         fake_mode = torch._dynamo.utils.detect_fake_mode(args)
         assert fake_mode is not None
         with fake_mode:
-            for i, grad in enumerate(requires_grad):
-                if isinstance(args[i], torch.Tensor):
-                    # pyrefly: ignore [missing-attribute]
-                    if grad and is_integer_dtype(args[i].dtype):
-                        return False
+            invalid_args = False
+            requires_grad_values = iter(pytree.tree_leaves(requires_grad))
 
-                    args[i] = torch.empty_strided(
-                        # pyrefly: ignore [missing-attribute]
-                        args[i].size(),
-                        # pyrefly: ignore [missing-attribute]
-                        args[i].stride(),
-                        # pyrefly: ignore [missing-attribute]
-                        dtype=args[i].dtype,
-                        # pyrefly: ignore [missing-attribute]
-                        device=args[i].device,
-                        requires_grad=grad,
-                    )
-                    # pyrefly: ignore [missing-attribute]
-                    for v in itertools.chain(args[i].shape, args[i].stride()):
-                        if isinstance(v, torch.SymInt) and all(
-                            statically_known_true(v != a) for a in sym_args
-                        ):
-                            sym_args.append(v)
+            def refresh_arg(arg: Any) -> Any:
+                nonlocal invalid_args
+                grad = next(requires_grad_values)
+                if not isinstance(arg, torch.Tensor):
+                    return arg
+
+                if grad and is_integer_dtype(arg.dtype):
+                    invalid_args = True
+                    return arg
+
+                refreshed_arg = torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=grad,
+                )
+                for v in itertools.chain(refreshed_arg.shape, refreshed_arg.stride()):
+                    if isinstance(v, torch.SymInt) and all(
+                        statically_known_true(v != a) for a in sym_args
+                    ):
+                        sym_args.append(v)
+                return refreshed_arg
+
+            args = pytree.tree_map(refresh_arg, args)
+            if invalid_args:
+                return False
 
             # If we were given a pre-traced pattern then use that instead of
             # retracing. Note that this means the pattern has to be independent
             # of its args.
             specific_pattern = search_fn_pattern
+            specific_arg_info = _trace_arg_info(argnames_static, args)
+            specific_argnames = specific_arg_info.flat_argnames
 
             if not specific_pattern:
                 if sym_args:
@@ -1595,9 +1718,11 @@ def register_replacement(
 
                     # correct argnames in the graph
                     sym_arg_names = []
-                    for i, placeholder in zip(
-                        range(len(sym_args) + len(args)),
-                        specific_graph.graph.nodes,
+                    placeholders = [
+                        n for n in specific_graph.graph.nodes if n.op == "placeholder"
+                    ]
+                    for i, placeholder in enumerate(
+                        placeholders[: len(sym_args) + len(specific_argnames)]
                     ):
                         if i < len(sym_args):
                             sym_arg_names.append(placeholder.target)
@@ -1605,13 +1730,13 @@ def register_replacement(
 
                         with specific_graph.graph.inserting_after(placeholder):
                             new_node = specific_graph.graph.placeholder(
-                                argnames[i - len(sym_args)]
+                                specific_argnames[i - len(sym_args)]
                             )
                             new_node.target = new_node.name
                             placeholder.replace_all_uses_with(new_node)
                             specific_graph.graph.erase_node(placeholder)
 
-                    argnames = sym_arg_names + argnames
+                    specific_argnames = sym_arg_names + specific_argnames
                 else:
                     try:
                         specific_graph = trace_fn(
@@ -1623,7 +1748,7 @@ def register_replacement(
 
                 specific_pattern = fx_to_pattern(
                     specific_graph,
-                    argnames=argnames,
+                    argnames=specific_argnames,
                     exclusive_arg_names=exclusive_arg_names,
                     scalar_workaround=scalar_workaround,
                 )
@@ -1641,11 +1766,19 @@ def register_replacement(
                     specific_pattern,
                 )
 
+            if is_match(specific_pattern_match):
+                specific_pattern_match.kwargs = _unflatten_match_kwargs(
+                    specific_pattern_match.kwargs,
+                    specific_arg_info,
+                    defaults=structured_match_kwargs,
+                )
+
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
+                match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
@@ -1657,7 +1790,14 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> list[Any]:
-        args = [kwargs.pop(name) for name in argnames_static]
+        # Flat kwargs come from the initial match; structured kwargs are restored
+        # after check_fn accepts the match.
+        if not all(name in kwargs for name in argnames_static):
+            kwargs = _unflatten_match_kwargs(kwargs, initial_arg_info)
+        structured_args = [kwargs.pop(name) for name in argnames_static]
+        args = []
+        for arg in structured_args:
+            args.extend(pytree.tree_leaves(arg))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
@@ -1673,9 +1813,6 @@ def register_replacement(
 
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
-        requires_grad: list[bool] = [
-            isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
-        ]
         if search_fn_pattern is None:
             pattern, gm = gen_pattern_and_search_gm(
                 search_fn,
@@ -1880,24 +2017,18 @@ def gen_pattern_and_search_gm(
 ) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
-    if scalar_workaround is None:
-        scalar_workaround = {}
-    flat_inputs = []
-    input_idx = 0  # Positional arguments index
-
-    for argname in argnames:
-        if argname in scalar_workaround:
-            flat_inputs.append(scalar_workaround[argname])
-        else:
-            flat_inputs.append(example_inputs[input_idx])
-            input_idx += 1
+    scalar_workaround = scalar_workaround or {}
+    flat_inputs = _trace_args_for_initial_trace(
+        argnames, example_inputs, scalar_workaround
+    )
+    arg_info = _trace_arg_info(argnames, flat_inputs)
 
     search_gm = trace_fn(search_fn, flat_inputs, get_decomp_fn=get_decomp_fn)
     return (
         fx_to_pattern(
             search_gm,
             ignore_types=(int, float, list, torch.device, torch.dtype),
-            argnames=argnames,
+            argnames=arg_info.flat_argnames,
             scalar_workaround=scalar_workaround,
             exclusive_arg_names=exclusive_arg_names,
         ),
