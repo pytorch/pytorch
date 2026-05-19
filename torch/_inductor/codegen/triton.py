@@ -235,9 +235,9 @@ def _val_expressible_in_32_bits(val: Any) -> bool:
 
 
 def _range_expressible_in_32_bits(bounds: ValueRanges[Any]) -> bool:
-    return _val_expressible_in_32_bits(
-        bounds.lower
-    ) and _val_expressible_in_32_bits(bounds.upper)
+    return _val_expressible_in_32_bits(bounds.lower) and _val_expressible_in_32_bits(
+        bounds.upper
+    )
 
 
 def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
@@ -1259,10 +1259,10 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
             def maybe_cast_arg(arg) -> str:
-                if func.__name__ == "sqrt" and (
-                    arg_dtype := triton_arg_dtype(arg)
-                ) is not None and (
-                    arg_dtype == torch.bool or is_integer_dtype(arg_dtype)
+                if (
+                    func.__name__ == "sqrt"
+                    and (arg_dtype := triton_arg_dtype(arg)) is not None
+                    and (arg_dtype == torch.bool or is_integer_dtype(arg_dtype))
                 ):
                     return TritonOverrides._cast_libdevice_arg(arg, torch.float32)
                 return maybe_upcast_arg(arg)
