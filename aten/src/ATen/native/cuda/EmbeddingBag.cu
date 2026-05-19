@@ -420,7 +420,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), mode, bag_size.mutable_data_ptr<index_t>(),
-            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
+            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : nullptr,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
