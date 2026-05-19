@@ -1107,6 +1107,36 @@ def _match_quack_grouped_n_select(
     return view.node, node.args[2], shape[-1]
 
 
+def _uses_quack_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
+    seen: set[torch.fx.Node] = set()
+
+    def visit(node: Any) -> bool:
+        if not isinstance(node, torch.fx.Node) or node in seen:
+            return False
+        seen.add(node)
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.select.int
+            and len(node.args) >= 3
+            and node.args[1] == 1
+        ):
+            view = _match_quack_view_or_reshape(node.args[0])
+            shape = _normalize_quack_shape(view.shape) if view is not None else None
+            if (
+                view is not None
+                and _quack_output_uses_node(view.base, mm_node)
+                and isinstance(shape, (list, tuple))
+                and len(shape) == 3
+                and shape[0] == -1
+                and isinstance(shape[1], int)
+                and shape[1] > 0
+            ):
+                return True
+        return any(visit(arg) for arg in pytree.tree_leaves((node.args, node.kwargs)))
+
+    return visit(value)
+
+
 def _match_quack_grouped_n_contract_main(
     output_value: Any, mm_node: torch.fx.Node
 ) -> QuackMainOutputTransformInfo | None:
@@ -1246,6 +1276,11 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
             and output_meta is not None
             and tuple(output_meta.shape) != tuple(mm_meta.shape)
         ):
+            if _uses_quack_grouped_m_select(output_value, mm_node):
+                raise NotImplementedError(
+                    "QUACK M-mode shape-changing main epilogues such as "
+                    "acc.view(-1, group_m, N)[:, i, :] are not supported yet"
+                )
             raise NotImplementedError(
                 "QUACK shape-changing main epilogues currently require a supported "
                 "local shape transform such as acc.view(M, -1, 2)[..., i]"
