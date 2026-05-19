@@ -71,6 +71,10 @@ except Exception:
 _expectedFailureIf_transformers_ge_5_2 = (
     unittest.expectedFailure if _transformers_version >= (5, 2) else lambda fn: fn
 )
+_skipIf_transformers_ge_5_2 = unittest.skipIf(
+    _transformers_version >= (5, 2),
+    "transformers >= 5.2 is affected by huggingface/transformers#44188",
+)
 
 
 log = logging.getLogger(__name__)
@@ -891,7 +895,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -900,7 +904,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -915,14 +919,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
