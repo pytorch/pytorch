@@ -1549,7 +1549,10 @@ def _quack_cute_epilogue_code(
         arg for arg in mm_node.args if isinstance(arg, torch.fx.Node)
     }
     aux_placeholder_nodes = [
-        node for node in placeholder_nodes if node not in gemm_placeholder_nodes
+        node
+        for node in placeholder_nodes
+        if node not in gemm_placeholder_nodes
+        and isinstance(node.meta.get("val"), torch.Tensor)
     ]
     env: dict[torch.fx.Node, Any] = {
         mm_node: CuteDSLCSEVariable(
