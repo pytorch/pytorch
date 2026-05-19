@@ -1465,7 +1465,6 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182317")
     def test_factory_override(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
