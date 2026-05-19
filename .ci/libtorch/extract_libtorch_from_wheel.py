@@ -135,14 +135,10 @@ def _rewrite_elf_rpath(filepath: Path, new_rpath: str) -> bool:
                 dyn_fmt = f"{endian}iI"
                 dyn_size = struct.calcsize(dyn_fmt)
 
-            f.seek(0)
+            # Fields after the 16-byte ident
             ehdr_data = f.read(ehdr_size)
             ehdr = struct.unpack(ehdr_fmt, ehdr_data)
-            # e_phoff, e_phentsize, e_phnum
-            if is_64:
-                e_phoff, e_phnum = ehdr[4], ehdr[12]
-            else:
-                e_phoff, e_phnum = ehdr[4], ehdr[12]
+            e_phoff, e_phnum = ehdr[4], ehdr[9]
 
             # Find PT_DYNAMIC (type=2)
             dyn_offset = dyn_filesz = 0
