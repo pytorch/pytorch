@@ -1179,7 +1179,7 @@ class ComboKernel(Kernel):
         triton_autotune_seed_infos = self.standalone_autotune_seed_infos
         if self.standalone_autotune_seed_infos:
             inplaced_call_arg_replacements: dict[str, str] = {}
-            seen_inplaced_args: set[str] = set()
+            seen_inplaced_args: OrderedSet[str] = OrderedSet()
             for inplaced in self.args.inplace_buffers.values():
                 if isinstance(inplaced, RemovedArg):
                     continue
@@ -1208,16 +1208,10 @@ class ComboKernel(Kernel):
                     for arg in seed_call_args
                     if isinstance(arg, str) and arg in V.graph.removed_buffers
                 ]
-                if stale_args:
-                    log.warning(
-                        "Combo standalone autotune seed %s references "
-                        "removed buffers %s; dropping seed_spec",
-                        seed_name,
-                        stale_args,
-                    )
-                    triton_autotune_seed_infos.append(None)
-                    seed_specs.append("None")
-                    continue
+                assert not stale_args, (
+                    f"Combo standalone autotune seed {seed_name} references "
+                    f"removed buffers {stale_args}"
+                )
                 triton_autotune_seed_infos.append(
                     (seed_name, seed_call_args, seed_arg_types)
                 )
