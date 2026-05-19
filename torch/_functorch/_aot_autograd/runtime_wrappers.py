@@ -2406,19 +2406,6 @@ class CachedAutogradLazyBackwardCompileInfo:
     bw_module_fn: Callable[..., Any]
 
 
-def _raise_if_functorch_active() -> None:
-    # not ideal but prevent the user from seeing a nasty traceback - See #138422
-    stack = torch._C._functorch.peek_interpreter_stack()
-    torch._check(
-        stack is None,
-        lambda: (
-            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
-            "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
-            "backward function."
-        ),
-    )
-
-
 def initialize_rng_states(
     num_rng: int,
     graphsafe_idx: int,
@@ -2979,12 +2966,23 @@ def _codegen_backward_prologue(
         "def _backward_prologue("
         "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
     ]
-    G: dict[str, object] = {
-        "_raise_if_functorch_active_": _raise_if_functorch_active,
-        "torch": torch,
-    }
+    G: dict[str, object] = {"torch": torch}
 
-    L.append("    _raise_if_functorch_active_()")
+    L.append("    stack = torch._C._functorch.peek_interpreter_stack()")
+    L.append("    torch._check(")
+    L.append("        stack is None,")
+    L.append("        lambda: (")
+    L.append(
+        "            \"It looks like you're trying to call a compiled backward "
+        'function within vmap/grad/vjp, "'
+    )
+    L.append(
+        "            \"which isn't supported. Try wrapping vmap inside "
+        'torch.compile, or skip compiling the "'
+    )
+    L.append('            "backward function."')
+    L.append("        ),")
+    L.append("    )")
 
     if deterministic is not None and not deterministic:
         L.append("    _gd = torch.are_deterministic_algorithms_enabled()")
