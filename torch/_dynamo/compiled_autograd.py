@@ -156,7 +156,7 @@ class NaNChecker:
                 raise AssertionError(
                     f"Expected param_node target to be operator.getitem, got {param_node.target}"
                 )
-            if param_node.args[0] is not inputs_node:
+            if param_node.args[0] is not inputs_node:  # type: ignore[possibly-undefined]
                 raise AssertionError("Expected param_node.args[0] to be inputs_node")
             if not isinstance(param_node.args[1], int):
                 raise AssertionError(
