@@ -538,14 +538,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.lshift: (
-                ["__lshift__", "__rlshift__", "__ilshift__"],
-                operator.ilshift,
-            ),
-            operator.rshift: (
-                ["__rshift__", "__rrshift__", "__irshift__"],
-                operator.irshift,
-            ),
             operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
@@ -2873,6 +2865,26 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_or", "nb_or", "|=")
+
+    def call_lshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_op(tx, a, b, "nb_lshift", "<<")
+
+    def call_ilshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_lshift", "nb_lshift", "<<=")
+
+    def call_rshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_op(tx, a, b, "nb_rshift", ">>")
+
+    def call_irshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
 
     def call_not_(
         self, tx: "InstructionTranslator", a: VariableTracker

@@ -2194,6 +2194,40 @@ class TensorVariable(VariableTracker):
         # produces a Tensor.
         return wrap_fx_proxy(tx=tx, proxy=proxy)
 
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslator",
@@ -2444,6 +2478,40 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
             ),
             sym_num=None,
         )

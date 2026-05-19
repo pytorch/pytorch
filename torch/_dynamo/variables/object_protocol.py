@@ -586,6 +586,10 @@ def generic_getiter(
 # ---------------------------------------------------------------------------
 
 NB_SLOT_MAPPING = {
+    "nb_lshift": PyNumberSlots.NB_LSHIFT,
+    "nb_inplace_lshift": PyNumberSlots.NB_INPLACE_LSHIFT,
+    "nb_inplace_rshift": PyNumberSlots.NB_INPLACE_RSHIFT,
+    "nb_rshift": PyNumberSlots.NB_RSHIFT,
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
     "nb_subtract": PyNumberSlots.NB_SUBTRACT,
