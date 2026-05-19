@@ -451,6 +451,11 @@ class DeviceTypeTestBase(TestCase):
                 cls.setUpClass()
             return cls.get_primary_device()
 
+    @classmethod
+    def device_count(cls) -> int:
+        """Returns the number of available devices for this device type."""
+        return torch.get_device_module(cls.device_type).device_count()
+
     # Returns a list of strings representing all available devices of this
     # device type. The primary device must be the first string in the list
     # and the list must contain no duplicates.

@@ -246,5 +246,22 @@ with _temp_test_configs(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
 
+
+class TestDeviceCountHook(TestCase):
+    # Smoke test that DeviceTypeTestBase.device_count() resolves the count from
+    # the instantiated device-specific class's device_type.
+    def test_device_count_for_openreg(self, device):
+        self.assertEqual(
+            type(self).device_type,
+            "openreg",
+        )
+        self.assertEqual(
+            type(self).device_count(),
+            torch.get_device_module(type(self).device_type).device_count(),
+        )
+
+
+instantiate_device_type_tests(TestDeviceCountHook, globals(), only_for=("openreg",))
+
 if __name__ == "__main__":
     run_tests()
