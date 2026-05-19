@@ -509,11 +509,7 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if device_id is None:
         return torch.empty(size, size, size, dtype=dtype).fill_(value)
     else:
-        return (
-            torch.empty(size, size, size, dtype=dtype)
-            .fill_(value)
-            .to(torch.device(device_id))
-        )
+        return torch.empty(size, size, size, dtype=dtype).fill_(value).to(device_id)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
@@ -606,9 +602,12 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
+        acc = torch.accelerator.current_accelerator()
         if (
-            BACKEND == "nccl" or BACKEND == "xccl"
-        ) and not torch.accelerator.is_available():
+            acc is None
+            or BACKEND != dist.get_default_backend_for_device(acc)
+            or not torch.accelerator.is_available()
+        ):
             sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         self = cls(test_name)
         self.rank = rank
@@ -654,9 +653,9 @@ class TestDistBackend(MultiProcessTestCase):
 class DistributedTest:
     class _DistTestBase:
         blocking_str = (
-            "TORCH_NCCL_BLOCKING_WAIT"
-            if BACKEND == "nccl"
-            else "TORCH_XCCL_BLOCKING_WAIT"
+            f"TORCH_{dist.get_default_backend_for_device(device_type).upper()}_BLOCKING_WAIT"
+            if device_type in {"cuda", "xpu"}
+            else "TORCH_NCCL_BLOCKING_WAIT"
         )
 
         def _barrier(self, *args, **kwargs):
@@ -1097,7 +1096,7 @@ class DistributedTest:
                 nn.Conv2d(3, 3, kernel_size=3, padding=1),
                 nn.ReLU(),
                 nn.Linear(1, 5, bias=False),
-            ).to(torch.device(device_id))
+            ).to(device_id)
             # Test global model averaging
             for p in model.parameters():
                 p.data = torch.ones_like(p.data)
@@ -1135,7 +1134,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            model = nn.Linear(1, 5, bias=False).to(torch.device(device_id))
+            model = nn.Linear(1, 5, bias=False).to(device_id)
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             expected_avg_tensor = (
@@ -1166,7 +1165,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            model = nn.Linear(1, 5, bias=False).to(torch.device(device_id))
+            model = nn.Linear(1, 5, bias=False).to(device_id)
             param = next(model.parameters())
             opt = torch.optim.SGD(model.parameters(), lr=0.1)
 
@@ -1217,7 +1216,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            model = nn.Linear(1, 5, bias=False).to(torch.device(device_id))
+            model = nn.Linear(1, 5, bias=False).to(device_id)
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             expected_avg_tensor = (
@@ -1260,7 +1259,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            model = nn.Linear(1, 5, bias=False).to(torch.device(device_id))
+            model = nn.Linear(1, 5, bias=False).to(device_id)
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             # Set up such a hierarchical model averaging as follows:
