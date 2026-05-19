@@ -692,7 +692,9 @@ def deduce_output_dtype_by_name(
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "rand",
+        "rand4x",
         "randn",
+        "randn4x",
     ):
         return torch.float
     elif op_name in (

@@ -2881,9 +2881,15 @@ def inductor_random(
     else:
 
         def inner_fn(index):
+            random_index = ops.index_expr(random_pos(index), torch.int32)
+            if device.type == "cuda":
+                return getattr(ops, f"{mode}4x")(
+                    seed_loader([]),
+                    random_index,
+                )
             return getattr(ops, mode)(
                 seed_loader([]),
-                ops.index_expr(random_pos(index), torch.int32),
+                random_index,
             )
 
     result = Pointwise.create(

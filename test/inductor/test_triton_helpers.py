@@ -14,6 +14,8 @@ Covers:
 import torch
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
+    rand4x,
+    randn4x,
     select_one,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -59,6 +61,31 @@ if HAS_GPU:
         mask = tl.load(mask_ptr + offsets)
         result = select_one(x, mask, dim=0)
         tl.store(result_ptr, result)
+
+    @triton.jit
+    def test_kernel_random_4x_order(
+        seed,
+        helper_result_ptr,
+        expected_result_ptr,
+        BLOCK_SIZE: tl.constexpr,
+        NORMAL: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        reduced_offsets = tl.arange(0, BLOCK_SIZE // 4)
+
+        if NORMAL:
+            helper = randn4x(seed, offsets, BLOCK_SIZE)
+            r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        else:
+            helper = rand4x(seed, offsets, BLOCK_SIZE)
+            r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+
+        expected0 = tl.cat(tl.ravel(r0), tl.ravel(r1))
+        expected1 = tl.cat(tl.ravel(r2), tl.ravel(r3))
+        expected = tl.cat(expected0, expected1)
+
+        tl.store(helper_result_ptr + offsets, helper)
+        tl.store(expected_result_ptr + offsets, expected)
 
 
 class ExclusiveScanDecoupledLookback64Test(TestCase):
@@ -155,6 +182,34 @@ class SelectOneTest(TestCase):
     def test_select_one_float64(self) -> None:
         """Test select_one with float64 (64-bit) — baseline that always worked."""
         self._run_select_one(torch.float64)
+
+
+class Random4xTest(TestCase):
+    """Test cases for rand4x/randn4x helper packing order."""
+
+    def _run_random_4x_order(self, normal: bool) -> None:
+        device = torch.device(GPU_TYPE)
+        block_size = 16
+        helper_result = torch.empty(block_size, dtype=torch.float32, device=device)
+        expected_result = torch.empty(block_size, dtype=torch.float32, device=device)
+
+        test_kernel_random_4x_order[(1,)](
+            1234,
+            helper_result,
+            expected_result,
+            BLOCK_SIZE=block_size,
+            NORMAL=normal,
+        )
+
+        torch.testing.assert_close(helper_result, expected_result, atol=0, rtol=0)
+
+    @requires_gpu()
+    def test_rand4x_order(self) -> None:
+        self._run_random_4x_order(normal=False)
+
+    @requires_gpu()
+    def test_randn4x_order(self) -> None:
+        self._run_random_4x_order(normal=True)
 
 
 if __name__ == "__main__":
