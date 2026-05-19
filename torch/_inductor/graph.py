@@ -1575,6 +1575,22 @@ class GraphLowering(torch.fx.Interpreter):
 
         return args, kwargs, (old_args, old_kwargs)
 
+    def _call_fallback_with_constraints(
+        self,
+        target: Callable[..., Any],
+        node: torch.fx.Node,
+        args: Any,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        args, kwargs, mutation_args = self._apply_layout_constraints(
+            target, node, args, kwargs, with_default=True
+        )
+        result = fallback_handler(target, add_to_fallback_set=False)(*args, **kwargs)
+        if mutation_args is not None:
+            old_args, old_kwargs = mutation_args
+            self.propagate_mutation(node, old_args, old_kwargs, args, kwargs)
+        return result
+
     @staticmethod
     def can_inline_constant(t: torch.Tensor) -> bool:
         """
@@ -1936,20 +1952,12 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             ):
                 debug("fallback_handler")
-                args, kwargs, mutation_args = self._apply_layout_constraints(
+                result = self._call_fallback_with_constraints(
                     n.target,
                     n,
                     args,  # type: ignore[possibly-undefined]
                     kwargs,  # type: ignore[possibly-undefined]
-                    with_default=True,
                 )
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args,  # type: ignore[possibly-undefined]
-                    **kwargs,  # type: ignore[possibly-undefined]
-                )
-                if mutation_args is not None:
-                    old_args, old_kwargs = mutation_args
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
             elif (
                 n.op == "call_function"
                 and isinstance(
@@ -1960,20 +1968,12 @@ class GraphLowering(torch.fx.Interpreter):
                 # this path supports fallback due to inductor lite mode. It supports
                 # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
                 debug("fallback_handler")
-                args, kwargs, mutation_args = self._apply_layout_constraints(
+                result = self._call_fallback_with_constraints(
                     n.target,
                     n,
                     args,  # type: ignore[possibly-undefined]
                     kwargs,  # type: ignore[possibly-undefined]
-                    with_default=True,
                 )
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args,  # type: ignore[possibly-undefined]
-                    **kwargs,  # type: ignore[possibly-undefined]
-                )
-                if mutation_args is not None:
-                    old_args, old_kwargs = mutation_args
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
             elif (
                 n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
