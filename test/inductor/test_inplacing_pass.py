@@ -11,13 +11,19 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _generalized_scatter,
+    canonicalize_view_scatter_ops,
+    decompose_generalized_scatter,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     subtest,
+    TEST_Z3,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -440,6 +446,164 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         expected = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
+
+    def test_generalized_scatter_target_is_operator(self):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+        from torch.func import functionalize
+
+        def fn(x, y):
+            z = x.sin()
+            z[:, 0].copy_(y)
+            return z.cos()
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2)
+        gm = make_fx(functionalize(fn), tracing_mode="fake")(x, y)
+        fake_mode = detect_fake_mode(
+            [node.meta["val"] for node in gm.graph.nodes if "val" in node.meta]
+        )
+
+        with V.set_fake_mode(fake_mode):
+            canonicalize_view_scatter_ops(gm.graph)
+
+        generalized_scatter_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target is _generalized_scatter
+        ]
+        self.assertEqual(len(generalized_scatter_nodes), 1)
+
+        unexpected_targets = [
+            node.target
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and not isinstance(node.target, torch._ops.OpOverload)
+            and node.target is not operator.getitem
+        ]
+        self.assertFalse(
+            unexpected_targets, f"unexpected targets: {unexpected_targets}"
+        )
+
+        with V.set_fake_mode(fake_mode):
+            decompose_generalized_scatter(gm.graph)
+
+        remaining_generalized_scatter_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target is _generalized_scatter
+        ]
+        self.assertFalse(remaining_generalized_scatter_nodes)
+
+    def test_generalized_scatter_symbolic_view_args(self):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+        from torch.func import functionalize
+        from torch.utils import _pytree as pytree
+
+        def fn(x, y):
+            z = x.sin()
+            z[: y.shape[0], 0].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(2)
+        torch._dynamo.mark_dynamic(y, 0)
+        gm = make_fx(functionalize(fn), tracing_mode="symbolic")(x, y)
+        fake_mode = detect_fake_mode(
+            [node.meta["val"] for node in gm.graph.nodes if "val" in node.meta]
+        )
+
+        with V.set_fake_mode(fake_mode):
+            canonicalize_view_scatter_ops(gm.graph)
+
+        generalized_scatter_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target is _generalized_scatter
+        ]
+        self.assertEqual(len(generalized_scatter_nodes), 1)
+
+        node = generalized_scatter_nodes[0]
+        fake_args, fake_kwargs = pytree.tree_map(
+            lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg,
+            (node.args, node.kwargs),
+        )
+        fake_result = node.target(*fake_args, **fake_kwargs)
+        self.assertEqual(fake_result.shape, fake_args[0].shape)
+
+    def test_generalized_scatter_dynamic_clamped_slice(self):
+        def fn(x, y):
+            z = x.sin()
+            z[:9223372036854775807].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(4, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
+    def test_generalized_scatter_dynamic_clamped_slice_translation_validation(self):
+        if not TEST_Z3:
+            self.skipTest("requires z3-solver")
+
+        import torch.fx.experimental._config as fx_config
+
+        def fn(x, y):
+            z = x.sin()
+            z[:9223372036854775807].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(4, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        with fx_config.patch(translation_validation=True):
+            result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
+    def test_generalized_scatter_dynamic_negative_slice(self):
+        def fn(x, y):
+            z = x.sin()
+            z[-y.shape[0] :].copy_(y)
+            return z.cos()
+
+        x = torch.randn(4, 3)
+        y = torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        expected = fn(x, y)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x, y)
+        self.assertEqual(result, expected)
+
+    def test_generalized_scatter_ignores_unrelated_view_ops(self):
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+        from torch.func import functionalize
+
+        def fn(x, y):
+            z = x.sin()
+            t = x.t()
+            z[:, 0].copy_(y)
+            return z.cos(), t
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2)
+        gm = make_fx(functionalize(fn), tracing_mode="fake")(x, y)
+        fake_mode = detect_fake_mode(
+            [node.meta["val"] for node in gm.graph.nodes if "val" in node.meta]
+        )
+
+        with V.set_fake_mode(fake_mode):
+            canonicalize_view_scatter_ops(gm.graph)
+            decompose_generalized_scatter(gm.graph)
 
     @parametrize(
         "factory_op",
