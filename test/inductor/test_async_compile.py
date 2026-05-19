@@ -1199,14 +1199,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         produces correct results, and writes a valid .o replacing the corrupt one."""
         import shutil
 
-        from torch._inductor.runtime.compile_tasks import (
-            _reload_python_module,
-            _worker_compile_pycodecache_kernel,
-        )
-        from torch._inductor.runtime.cutedsl_cache import (
-            _cache_dir,
-            _make_disk_key,
-        )
+        from torch._inductor.runtime.cutedsl_cache import _cache_dir, _make_disk_key
 
         source = textwrap.dedent("""\
             import torch
@@ -1304,7 +1297,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     1,
                     "Should have fallen back to recompile after corrupt cache",
                 )
-                self.assertEqual(out, x + y, "Recompiled kernel should produce correct results")
+                self.assertEqual(
+                    out, x + y, "Recompiled kernel should produce correct results"
+                )
 
                 # The recompile should have written a valid .o via disk_cache_set.
                 # os.replace overwrites the corrupt file atomically.
@@ -1327,7 +1322,186 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 y2 = torch.randn(8, 4, device="cuda", dtype=torch.float32)
                 out2 = torch.empty(8, 4, device="cuda", dtype=torch.float32)
                 reloaded(x2, y2, out2)
-                self.assertEqual(out2, x2 + y2, "Reloaded artifact should execute correctly")
+                self.assertEqual(
+                    out2, x2 + y2, "Reloaded artifact should execute correctly"
+                )
+            finally:
+                if cache_dir.exists():
+                    shutil.rmtree(cache_dir)
+
+    def test_fix_elf_dup_text_patches_duplicate_sections(self):
+        """_fix_elf_dup_text_flags rewrites flags on duplicate .text sections."""
+        import struct
+
+        from torch._inductor.runtime.cutedsl_cache import _fix_elf_dup_text_flags
+
+        # Build a minimal ELF64 LE with two .text sections:
+        #   section 0: strtab  (sh_name=0)
+        #   section 1: .text   (ALLOC|EXECINSTR = 0x6)
+        #   section 2: .text   (WRITE|ALLOC    = 0x3)
+        shstrtab = b"\x00.text\x00"  # offset 0 = "", offset 1 = ".text"
+        e_shentsize = 64
+        e_shnum = 3
+        e_shstrndx = 0
+        e_shoff = 64  # section headers start right after ELF header
+
+        # ELF64 header (64 bytes)
+        ehdr = bytearray(64)
+        ehdr[0:4] = b"\x7fELF"
+        ehdr[4] = 2  # EI_CLASS = ELFCLASS64
+        ehdr[5] = 1  # EI_DATA  = ELFDATA2LSB
+        struct.pack_into("<Q", ehdr, 40, e_shoff)
+        struct.pack_into("<H", ehdr, 58, e_shentsize)
+        struct.pack_into("<H", ehdr, 60, e_shnum)
+        struct.pack_into("<H", ehdr, 62, e_shstrndx)
+
+        def make_shdr(sh_name, sh_type, sh_flags, sh_offset, sh_size):
+            s = bytearray(e_shentsize)
+            struct.pack_into("<I", s, 0, sh_name)  # sh_name
+            struct.pack_into("<I", s, 4, sh_type)  # sh_type
+            struct.pack_into("<Q", s, 8, sh_flags)  # sh_flags
+            struct.pack_into("<Q", s, 24, sh_offset)  # sh_offset
+            struct.pack_into("<Q", s, 32, sh_size)  # sh_size
+            return s
+
+        strtab_offset = 64 + e_shnum * e_shentsize
+        shdr0 = make_shdr(0, 3, 0, strtab_offset, len(shstrtab))  # SHT_STRTAB
+        shdr1 = make_shdr(1, 1, 0x6, 0, 0)  # .text, ALLOC|EXECINSTR
+        shdr2 = make_shdr(1, 1, 0x3, 0, 0)  # .text, WRITE|ALLOC
+
+        elf = bytes(ehdr) + bytes(shdr0) + bytes(shdr1) + bytes(shdr2) + shstrtab
+
+        patched = _fix_elf_dup_text_flags(elf)
+        self.assertNotEqual(elf, patched, "Patch should modify the ELF")
+
+        # Second .text section flags should now be 0x6 (ALLOC|EXECINSTR)
+        sh2_offset = e_shoff + 2 * e_shentsize
+        new_flags = struct.unpack_from("<Q", patched, sh2_offset + 8)[0]
+        self.assertEqual(
+            new_flags, 0x6, "Duplicate .text flags should be harmonized to 0x6"
+        )
+
+        # First .text section should be untouched
+        sh1_offset = e_shoff + 1 * e_shentsize
+        orig_flags = struct.unpack_from("<Q", patched, sh1_offset + 8)[0]
+        self.assertEqual(orig_flags, 0x6, "First .text section should remain unchanged")
+
+    def test_fix_elf_dup_text_noop_single_text(self):
+        """_fix_elf_dup_text_flags is a no-op when there's only one .text section."""
+        import struct
+
+        from torch._inductor.runtime.cutedsl_cache import _fix_elf_dup_text_flags
+
+        shstrtab = b"\x00.text\x00"
+        e_shentsize = 64
+        e_shnum = 2
+        e_shoff = 64
+
+        ehdr = bytearray(64)
+        ehdr[0:4] = b"\x7fELF"
+        ehdr[4] = 2
+        ehdr[5] = 1
+        struct.pack_into("<Q", ehdr, 40, e_shoff)
+        struct.pack_into("<H", ehdr, 58, e_shentsize)
+        struct.pack_into("<H", ehdr, 60, e_shnum)
+        struct.pack_into("<H", ehdr, 62, 0)
+
+        def make_shdr(sh_name, sh_type, sh_flags, sh_offset, sh_size):
+            s = bytearray(e_shentsize)
+            struct.pack_into("<I", s, 0, sh_name)
+            struct.pack_into("<I", s, 4, sh_type)
+            struct.pack_into("<Q", s, 8, sh_flags)
+            struct.pack_into("<Q", s, 24, sh_offset)
+            struct.pack_into("<Q", s, 32, sh_size)
+            return s
+
+        strtab_offset = 64 + e_shnum * e_shentsize
+        shdr0 = make_shdr(0, 3, 0, strtab_offset, len(shstrtab))
+        shdr1 = make_shdr(1, 1, 0x6, 0, 0)
+
+        elf = bytes(ehdr) + bytes(shdr0) + bytes(shdr1) + shstrtab
+        result = _fix_elf_dup_text_flags(elf)
+        self.assertEqual(elf, result, "Single .text section should not be modified")
+
+    def test_fix_elf_dup_text_noop_non_elf(self):
+        """_fix_elf_dup_text_flags is a no-op for non-ELF data."""
+        from torch._inductor.runtime.cutedsl_cache import _fix_elf_dup_text_flags
+
+        self.assertEqual(_fix_elf_dup_text_flags(b""), b"")
+        self.assertEqual(_fix_elf_dup_text_flags(b"not an elf"), b"not an elf")
+        self.assertEqual(
+            _fix_elf_dup_text_flags(b"\x7fELF" + b"\x00" * 10),
+            b"\x7fELF" + b"\x00" * 10,
+        )
+
+    def test_fix_elf_dup_text_old_artifacts_patched_on_load(self):
+        """disk_cache_get patches old unpatched .o files in-place on load."""
+        import shutil
+        import struct
+
+        from torch._inductor.runtime.cutedsl_cache import (
+            _cache_dir,
+            _make_disk_key,
+            disk_cache_get,
+        )
+
+        shstrtab = b"\x00.text\x00"
+        e_shentsize = 64
+        e_shnum = 3
+        e_shoff = 64
+
+        ehdr = bytearray(64)
+        ehdr[0:4] = b"\x7fELF"
+        ehdr[4] = 2
+        ehdr[5] = 1
+        struct.pack_into("<Q", ehdr, 40, e_shoff)
+        struct.pack_into("<H", ehdr, 58, e_shentsize)
+        struct.pack_into("<H", ehdr, 60, e_shnum)
+        struct.pack_into("<H", ehdr, 62, 0)
+
+        def make_shdr(sh_name, sh_type, sh_flags, sh_offset, sh_size):
+            s = bytearray(e_shentsize)
+            struct.pack_into("<I", s, 0, sh_name)
+            struct.pack_into("<I", s, 4, sh_type)
+            struct.pack_into("<Q", s, 8, sh_flags)
+            struct.pack_into("<Q", s, 24, sh_offset)
+            struct.pack_into("<Q", s, 32, sh_size)
+            return s
+
+        strtab_offset = 64 + e_shnum * e_shentsize
+        shdr0 = make_shdr(0, 3, 0, strtab_offset, len(shstrtab))
+        shdr1 = make_shdr(1, 1, 0x6, 0, 0)
+        shdr2 = make_shdr(1, 1, 0x3, 0, 0)  # bad flags
+
+        bad_elf = bytes(ehdr) + bytes(shdr0) + bytes(shdr1) + bytes(shdr2) + shstrtab
+
+        module_path = "/fake/old_artifact.py"
+        config_key = ("test_old_artifact",)
+        runtime_key = ((4, 4), torch.float32)
+
+        with fresh_cache():
+            cache_dir = _cache_dir()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                h = _make_disk_key(module_path, config_key, runtime_key, device_index=0)
+                obj_path = cache_dir / f"{h}.o"
+                obj_path.write_bytes(bad_elf)
+
+                mem_cache: dict = {}
+                # disk_cache_get will fail to load (not a real compiled artifact)
+                # but should still patch the file on disk before attempting load
+                disk_cache_get(
+                    mem_cache, module_path, config_key, runtime_key, device_index=0
+                )
+
+                patched_bytes = obj_path.read_bytes()
+                sh2_offset = e_shoff + 2 * e_shentsize
+                new_flags = struct.unpack_from("<Q", patched_bytes, sh2_offset + 8)[0]
+                self.assertEqual(
+                    new_flags,
+                    0x6,
+                    "disk_cache_get should patch old artifacts with bad .text flags",
+                )
             finally:
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
@@ -1337,9 +1511,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         causing the async path to skip _precompile and compile lazily."""
         from unittest.mock import MagicMock
 
-        from torch._inductor.codegen.cutedsl.cutedsl_scheduling import (
-            CuteDSLScheduling,
-        )
+        from torch._inductor.codegen.cutedsl.cutedsl_scheduling import CuteDSLScheduling
 
         class _SymbolicSize:
             """Mimics torch.SymInt — int() raises TypeError."""
@@ -1349,10 +1521,13 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
         kernel = MagicMock()
         kernel._template_input_args = [
-            ("arg_input_a", MagicMock(
-                get_size=MagicMock(return_value=[_SymbolicSize(), _SymbolicSize()]),
-                get_dtype=MagicMock(return_value=torch.float32),
-            )),
+            (
+                "arg_input_a",
+                MagicMock(
+                    get_size=MagicMock(return_value=[_SymbolicSize(), _SymbolicSize()]),
+                    get_dtype=MagicMock(return_value=torch.float32),
+                ),
+            ),
         ]
 
         ctb = MagicMock()

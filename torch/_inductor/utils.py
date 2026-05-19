@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -1273,7 +1273,7 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
         if isinstance(node.meta.get("val"), torch.Tensor)
     )
 
-    out_arg = output_node(gm).args[0]
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
     out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
@@ -1366,24 +1366,36 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
+    share_triton: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
+
+    When share_triton=True, the Triton compilation cache is placed in a
+    persistent shared directory rather than inside the per-test temp dir.
+    Triton compilation is a pure function of the kernel source, so sharing
+    compiled kernels across tests is safe and avoids redundant compilation.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
+    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = normalize_path_separator(
-                os.path.join(inductor_cache_dir, "triton")
-            )
+            if share_triton:
+                triton_cache_dir = normalize_path_separator(
+                    os.path.join(default_cache_dir(), "triton")
+                )
+            else:
+                triton_cache_dir = normalize_path_separator(
+                    os.path.join(inductor_cache_dir, "triton")
+                )
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
@@ -3025,7 +3037,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(val, sympy.Expr), (
         "only support sympy.Expr as input to get_sympy_Expr_dtype"
     )
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -3755,7 +3767,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
     # Allow for unhinted e as long as we can still statically prove
@@ -4147,7 +4159,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     # Check for cudagraph_unsafe tag
     if (
         isinstance(target, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in target.tags
+        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
     ):
         return True
 
