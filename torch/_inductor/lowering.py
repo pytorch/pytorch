@@ -8571,9 +8571,25 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             m, n = mat1.get_size()[0], mat2.get_size()[1]
             size = [m, n]
             stride = [n, 1]
+        output_nodes = [
+            node
+            for node in subgraph.graph_module.graph.nodes
+            if node.op == "output"
+        ]
+        main_output_dtype = gemm_kwargs.get("out_dtype", mat1.get_dtype())
+        if len(output_nodes) == 1:
+            output_value = output_nodes[0].args[0]
+            if isinstance(output_value, (tuple, list)):
+                output_value = output_value[0]
+            output_meta = (
+                output_value.meta.get("val")
+                if isinstance(output_value, torch.fx.Node)
+                else None
+            )
+            main_output_dtype = getattr(output_meta, "dtype", main_output_dtype)
         layout = ir.FixedLayout(
             mat1.get_device_or_error(),
-            gemm_kwargs.get("out_dtype", mat1.get_dtype()),
+            main_output_dtype,
             size,
             stride,
         )
@@ -8679,7 +8695,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             gemm_op=gemm_op_info.quack_name,
             alpha=alpha,
             beta=beta,
-            out_dtype=gemm_kwargs.get("out_dtype"),
+            out_dtype=main_output_dtype,
             epilogue_arg_indices=epilogue_arg_indices,
             local_reduce_out_index=local_reduce_out_index,
             aux_out_index=aux_out_index,
