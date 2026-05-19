@@ -23,9 +23,9 @@ from torch._inductor.pattern_matcher import (
     Match,
     PatternMatcherPass,
     PatternPrettyPrinter,
-    ReplacementPatternEntry,
     register_graph_pattern,
     register_replacement,
+    ReplacementPatternEntry,
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
