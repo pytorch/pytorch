@@ -56,6 +56,47 @@ class TestTSan(TestCase):
             for gf in grad_fns:
                 self.assertIs(gf, y.grad_fn)
 
+    def test_concurrent_dict_recursive_tag_watcher(self):
+        """Race the dict recursive-tag watcher callback against guard checks.
+
+        On free-threaded Python (3.12+), a tag-safe root's CPython dict
+        watcher can fire on one thread (e.g. due to nn.Module attribute
+        mutation) while another thread is inside RootGuardManager.check and
+        iterating the same per-GuardManager _dict_pointers map. Without the
+        deferred-cleanup fix, that's UB on std::unordered_map plus a torn
+        read on the disable flag.
+        """
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 0
+
+            def forward(self, x):
+                return x + self.a
+
+        mod = Mod()
+        x = torch.randn(4, 4)
+
+        def fn(inp):
+            return mod(inp)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Warm up: first call compiles and installs the tag-safe root plus
+        # the dict watcher on mod.__dict__.
+        opt_fn(x)
+
+        def mutate():
+            for i in range(200):
+                # Fires dict_recursive_tag_watch_callback on mod.__dict__.
+                mod.a = i
+
+        def call_opt_fn():
+            for _ in range(200):
+                opt_fn(x)
+
+        run_concurrently([call_opt_fn, mutate])
+
 
 if __name__ == "__main__":
     run_tests()

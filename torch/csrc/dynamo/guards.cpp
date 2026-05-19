@@ -39,6 +39,7 @@
 #include <ATen/native/mtia/EmptyTensor.h>
 #endif
 
+#include <atomic>
 #include <chrono>
 #include <sstream>
 #include <tuple>
@@ -3280,7 +3281,19 @@ class GuardManager {
 
   virtual ~GuardManager() {
     cleanup_tag_safe_entries();
-    disable_recursive_dict_tag_optimization();
+    // Flip the atomic first so any in-flight callback observes that the
+    // optimization is dead, then reclaim any still-live watcher registrations.
+    // No one else can call into this GuardManager once we are in the
+    // destructor, so we don't need _lock here — only the
+    // dict_to_guard_managers lock that unwatch_all_saved_dict_pointers needs.
+    _disable_dict_tag_matching.store(true);
+#if IS_PYTHON_3_12_PLUS
+    if (!_dict_pointers.empty() || !_callback_handled_dicts.empty()) {
+      dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+        unwatch_all_saved_dict_pointers(map);
+      });
+    }
+#endif
   }
 
   void cleanup_tag_safe_entries() {
@@ -3333,7 +3346,7 @@ class GuardManager {
   }
 
   bool is_recursive_dict_tag_matching_disabled() {
-    return _disable_dict_tag_matching;
+    return _disable_dict_tag_matching.load();
   }
 
   py::object get_type_of_guarded_value() {
@@ -3387,16 +3400,21 @@ class GuardManager {
     _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
 
+  // Marks the recursive-dict-tag optimization as permanently disabled for this
+  // GuardManager. Safe to call from any thread (including the dict watcher and
+  // weakref callbacks) without holding _lock. Actual cleanup of the stashed
+  // dict pointers and watcher registrations happens lazily on the next
+  // check_nopybind under _lock, or in the destructor.
   void disable_recursive_dict_tag_optimization() {
-    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-      disable_recursive_dict_tag_optimization(map);
-    });
+    _disable_dict_tag_matching.store(true);
   }
 
-  // Caller must hold dict_to_guard_managers lock.
-  void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
-    unwatch_all_saved_dict_pointers(map);
-    _disable_dict_tag_matching = true;
+  // Called by the dict watcher callback after it has erased `dict` from
+  // dict_to_guard_managers and unwatched it. Caller must hold the
+  // dict_to_guard_managers lock. This lets the deferred cleanup skip `dict`
+  // and avoid an ABA where CPython has freed the dict and reused its address.
+  void mark_dict_handled_by_callback(PyObject* dict) {
+    _callback_handled_dicts.insert(dict);
   }
 
  public:
@@ -3622,7 +3640,12 @@ class GuardManager {
     // yielding significant speed‑ups in torch.compile’s Guard Tree.
     // -----------------------------------------------------------------------------
     bool is_recording = false;
-    if (!_disable_dict_tag_matching) {
+    // Cross-thread callbacks may also set this flag; we still only ever
+    // transition false -> true, so the next check_nopybind will catch it.
+    if (_is_tag_safe_root) {
+      cleanup_dict_pointers_if_invalidated();
+    }
+    if (!_disable_dict_tag_matching.load()) {
       if (_is_tag_safe_root) {
         // Check if the `value` object was recorded earlier
         if (_dict_pointers.find(value) != _dict_pointers.end()) {
@@ -3633,20 +3656,20 @@ class GuardManager {
             if (check_no_tensor_aliasing_guards_fast(value)) {
               return true;
             } else {
-              _disable_dict_tag_matching = true;
+              _disable_dict_tag_matching.store(true);
               return false;
             }
           }
           // Something changed, very likely the dict tag checking will fail in
           // future. So disable the recursive tag matching.
-          _disable_dict_tag_matching = true;
+          _disable_dict_tag_matching.store(true);
         } else if (
             _dict_pointers.size() ==
             _max_saved_pointers_for_recursive_dict_tags_check) {
           // Bound the cache size. If there are too many new `value` pointers to
           // be recorded, it is a sign that dict tag matching will never
           // succeed.
-          _disable_dict_tag_matching = true;
+          _disable_dict_tag_matching.store(true);
         } else {
           // Start the recording
           start_recording_dict_pointers(_root, this);
@@ -3683,7 +3706,7 @@ class GuardManager {
       }
     }
     if (!result) {
-      _disable_dict_tag_matching = true;
+      _disable_dict_tag_matching.store(true);
     }
     return result;
   }
@@ -3784,29 +3807,55 @@ class GuardManager {
     return true;
   }
 
-  // Caller must hold dict_to_guard_managers lock.
+  // Caller must hold dict_to_guard_managers lock. Removes this GuardManager
+  // from every dict entry it previously registered for and unwatches any dict
+  // that ends up with no remaining watchers. Dicts that the watcher callback
+  // has already handled (recorded in _callback_handled_dicts) are skipped to
+  // avoid both double-unwatching and ABA where CPython has freed the dict and
+  // reused its address for an unrelated object.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
-
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
-
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
-
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      for (auto& stashed_pointer : value_stashed_pointers.second) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        if (_callback_handled_dicts.count(dict_pointer)) {
+          // The watcher already unregistered this dict on our behalf.
+          continue;
+        }
+        auto map_it = map.find(dict_pointer);
+        if (map_it == map.end()) {
+          continue;
+        }
+        auto& managers = map_it->second;
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
+        if (managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(map_it);
         }
       }
     }
+    _dict_pointers.clear();
+    _callback_handled_dicts.clear();
+#endif
+  }
+
+  // Called from the hot path (under _lock). If a callback has flipped the
+  // atomic since the last evaluation, reclaim any stashed dict pointers and
+  // unwatch the dicts we are still responsible for.
+  void cleanup_dict_pointers_if_invalidated() {
+#if IS_PYTHON_3_12_PLUS
+    if (!_disable_dict_tag_matching.load()) {
+      return;
+    }
+    if (_dict_pointers.empty() && _callback_handled_dicts.empty()) {
+      return;
+    }
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      unwatch_all_saved_dict_pointers(map);
+    });
 #endif
   }
 
@@ -4049,10 +4098,17 @@ class GuardManager {
   // tag safe markers
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
-  bool _disable_dict_tag_matching = false;
+  // Set by either check_nopybind (under RootGuardManager::_lock) or by the dict
+  // watcher / weakref callbacks (outside _lock). Reads on the hot path must
+  // observe cross-thread writes from the callbacks, so it is atomic.
+  std::atomic<bool> _disable_dict_tag_matching{false};
   std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<py::weakref>> _tensor_pointers;
+  // Dicts that the watcher callback has already unregistered (erased from
+  // dict_to_guard_managers and PyDict_Unwatch'd). Written by the callback and
+  // read by deferred cleanup; both run under dict_to_guard_managers lock.
+  std::unordered_set<PyObject*> _callback_handled_dicts;
   std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
@@ -4781,20 +4837,32 @@ static int dict_recursive_tag_watch_callback(
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  if (event != PyDict_EVENT_CLONED) {
-    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-      auto it = map.find(dict);
-      if (it != map.end()) {
-        // Copy the list — unwatch_all_saved_dict_pointers may mutate it.
-        auto guard_managers = it->second;
-        for (auto& guard_manager : guard_managers) {
-          if (guard_manager) {
-            guard_manager->disable_recursive_dict_tag_optimization(map);
-          }
-        }
-      }
-    });
+  // The callback runs inside CPython's dict mutation path. To keep it
+  // free-threading-safe we avoid taking RootGuardManager::_lock (which would
+  // introduce a lock-order cycle with the hot-path check, and risks deadlock
+  // via the GIL) and we avoid iterating any GuardManager's _dict_pointers map.
+  // Instead, we only touch the single dict that fired: flip each registered
+  // GuardManager's atomic flag, remember that we already unregistered this
+  // dict, erase the dict's entry from the registry, and unwatch it here. The
+  // next guard evaluation will reclaim the stashed pointers for the rest of
+  // the GuardManager's dicts under its own lock.
+  if (event == PyDict_EVENT_CLONED) {
+    return 0;
   }
+  dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+    auto it = map.find(dict);
+    if (it == map.end()) {
+      return;
+    }
+    for (GuardManager* guard_manager : it->second) {
+      if (guard_manager) {
+        guard_manager->disable_recursive_dict_tag_optimization();
+        guard_manager->mark_dict_handled_by_callback(dict);
+      }
+    }
+    map.erase(it);
+    PyDict_Unwatch(dict_recursive_tag_watcher_id, dict);
+  });
   return 0; // keep watching
 }
 #endif
