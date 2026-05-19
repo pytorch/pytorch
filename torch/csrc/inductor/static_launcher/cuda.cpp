@@ -627,7 +627,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
     return THPUtils_unpackUInt64(obj);
 #endif
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return 0;
   }
   // Fast type check: inductor-generated tensors are always exact THPVariable
