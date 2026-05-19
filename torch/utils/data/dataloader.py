@@ -324,9 +324,9 @@ class DataLoader(Generic[_T_co]):
             # finite `__len__` because in multi-process data loading, naive
             # settings will return duplicated data (which may be desired), and
             # thus using a sampler with length matching that of dataset will
-            # cause data lost (you may have duplicates of the first couple
+            # cause data loss (you may have duplicates of the first couple
             # batches, but never see anything afterwards). Therefore,
-            # `Iterabledataset` always uses an infinite sampler, an instance of
+            # `IterableDataset` always uses an infinite sampler, an instance of
             # `_InfiniteConstantSampler` defined above.
             #
             # A custom `batch_sampler` essentially only controls the batch size.

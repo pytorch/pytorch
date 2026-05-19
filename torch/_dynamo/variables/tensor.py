@@ -2210,6 +2210,25 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__mul__(x)`` calls — the
+        # ``operator.mul`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
@@ -2445,6 +2464,23 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.sub, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like() and not other.is_python_constant():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
             ),
             sym_num=None,
         )
