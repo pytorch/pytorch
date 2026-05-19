@@ -1371,26 +1371,42 @@ class PrecompileThreadPool:
     """
 
     _instance: PrecompileThreadPool | None = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self, max_workers: int = 4):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     @classmethod
     def get_instance(cls) -> PrecompileThreadPool:
-        from torch._inductor.select_algorithm import get_num_workers
-
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = cls(get_num_workers())
+                    cls._instance = cls(
+                        max(1, torch._inductor.async_compile.get_compile_threads())
+                    )
         return cls._instance
 
     def submit(self, fn, *args, **kwargs):
         ctx = contextvars.copy_context()
         # Need to copy context so workers have access to the correct config settings
         fn = functools.partial(ctx.run, fn)
-        return self._executor.submit(fn, *args, **kwargs)
+        cls = type(self)
+        with cls._lock:
+            if cls._instance is not self:
+                if cls._instance is None:
+                    cls._instance = cls(
+                        max(1, torch._inductor.async_compile.get_compile_threads())
+                    )
+                return cls._instance._executor.submit(fn, *args, **kwargs)
+            try:
+                return self._executor.submit(fn, *args, **kwargs)
+            except RuntimeError as e:
+                if "cannot schedule new futures after shutdown" not in str(e):
+                    raise
+                cls._instance = cls(
+                    max(1, torch._inductor.async_compile.get_compile_threads())
+                )
+                return cls._instance._executor.submit(fn, *args, **kwargs)
 
     def _shutdown(self, wait: bool = False):
         return self._executor.shutdown(wait=wait)
@@ -1402,6 +1418,18 @@ class PrecompileThreadPool:
                 if cls._instance is not None:
                     cls._instance._shutdown(wait=False)
                     cls._instance = None
+
+    @classmethod
+    def _after_fork_in_child(cls) -> None:
+        # ThreadPoolExecutor workers don't survive fork(); the inherited
+        # _executor / _lock state is dead. Reset the singleton so the next
+        # submit() in the child constructs a fresh pool. Locks are reset
+        # because the parent could have been mid-acquire at fork time.
+        cls._instance = None
+        cls._lock = threading.RLock()
+
+
+os.register_at_fork(after_in_child=PrecompileThreadPool._after_fork_in_child)
 
 
 class AsyncAutotuner:
