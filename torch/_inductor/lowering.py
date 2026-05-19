@@ -8731,9 +8731,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             main_output_transform_group=main_output_transform.group_size
             if main_output_transform is not None
             else None,
-            main_output_expression=main_output_transform.expression
-            if main_output_transform is not None
-            else None,
             mutated_inputs=mutated_inputs or None,
         )
         node, _ = autotune_select_algorithm(

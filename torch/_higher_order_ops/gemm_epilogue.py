@@ -311,7 +311,6 @@ class QuackAuxOutputInfo:
 class QuackMainOutputTransformInfo:
     kind: str
     group_size: int | None = None
-    expression: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1190,7 +1189,6 @@ def _match_quack_grouped_n_contract_main(
     return QuackMainOutputTransformInfo(
         kind="grouped_n_contract",
         group_size=gate_group,
-        expression="swiglu",
     )
 
 
