@@ -368,6 +368,51 @@ class NumBytesMetricTests(TestCase):
 
         self.assertLessEqual(deferred_bytes, eager_bytes)
 
+    @requires_gpu_and_triton
+    @skipIfXpu(msg="CUDA-specific generated allocation check")
+    @unittest.skipIf(TEST_WITH_ROCM, "CUDA-specific generated allocation check")
+    def test_checkpoint_recompute_upcast_avoids_fp32_materialization(self):
+        from torch.utils.checkpoint import checkpoint
+
+        class Layer(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.mods = torch.nn.Sequential(
+                    torch.nn.Linear(dim, dim),
+                    torch.nn.LayerNorm([dim]),
+                    torch.nn.GELU(),
+                )
+
+            def forward(self, x):
+                return checkpoint(self.mods, x, use_reentrant=False)
+
+        def fwd_bwd(mod, inp):
+            for p in mod.parameters():
+                p.grad = None
+            mod(inp).sum().backward()
+            return tuple(p.grad for p in mod.parameters())
+
+        batch, dim = 64, 128
+        mod = Layer(dim).to(device=GPU_TYPE, dtype=torch.bfloat16)
+        inp = torch.randn(batch, dim, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        _, wrapper_codes = run_and_get_code(
+            fwd_bwd, torch.compile(mod, fullgraph=True), inp
+        )
+        self.assertEqual(len(wrapper_codes), 2)
+        backward_code = wrapper_codes[-1]
+
+        full_size_fp32_allocs = re.findall(
+            rf"= empty_strided_{GPU_TYPE}\(\({batch}, {dim}\), "
+            rf"\({dim}, 1\), torch\.float32\)",
+            backward_code,
+        )
+        self.assertEqual(
+            full_size_fp32_allocs,
+            [],
+            f"Unexpected full-size fp32 buffers in backward:\n{backward_code}",
+        )
+
 
 class FusionTests(TestCase):
     """
