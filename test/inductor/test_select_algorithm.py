@@ -611,6 +611,174 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestAlgorithmSelectorCleanup(TestCase):
+    class Choice:
+        failed = False
+        name = "choice"
+        description = "choice"
+
+        def __init__(self, key="choice", description="choice"):
+            self.key = key
+            self.description = description
+            self.precompile_calls = 0
+            self.released = 0
+
+        def kernel_hash_key(self):
+            return self.key
+
+        def mark_failed(self):
+            self.failed = True
+
+        def precompile(self):
+            self.precompile_calls += 1
+
+        def release_benchmark_artifacts(self):
+            self.released += 1
+
+    class PrecompileFn:
+        def __init__(self):
+            self.released = 0
+
+        def __call__(self):
+            return {}
+
+        def release_benchmark_artifacts(self):
+            self.released += 1
+
+    def test_do_autotuning_releases_benchmark_artifacts(self):
+        choice = self.Choice()
+        precompile_fn = self.PrecompileFn()
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            return {choices[0]: 1.0}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            timings = cache.do_autotuning(
+                "mm", [], None, None, "inputs_key", [choice], precompile_fn
+            )
+
+        self.assertEqual(timings, {choice: 1.0})
+        self.assertEqual(choice.released, 1)
+        self.assertEqual(precompile_fn.released, 1)
+
+    def test_do_autotuning_releases_benchmark_artifacts_on_exception(self):
+        choice = self.Choice()
+        precompile_fn = self.PrecompileFn()
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            raise RuntimeError("lookup failed")
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+            self.assertRaisesRegex(RuntimeError, "lookup failed"),
+        ):
+            cache.do_autotuning(
+                "mm", [], None, None, "inputs_key", [choice], precompile_fn
+            )
+
+        self.assertEqual(choice.released, 1)
+        self.assertEqual(precompile_fn.released, 1)
+
+    def test_precompile_release_preserves_completed_cache_marker(self):
+        class VersionInfo:
+            major = 3
+            minor = 12
+            micro = 0
+
+        choice = self.Choice()
+
+        def lookup(self, choices, name, inputs_key, benchmark=None, hint_override=None):
+            return {}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm, "get_num_workers", lambda: 1),
+            patch.object(select_algorithm.sys, "version_info", VersionInfo),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            precompile_fn = cache.make_precompile_fn([choice], "mm", "inputs_key")
+            precompile_fn()
+            precompile_fn.release_benchmark_artifacts()
+            precompile_fn.release_benchmark_artifacts()
+
+            precompile_fn2 = cache.make_precompile_fn([choice], "mm", "inputs_key")
+            self.assertEqual(precompile_fn2(), {})
+            precompile_fn2.release_benchmark_artifacts()
+
+        self.assertIs(precompile_fn, precompile_fn2)
+        self.assertEqual(choice.precompile_calls, 1)
+        self.assertEqual(choice.released, 1)
+
+    def test_best_config_filter_does_not_duplicate_choices(self):
+        best_config = {
+            "ACC_TYPE": "tl.float32",
+            "ALLOW_TF32": "False",
+            "BLOCK_K": "32",
+            "BLOCK_M": "16",
+            "BLOCK_N": "32",
+            "EVEN_K": "True",
+            "GROUP_M": "8",
+            "USE_FAST_ACCUM": "False",
+            "num_stages": "3",
+            "num_warps": "4",
+            "num_consumer_groups": "0",
+            "num_buffers_warp_spec": "0",
+        }
+
+        async def get_best_config():
+            return best_config
+
+        matching_description = " ".join(
+            f"{key}={value}" for key, value in best_config.items()
+        )
+        nonmatching_description = matching_description.replace(
+            "BLOCK_M=16", "BLOCK_M=32"
+        )
+        matching_choices = [
+            self.Choice("match_0", matching_description),
+            self.Choice("match_1", matching_description),
+        ]
+        choices = [
+            matching_choices[0],
+            self.Choice("miss", nonmatching_description),
+            matching_choices[1],
+        ]
+        precompile_fn = self.PrecompileFn()
+        seen_choices = []
+
+        def lookup(self, choices, name, inputs_key, benchmark, hint_override=None):
+            seen_choices.append(list(choices))
+            return {choice: index + 1.0 for index, choice in enumerate(choices)}
+
+        cache = select_algorithm.AlgorithmSelectorCache()
+        with (
+            patch.object(select_algorithm, "use_pipelined_autotuning", lambda: False),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", lookup),
+        ):
+            timings = cache.do_autotuning(
+                "mm",
+                [],
+                None,
+                None,
+                "inputs_key",
+                choices,
+                precompile_fn,
+                best_config_future=get_best_config(),
+            )
+
+        self.assertEqual(seen_choices, [matching_choices])
+        self.assertEqual(list(timings), matching_choices)
+        self.assertEqual(precompile_fn.released, 1)
+        self.assertEqual([choice.released for choice in choices], [1, 1, 1])
+
+
 class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches

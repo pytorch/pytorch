@@ -5673,6 +5673,9 @@ class ChoiceCaller:
     def output_node(self) -> TensorBox:
         raise NotImplementedError
 
+    def release_benchmark_artifacts(self) -> None:
+        pass
+
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
