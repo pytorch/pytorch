@@ -14897,12 +14897,6 @@ if __name__ == '__main__':
                 maximal_linear_weight_grad_err = err
                 worst_linear_weight_grad_err_kwargs = dict(module_kwargs)
 
-        # temporary printouts:
-        print(f'\n{maximal_linear_weight_grad_err=} <= {feps}\n{maximal_input_grad_err=} <= {feps}')
-        print(f'{maximal_output_max_ulp_diff=} <= {expected_max_ulp_diff}')
-        print(f'{maximal_input_grad_max_ulp_diff=} <= {expected_input_grad_max_ulp_diff}')
-        print(f'{maximal_linear_weight_grad_max_ulp_diff=} <= {expected_weight_grad_max_ulp_diff}')
-
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
