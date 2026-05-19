@@ -3807,6 +3807,51 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_fake_script_object_mesh_cache_key(self):
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        with _fake_process_group():
+            mesh = DeviceMesh("cpu", torch.arange(2))
+            fake_mesh = FakeScriptObject(
+                mesh,
+                f"{DeviceMesh.__module__}.{DeviceMesh.__qualname__}",
+                mesh,
+            )
+            local_tensor = torch.zeros(4, 4)
+            tensor_meta = TensorMeta(
+                local_tensor.shape, local_tensor.stride(), local_tensor.dtype
+            )
+            fake_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    fake_mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+            real_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+
+            pickler = AOTAutogradCachePickler(
+                torch.fx.GraphModule({}, torch.fx.Graph())
+            )
+            self.assertEqual(
+                pickler.get_hash(fake_mesh_dtensor),
+                pickler.get_hash(real_mesh_dtensor),
+            )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_dtensor_different_placements_different_cache_key(self):
         from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.tensor import DTensor, Replicate, Shard
