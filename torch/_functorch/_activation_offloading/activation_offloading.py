@@ -13,7 +13,10 @@ import torch
 import torch.fx as fx
 from torch._functorch._activation_offloading.offload_ops import (  # noqa: F401 -- registers ao::offload, ao::reload, ao::wait_tensor ops
     offload,
+    record_stream_event,
     reload,
+    reload_after,
+    reload_inplace,
     wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
@@ -42,7 +45,7 @@ def _find_all_effective_users(node: fx.Node, op_types: OpTypes) -> OrderedSet[fx
         if user.op == "output":
             continue
         effective_users.add(user)
-        if op_types.is_view(user):
+        if op_types.is_view(user) or user.target == torch.ops.aten._unsafe_view.default:
             effective_users.update(_find_all_effective_users(user, op_types))
     return effective_users
 
@@ -232,7 +235,7 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
         with graph.inserting_after(offload_node):
             wait_node: fx.Node = graph.call_function(
                 torch.ops.ao.wait_tensor.default,
-                args=(offload_node, node),
+                args=(offload_node, node, last_user),
                 name=CPU_OFFLOAD_PREFIX + str(node.name),
             )
             wait_node.meta["val"] = offload_node.meta["val"]
@@ -517,10 +520,9 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
     ao.wait_tensor at its original position.
     """
     graph: fx.Graph = bwd_module.graph
-    nodes_list: list[fx.Node] = list(graph.nodes)
 
-    # Identify reload + wait pairs
-    reload_patterns: dict[fx.Node, ReloadNodeInfo] = {}
+    reload_nodes: list[fx.Node] = []
+    wait_nodes: list[fx.Node] = []
     for node in graph.nodes:
         if not (
             node.op == "call_function" and node.target == torch.ops.ao.reload.default
@@ -530,18 +532,95 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
             (u for u in node.users if u.target == torch.ops.ao.wait_tensor.default),
             None,
         )
-        if wait_node is None:
-            continue
-        transfer_size_bytes: int = _calculate_transfer_size(node)
-        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
-        reload_patterns[node] = ReloadNodeInfo(
-            reload_group_nodes=[node],
-            wait_event_node=wait_node,
-            transfer_size_bytes=transfer_size_bytes,
-            transfer_time_ms=transfer_time_ms,
-        )
+        if wait_node is not None:
+            reload_nodes.append(node)
+            wait_nodes.append(wait_node)
 
-    reorder_for_prefetch(nodes_list, reload_patterns)
+    if not reload_nodes:
+        return
+
+    placeholders = graph.find_nodes(op="placeholder")
+    if not placeholders:
+        return
+    last_placeholder = placeholders[-1]
+
+    window = config.activation_reload_prefetch_window
+    if window < 0:
+        raise ValueError(
+            f"activation_reload_prefetch_window must be >= 0, got {window}"
+        )
+    if window == 0:
+        window = len(reload_nodes)
+
+    # The reload inputs are saved CPU activation placeholders, so a small initial
+    # window can be issued as soon as backward starts. Later reloads are inserted
+    # after compute-stream release events from earlier reloaded activations. This
+    # keeps the host from allocating every reload destination at backward entry.
+    for reload_node in reversed(reload_nodes[:window]):
+        last_placeholder.append(reload_node)
+
+    op_types: OpTypes = get_default_op_list()
+    for idx, reload_node in enumerate(reload_nodes[window:]):
+        release_wait_node = wait_nodes[idx]
+        target_wait_node = wait_nodes[idx + window]
+        nodes_list = list(graph.nodes)
+        node_to_index = {node: node_idx for node_idx, node in enumerate(nodes_list)}
+        release_users = _find_all_effective_users(release_wait_node, op_types)
+        release_point = (
+            max(release_users, key=lambda n: node_to_index[n])
+            if release_users
+            else release_wait_node
+        )
+        with graph.inserting_after(release_point):
+            release_token = graph.call_function(
+                torch.ops.ao.record_stream_event.default,
+                args=(release_wait_node,),
+                name=f"release_{release_wait_node.name}",
+            )
+            release_token.meta["val"] = torch.empty((), device="cpu")
+            release_token.meta["tensor_meta"] = extract_tensor_metadata(
+                release_token.meta["val"]
+            )
+
+        reload_val = reload_node.meta["val"]
+        reuse_val = release_wait_node.meta["val"]
+        if (
+            reload_val.shape == reuse_val.shape
+            and reload_val.stride() == reuse_val.stride()
+            and reload_val.dtype == reuse_val.dtype
+        ):
+            reload_node.target = torch.ops.ao.reload_inplace.default
+            reload_node.args = (
+                reload_node.args[0],
+                release_wait_node,
+                release_token,
+            )
+            reload_node.meta["val"] = torch.empty((), device="cpu")
+            reload_node.meta["tensor_meta"] = extract_tensor_metadata(
+                reload_node.meta["val"]
+            )
+            target_wait_node.args = (
+                release_wait_node,
+                target_wait_node.args[1],
+                reload_node,
+            )
+        else:
+            reload_node.target = torch.ops.ao.reload_after.default
+            reload_node.args = (
+                reload_node.args[0],
+                reload_node.args[1],
+                release_token,
+            )
+        release_token.append(reload_node)
+
+    # Make the one-activation lookahead explicit in dataflow so later compiler
+    # scheduling cannot sink a reload back to its own wait.
+    for idx, wait_node in enumerate(wait_nodes[:-1]):
+        wait_args = list(wait_node.args)
+        while len(wait_args) < 4:
+            wait_args.append(None)
+        wait_args[3] = reload_nodes[idx + 1]
+        wait_node.args = tuple(wait_args)
 
 
 def _calculate_transfer_size(device_put_node: fx.Node) -> int:

@@ -230,6 +230,10 @@ activation_offload_sink_wait = False
 # activation reloading with prefetching when using separate streams (bwd graph)
 activation_reload_prefetch = False
 
+# Maximum number of activation reloads to prefetch ahead in the backward graph.
+# 0 means unbounded prefetch.
+activation_reload_prefetch_window: int = 0
+
 # CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
 # scheduling. This is hardware-specific and should be set by the user.
 activation_offload_cpu_gpu_bw: float = 50.0
