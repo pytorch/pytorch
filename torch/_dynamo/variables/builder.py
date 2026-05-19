@@ -503,10 +503,6 @@ def lookup_spec_from_dynamo_source(
         return None
     # Seed at the named-arg root; descend the rest of the path.
     current_spec: IntermediateSpec = shapes_spec._params._named_args.get(path[0].name)
-    if current_spec is None:
-        # Under-specified: the user didn't provide a spec for this arg.
-        # Treat as static.
-        return None
     return _walk_spec(current_spec, path[1:])
 
 
