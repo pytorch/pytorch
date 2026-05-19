@@ -1391,7 +1391,7 @@ class InstructionTranslatorBase(
         """Return the most recently generated pycode varname for the given prefix."""
         return self._pycode_last_varname[prefix]
 
-    def cell_and_freevars(self) -> list[str]:
+    def cell_and_freevars(self) -> tuple[str, ...]:
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars

@@ -6,8 +6,7 @@ import sys
 import traceback
 import types
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -22,19 +21,21 @@ from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
-from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.node import Argument, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
     from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx import Node
+    from torch.fx.node import Argument, Target
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -225,7 +226,7 @@ class ModuleToTrace(torch.nn.Module):
         self._export_root = foo
         self.in_spec = in_spec
 
-    def forward(self, *flat_args: Any) -> "ExportTracerOutput":
+    def forward(self, *flat_args: Any) -> ExportTracerOutput:
         args, kwargs = pytree.tree_unflatten(flat_args, self.in_spec)
         res = self._export_root(*args, **kwargs)
         out_flat, out_spec = pytree.tree_flatten(res)
@@ -433,7 +434,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
     orig_callable: Callable[..., Any],
-    fake_mode: Optional["FakeTensorMode"],
+    fake_mode: FakeTensorMode | None,
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,

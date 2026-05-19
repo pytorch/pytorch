@@ -18,9 +18,6 @@ from __future__ import annotations
 import copy
 import dataclasses
 import sys
-import types
-from collections.abc import Callable, Iterable
-from contextlib import AbstractContextManager
 from typing import Any, cast, TYPE_CHECKING
 
 from .bytecode_transformation import (
@@ -40,6 +37,10 @@ from .bytecode_transformation import (
 from .utils import ExactWeakKeyDictionary
 
 if TYPE_CHECKING:
+    import types
+    from collections.abc import Callable, Iterable
+    from contextlib import AbstractContextManager
+
     from .output_graph import CodeOptions
 
 
