@@ -3785,25 +3785,45 @@ class GuardManager {
   }
 
   // Caller must hold dict_to_guard_managers lock.
+  //
+  // This function does two things; they must be gated differently.
+  //
+  // 1) Map cleanup: remove `this` from `map[dict]` for every dict this
+  //    manager watched. Must always run -- including when
+  //    `_disable_dict_tag_matching` is already true -- otherwise a later
+  //    watch callback on a still-live dict would dereference the freed
+  //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
+  //    read in this function).
+  //
+  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
+  //    when the dict pointer is still alive. The watch callback sets
+  //    `_disable_dict_tag_matching = true` on every event, including
+  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
+  //    in our map may have been freed, so PyDict_Unwatch on them would
+  //    crash. When the flag is true, the dict's eventual deallocation
+  //    will tear down the watch automatically; skipping PyDict_Unwatch
+  //    here only loses an early-cleanup optimisation.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      auto stashed_pointers = value_stashed_pointers.second;
 
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
+      for (auto& stashed_pointer : stashed_pointers) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        auto& managers = map[dict_pointer];
 
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
+        // (1) Always: remove this manager from the per-dict list.
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
 
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+        // (2) Only when the dict is still guaranteed alive: unwatch and
+        // erase the now-empty map entry. The map.erase below invalidates
+        // the `managers` reference, so it must be the last use.
+        if (!_disable_dict_tag_matching && managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(dict_pointer);
         }
       }
     }
