@@ -7492,6 +7492,112 @@ class CommonTemplate:
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
 
+    @skip_if_gpu_halide
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_remove_no_ops_expanded_zero(self):
+        from torch._inductor.fx_passes.joint_graph import constant_fold_uniform_value
+
+        def add_expanded_zero(x):
+            zero = torch.full((1, x.shape[1]), 0.0, dtype=x.dtype, device=x.device)
+            return x + zero.expand(x.shape)
+
+        def add_shared_expanded_zero(x):
+            zero = torch.full((1, x.shape[1]), 0.0, dtype=x.dtype, device=x.device)
+            expanded = zero.expand(x.shape)
+            expanded_again = zero.expand(x.shape)
+            return x + expanded + expanded_again
+
+        x = torch.randn((2, 4), device=self.device)
+
+        for fn in (add_expanded_zero, add_shared_expanded_zero):
+            gm = make_fx(fn)(x)
+            constant_fold_uniform_value(gm)
+            gm.graph.lint()
+            self.assertFalse(
+                any(
+                    node.op == "call_function" and node.target is aten.add.Tensor
+                    for node in gm.graph.nodes
+                )
+            )
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            out, source_codes = run_and_get_code(opt_fn, x)
+            self.assertEqual(out, fn(x))
+            if self.device == "cpu":
+                FileCheck().check_not("cpp_fused").run(source_codes[0])
+            else:
+                FileCheck().check_not("triton.jit").run(source_codes[0])
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support flash attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_uses_flash(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+
+        q = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        out, source_codes = run_and_get_code(opt_fn, q, k, v)
+        self.assertEqual(out, fn(q, k, v), atol=2e-4, rtol=1e-2)
+
+        source_code = "\n".join(source_codes)
+        self.assertIn("aten._scaled_dot_product_flash_attention", source_code)
+        self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
+
+    @requires_gpu()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem efficient attention",
+    )
+    @torch._inductor.config.patch({"joint_graph_constant_folding": True})
+    def test_sdpa_expanded_zero_bias_nonzero_dropout_stays_efficient(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn(q, k, v):
+            bias = torch.full(
+                (1, 1, q.shape[-2], k.shape[-2]),
+                0.0,
+                dtype=q.dtype,
+                device=q.device,
+            )
+            bias = bias.expand(q.shape[0], q.shape[1], q.shape[-2], k.shape[-2])
+            return F.scaled_dot_product_attention(
+                q, k, v, attn_mask=bias, dropout_p=0.5
+            )
+
+        q = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        k = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+        v = torch.randn((2, 4, 16, 64), device=self.device, dtype=torch.float16)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        torch.manual_seed(1234)
+        expected = fn(q, k, v)
+        torch.manual_seed(1234)
+        out, source_codes = run_and_get_code(opt_fn, q, k, v)
+        self.assertEqual(out, expected, atol=2e-4, rtol=1e-2)
+
+        source_code = "\n".join(source_codes)
+        self.assertIn("aten._scaled_dot_product_efficient_attention", source_code)
+        self.assertNotIn("aten._scaled_dot_product_flash_attention", source_code)
+
     def test_remove_noop_copy(self):
         def fn(x, y):
             x = x.cos()
