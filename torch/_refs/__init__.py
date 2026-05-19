@@ -771,8 +771,7 @@ def floor(a):
     exact_dtype=True,
 )
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
-    return torch.sub(x, trunc_x)
+    return torch.sub(x, torch.trunc(x))
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -5384,6 +5383,7 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64 or integer_args:
+        torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
