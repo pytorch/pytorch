@@ -573,11 +573,7 @@ bool StaticXpuLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticXpuLauncherType);
-  if (PyModule_AddObject(
-          module, "_StaticXpuLauncher", (PyObject*)&StaticXpuLauncherType) <
-      0) {
-    Py_DECREF(&StaticXpuLauncherType);
+  if (PyModule_AddType(module, &StaticXpuLauncherType) < 0) {
     return false;
   }
   return true;
