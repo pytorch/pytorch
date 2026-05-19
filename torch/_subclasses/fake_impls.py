@@ -88,6 +88,15 @@ _MKLDNN_DTYPES = {
     torch.uint8,
     torch.int8,
 }
+_TO_DENSE_SPARSE_LAYOUTS = frozenset(
+    {
+        torch.sparse_coo,
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }
+)
 
 
 def ordered_set(*items: _T) -> dict[_T, bool]:
@@ -1450,30 +1459,24 @@ class _ToDenseMkldnn(torch.autograd.Function):
 
 # Fake MKLDNN tensors keep MKLDNN-ness in a side channel because the backing
 # meta tensor is strided.  The native composite reads TensorImpl::layout()
-# directly, so this Python composite consults FakeTensor.is_mkldnn instead.
+# directly, so this Python composite consults the layout override instead.
 def to_dense_composite_impl(
     self: torch.Tensor,
     dtype: torch.dtype | None = None,
     *,
     masked_grad: bool | None = None,
 ) -> torch.Tensor:
-    if self.is_mkldnn:
+    layout = self.layout
+    # This composite is installed globally so direct aten.to_dense can see fake
+    # MKLDNN tensors. Keep the common strided path minimal.
+    if layout == torch.strided:
+        return self.to(dtype=dtype) if dtype is not None else self
+    if layout == torch._mkldnn:  # type: ignore[attr-defined]
         return _ToDenseMkldnn.apply(self, dtype, masked_grad)
-    if self.layout in {
-        torch.sparse_coo,
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }:
+    if layout in _TO_DENSE_SPARSE_LAYOUTS:
         return aten._to_dense.default(self, dtype, masked_grad)
-    torch._check(
-        self.layout == torch.strided,
-        lambda: f"to_dense does not support layout {self.layout}",
-    )
-    if dtype is not None:
-        return self.to(dtype=dtype)
-    return self
+    torch._check(False, lambda: f"to_dense does not support layout {layout}")
+    raise AssertionError("unreachable")
 
 
 def to_dense_functorch_frontmode_impl(
