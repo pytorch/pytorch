@@ -54,6 +54,7 @@ from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config, ir, metrics
 from .codegen.common import (
@@ -111,6 +112,7 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
+    get_dtype_size,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
@@ -119,6 +121,7 @@ from .utils import (
     should_assume_input_aligned,
     should_fallback_by_default,
     SUPPORTED_MKLDNN_DEVICES,
+    sympy_product,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -362,6 +365,8 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """Lower an FX graph into Inductor IR and generated code."""
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -1801,6 +1806,37 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(ir_value, ir.TensorBox):
                 ir_value.realize()
 
+    def should_realize_for_recompute_broadcast_or_upcast(
+        self, producer: torch.fx.Node, user: torch.fx.Node
+    ) -> bool:
+        """Avoid materializing a checkpoint recompute value after it grows."""
+        if producer.meta.get("recompute") not in (
+            CheckpointPolicy.MUST_RECOMPUTE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+        ):
+            return False
+
+        producer_val = producer.meta.get("val")
+        user_val = user.meta.get("val")
+        if not isinstance(producer_val, torch.Tensor) or not isinstance(
+            user_val, torch.Tensor
+        ):
+            return False
+
+        if (
+            user.target is torch.ops.prims.convert_element_type.default
+            and get_dtype_size(user_val.dtype) > get_dtype_size(producer_val.dtype)
+        ):
+            return True
+
+        tags = getattr(user.target, "tags", ())
+        if torch.Tag.pointwise not in tags:
+            return False
+
+        producer_numel = sympy_product(convert_shape_to_inductor(producer_val.shape))
+        user_numel = sympy_product(convert_shape_to_inductor(user_val.shape))
+        return self.sizevars.statically_known_gt(user_numel, producer_numel)
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -2022,6 +2058,12 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(OrderedSet(n.users))
+            if isinstance(result, TensorBox):
+                for user in n.users:
+                    if self.should_realize_for_recompute_broadcast_or_upcast(n, user):
+                        result.realize()
+                        break
+
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
