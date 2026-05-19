@@ -3628,6 +3628,16 @@
       ]
     }
   ],
+  "GB6297": [
+    {
+      "Gb_type": "autograd.Function.apply: duplicate tensor input",
+      "Context": "",
+      "Explanation": "Dynamo does not support tracing autograd.Function.apply when the same tensor is passed to multiple forward inputs.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0262": [
     {
       "Gb_type": "unsupported contextlib.* API",
