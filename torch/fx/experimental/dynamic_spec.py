@@ -19,6 +19,8 @@ __all__ = [
     "ShapeVar",
     "IntVar",
     "TensorSpec",
+    "ObjectSpec",
+    "DictSpec",
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
@@ -161,127 +163,170 @@ class TensorSpec:
         }
 
 
+class ObjectSpec:
+    """Spec for any Python object's attributes.
+
+    Constructor::
+
+        ObjectSpec({name: IntermediateSpec, ...})
+
+    Values may be leaves (``TensorSpec`` / ``IntVar`` / ``int`` /
+    ``None``) or another ``ObjectSpec`` for recursion.
+
+    Example::
+
+        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        ObjectSpec({"inner": ObjectSpec({"weight": TensorSpec([ShapeVar("h")])})})
+    """
+
+    def __init__(self, fields: dict[str, IntermediateSpec] | None = None) -> None:
+        self._fields: dict[str, IntermediateSpec] = dict(fields) if fields else {}
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def items(self) -> Any:
+        return self._fields.items()
+
+    def __repr__(self) -> str:
+        lines = ["object_spec:"]
+        for name, spec in self._fields.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}.{name}:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}.{name}: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "ObjectSpec",
+            "fields": {
+                name: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for name, spec in self._fields.items()
+            },
+        }
+
+
+class DictSpec:
+    """Spec for a Python ``dict``-typed value.
+
+    Constructor::
+
+        DictSpec({key: IntermediateSpec, ...})
+
+    Example::
+
+        DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        DictSpec({"config": DictSpec({"batch": IntVar()})})
+    """
+
+    def __init__(self, entries: dict[str, IntermediateSpec] | None = None) -> None:
+        self._entries: dict[str, IntermediateSpec] = dict(entries) if entries else {}
+
+    def __getitem__(self, key: str) -> IntermediateSpec:
+        return self._entries[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def items(self) -> Any:
+        return self._entries.items()
+
+    def __repr__(self) -> str:
+        lines = ["dict_spec:"]
+        for key, spec in self._entries.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}[{key!r}]:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}[{key!r}]: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "DictSpec",
+            "entries": {
+                key: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for key, spec in self._entries.items()
+            },
+        }
+
+
 # Type alias for leaf specs (individual argument specifications)
 LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
-# This will include ListSpec, DictSpec and ObjectSpec
-IntermediateSpec: TypeAlias = LeafSpec
+# Includes containers (``ObjectSpec`` / ``DictSpec``; future ``ListSpec``)
+# for nested specs reachable via dynamo source-chain walks.
+IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
 
 
 class ParamsSpec:
     """Specification for the arguments of a compiled function.
 
-    Describes the dynamic shape behavior for named arguments, ``*args``,
-    and ``**kwargs`` of a ``torch.compile``-wrapped function. Takes a
-    single dict keyed by parameter name, with two reserved sentinel keys
-    for the variadic slots::
+    Describes the dynamic shape behavior for named arguments, *args, and
+    **kwargs of a ``torch.compile``-wrapped function::
 
-        def func(x, n, *args, **kwargs): ...
+        def f(x, y, *args, **kwargs):
+        #    ^^^^  named_args
+        #           ^^^^^  varargs
+        #                   ^^^^^^  varkw
 
+    Example::
 
-        ParamsSpec(
-            {
-                "x": TensorSpec([ShapeVar("batch"), None]),
-                "n": IntVar("seq"),
-                "*args": [TensorSpec([ShapeVar("a")]), None],
-                "**kwargs": {
-                    "foo": TensorSpec([ShapeVar("b"), None]),
-                    "bar": TensorSpec([ShapeVar("c"), None]),
-                },
-            }
-        )
-
-    Key conventions:
-
-    * **Regular named arg** — key is the parameter's Python name
-      (``"x"``, ``"n"`` above). Value is a leaf spec (``TensorSpec`` /
-      ``IntVar`` / ``int`` / ``None``).
-    * **``*args`` slot** — key is the literal sentinel ``"*args"``,
-      regardless of the function's actual ``*args`` Python name. Value
-      is a ``list[LeafSpec]`` indexed positionally: position ``N`` of the
-      list applies to ``args[N]``. The spec does not constrain
-      ``len(args)`` — positions past the end of the list are static.
-    * **``**kwargs`` slot** — key is the literal sentinel ``"**kwargs"``.
-      Value is a ``dict[str, LeafSpec]`` keyed by the actual keyword name
-      (so the ``"**kwargs"`` entry ``"foo"`` applies to
-      ``kwargs["foo"]``).
-
-    **Anything not expressed in ``ParamsSpec`` is STATIC.**
+        ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
     """
-
-    _VARARGS_KEY = "*args"
-    _VARKW_KEY = "**kwargs"
 
     def __init__(
         self,
-        params: dict[str, IntermediateSpec] | None = None,
+        named_args: dict[str, IntermediateSpec] | None = None,
+        *,
+        varargs: list[IntermediateSpec] | None = None,
+        varkw: dict[str, IntermediateSpec] | None = None,
     ) -> None:
-        self._named_args: dict[str, IntermediateSpec] = {}
+        self._named_args: dict[str, IntermediateSpec] = (
+            dict(named_args) if named_args else {}
+        )
+        if varargs is not None:
+            raise NotImplementedError("varargs is not supported yet")
+        if varkw is not None:
+            raise NotImplementedError("varkw is not supported yet")
         self._varargs: list[IntermediateSpec] | None = None
         self._varkw: dict[str, IntermediateSpec] | None = None
-        if params is None:
-            return
-        for key, value in params.items():
-            if key == self._VARARGS_KEY:
-                if not isinstance(value, list):
-                    raise ValueError(
-                        f"ParamsSpec {self._VARARGS_KEY!r} value must be a list "
-                        f"of leaf specs, got {type(value).__name__}"
-                    )
-                self._varargs = list(value)
-            elif key == self._VARKW_KEY:
-                if not isinstance(value, dict):
-                    raise ValueError(
-                        f"ParamsSpec {self._VARKW_KEY!r} value must be a dict "
-                        f"of leaf specs, got {type(value).__name__}"
-                    )
-                self._varkw = dict(value)
-            elif key.startswith("*"):
-                raise ValueError(
-                    f"Unknown sentinel key {key!r} in ParamsSpec; only "
-                    f"{self._VARARGS_KEY!r} and {self._VARKW_KEY!r} are reserved"
-                )
-            else:
-                self._named_args[key] = value
 
     def __repr__(self) -> str:
-        def _indent_lines(text: str, prefix: str = _INDENT) -> str:
-            return "\n".join(prefix + line for line in text.splitlines())
-
-        def _entry_repr(key: str, value: Any) -> str:
-            v_repr = repr(value)
+        lines = []
+        for k, v in self._named_args.items():
+            v_repr = repr(v)
             if "\n" in v_repr:
-                return f"{key}:\n{_indent_lines(v_repr)}"
-            return f"{key}: {v_repr}"
-
-        lines = [_entry_repr(k, v) for k, v in self._named_args.items()]
-        if self._varargs is not None:
-            inner = "\n".join(
-                _entry_repr(str(i), v) for i, v in enumerate(self._varargs)
-            )
-            lines.append(f"{self._VARARGS_KEY}:\n{_indent_lines(inner)}")
-        if self._varkw is not None:
-            inner = "\n".join(_entry_repr(k, v) for k, v in self._varkw.items())
-            lines.append(f"{self._VARKW_KEY}:\n{_indent_lines(inner)}")
+                indented = "\n".join(_INDENT + line for line in v_repr.splitlines())
+                lines.append(f"{k}:\n{indented}")
+            else:
+                lines.append(f"{k}: {v_repr}")
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
-        params: dict[str, Any] = {
-            name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
-            for name, value in self._named_args.items()
-        }
-        if self._varargs is not None:
-            params[self._VARARGS_KEY] = [
-                v.to_jsonable() if hasattr(v, "to_jsonable") else v
-                for v in self._varargs
-            ]
-        if self._varkw is not None:
-            params[self._VARKW_KEY] = {
-                name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
-                for name, value in self._varkw.items()
-            }
         return {
             "type": "ParamsSpec",
-            "params": params,
+            "named_args": {
+                name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
+                for name, value in self._named_args.items()
+            },
         }
 
 

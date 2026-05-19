@@ -79,7 +79,13 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
-from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
+from torch.fx.experimental.dynamic_spec import (
+    IntVar,
+    LeafSpec,
+    ObjectSpec,
+    ShapesSpec,
+    TensorSpec,
+)
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -136,6 +142,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -146,6 +153,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -352,85 +360,74 @@ def safe_has_grad(t: object) -> bool:
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Find the user spec entry corresponding to a given dynamo input source.
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Three kinds of input sources are recognized:
+    Returns the leaf ``TensorSpec`` / ``IntVar`` / ``int`` at the
+    corresponding path, or ``None`` if the source isn't covered.
+    Supported source kinds:
 
-    1. **Named forward arg** — ``LocalSource(local_name=NAME, is_input=True)``
-       with ``is_varargs=False`` and ``is_varkw=False`` (a regular named
-       parameter). Looked up in ``ParamsSpec._named_args[NAME]``.
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec._fields[member]``.
+    - ``NNModuleSource`` (and subclasses) — transparently unwrapped.
+      ``nn.Module`` attribute access produces
+      ``AttrSource(NNModuleSource(...))``; ``NNModuleSource`` is a
+      guard-semantics marker, not an access step, so the walk skips
+      past it.
+    - ``DictGetItemSource(UnspecializedParamBufferSource(_,
+      '_parameters' | '_buffers'), key)`` — dynamo rewrites
+      ``self.weight`` internally as ``self._parameters["weight"]``;
+      the walk collapses that pair into a single ``("attr", key)``
+      step so the user-facing attribute name matches the spec.
 
-    2. **Indexed varargs element** — ``GetItemSource(base=LocalSource(_, is_input=True, is_varargs=True), index=N)``.
-       This represents ``args[N]`` for the function's ``*args`` parameter
-       (whose Python name is irrelevant — the ``is_varargs`` flag is the
-       discriminator, set by dynamo from ``co_flags & CO_VARARGS``).
-       Looked up in ``ParamsSpec._varargs[N]``.
-
-    3. **Keyed varkw element** — ``DictGetItemSource(base=LocalSource(_, is_input=True, is_varkw=True), index=KEY)``.
-       This represents ``kwargs[KEY]`` for the function's ``**kwargs``
-       parameter (Python name again irrelevant — the ``is_varkw`` flag is
-       the discriminator, set by dynamo from ``co_flags & CO_VARKEYWORDS``).
-       Looked up in ``ParamsSpec._varkw[KEY]``.
-
-    Note: indexed access into a *regular list-typed input* (e.g. ``def
-    forward(self, lst): return lst[0]``) is structurally identical at the
-    dynamo level — same ``GetItemSource`` shape — but its base
-    ``LocalSource`` has ``is_varargs=False``. Such accesses are NOT matched
-    here (those inputs stay static under the current spec API). Same goes
-    for keyed access into a regular dict-typed input vs ``**kwargs``.
-
-    Returns the matching ``TensorSpec`` / ``IntVar`` / ``int`` / ``None``
-    leaf spec, or ``None`` if the source pattern is not recognized or no
-    spec is registered for that position.
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
-    params = shapes_spec._params
-    # Case 1: direct named arg (not the *args / **kwargs slot).
-    if (
-        isinstance(source, LocalSource)
-        and source.is_input
-        and not source.is_varargs
-        and not source.is_varkw
-    ):
-        return params._named_args.get(source.local_name)
-    # Case 2: indexed access into *args. In practice dynamo only reaches
-    # here with a literal int index; non-int is unexpected (slices are
-    # statically resolved upstream and data-dependent indices fail with
-    # `GuardOnDataDependentSymNode` before reaching us).
-    if (
-        isinstance(source, GetItemSource)
-        and isinstance(source.base, LocalSource)
-        and source.base.is_input
-        and source.base.is_varargs
-    ):
-        if type(source.index) is not int:
-            raise RuntimeError(
-                f"Unexpected non-int index for *args GetItemSource: "
-                f"{type(source.index).__name__}: {source.index!r} "
-                f"(source={source!r})"
-            )
-        if params._varargs is not None and 0 <= source.index < len(params._varargs):
-            return params._varargs[source.index]
+
+    # Walk source.base chain to its root, collecting (kind, key) entries.
+    path: list[tuple[str, Any]] = []
+    cur: Source = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, NNModuleSource):
+            cur = cur.base
+            continue
+        # ``self.weight`` → dynamo emits
+        # ``DictGetItemSource(UnspecializedParamBufferSource(_,
+        # '_parameters'), 'weight')``. Collapse this pair into a single
+        # ``("attr", key)`` step so the user's ``ObjectSpec({"weight":
+        # ...})`` matches.
+        if isinstance(cur, DictGetItemSource) and isinstance(
+            cur.base, UnspecializedParamBufferSource
+        ):
+            path.append(("attr", cur.index))
+            cur = cur.base.base
+            continue
+        if isinstance(cur, AttrSource):
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
+    if not cur.is_input:
         return None
-    # Case 3: keyed access into **kwargs. ``**kwargs`` keys are always
-    # strings; a non-string index here is unexpected.
-    if (
-        isinstance(source, DictGetItemSource)
-        and isinstance(source.base, LocalSource)
-        and source.base.is_input
-        and source.base.is_varkw
-    ):
-        if not isinstance(source.index, str):
-            raise RuntimeError(
-                f"Unexpected non-str index for **kwargs DictGetItemSource: "
-                f"{type(source.index).__name__}: {source.index!r} "
-                f"(source={source!r})"
-            )
-        if params._varkw is not None and source.index in params._varkw:
-            return params._varkw[source.index]
+    path.reverse()
+
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec._params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
+            return None
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    # Only return leaves — a container at the end of the walk means
+    # the source's path didn't reach an applicable spec.
+    if isinstance(spec, ObjectSpec):
         return None
-    return None
+    return spec
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
