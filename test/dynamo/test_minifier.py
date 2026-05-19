@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import tempfile
+
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -177,6 +179,37 @@ class Repro(torch.nn.Module):
         x_20 = torch.relu(x_19);  x_19 = None
         return (x_20,)""",
         )
+
+
+class ReproGenerationTests(torch._dynamo.test_case.TestCase):
+    def test_after_dynamo_repro_serializes_module_with_child_repr(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("fake_quant", (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule(
+            {"fake_quant": FusedMovingAvgObsFakeQuantize()}, graph
+        )
+
+        with tempfile.TemporaryDirectory() as save_dir:
+            for module_save_dir in (save_dir, None):
+                with self.subTest(save_dir=module_save_dir):
+                    code = generate_dynamo_fx_repro_string(
+                        gm, [torch.randn(2)], "eager", save_dir=module_save_dir
+                    )
+
+                    self.assertNotIn("(activation_post_process):", code)
+                    compile(code, "<generated minifier repro>", "exec")
+
+                    namespace = {"__name__": "not_main"}
+                    exec(code, namespace)
+                    mod = namespace["mod"]
+
+                    self.assertIsInstance(mod.fake_quant, FusedMovingAvgObsFakeQuantize)
+                    self.assertEqual(mod(torch.randn(2))[0].shape, (2,))
 
 
 instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)

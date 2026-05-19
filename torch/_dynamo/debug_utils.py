@@ -19,11 +19,13 @@ Key classes:
 from __future__ import annotations
 
 import atexit
+import base64
 import copy
 import cProfile
 import functools
 import getpass
 import inspect
+import io
 import itertools
 import logging
 import os
@@ -187,12 +189,44 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            log.warning("We have not tested reprs of some modules - %s", cant_convert)
-        # TODO - Assuming that all modules can be safely repr'd. Check if that assumption is correct.
+            log.warning(
+                "Some modules will be serialized instead of emitted from repr - %s",
+                cant_convert,
+            )
         return True
 
     @staticmethod
-    def convert(gm: torch.fx.GraphModule) -> str:
+    def _can_emit_module_constructor(module: torch.nn.Module, module_str: str) -> bool:
+        if type(module) not in NNModuleToString.safe_reprs:
+            return False
+
+        try:
+            compile(f"mod = {module_str}", "<module repr>", "exec")
+        except SyntaxError:
+            return False
+        return True
+
+    @staticmethod
+    def _save_module(module: torch.nn.Module, module_idx: int, save_dir: str) -> str:
+        os.makedirs(save_dir, exist_ok=True)
+        module_path = normalize_path_separator(
+            os.path.join(save_dir, f"nn_module_{module_idx}.pt")
+        )
+        torch.save(module, module_path)
+        return f"torch.load({module_path!r}, weights_only=False)"
+
+    @staticmethod
+    def _inline_module(module: torch.nn.Module) -> str:
+        buffer = io.BytesIO()
+        torch.save(module, buffer)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return (
+            "torch.load(__import__('io').BytesIO("
+            f"__import__('base64').b64decode({encoded!r})), weights_only=False)"
+        )
+
+    @staticmethod
+    def convert(gm: torch.fx.GraphModule, save_dir: str | None = None) -> str:
         from torch.nn.modules.module import _addindent
 
         tab = " " * 4
@@ -206,13 +240,18 @@ class NNModuleToString:
             """
         )
 
-        for module_name, module in gm.named_children():
+        for module_idx, (module_name, module) in enumerate(gm.named_children()):
             module_str = f"{module.__repr__()}"
-            # module should be a core torch.nn.Module, so all parameters
-            # should be on the same device.
-            example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
+            if NNModuleToString._can_emit_module_constructor(module, module_str):
+                # module should be a core torch.nn.Module, so all parameters
+                # should be on the same device.
+                example_param = next(module.parameters(), None)
+                if example_param is not None and example_param.is_cuda:
+                    module_str = f"{module_str}.cuda()"
+            elif save_dir is not None:
+                module_str = NNModuleToString._save_module(module, module_idx, save_dir)
+            else:
+                module_str = NNModuleToString._inline_module(module)
             model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():

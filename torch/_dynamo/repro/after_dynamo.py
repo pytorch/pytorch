@@ -194,7 +194,7 @@ def generate_dynamo_fx_repro_string(
     Generate a repro string for backend-agnostic minified version.
     """
 
-    model_str = NNModuleToString.convert(gm)
+    model_str = NNModuleToString.convert(gm, save_dir=save_dir)
 
     # TODO: Figure out why torch.compile'd hash isn't work on this codepath
     writer = InputWriter(save_dir, stable_hash=True)
