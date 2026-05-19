@@ -110,25 +110,26 @@ class TestCodegenTriton(InductorTestCase):
 
             return Features()
 
-        self.assertTrue(
-            InductorChoices.should_use_persistent_reduction(
-                make_features(805306368, 536870912),
-                cooperative_reduction=False,
-            )
-        )
-        self.assertFalse(
-            InductorChoices.should_use_persistent_reduction(
-                make_features(630000000, 536870912),
-                cooperative_reduction=False,
-            )
-        )
-        with patch.object(self._graph, "is_backward", True):
-            self.assertFalse(
+        with patch.object(self._graph, "is_inference", True):
+            self.assertTrue(
                 InductorChoices.should_use_persistent_reduction(
                     make_features(805306368, 536870912),
                     cooperative_reduction=False,
                 )
             )
+            self.assertFalse(
+                InductorChoices.should_use_persistent_reduction(
+                    make_features(630000000, 536870912),
+                    cooperative_reduction=False,
+                )
+            )
+
+        self.assertFalse(
+            InductorChoices.should_use_persistent_reduction(
+                make_features(805306368, 536870912),
+                cooperative_reduction=False,
+            )
+        )
 
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @inductor_config.patch(
