@@ -101,6 +101,38 @@ the conventional forms described here. If your operator mutates inputs but is
 not an in-place or `out=` operator, model it as a mutable operator and return no
 aliases of inputs.
 
+The same operation can have different contracts depending on how it handles its
+outputs:
+
+```python
+from torch import Tensor
+
+
+@torch.library.custom_op(
+    "mylib::add_inplace",
+    mutates_args={"x"},
+    tags=torch.Tag.inplace,
+)
+def add_inplace(x: Tensor, y: Tensor) -> Tensor:
+    x.add_(y)
+    return x
+
+
+@torch.library.custom_op(
+    "mylib::add_out",
+    mutates_args={"out"},
+    tags=torch.Tag.out,
+)
+def add_out(x: Tensor, y: Tensor, *, out: Tensor) -> Tensor:
+    out.copy_(x + y)
+    return out
+
+
+@torch.library.custom_op("mylib::add_mutate", mutates_args={"x"})
+def add_mutate(x: Tensor, y: Tensor) -> None:
+    x.add_(y)
+```
+
 ```{dropdown} More details on mutation, aliasing, and transforms
 `custom_op` asks for a precise mutation and aliasing contract because PyTorch
 uses that contract in FakeTensor, autograd, functionalization, and
