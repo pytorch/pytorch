@@ -178,7 +178,12 @@ class QuackLocalReduceInfo:
     kind: str = "sum"
     scale: float = 1.0
     max_power: int = 8
+    output_node: torch.fx.Node | None = None
     extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
+
+    @property
+    def aux_output_node(self) -> torch.fx.Node:
+        return self.output_node if self.output_node is not None else self.reduce_node
 
 
 @dataclass(frozen=True)
@@ -632,6 +637,8 @@ def _match_quack_scaled_local_n_amax_reduce(
         feeds_main=local_reduce.feeds_main,
         kind=local_reduce.kind,
         scale=local_reduce.scale,
+        max_power=local_reduce.max_power,
+        output_node=node,
         extra_skip_nodes=local_reduce.extra_skip_nodes | frozenset((node,)),
     )
 
@@ -724,13 +731,14 @@ def _match_quack_local_n_amax_scale_view(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=aux_output_node,
+        reduce_node=reduce_node,
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
         kind="amax_abs",
         scale=scale,
+        output_node=aux_output_node,
         extra_skip_nodes=frozenset(extra_skip_nodes | {reduce_node, abs_node}),
     )
 
@@ -786,13 +794,14 @@ def _match_quack_local_n_mx_scale_view(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=aux_view.node,
+        reduce_node=reduce_node,
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
         kind="mx_e8m0_scale",
         max_power=max_power,
+        output_node=aux_view.node,
         extra_skip_nodes=frozenset((scale_node, reduce_node, abs_node, aux_view.node)),
     )
 
@@ -979,6 +988,8 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 or _match_quack_local_n_mx_scale_view(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
+                if not _quack_output_uses_node(output_value[0], local_reduce.aux_output_node):
+                    skip_nodes.add(local_reduce.aux_output_node)
                 if not _quack_output_uses_node(output_value[0], local_reduce.reduce_node):
                     skip_nodes.add(local_reduce.reduce_node)
                 for skip_node in local_reduce.extra_skip_nodes:
