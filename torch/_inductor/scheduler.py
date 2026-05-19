@@ -35,7 +35,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from .ir import ComputedBuffer, Pointwise
 
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
     from types import ModuleType
@@ -107,7 +106,6 @@ from .utils import (
 )
 from .virtualized import V
 
-
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
@@ -128,9 +126,9 @@ class FusionResult:
     future: LambdaFuture | None = None
 
     def __post_init__(self):
-        assert (self.should_fuse is not None) ^ (self.callable_fn is not None), (
-            "Fusion result should contain either fusion decision or callable_fn, not both"
-        )
+        assert (self.should_fuse is not None) ^ (
+            self.callable_fn is not None
+        ), "Fusion result should contain either fusion decision or callable_fn, not both"
 
     @classmethod
     def fuse(cls, should_fuse: bool):
@@ -1126,8 +1124,7 @@ class BaseSchedulerNode:
         """Longer form printout for trace logs"""
         name = self.get_name()
         buf = IndentedBuffer()
-        buf.splice(
-            f"""\
+        buf.splice(f"""\
 {name}: {type(self).__name__}({type(getattr(self, "node", None)).__name__})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
@@ -1135,8 +1132,7 @@ class BaseSchedulerNode:
 {name}.min_input_distance = {self.min_input_distance}
 {name}.max_input_distance = {self.max_input_distance}
 {name}.outputs = [
-        """
-        )
+        """)
         with buf.indent():
             for out in self.get_outputs():
                 buf.splice(out.debug_str())
@@ -2324,9 +2320,9 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self) -> bool:
-        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
-            f"{type(self.node)=}"
-        )
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
 
         # self._body containing partial accumulate means the reduction is
         # converted to a pointwise node.  Need this extra check since
@@ -2341,9 +2337,9 @@ class SchedulerNode(BaseSchedulerNode):
         return self.node.get_reduction_type() == "dot"
 
     def is_split_scan(self) -> bool:
-        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
-            f"{type(self.node)=}"
-        )
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
         )
@@ -2715,8 +2711,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         name = self.get_name()
         node_typestr = ",".join(type(n).__name__ for n in self.snodes)
         buf = IndentedBuffer()
-        buf.splice(
-            f"""\
+        buf.splice(f"""\
 {name}: {type(self).__name__}({node_typestr})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
@@ -2724,8 +2719,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 {name}.min_input_distance = {self.min_input_distance}
 {name}.max_input_distance = {self.max_input_distance}
 {name}.outputs = [
-            """
-        )
+            """)
         with buf.indent():
             for out in self.get_outputs():
                 buf.splice(out.debug_str())
@@ -4075,7 +4069,10 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
         if config.aten_distributed_optimizations.enable_simple_overlap:
-            if not config.reorder_for_peak_memory and not config.reorder_for_compute_comm_overlap:
+            if (
+                not config.reorder_for_peak_memory
+                and not config.reorder_for_compute_comm_overlap
+            ):
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 
                 assign_memory_planning_info_for_scheduler_buffers(
@@ -4236,9 +4233,9 @@ class Scheduler:
                 node.log_details()
 
     def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
-        assert node.get_origins() is not None, (
-            "All nodes passed to scheduling must have an origin"
-        )
+        assert (
+            node.get_origins() is not None
+        ), "All nodes passed to scheduling must have an origin"
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -4422,9 +4419,9 @@ class Scheduler:
                 )
                 # if a kernel takes unbacked symints, register dependencies
                 for s in unbacked_symbol_uses:
-                    assert s in unbacked_symbol_to_origin_node, (
-                        f"{s} not in {unbacked_symbol_to_origin_node}"
-                    )
+                    assert (
+                        s in unbacked_symbol_to_origin_node
+                    ), f"{s} not in {unbacked_symbol_to_origin_node}"
                     if (r := unbacked_symbol_to_origin_node[s]) is not None:
                         for buf in self.name_to_node[r].get_outputs():
                             node.add_fake_dep(StarDep(buf.get_name()))
@@ -4507,9 +4504,9 @@ class Scheduler:
         if has_non_input_unbacked_defs:
             for out in V.graph.graph_outputs:
                 for s in out.get_free_symbol_uses(unbacked_only=True):
-                    assert s in unbacked_symbol_to_origin_node, (
-                        f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                    )
+                    assert (
+                        s in unbacked_symbol_to_origin_node
+                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                     if r := unbacked_symbol_to_origin_node[s]:
                         for buf_name in self.name_to_node[r].get_buffer_names():
                             log.debug(
@@ -5790,9 +5787,9 @@ class Scheduler:
         ] = {}
 
         template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
-        deferred_prologue_fusions: list[
-            tuple[BaseSchedulerNode, BaseSchedulerNode]
-        ] = []
+        deferred_prologue_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]] = (
+            []
+        )
 
         possible_fusions = self.get_possible_fusions(
             nodes,
@@ -6194,7 +6191,8 @@ class Scheduler:
         def check_all_pairs(nodes: list[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
                 for node2 in nodes[
-                    node1_index + 1 : node1_index
+                    node1_index
+                    + 1 : node1_index
                     + 1
                     + config.max_fusion_buffer_group_pairwise_attempts
                 ]:
@@ -7377,7 +7375,7 @@ class Scheduler:
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
-            (expand_dim, smaller_node, expand_size) = expand_analysis
+            expand_dim, smaller_node, expand_size = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self._score_fusion_memory_for_can_fuse(
                 node1,
@@ -8227,9 +8225,9 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        assert not is_gpu(device.type) or device.index is not None, (
-            f"{device} should have been normalized in lowering"
-        )
+        assert (
+            not is_gpu(device.type) or device.index is not None
+        ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
@@ -8758,12 +8756,10 @@ class Scheduler:
             num_iters += 1
 
         if num_iters > len(nodes):
-            raise RuntimeError(
-                """
+            raise RuntimeError("""
                 Failed to schedule, while loop ran too long when
                 reordering for minimizing the num of partitions
-                """
-            )
+                """)
 
         return schedule
 
@@ -9005,9 +9001,9 @@ class Scheduler:
             if self.default_device_context and device_need_guard(
                 self.default_device_context.type
             ):
-                assert self.default_device_context.index is not None, (
-                    "device should have an index"
-                )
+                assert (
+                    self.default_device_context.index is not None
+                ), "device should have an index"
                 V.graph.wrapper_code.codegen_device_guard_enter(
                     self.default_device_context.index
                 )
@@ -9083,9 +9079,9 @@ class Scheduler:
 
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):
-                assert len(partition) >= 1, (
-                    f"Each partition must have at least one node but found {len(partition)}"
-                )
+                assert (
+                    len(partition) >= 1
+                ), f"Each partition must have at least one node but found {len(partition)}"
 
                 if signature.skip_cudagraph:
                     self._codegen(partition)
@@ -9098,9 +9094,9 @@ class Scheduler:
         # See [Note: Graph Partition Map for CUDAGraph]
         if num_partitions > 0:
             assert V.graph.partition_maps is not None
-            assert num_partitions == len(V.graph.partition_maps), (
-                f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
-            )
+            assert num_partitions == len(
+                V.graph.partition_maps
+            ), f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
@@ -9305,9 +9301,9 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        assert all(node.get_device() == device for node in subkernel_nodes), (
-            "All nodes in a combo kernel group must be on the same device"
-        )
+        assert all(
+            node.get_device() == device for node in subkernel_nodes
+        ), "All nodes in a combo kernel group must be on the same device"
 
         if not config.benchmark_combo_kernel:
             return True
