@@ -2,7 +2,6 @@
 import os
 import tempfile
 import textwrap
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -18,21 +17,13 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfNoCuteDSL,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     requires_gpu,
     requires_triton,
 )
-
-
-try:
-    import cutlass  # noqa: F401
-    import cutlass.cute as cute
-
-    HAS_CUTLASS = True
-except ImportError:
-    HAS_CUTLASS = False
 
 
 CUTEDSL_ADD_TEMPLATE = r"""
@@ -83,7 +74,7 @@ CUTEDSL_ADD_TEMPLATE_WITH_PRECOMPILE = (
 import os
 import tempfile
 
-_PRECOMPILE_SENTINEL = os.path.join(tempfile.gettempdir(), "cutedsl_test_precompile_sentinel")
+_PRECOMPILE_SENTINEL = os.path.join(tempfile.gettempdir(), "SENTINEL_PLACEHOLDER")
 
 def {{kernel_name}}_precompile(precompile_shapes, precompile_dtypes, device_index=0):
     with open(_PRECOMPILE_SENTINEL, "w") as f:
@@ -253,8 +244,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             pool.shutdown(wait=True)
 
 
-@unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
-@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+@skipIfNoCuteDSL
 class TestCuteDSLSubprocessCompile(TestCase):
     def _compile_and_run_add(self, template_name):
         """Compile a CuteDSL add kernel via torch.compile and verify correctness."""
@@ -353,20 +343,22 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
     def test_cutedsl_subprocess_precompile_invoked(self):
         """Verify that subprocess actually calls _precompile for a template that defines it."""
+        import uuid
+
         from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
         from torch._inductor.ir import TensorBox
         from torch._inductor.lowering import lowerings
         from torch._inductor.utils import run_and_get_code
 
-        sentinel_path = os.path.join(
-            tempfile.gettempdir(), "cutedsl_test_precompile_sentinel"
+        sentinel_name = f"cutedsl_precompile_{uuid.uuid4().hex[:8]}"
+        sentinel_path = os.path.join(tempfile.gettempdir(), sentinel_name)
+        source = CUTEDSL_ADD_TEMPLATE_WITH_PRECOMPILE.replace(
+            "SENTINEL_PLACEHOLDER", sentinel_name
         )
-        if os.path.exists(sentinel_path):
-            os.unlink(sentinel_path)
 
         template = CuteDSLTemplate(
             name="test_add_precompile",
-            source=CUTEDSL_ADD_TEMPLATE_WITH_PRECOMPILE,
+            source=source,
         )
 
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
@@ -404,7 +396,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     self.assertEqual(result, x + y)
                     self.assertTrue(
                         os.path.exists(sentinel_path),
-                        "Subprocess _precompile was not invoked — sentinel file missing",
+                        "Subprocess _precompile was not invoked -- sentinel file missing",
                     )
         finally:
             if os.path.exists(sentinel_path):
@@ -591,7 +583,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
         The disk key includes the device capability (arch), so devices with
         different compute capabilities get distinct keys. On a single-arch
-        multi-GPU host, device_index alone does NOT change the key — the arch
+        multi-GPU host, device_index alone does NOT change the key -- the arch
         is what matters. This test only asserts inequality when the two devices
         actually differ in capability.
         """
@@ -604,7 +596,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         cap1 = torch.cuda.get_device_capability(1)
         if cap0 == cap1:
             self.skipTest(
-                "Both GPUs have the same compute capability — "
+                "Both GPUs have the same compute capability -- "
                 "disk keys are expected to match"
             )
 
@@ -653,7 +645,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         """End-to-end test: subprocess compiles via TVM FFI, writes .o to disk,
         parent loads .o without recompiling, produces correct results.
 
-        This exercises the real export_to_c → load_module path through
+        This exercises the real export_to_c -> load_module path through
         cutedsl_cache.py. Requires CUTLASS + a CUDA GPU.
         """
         import shutil
@@ -663,6 +655,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
             _worker_compile_pycodecache_kernel,
         )
         from torch._inductor.runtime.cutedsl_cache import _cache_dir
+
+        dev_idx = torch.cuda.current_device()
 
         source = textwrap.dedent("""\
             import torch
@@ -755,9 +749,10 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 "input_b": "float32",
                 "output": "float32",
             },
-            "device_index": 0,
+            "device_index": dev_idx,
         }
 
+        device = f"cuda:{dev_idx}"
         with fresh_cache():
             cache_dir = _cache_dir()
             if cache_dir.exists():
@@ -775,7 +770,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 self.assertGreater(
                     len(o_files),
                     0,
-                    "No .o artifacts written — export_to_c may have failed",
+                    "No .o artifacts written -- export_to_c may have failed",
                 )
 
                 # --- Simulate parent: fresh module load, should hit disk cache ---
@@ -790,15 +785,15 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     "Fresh module should start with compile_count=0",
                 )
 
-                x = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                y = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                out = torch.empty(8, 4, device="cuda", dtype=torch.float32)
+                x = torch.randn(8, 4, device=device, dtype=torch.float32)
+                y = torch.randn(8, 4, device=device, dtype=torch.float32)
+                out = torch.empty(8, 4, device=device, dtype=torch.float32)
                 parent_mod.test_kernel_main(x, y, out)
 
                 self.assertEqual(
                     parent_mod.compile_count,
                     0,
-                    "Parent called cute.compile() — disk cache was NOT loaded. "
+                    "Parent called cute.compile() -- disk cache was NOT loaded. "
                     "The subprocess .o artifact did not transfer correctly.",
                 )
                 self.assertEqual(
@@ -826,6 +821,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
             _worker_compile_pycodecache_kernel,
         )
         from torch._inductor.runtime.cutedsl_cache import _cache_dir
+
+        dev_idx = torch.cuda.current_device()
 
         source = textwrap.dedent("""\
             import torch
@@ -932,9 +929,10 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 "in_ptr1": "float32",
                 "output": "float32",
             },
-            "device_index": 0,
+            "device_index": dev_idx,
         }
 
+        device = f"cuda:{dev_idx}"
         with fresh_cache():
             cache_dir = _cache_dir()
             if cache_dir.exists():
@@ -952,7 +950,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 self.assertGreater(
                     len(o_files),
                     0,
-                    "No .o artifacts written — export_to_c may have failed",
+                    "No .o artifacts written -- export_to_c may have failed",
                 )
 
                 # --- Simulate parent: fresh module load, should hit disk cache ---
@@ -967,15 +965,15 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     "Fresh module should start with compile_count=0",
                 )
 
-                x = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                y = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                out = torch.empty(8, 4, device="cuda", dtype=torch.float32)
+                x = torch.randn(8, 4, device=device, dtype=torch.float32)
+                y = torch.randn(8, 4, device=device, dtype=torch.float32)
+                out = torch.empty(8, 4, device=device, dtype=torch.float32)
                 parent_mod.test_kernel_main(x, y, out)
 
                 self.assertEqual(
                     parent_mod.compile_count,
                     0,
-                    "Parent called cute.compile() — disk cache was NOT loaded. "
+                    "Parent called cute.compile() -- disk cache was NOT loaded. "
                     "The subprocess .o artifact did not transfer correctly.",
                 )
                 # Verify artifact wrapping worked
@@ -994,7 +992,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
     def test_cutedsl_subprocess_pool_handoff(self):
         """Test the real subprocess pool path: serialization, result handoff, parent reload.
 
-        Goes through AsyncCompile.cutedsl() → SubprocPool → parent reload
+        Goes through AsyncCompile.cutedsl() -> SubprocPool -> parent reload
         WITHOUT precompile_metadata, since SubprocPool workers use forked processes
         that cannot re-initialize CUDA. This exercises the subprocess boundary
         (serialization, worker startup, result handoff) that the direct-call
@@ -1005,16 +1003,8 @@ class TestCuteDSLSubprocessCompile(TestCase):
         """
         source = textwrap.dedent("""\
             import torch
-            import cutlass
-            import cutlass.cute as cute
-            from cutlass.cute.runtime import from_dlpack
-            from cutlass import cuda
 
             def test_pool_kernel_main(input_a, input_b, output, stream=None):
-                cute_a = from_dlpack(input_a)
-                cute_b = from_dlpack(input_b)
-                cute_c = from_dlpack(output)
-                # Use a simple Python loop for correctness (no CUDA needed at load time)
                 for i in range(input_a.shape[0]):
                     for j in range(input_a.shape[1]):
                         output[i, j] = input_a[i, j] + input_b[i, j]
@@ -1025,14 +1015,16 @@ class TestCuteDSLSubprocessCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile.use_process_pool())
 
+            dev_idx = torch.cuda.current_device()
+            device = f"cuda:{dev_idx}"
             with fresh_cache():
                 async_compile = AsyncCompile()
                 wrapper = async_compile.cutedsl("test_pool_kernel", source)
                 kernel_wrapper = wrapper.result()
 
-                x = torch.randn(4, 4, device="cuda", dtype=torch.float32)
-                y = torch.randn(4, 4, device="cuda", dtype=torch.float32)
-                out = torch.empty(4, 4, device="cuda", dtype=torch.float32)
+                x = torch.randn(4, 4, device=device, dtype=torch.float32)
+                y = torch.randn(4, 4, device=device, dtype=torch.float32)
+                out = torch.empty(4, 4, device=device, dtype=torch.float32)
                 kernel_wrapper.run(x, y, out)
                 self.assertEqual(out, x + y)
 
@@ -1092,14 +1084,17 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 shutil.rmtree(cache_dir)
 
             try:
-                # Write source to a file so CuTe DSL can parse it
+                import cutlass.cute as cute
+
                 import torch._inductor.codecache as codecache
 
                 key, path = codecache.PyCodeCache.write(source)
                 mod = codecache.PyCodeCache.load_by_key_path(key, path)
 
-                a = torch.randn(4, 4, device="cuda")
-                b = torch.empty(4, 4, device="cuda")
+                dev_idx = torch.cuda.current_device()
+                device = f"cuda:{dev_idx}"
+                a = torch.randn(4, 4, device=device)
+                b = torch.empty(4, 4, device=device)
                 compiled_fn = cute.compile(
                     mod._copy_jit,
                     mod._to_ct(a),
@@ -1122,7 +1117,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                             config_key,
                             runtime_key,
                             compiled_fn,
-                            device_index=0,
+                            device_index=dev_idx,
                         )
                     except Exception as e:
                         errors.append((thread_id, e))
@@ -1135,15 +1130,15 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 # Verify the file is valid by loading it
                 fresh_mem: dict = {}
                 loaded = disk_cache_get(
-                    fresh_mem, path, config_key, runtime_key, device_index=0
+                    fresh_mem, path, config_key, runtime_key, device_index=dev_idx
                 )
                 self.assertIsNotNone(
                     loaded, ".o file missing or corrupt after concurrent writes"
                 )
 
                 # Verify the loaded function actually works
-                x = torch.randn(4, 4, device="cuda")
-                out = torch.empty(4, 4, device="cuda")
+                x = torch.randn(4, 4, device=device)
+                out = torch.empty(4, 4, device=device)
                 loaded(x, out)
                 self.assertEqual(out, x)
             finally:
@@ -1151,7 +1146,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                     shutil.rmtree(cache_dir)
 
     def test_corrupt_cache_falls_back_cleanly(self):
-        """A corrupt .o on disk should not crash — disk_cache_get returns None
+        """A corrupt .o on disk should not crash -- disk_cache_get returns None
         so the caller falls back to recompile."""
         import shutil
 
@@ -1200,6 +1195,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
         import shutil
 
         from torch._inductor.runtime.cutedsl_cache import _cache_dir, _make_disk_key
+
+        dev_idx = torch.cuda.current_device()
+        device = f"cuda:{dev_idx}"
 
         source = textwrap.dedent("""\
             import torch
@@ -1276,7 +1274,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 key, path = codecache.PyCodeCache.write(source)
                 config_key = ("test_corrupt_e2e",)
                 runtime_key = ((8, 4), torch.float32, (8, 4), torch.float32)
-                h = _make_disk_key(path, config_key, runtime_key, device_index=0)
+                h = _make_disk_key(path, config_key, runtime_key, device_index=dev_idx)
                 obj_path = cache_dir / f"{h}.o"
 
                 # Write corrupt data at the expected .o path
@@ -1287,9 +1285,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 mod = codecache.PyCodeCache.load_by_key_path(key, path)
                 self.assertEqual(mod.compile_count, 0)
 
-                x = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                y = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                out = torch.empty(8, 4, device="cuda", dtype=torch.float32)
+                x = torch.randn(8, 4, device=device, dtype=torch.float32)
+                y = torch.randn(8, 4, device=device, dtype=torch.float32)
+                out = torch.empty(8, 4, device=device, dtype=torch.float32)
                 mod.test_kernel_main(x, y, out)
 
                 self.assertEqual(
@@ -1312,15 +1310,15 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
                 verify_mem: dict = {}
                 reloaded = disk_cache_get(
-                    verify_mem, path, config_key, runtime_key, device_index=0
+                    verify_mem, path, config_key, runtime_key, device_index=dev_idx
                 )
                 self.assertIsNotNone(
                     reloaded,
-                    "Rewritten .o should be loadable — the corrupt file was not replaced",
+                    "Rewritten .o should be loadable -- the corrupt file was not replaced",
                 )
-                x2 = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                y2 = torch.randn(8, 4, device="cuda", dtype=torch.float32)
-                out2 = torch.empty(8, 4, device="cuda", dtype=torch.float32)
+                x2 = torch.randn(8, 4, device=device, dtype=torch.float32)
+                y2 = torch.randn(8, 4, device=device, dtype=torch.float32)
+                out2 = torch.empty(8, 4, device=device, dtype=torch.float32)
                 reloaded(x2, y2, out2)
                 self.assertEqual(
                     out2, x2 + y2, "Reloaded artifact should execute correctly"
@@ -1514,7 +1512,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
         from torch._inductor.codegen.cutedsl.cutedsl_scheduling import CuteDSLScheduling
 
         class _SymbolicSize:
-            """Mimics torch.SymInt — int() raises TypeError."""
+            """Mimics torch.SymInt -- int() raises TypeError."""
 
             def __int__(self):
                 raise TypeError("Cannot convert symbolic size to int")
@@ -1611,11 +1609,11 @@ class TestCuteDSLSubprocessCompile(TestCase):
             key_v1,
             key_v2,
             "Different source content (different PyCodeCache paths) must produce "
-            "different disk cache keys — this is how template changes invalidate "
+            "different disk cache keys -- this is how template changes invalidate "
             "stale artifacts",
         )
 
-        # Same path → same key (deterministic)
+        # Same path -> same key (deterministic)
         key_again = _make_disk_key(
             "/cache/abc123_v1.py", config_key, runtime_key, device_index=0
         )

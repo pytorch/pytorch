@@ -132,27 +132,26 @@ def disk_cache_set(
     d = _cache_dir()
     d.mkdir(parents=True, exist_ok=True)
     obj_path = d / f"{h}.o"
-    if not obj_path.exists():
-        import tempfile
+    import tempfile
 
-        tmp_path = None
-        try:
-            fd, tmp_path = tempfile.mkstemp(dir=str(d), suffix=".o.tmp")
-            os.close(fd)
-            compiled_fn.export_to_c(object_file_path=tmp_path, function_name="func")
-            with open(tmp_path, "rb") as f:
-                patched = _fix_elf_dup_text_flags(f.read())
-            with open(tmp_path, "wb") as f:
-                f.write(patched)
-            os.replace(tmp_path, str(obj_path))
-        except (AttributeError, RuntimeError, TypeError):
-            log.debug(
-                "export_to_c not available for %s, skipping disk persistence",
-                type(compiled_fn).__name__,
-                exc_info=True,
-            )
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=str(d), suffix=".o.tmp")
+        os.close(fd)
+        compiled_fn.export_to_c(object_file_path=tmp_path, function_name="func")
+        with open(tmp_path, "rb") as f:
+            patched = _fix_elf_dup_text_flags(f.read())
+        with open(tmp_path, "wb") as f:
+            f.write(patched)
+        os.replace(tmp_path, str(obj_path))
+    except (AttributeError, RuntimeError, TypeError):
+        log.debug(
+            "export_to_c not available for %s, skipping disk persistence",
+            type(compiled_fn).__name__,
+            exc_info=True,
+        )
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
