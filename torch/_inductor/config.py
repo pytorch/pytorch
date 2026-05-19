@@ -1666,6 +1666,10 @@ class cpp:
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
     )  # type: ignore[assignment]
 
+    # Target CPU architecture for C++ wrapper compilation. When unset, Inductor
+    # uses the platform default. Set to "" to suppress the architecture flag.
+    march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
