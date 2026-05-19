@@ -15,6 +15,8 @@ from collections.abc import Generator, Iterable
 import torch
 import torch.fx
 from torch._dynamo import config
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -31,6 +33,7 @@ UsageIndex = tuple[int, int]
 log = logging.getLogger(__name__)
 
 last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
+_MISSING = object()
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -74,6 +77,12 @@ when they are created in output_graph.
     sub_gms: dict[str, torch.fx.GraphModule] = {}
 
     for region_group in duplicated_region_groups:
+        if any(
+            _has_mutated_external_input(region, node_to_mutated_arg_positions)
+            for region in region_group
+        ):
+            continue
+
         inds_with_external_users = _get_all_output_indices(region_group)
         region = region_group[0]
         (
@@ -85,6 +94,22 @@ when they are created in output_graph.
 
         # Ignore regions with no args for now, could they possibly be evaluated at compile time?
         if not list(external_node_usages):
+            continue
+
+        if any(
+            not _are_valid_invoke_subgraph_outputs(region, inds_with_external_users)
+            for region in region_group
+        ):
+            continue
+
+        if any(
+            not _are_valid_invoke_subgraph_operands(
+                _get_sub_args(region, external_node_usages, node_usage_to_tuple_elems)[
+                    0
+                ]
+            )
+            for region in region_group
+        ):
             continue
 
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
@@ -132,13 +157,13 @@ def _replace_region_with_subgraph(
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
-    sub_args = []
-    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
+    sub_args, flattened_getitem_nodes = _get_sub_args(
+        region, external_node_usages, node_usage_to_tuple_elems
+    )
     for usages in external_node_usages:
         usage = next(iter(usages))
         node_ind, usage_ind = usage
         node = region[node_ind]
-        flattened_args_kwargs = _get_flat_args(node, {})
         for user_ind, node_usage_ind in usages:
             user = region[user_ind]
             if user in node_to_mutated_arg_positions:
@@ -147,12 +172,6 @@ def _replace_region_with_subgraph(
                         "NYI: Failed to substitute region %s due to mutation", region
                     )
                     return
-        if usage in node_usage_to_tuple_elems:
-            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
-            flattened_getitem_nodes.update(tuple_elems)
-            sub_args.extend(tuple_elems)
-        else:
-            sub_args.append(flattened_args_kwargs[usage_ind])
 
     # Input/Output aliasing not supported in HOPs today
     # Note: we should use the nodes in the original graph (the region here)
@@ -215,6 +234,118 @@ def _replace_region_with_subgraph(
         print(_detect_cycles(graph, node_to_additional_deps))
         _stable_topological_sort(graph, node_to_additional_deps)
         graph.lint()
+
+
+def _get_sub_args(
+    region: Region,
+    external_node_usages: Iterable[OrderedSet[UsageIndex]],
+    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]],
+) -> tuple[list[Node], OrderedSet[Node]]:
+    sub_args = []
+    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
+    for usages in external_node_usages:
+        usage = next(iter(usages))
+        node_ind, usage_ind = usage
+        node = region[node_ind]
+        flattened_args_kwargs = _get_flat_args(node, {})
+        if usage in node_usage_to_tuple_elems:
+            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
+            flattened_getitem_nodes.update(tuple_elems)
+            sub_args.extend(tuple_elems)
+        else:
+            sub_args.append(flattened_args_kwargs[usage_ind])
+
+    return sub_args, flattened_getitem_nodes
+
+
+def _has_mutated_external_input(
+    region: Region,
+    node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
+) -> bool:
+    region_unique = set(region)
+
+    for node in region:
+        if node in node_to_mutated_arg_positions:
+            flattened_args_kwargs = _get_flat_args(node, {})
+            for arg_index in node_to_mutated_arg_positions[node]:
+                if arg_index >= len(flattened_args_kwargs):
+                    continue
+                arg = flattened_args_kwargs[arg_index]
+                if isinstance(arg, Node) and arg not in region_unique:
+                    return True
+
+        if not (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+        ):
+            continue
+
+        schema_args = node.target._schema.arguments
+        for arg, arg_schema in zip(node.args, schema_args):
+            if arg_schema.is_write and _contains_external_node(arg, region_unique):
+                return True
+
+        for arg_schema in schema_args[len(node.args) :]:
+            if (
+                arg_schema.is_write
+                and arg_schema.name in node.kwargs
+                and _contains_external_node(node.kwargs[arg_schema.name], region_unique)
+            ):
+                return True
+
+    return False
+
+
+def _contains_external_node(arg: object, region_unique: set[Node]) -> bool:
+    flattened_args, _ = torch.utils._pytree.tree_flatten(arg)
+    return any(
+        isinstance(flat_arg, Node) and flat_arg not in region_unique
+        for flat_arg in flattened_args
+    )
+
+
+def _are_valid_invoke_subgraph_operands(nodes: list[Node]) -> bool:
+    return all(_is_valid_invoke_subgraph_operand(node) for node in nodes)
+
+
+def _is_valid_invoke_subgraph_operand(node: Node) -> bool:
+    example_value = _get_example_value(node)
+    if example_value is _MISSING:
+        return False
+
+    return (
+        example_value is None
+        or isinstance(
+            example_value,
+            (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject),
+        )
+        or is_opaque_type(type(example_value))
+    )
+
+
+def _are_valid_invoke_subgraph_outputs(
+    region: Region, inds_with_external_users: list[int]
+) -> bool:
+    return all(
+        _is_valid_invoke_subgraph_output(_get_example_value(region[ind]))
+        for ind in inds_with_external_users
+    )
+
+
+def _is_valid_invoke_subgraph_output(example_value: object) -> bool:
+    if example_value is _MISSING or example_value is None:
+        return False
+    if isinstance(example_value, tuple):
+        return all(_is_valid_invoke_subgraph_output(v) for v in example_value)
+    return isinstance(example_value, (torch.Tensor, int, torch.SymInt))
+
+
+def _get_example_value(node: Node) -> object:
+    if "example_value" in node.meta:
+        return node.meta["example_value"]
+    if "val" in node.meta:
+        return node.meta["val"]
+    return _MISSING
 
 
 def _get_external_inputs(
@@ -475,9 +606,10 @@ def _has_aliasing(
     for node in inputs:
         if node in flattened_getitem_nodes:
             continue
-        example_value = node.meta["example_value"]
-        if isinstance(example_value, torch.Tensor):
-            storage = StorageWeakRef(example_value._typed_storage())
+        can_check, storage = _get_tensor_storage_for_alias_check(region, node)
+        if not can_check:
+            return True
+        if storage is not None:
             if storage in input_storages:
                 # input-input aliasing
                 log.debug(
@@ -494,11 +626,20 @@ def _has_aliasing(
         if out_node in flattened_getitem_nodes:
             continue
         if out_node:
-            example_value = out_node.meta["example_value"]
+            example_value = _get_example_value(out_node)
+            if example_value is _MISSING:
+                log.debug(
+                    "NYI: Failed to substitute region %s because node %s has no example value for alias checking",
+                    region,
+                    out_node,
+                )
+                return True
             if isinstance(example_value, list):
                 raise AssertionError("expected example_value to not be a list")
-            if isinstance(example_value, torch.Tensor):
-                storage = StorageWeakRef(example_value._typed_storage())
+            can_check, storage = _get_tensor_storage_for_alias_check(region, out_node)
+            if not can_check:
+                return True
+            if storage is not None:
                 if storage in output_storages:
                     # output-output aliasing
                     log.debug(
@@ -525,8 +666,32 @@ def _has_aliasing(
     return False
 
 
+def _get_tensor_storage_for_alias_check(
+    region: Region, node: Node
+) -> tuple[bool, StorageWeakRef | None]:
+    example_value = _get_example_value(node)
+    if example_value is _MISSING:
+        log.debug(
+            "NYI: Failed to substitute region %s because node %s has no example value for alias checking",
+            region,
+            node,
+        )
+        return False, None
+    if not isinstance(example_value, torch.Tensor):
+        return True, None
+    try:
+        return True, StorageWeakRef(example_value._typed_storage())
+    except NotImplementedError:
+        log.debug(
+            "NYI: Failed to substitute region %s because node %s has tensor storage that cannot be inspected",
+            region,
+            node,
+        )
+        return False, None
+
+
 def _is_tuple_node(node: Node) -> bool:
-    return isinstance(node.meta["example_value"], tuple)
+    return isinstance(_get_example_value(node), tuple)
 
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
@@ -552,7 +717,7 @@ def _get_flattened_node_indices(node: Node, region: Region) -> OrderedSet[int]:
 def _create_getitem_nodes(
     node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
 ) -> tuple[list[Node], dict[tuple[int, ...], int]]:
-    tup = node.meta["example_value"]
+    tup = _get_example_value(node)
     if not isinstance(tup, tuple):
         raise AssertionError("_get_getitem_children expects tuple")
 
