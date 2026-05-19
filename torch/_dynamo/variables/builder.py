@@ -364,6 +364,8 @@ class _LocalToken:
     """Root token: a top-level function-argument access."""
 
     name: str
+    is_varargs: bool = False
+    is_varkw: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -398,8 +400,8 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
     access) or a ``_SubscriptToken`` (``dict[key]`` access with an
     ``int`` or ``str`` key).
 
-    Returns ``None`` for sources that we know we can'r represent them
-    in our sepecs.
+    Returns ``None`` for sources that we know we can't represent them
+    in shapes specs.
     """
     path: list[_AccessToken] = []
     cur: Source = source
@@ -412,17 +414,20 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         # ``self.weight`` → dynamo emits
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
         # '_parameters'), 'weight')``. Collapse that pair into a single
-        # attr token so the user's ``ObjectSpec({"weight": ...})``
-        # matches the user-facing attribute name.
+        # attr token.
         if isinstance(cur, DictGetItemSource) and isinstance(
             cur.base, UnspecializedParamBufferSource
         ):
             path.append(_AttrToken(cur.index))
             cur = cur.base.base
             continue
-        # Plain ``dict[key]`` access on a function-arg dict — emit a
-        # subscript token so ``DictSpec`` can be walked.
+        # Plain ``dict[key]`` access.
         if isinstance(cur, DictGetItemSource) and isinstance(cur.index, (int, str)):
+            path.append(_SubscriptToken(cur.index))
+            cur = cur.base
+            continue
+        # Integer subscript (e.g. *args[i] or list[i]).
+        if isinstance(cur, GetItemSource) and type(cur.index) is int:
             path.append(_SubscriptToken(cur.index))
             cur = cur.base
             continue
@@ -433,7 +438,9 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         return None
     if not cur.is_input:
         return None
-    path.append(_LocalToken(cur.local_name))
+    path.append(
+        _LocalToken(cur.local_name, is_varargs=cur.is_varargs, is_varkw=cur.is_varkw)
+    )
     path.reverse()
     return path
 
@@ -492,19 +499,58 @@ def _walk_spec(
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Walk a dynamo ``Source`` chain against the spec tree.
-
-    Returns the ``LeafSpec`` at the corresponding path, or ``None``
-    if the source isn't covered. See
-    ``_source_to_access_path`` for the set of supported source kinds.
+    """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
+    Returns ``None`` if the source isn't covered.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
     path = _source_to_access_path(source)
-    if path is None or not isinstance(path[0], _LocalToken):
+    if not path or not isinstance(path[0], _LocalToken):
         return None
-    # Seed at the named-arg root; descend the rest of the path.
-    current_spec: IntermediateSpec = shapes_spec._params._named_args.get(path[0].name)
+    params = shapes_spec._params
+    root = path[0]
+    if root.is_varargs:
+        # ``*args`` element access: root is the varargs local, next token must
+        # be an int subscript. A varargs local is always followed by a
+        # subscript token in ``_source_to_access_path``; anything else means
+        # the chain was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after *args local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if type(key) is not int:
+            raise RuntimeError(
+                f"Unexpected non-int subscript for *args access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varargs is None or not (0 <= key < len(params._varargs)):
+            return None
+        return _walk_spec(params._varargs[key], path[2:])
+    if root.is_varkw:
+        # ``**kwargs`` element access: root is the varkw local, next token must
+        # be a str subscript. A varkw local is always followed by a subscript
+        # token in ``_source_to_access_path``; anything else means the chain
+        # was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after **kwargs local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if not isinstance(key, str):
+            raise RuntimeError(
+                f"Unexpected non-str subscript for **kwargs access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varkw is None or key not in params._varkw:
+            return None
+
+        return _walk_spec(params._varkw[key], path[2:])
+    # Regular named arg: seed at the named-arg root and descend the rest.
+
+    current_spec: IntermediateSpec = params._named_args.get(root.name)
     return _walk_spec(current_spec, path[1:])
 
 
