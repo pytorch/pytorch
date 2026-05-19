@@ -341,7 +341,7 @@ def launch_build_group_ptrs_from_bases(
     )
 
 
-def {{kernel_name}}_precompile(precompile_shapes, precompile_dtypes, device_index=0):
+def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0):
     """Trigger CuTe DSL compilation with small representative tensors.
 
     Called by the subprocess worker to warm the disk cache so the parent
@@ -358,9 +358,15 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_dtypes, device_inde
     shape_out = tuple(precompile_shapes["output"])
     shape_offs = tuple(precompile_shapes["input_a_offs"])
 
-    input_a = torch.empty(shape_a, device=device, dtype=dtype_a)
-    input_b = torch.empty(shape_b, device=device, dtype=dtype_b)
-    buf_out = torch.empty(shape_out, device=device, dtype=dtype_out)
+    input_a = torch.empty_strided(
+        shape_a, tuple(precompile_strides["input_a"]), device=device, dtype=dtype_a,
+    )
+    input_b = torch.empty_strided(
+        shape_b, tuple(precompile_strides["input_b"]), device=device, dtype=dtype_b,
+    )
+    buf_out = torch.empty_strided(
+        shape_out, tuple(precompile_strides["output"]), device=device, dtype=dtype_out,
+    )
 
     G = shape_offs[0]
     offs_data = [shape_a[0] * (i + 1) // G for i in range(G)]
