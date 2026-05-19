@@ -114,6 +114,20 @@ class TestInplaceTag(TestCase):
                 tags=[torch.Tag.inplace],
             )
 
+    def test_return_not_tensor(self):
+        with self.assertRaisesRegex(ValueError, "return must be a Tensor"):
+            self.lib.define(
+                "bad_return_type(Tensor(a!) self) -> int(a!)",
+                tags=[torch.Tag.inplace],
+            )
+
+    def test_return_not_mutable_alias(self):
+        with self.assertRaisesRegex(ValueError, "return must be a mutable alias"):
+            self.lib.define(
+                "bad_return_mutability(Tensor(a!) self) -> Tensor(a)",
+                tags=[torch.Tag.inplace],
+            )
+
     def test_return_wrong_alias(self):
         with self.assertRaisesRegex(ValueError, "return the first mutable argument"):
             self.lib.define(
