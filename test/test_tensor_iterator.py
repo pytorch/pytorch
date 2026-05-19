@@ -5,12 +5,14 @@ import unittest
 
 import torch
 from torch._tensor_iterator import (
+    binary_float_op,
     binary_op,
     comparison_op,
     ConfigSpec,
     nullary_op,
     reduce_op,
     TensorIteratorConfig,
+    unary_float_op,
     unary_op,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -92,7 +94,7 @@ class TestTensorIteratorBuild(TestCase):
         )
         gc.collect()
         it = tail.build()
-        self.assertEqual(it.shape, (3,))
+        self.assertEqual(tuple(it.shape), (3,))
 
     def test_build_is_single_shot(self):
         # The C++ TensorIteratorConfig::build() std::moves out of its
@@ -114,6 +116,28 @@ class TestTensorIteratorBuild(TestCase):
             cfg.build()
         with self.assertRaisesRegex(RuntimeError, "already been used"):
             cfg.add_input(a)
+
+    def test_build_failure_poisons_config(self):
+        # TI's build() moves out of tensors_ inside populate_operands() before
+        # any of the type/overlap checks run. If a later check throws, the
+        # operands are gone but the wrapper would otherwise still appear
+        # reusable -- a retry would iterate moved-from MaybeOwneds. The
+        # binding sets the built flag *before* the C++ build() call so a
+        # thrown build still poisons the wrapper.
+        out = torch.empty(3, dtype=torch.int32)
+        a = torch.zeros(3, dtype=torch.float32)
+        cfg = (
+            TensorIteratorConfig()
+            .add_output(out)
+            .add_const_input(a)
+            .resize_outputs(False)
+            .enforce_safe_casting_to_output(True)
+            .promote_inputs_to_common_dtype(True)
+        )
+        with self.assertRaises(RuntimeError):
+            cfg.build()
+        with self.assertRaisesRegex(RuntimeError, "single-shot"):
+            cfg.build()
 
     def test_is_reduction_requires_defined_output(self):
         # at::TensorIterator::reduce_op gates is_reduction with
@@ -165,7 +189,7 @@ class TestTensorIteratorBuild(TestCase):
             promote_inputs_to_common_dtype=True,
         ).build()
 
-        self.assertEqual(it_fluent.shape, it_dc.shape)
+        self.assertEqual(tuple(it_fluent.shape), tuple(it_dc.shape))
         self.assertEqual(it_fluent.common_dtype, it_dc.common_dtype)
         self.assertEqual(it_fluent.dtype(0), it_dc.dtype(0))
 
@@ -355,7 +379,7 @@ class TestTensorIteratorBuild(TestCase):
             with self.subTest(name):
                 it_dc = spec.build()
                 it_fluent = fluent_setup(TensorIteratorConfig()).build()
-                self.assertEqual(it_dc.shape, it_fluent.shape, name)
+                self.assertEqual(tuple(it_dc.shape), tuple(it_fluent.shape), name)
                 self.assertEqual(it_dc.dtype(0), it_fluent.dtype(0), name)
                 self.assertEqual(it_dc.device(0).type, it_fluent.device(0).type, name)
                 self.assertEqual(it_dc.common_dtype, it_fluent.common_dtype, name)
@@ -379,38 +403,25 @@ class TestTensorIteratorBuild(TestCase):
             cfg.build()
 
     def test_enforce_linear_iteration_preserves_c_order(self):
-        # Without enforce_linear_iteration, the iterator reorders dims by
-        # stride magnitude (smallest first). For a row-major tensor this
-        # flips the leading axis to the end. With the flag on, dims are
-        # iterated in original C-order. We probe via element_strides:
-        # without the flag the output's element_strides should *end* with
-        # 1; with the flag they should *start* (after coalesce) with the
-        # outer dims in their original order.
-        a = torch.zeros(2, 3, 4)
-        b = torch.zeros(2, 3, 4)
-
-        no_flag = (
-            TensorIteratorConfig()
-            .add_output(None)
-            .add_const_input(a)
-            .add_const_input(b)
-            .promote_inputs_to_common_dtype(True)
-            .build()
-        )
+        # Probe with a non-contiguous input: a transposed (3, 4) tensor.
+        # The default reorder permutes dims into memory order so the iter
+        # collapses to one contiguous dim of length 12. With
+        # enforce_linear_iteration the perm is fixed at [n-1, ..., 0], so
+        # the iter cannot coalesce -- ndim stays at 2.
+        a = torch.zeros(4, 3).t()
+        no_flag = unary_op(None, a)
+        self.assertEqual(no_flag.ndim, 1)
+        self.assertEqual(no_flag.numel, 12)
         with_flag = (
             TensorIteratorConfig()
             .add_output(None)
             .add_const_input(a)
-            .add_const_input(b)
-            .promote_inputs_to_common_dtype(True)
+            .check_all_same_dtype(True)
             .enforce_linear_iteration(True)
             .build()
         )
-        # Both coalesce a fully-contiguous shape down to one dim, so
-        # numel must agree.
-        self.assertEqual(no_flag.numel, with_flag.numel)
-        # The flag is exercised; specific stride layouts are an
-        # implementation detail of reorder_dimensions.
+        self.assertEqual(with_flag.ndim, 2)
+        self.assertEqual(with_flag.numel, 12)
 
     def test_declare_static_dtype_and_device(self):
         a = torch.zeros(3, dtype=torch.float32)
@@ -653,6 +664,40 @@ class TestTensorIterator(TestCase):
         it = reduce_op(out, a)
         self.assertEqual(it.ntensors, 2)
         self.assertEqual(it.noutputs, 1)
+
+    def test_reduce_op_two_outputs(self, device):
+        # The (out, out2) overload covers things like at::min returning
+        # (values, indices). We don't need integer indices to exercise the
+        # binding; we just need two outputs that share the reduced shape.
+        a = torch.zeros(3, 4, device=device)
+        out = torch.empty(3, 1, device=device)
+        out2 = torch.empty(3, 1, device=device)
+        it = reduce_op(out, a, out2=out2)
+        self.assertEqual(it.ntensors, 3)
+        self.assertEqual(it.noutputs, 2)
+
+    def test_reduce_op_two_outputs_shape_mismatch_raises(self, device):
+        a = torch.zeros(3, 4, device=device)
+        out = torch.empty(3, 1, device=device)
+        out2 = torch.empty(1, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "identical sizes and strides"):
+            reduce_op(out, a, out2=out2)
+
+    def test_binary_float_op_promotes_integers(self, device):
+        # binary_float_op promotes integer inputs to the default float dtype
+        # so the kernel can dispatch a single float arithmetic path.
+        a = torch.zeros(3, 4, dtype=torch.int32, device=device)
+        b = torch.zeros(3, 4, dtype=torch.int64, device=device)
+        it = binary_float_op(None, a, b)
+        self.assertTrue(it.common_dtype.is_floating_point)
+        # The auto-allocated output picks up the promoted dtype.
+        self.assertTrue(it.dtype(0).is_floating_point)
+
+    def test_unary_float_op_promotes_integers(self, device):
+        a = torch.zeros(3, 4, dtype=torch.int32, device=device)
+        it = unary_float_op(None, a)
+        self.assertTrue(it.common_dtype.is_floating_point)
+        self.assertTrue(it.dtype(0).is_floating_point)
 
     def test_strides_are_bytes(self, device):
         a = torch.zeros(3, 4, dtype=torch.float32, device=device)

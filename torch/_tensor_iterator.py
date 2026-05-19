@@ -61,7 +61,12 @@ class TensorIterator:
         return self._impl.ndim
 
     @property
-    def shape(self) -> tuple[int, ...]:
+    def shape(self) -> memoryview:
+        """Iterator shape (post coalesce/reorder), as a zero-copy
+        ``memoryview`` of ``int64`` elements. The view is live for the
+        lifetime of this iterator; copy via ``tuple(it.shape)`` if you
+        need a snapshot. Hot-path readers (dispatch conditionals) get
+        index access without an allocation."""
         return self._impl.shape
 
     @property
@@ -90,16 +95,31 @@ class TensorIterator:
 
     @property
     def common_dtype(self) -> torch.dtype | None:
-        """The promoted computation dtype, or ``None`` if promotion was not requested."""
+        """The inferred computation dtype, or ``None`` if no single dtype
+        was inferred. Populated whenever TensorIterator can resolve a
+        common dtype -- under promotion flags, or when every input
+        already shares a dtype. ``None`` does not mean "promotion was
+        not requested"; it means inference produced no answer."""
         return self._impl.common_dtype
 
     def tensor(self, index: int) -> torch.Tensor:
+        """Return the iterator's current operand at ``index``.
+
+        Note: under ``promote_inputs_to_common_dtype`` /
+        ``cast_common_dtype_to_outputs`` (CPU paths), this may be a
+        promoted/cast kernel temporary rather than the tensor that was
+        registered with the config -- it's the iterator's view of the
+        operand a kernel would actually iterate over."""
         return self._impl.tensor(index)
 
     def input(self, index: int = 0) -> torch.Tensor:
+        """Return the iterator's current input. See :meth:`tensor` for the
+        promoted-temporary caveat."""
         return self._impl.input(index)
 
     def output(self, index: int = 0) -> torch.Tensor:
+        """Return the iterator's current output. See :meth:`tensor` for the
+        cast-temporary caveat."""
         return self._impl.output(index)
 
     def dtype(self, index: int = 0) -> torch.dtype:
@@ -108,8 +128,11 @@ class TensorIterator:
     def device(self, index: int = 0) -> torch.device:
         return self._impl.device(index)
 
-    def strides(self, index: int) -> tuple[int, ...]:
-        """Per-operand strides in bytes (post reorder/coalesce)."""
+    def strides(self, index: int) -> memoryview:
+        """Per-operand strides in bytes (post reorder/coalesce), as a
+        zero-copy ``memoryview`` of ``int64`` elements. The view is live
+        for the lifetime of this iterator; copy via ``tuple(it.strides(i))``
+        if you need a snapshot."""
         return self._impl.strides(index)
 
     def element_strides(self, index: int) -> tuple[int, ...]:
@@ -217,8 +240,30 @@ class TensorIteratorConfig:
 class ConfigSpec:
     """Dataclass-style alternative to :class:`TensorIteratorConfig`.
 
-    Defaults match the C++ ``TensorIteratorConfig`` defaults. ``outputs`` are
-    always registered before ``inputs`` and ``const_inputs``.
+    A canonical recipe -- *not* a faithful replay of arbitrary
+    ``TensorIteratorConfig`` call sequences. ``build()`` always registers
+    operands in the order ``outputs -> inputs -> const_inputs`` and applies
+    setters in one fixed order, so two configurations that differ only by
+    operand registration order or setter ordering can collapse to the same
+    ``ConfigSpec``. Notably:
+
+    * The fluent builder distinguishes ``add_input(a); add_const_input(b)``
+      from ``add_const_input(b); add_input(a)`` -- ``input(0)`` refers to
+      different operands. ``ConfigSpec`` cannot express that distinction:
+      every ``inputs[i]`` precedes every ``const_inputs[j]``.
+    * Some setters have order-dependent side effects in C++ (e.g.
+      ``promote_inputs_to_common_dtype(True)`` also flips
+      ``check_all_same_dtype`` to ``False``). ``ConfigSpec`` materializes
+      the *final* boolean state of each knob, not the call order, so it
+      can't reproduce a sequence where an intermediate setter observed a
+      since-overwritten value.
+
+    For the common case -- "I want a TI with this set of operands and
+    these flags" -- this is the more ergonomic surface. If you need
+    operand or setter call order, drop down to
+    :class:`TensorIteratorConfig`.
+
+    Defaults match the C++ ``TensorIteratorConfig`` defaults.
     """
 
     outputs: list[torch.Tensor | None] = field(default_factory=list)
@@ -412,8 +457,31 @@ def reduce_op(
 
     Pass ``out2`` for the two-output reduction overload (e.g. ``min`` returning
     values + indices). The output tensor(s) must be pre-allocated and shaped
-    correctly: this factory does not allocate or resize.
+    correctly: this factory does not allocate or resize. With ``out2``, both
+    outputs must live on ``a``'s device and share its sizes/strides -- the
+    C++ named constructor asserts this and the same checks are mirrored
+    here.
     """
+    # Mirror the TORCH_INTERNAL_ASSERTs in TensorIterator::reduce_op. We
+    # surface them as RuntimeError up front since the binding doesn't
+    # rebind the named constructor itself; without this, mismatched
+    # out1/out2 would build a kernel-shape that doesn't match the
+    # tensors and corrupt memory once a kernel is invoked.
+    if out2 is not None:
+        if not out.device == a.device == out2.device:
+            raise RuntimeError(
+                "reduce_op: out, out2, and the input must share a device, "
+                f"got out={out.device}, out2={out2.device}, a={a.device}"
+            )
+        if out.dim() != out2.dim():
+            raise RuntimeError(
+                f"reduce_op: out and out2 must have the same dim, got "
+                f"{out.dim()} and {out2.dim()}"
+            )
+        if out.shape != out2.shape or out.stride() != out2.stride():
+            raise RuntimeError(
+                "reduce_op: out and out2 must have identical sizes and strides"
+            )
     cfg = TensorIteratorConfig().set_check_mem_overlap(False).add_output(out)
     if out2 is not None:
         cfg.add_output(out2)
