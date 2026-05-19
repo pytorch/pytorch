@@ -90,10 +90,12 @@ else
   # also fails the same way). Export bare compilers so the sysconfig fallback
   # is skipped.
   if [[ -z "${CC:-}" ]]; then
-    export CC=$(command -v gcc)
+    CC=$(command -v gcc)
+    export CC
   fi
   if [[ -z "${CXX:-}" ]]; then
-    export CXX=$(command -v g++)
+    CXX=$(command -v g++)
+    export CXX
   fi
 fi
 
