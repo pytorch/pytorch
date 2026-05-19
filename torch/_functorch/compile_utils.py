@@ -74,28 +74,63 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             f"expected output_node.op to be 'output', got '{output_node.op}'"
         )
 
-    def checkable_node(node: fx.Node) -> bool:
-        """We can evaluate only nodes that represent tensors with defined storage."""
-        if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
-            return False
+    def get_node_storages(node: fx.Node) -> set[StorageWeakRef]:
+        """Returns all defined tensor storages in node metadata."""
+        if "val" not in node.meta:
+            return set()
 
-        try:
-            node.meta["val"].untyped_storage()
-        except NotImplementedError:
-            return False
+        storages = set()
+        for value in pytree.tree_leaves(node.meta["val"]):
+            if not isinstance(value, torch.Tensor):
+                continue
 
-        return True
+            try:
+                storages.add(StorageWeakRef(value.untyped_storage()))
+            except NotImplementedError:
+                continue
+
+        return storages
 
     output_storages = {
-        StorageWeakRef(n.meta["val"].untyped_storage())
-        for n in output_node.all_input_nodes
-        if checkable_node(n)
+        storage for n in output_node.all_input_nodes for storage in get_node_storages(n)
     }
     nodes_that_alias_outputs = {
+        n for n in fx_g.nodes if get_node_storages(n) & output_storages
+    }
+
+    # These bases are potential write targets for Inductor reinplacing. CSEing
+    # them, or producers that alias them, can create artificial later uses.
+    def collect_auto_functionalized_base_nodes() -> set[fx.Node]:
+        base_nodes = set()
+
+        def add_nodes(value: Any) -> None:
+            for leaf in pytree.tree_leaves(value):
+                if isinstance(leaf, fx.Node):
+                    base_nodes.add(leaf)
+
+        for node in fx_g.nodes:
+            if node.target is torch.ops.higher_order.auto_functionalized_v2:
+                add_nodes(node.kwargs.get("_all_bases", ()))
+            elif node.target is torch.ops.higher_order.auto_functionalized:
+                from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+                mutable_arg_names, _ = get_mutable_args(node.args[0])
+                for arg_name in mutable_arg_names:
+                    add_nodes(node.kwargs.get(arg_name))
+
+        return base_nodes
+
+    auto_functionalized_base_nodes = collect_auto_functionalized_base_nodes()
+    auto_functionalized_base_storages = {
+        storage
+        for node in auto_functionalized_base_nodes
+        for storage in get_node_storages(node)
+    }
+    nodes_that_alias_auto_functionalized_bases = {
         n
         for n in fx_g.nodes
-        if checkable_node(n)
-        and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
+        if n in auto_functionalized_base_nodes
+        or get_node_storages(n) & auto_functionalized_base_storages
     }
 
     for n in fx_g.nodes:
@@ -111,6 +146,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            or n in nodes_that_alias_auto_functionalized_bases
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:

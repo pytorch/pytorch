@@ -18,6 +18,21 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 HAS_CUDA = torch.cuda.is_available()
 
 
+@torch.library.custom_op("_cse_reinplacing::foo", mutates_args={})
+def cse_foo(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@cse_foo.register_fake
+def _(x):
+    return x.clone()
+
+
+@torch.library.custom_op("_cse_reinplacing::sin", mutates_args={"result"})
+def cse_sin(x: torch.Tensor, result: torch.Tensor) -> None:
+    result.copy_(x.sin())
+
+
 def _num_args(fn: Callable):
     return len(inspect.signature(fn).parameters)
 
@@ -258,6 +273,62 @@ class NoChangeTestCase(TestCase):
 
         t = torch.randn(2, 2)
         check(f, t, 0)
+
+    def test_auto_functionalized_v2_bases_not_csed(self):
+        def f(x):
+            out0 = cse_foo(x)
+            _, new_out0 = torch.ops.higher_order.auto_functionalized_v2(
+                cse_sin._opoverload,
+                x=x,
+                _result_base_index=0,
+                _result_size=(3,),
+                _result_stride=(1,),
+                _result_storage_offset=0,
+                _all_bases=[out0],
+            )
+            out1 = cse_foo(x)
+            _, new_out1 = torch.ops.higher_order.auto_functionalized_v2(
+                cse_sin._opoverload,
+                x=new_out0,
+                _result_base_index=0,
+                _result_size=(3,),
+                _result_stride=(1,),
+                _result_storage_offset=0,
+                _all_bases=[out1],
+            )
+            return new_out0, new_out1
+
+        t = torch.randn(3)
+        fx_g = make_fx(f, tracing_mode="fake")(t)
+        new_graph = fx_graph_cse(fx_g.graph)
+        self.assertEqual(
+            sum(n.target is cse_foo._opoverload for n in new_graph.nodes),
+            2,
+        )
+
+    def test_auto_functionalized_bases_not_csed(self):
+        def f(x):
+            out0 = cse_foo(x)
+            _, new_out0 = torch.ops.higher_order.auto_functionalized(
+                cse_sin._opoverload,
+                x=x,
+                result=out0,
+            )
+            out1 = cse_foo(x)
+            _, new_out1 = torch.ops.higher_order.auto_functionalized(
+                cse_sin._opoverload,
+                x=new_out0,
+                result=out1,
+            )
+            return new_out0, new_out1
+
+        t = torch.randn(3)
+        fx_g = make_fx(f, tracing_mode="fake")(t)
+        new_graph = fx_graph_cse(fx_g.graph)
+        self.assertEqual(
+            sum(n.target is cse_foo._opoverload for n in new_graph.nodes),
+            2,
+        )
 
     def test_rand_like(self):
         def f(x):

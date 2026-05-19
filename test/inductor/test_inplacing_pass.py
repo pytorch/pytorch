@@ -43,6 +43,16 @@ def sin(x: torch.Tensor, result: torch.Tensor) -> None:
     result.copy_(x.sin())
 
 
+@torch.library.custom_op("_reinplacing::foo", mutates_args={})
+def foo(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@foo.register_fake
+def _(x):
+    return x.clone()
+
+
 @torch.library.custom_op("_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"})
 def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> None:
     out_sin.copy_(x.sin())
@@ -478,6 +488,31 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         x = torch.randn(3, requires_grad=True, device=device)
         f(x)
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_partitioner_recomputes_custom_factory(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = foo(x)
+                sin(x, out)
+                ctx.save_for_backward(x, out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                x, saved = ctx.saved_tensors
+                out = foo(x)
+                sin(saved, out)
+                return out
+
+        @torch.compile(backend="inductor")
+        def f(x):
+            return MySin.apply(x)
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        result = f(x)
+        self.assertEqual(result, x.sin())
         self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_with_effects_reinplace(self):
