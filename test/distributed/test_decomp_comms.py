@@ -14,7 +14,10 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.fx as fx
-from torch._inductor.fx_passes.decomp_comms import decomp_gram_matrix_all_gather
+from torch._inductor.fx_passes.decomp_comms import (
+    batch_all_reduces,
+    decomp_gram_matrix_all_gather,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -187,6 +190,50 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
             "all_gather should remain when no Gram pattern detected",
         )
         self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
+
+    def test_batch_all_reduces_mixed_shapes(self):
+        """
+        Batch independent all_reduces of different shapes into one.
+        Covers scalars (norms), vectors, and matrices.
+        """
+        group_name = "0"
+
+        def mixed_reduces(w0, w1, w2):
+            # Scalar all_reduce (norm)
+            s0 = aten.sum.default(aten.pow.Tensor_Scalar(w0, 2))
+            ar0 = c10d.all_reduce.default(s0, "sum", group_name)
+            r0 = c10d.wait_tensor.default(ar0)
+
+            # Another scalar all_reduce
+            s1 = aten.sum.default(aten.pow.Tensor_Scalar(w1, 2))
+            ar1 = c10d.all_reduce.default(s1, "sum", group_name)
+            r1 = c10d.wait_tensor.default(ar1)
+
+            # Matrix all_reduce (gradient sync)
+            ar2 = c10d.all_reduce.default(w2, "sum", group_name)
+            r2 = c10d.wait_tensor.default(ar2)
+
+            return (
+                aten.div.Tensor(
+                    w0, aten.clamp_min.default(aten.pow.Tensor_Scalar(r0, 0.5), 1e-7)
+                ),
+                aten.div.Tensor(
+                    w1, aten.clamp_min.default(aten.pow.Tensor_Scalar(r1, 0.5), 1e-7)
+                ),
+                aten.mul.Tensor(r2, 0.1),
+            )
+
+        with FakeTensorMode():
+            w0 = torch.randn(64, 128, device=self.device)
+            w1 = torch.randn(32, 256, device=self.device)
+            w2 = torch.randn(16, 16, device=self.device)
+            traced = make_fx(mixed_reduces)(w0, w1, w2)
+
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 3)
+
+        batch_all_reduces(traced)
+
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 1)
 
 
 if __name__ == "__main__":
