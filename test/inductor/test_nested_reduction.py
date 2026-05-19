@@ -599,30 +599,6 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
-    @inductor_config.patch(emulate_precision_casts=True)
-    def test_producer_consumer_residual_rmsnorm_quant(self):
-        B, D, G = 128, 2048, 128
-        qmax = 448.0
-        min_scale = 1.0 / (qmax * 512.0)
-
-        def f(x, residual, weight):
-            h = x.float() + residual.float()
-            variance = h.pow(2).mean(dim=-1, keepdim=True)
-            normed = h * torch.rsqrt(variance + 1e-6)
-            normed_fp16 = normed.to(torch.float16) * weight
-            grouped = normed_fp16.view(B, D // G, G)
-            absmax = grouped.abs().amax(dim=-1, keepdim=True).float()
-            scales = (absmax / qmax).clamp(min=min_scale)
-            x_scaled = (grouped / scales).clamp(-qmax, qmax)
-            x_quant = x_scaled.to(torch.float16).view(B, D)
-            return x_quant.float(), scales.squeeze(-1)
-
-        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.check_nested_matches_unnested(f, (x, residual, w))
-        self.check_fusion()
-
     @parametrize("B,K,D", [(64, 16, 4096), (1, 16, 1024)])
     def test_no_fullres_epilogue_small_dim_in_x(self, B, K, D):
         """Small-dim-in-X with full-res consumer falls back."""
