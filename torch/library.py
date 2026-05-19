@@ -97,9 +97,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     unsupported_mutable = [
-        arg
-        for arg in mutable_args
-        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+        arg for arg in mutable_args if not isinstance(arg.type, torch.TensorType)
     ]
     if unsupported_mutable:
         names = [a.name for a in unsupported_mutable]

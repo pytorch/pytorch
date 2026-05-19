@@ -6,7 +6,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, Union
+from typing import Any, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -17,8 +17,8 @@ from . import autograd, utils
 from .effects import EffectType
 
 
-device_types_t = str | Sequence[str] | None
-tags_t = _C.Tag | Sequence[_C.Tag] | None
+device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
+tags_t: TypeAlias = _C.Tag | Sequence[_C.Tag] | None  # noqa: PYI042
 log = logging.getLogger(__name__)
 
 
