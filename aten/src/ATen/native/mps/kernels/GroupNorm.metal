@@ -38,9 +38,7 @@ kernel void group_norm(
     constant GroupNormParams& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
-    uint tptg [[threads_per_threadgroup]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+    uint tptg [[threads_per_threadgroup]]) {
   uint32_t group_offset = tgid * params.elements_per_group;
   constant T* x = X + group_offset;
   device T* y = Y + group_offset;
@@ -121,9 +119,7 @@ kernel void group_norm(
       constant GroupNormParams & params [[buffer(6)]],              \
       uint tg_id [[threadgroup_position_in_grid]],                  \
       uint tid [[thread_position_in_threadgroup]],                  \
-      uint tptg [[threads_per_threadgroup]],                        \
-      uint simd_lane_id [[thread_index_in_simdgroup]],              \
-      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+      uint tptg [[threads_per_threadgroup]]);
 
 #define REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, affine_T) \
   REGISTER_GROUP_NORM(T, affine_T, affine_T);               \
