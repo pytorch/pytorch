@@ -53,7 +53,11 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("nvidia_cutlass_dsl")
     else:
-        log.warning(
+        # info, not warning: missing optional deps is the common case on stock
+        # builds and we don't want to spam stderr on `import torch`. Surface
+        # it via TORCH_LOGS=+native_dsl when diagnosing why an override is
+        # silent.
+        log.info(
             "CuTeDSL operators require optional Python packages "
             "`nvidia-cutlass-dsl` and `apache-tvm-ffi`; "
             "%s",
@@ -80,7 +84,7 @@ def _version_is_ok() -> bool:
     if check_native_version_skip() or (version in _CUTEDSL_REQUIRED_VERSIONS):
         return True
 
-    log.warning(
+    log.info(
         "cutedsl version %s is not known-good (ok: %s); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,

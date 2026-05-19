@@ -22,7 +22,6 @@ intercept the in-place method.
 """
 
 import functools
-import importlib.util
 import math
 
 import torch
@@ -32,17 +31,6 @@ from ...registry import _OpCondFn, _OpImplFn
 
 
 _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
-
-
-@functools.cache
-def _has_cutedsl() -> bool:
-    try:
-        return (
-            importlib.util.find_spec("cutlass") is not None
-            and importlib.util.find_spec("tvm_ffi") is not None
-        )
-    except ModuleNotFoundError:
-        return False
 
 
 @functools.cache
@@ -70,7 +58,7 @@ def _any_cow(*tensors: torch.Tensor) -> bool:
 
 def _base_cond_ok(*tensors: torch.Tensor) -> bool:
     """Pre-checks shared by every path: env sanity, all CUDA, non-COW."""
-    if not _has_cutedsl() or _deterministic():
+    if _deterministic():
         return False
     if not all(t.is_cuda for t in tensors):
         return False
@@ -357,7 +345,5 @@ def _register_path(
 
 
 def register_to_dispatch() -> None:
-    if not _has_cutedsl():
-        return
     for path in _PATHS:
         _register_path("CUDA", *path)
