@@ -552,16 +552,51 @@ class ExprPrinterTests(InductorTestCase):
         self.assertExpectedInline(texpr(expr), """(-10) % x""")
 
     def test_print_mod_index(self):
+        from torch._inductor.codegen.mps import MetalExprPrinter
+
         x = sympy.Symbol("x", integer=True)
         ks = sympy.Symbol("ks", integer=True)
         expr = ModularIndexing(x - 10, ks, ks)
-        self.assertExpectedInline(pexpr(expr), """((((-10) + x) // ks) % ks)""")
+        self.assertExpectedInline(pexpr(expr), """(((-10) + x) // ks) % ks""")
         self.assertExpectedInline(
             cexpr(expr),
-            """(static_cast<int64_t>(c10::div_floor_integer("""
-            f"""static_cast<int64_t>((-10{LONG_SUFFIX}) + x), static_cast<int64_t>(ks))) % static_cast<int64_t>(ks))""",
+            "c10::div_mod(c10::div_floor_integer("
+            f"static_cast<int64_t>((-10{LONG_SUFFIX}) + x), static_cast<int64_t>(ks)), ks)",
         )
-        self.assertExpectedInline(texpr(expr), """((((-10) + x) // ks) % ks)""")
+        self.assertExpectedInline(
+            texpr(expr),
+            """triton_helpers.remainder_integer(triton_helpers.div_floor_integer((-10) + x,  ks), ks)""",
+        )
+        self.assertExpectedInline(
+            MetalExprPrinter().doprint(expr),
+            """c10::metal::remainder(c10::metal::floor_divide((-10) + x, ks), ks)""",
+        )
+
+    def test_print_mod_index_negative_semantics(self):
+        from torch._inductor.codegen.mps import MetalExprPrinter
+
+        x = sympy.Symbol("x", integer=True)
+        expr = ModularIndexing(x, 2, 4)
+        self.assertTrue(expr.is_nonnegative)
+        self.assertExpectedInline(pexpr(expr), """(x // 2) % 4""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            f"""c10::div_mod(c10::div_floor_integer(static_cast<int64_t>(x), static_cast<int64_t>(2{LONG_SUFFIX})), 4{LONG_SUFFIX})""",
+        )
+        self.assertExpectedInline(
+            texpr(expr),
+            """triton_helpers.remainder_integer(triton_helpers.div_floor_integer(x,  2), 4)""",
+        )
+        self.assertExpectedInline(
+            MetalExprPrinter().doprint(expr),
+            """c10::metal::remainder(c10::metal::floor_divide(x, 2), 4)""",
+        )
+
+        expr = ModularIndexing(x, 65536, 6)
+        self.assertExpectedInline(
+            MetalExprPrinter().doprint(expr),
+            """c10::metal::safe_remainder(c10::metal::floor_divide(x, 65536), 6)""",
+        )
 
     def test_print_python_mod(self):
         x = sympy.Symbol("x", integer=True)
