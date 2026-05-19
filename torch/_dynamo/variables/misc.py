@@ -31,7 +31,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, Literal, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -62,7 +62,6 @@ from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     identity,
-    is_tensor_base_attr_getter,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -1462,144 +1461,6 @@ class GetAttrVariable(VariableTracker):
         return super().mp_subscript_impl(tx, key)
 
 
-class ConstantMethodWrapperVariable(VariableTracker):
-    def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.method_wrapper = method_wrapper
-
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.method_wrapper
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
-            args[0], variables.TensorVariable
-        ):
-            if not (len(args) == 1 and len(kwargs) == 0):
-                raise_type_error(
-                    tx, "tensor attribute getter takes exactly one argument"
-                )
-            # type: ignore[arg-type, attr-defined]
-            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
-
-        # method-wrapper variables are common in __init__ calls. For example,
-        # str("foo").__init__ is a method-wrapper. These method wrappers point
-        # to C functions.  Here we intercept if these method-wrappers are from
-        # builtins and then call the function counterpart directly by obtaining
-        # the self object.
-        self_obj = self.method_wrapper.__self__
-        wrapper_name = self.method_wrapper.__name__
-        # TODO(dynamo-team) - We can perhaps expand the scope to more names and
-        # more builtins.
-        if wrapper_name == "__init__":
-            fn_obj = type(self_obj).__init__
-            if fn_obj is object.__init__:
-                return VariableTracker.build(tx, object).call_method(
-                    tx,
-                    wrapper_name,
-                    # type: ignore[arg-type, list-item]
-                    [self_obj, *args],
-                    kwargs,
-                )
-        elif (
-            sys.version_info >= (3, 14)
-            # for some reason, even if the below check passes,
-            # self.method_wrapper may not be the same as type.__dict__["__annotations__"].__get__
-            and self_obj is type.__dict__["__annotations__"]
-            and wrapper_name == "__get__"
-        ):
-            from .builder import SourcelessBuilder
-
-            if len(args) == 1 and not kwargs:
-                try:
-                    return SourcelessBuilder.create(
-                        tx, self.method_wrapper(args[0].as_python_constant())
-                    )
-                except AttributeError:
-                    raise_observed_exception(AttributeError, tx)
-                except AsPythonConstantNotImplementedError:
-                    pass
-
-            unimplemented(
-                gb_type="unsupported type.__dict__['__annotations__'].__get__ call",
-                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
-                explanation="`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ "
-                "on a single constant argument (i.e. a type).",
-                hints=[
-                    "Make sure your call to type.__dict__['__annotations__'] only has "
-                    "one positional argument (no keyword arguments).",
-                    "Make sure the argument to type.__dict__['__annotations__'] is a constant "
-                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-        elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
-            self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
-        ):
-            attr_name = (
-                "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
-            )
-
-            if len(args) == 1 and not kwargs:
-                try:
-                    value = self.method_wrapper(args[0].as_python_constant())
-                except AsPythonConstantNotImplementedError:
-                    pass
-                else:
-                    # Use a sourced variable when the descriptor is the
-                    # standard one from type (not overridden by a metaclass).
-                    source = args[0].source
-                    if source is not None:
-                        cls_val = args[0].as_python_constant()
-                        static_desc = inspect.getattr_static(type(cls_val), attr_name)
-                        if static_desc is self_obj:
-                            if attr_name == "__mro__":
-                                source = TypeMROSource(source)
-                            else:
-                                source = AttrSource(source, attr_name)
-                            return VariableTracker.build(tx, value, source)
-
-                    from .builder import SourcelessBuilder
-
-                    return SourcelessBuilder.create(tx, value)
-
-            unimplemented(
-                gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
-                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
-                explanation=f"`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ "
-                "on a single constant argument (i.e. a type).",
-                hints=[
-                    f"Make sure your call to type.__dict__['{attr_name}'].__get__ only has "
-                    "one positional argument (no keyword arguments).",
-                    f"Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant "
-                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-        return super().call_function(tx, args, kwargs)
-
-    def is_python_constant(self) -> Literal[True]:
-        return True
-
-    def as_python_constant(self) -> types.MethodWrapperType:
-        return self.method_wrapper
-
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
-        # CPython wrapper_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1347
-        return hash(self.method_wrapper), False
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
-
-
 class PythonModuleVariable(VariableTracker):
     # PyModule_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/moduleobject.c#L1203
     _cpython_type = types.ModuleType
@@ -2023,47 +1884,10 @@ class StringFormatVariable(VariableTracker):
         sym_args: Sequence[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        all_args = list(itertools.chain(sym_args, sym_kwargs.values()))
-
-        has_lazy_constant = any(
-            isinstance(x, (LazyConstantVariable, ComputedLazyConstantVariable))
-            for x in all_args
-        )
-
-        if has_lazy_constant and not sym_kwargs:
-            # All args must be simple constants or lazy constants (not
-            # containers like TupleVariable which may hold SymNodeVariables
-            # under dynamic shapes).
-            all_simple_constants = all(
-                isinstance(
-                    x,
-                    (
-                        variables.ConstantVariable,
-                        LazyConstantVariable,
-                        ComputedLazyConstantVariable,
-                    ),
-                )
-                for x in all_args
-            )
-            if all_simple_constants:
-                # Use str.format as the op with format_string as the first arg.
-                # _make_binary_op_reconstruct_fn already has a str.format handler.
-                from .base import AsPythonConstantNotImplementedError
-                from .builtin import _make_binary_op_reconstruct_fn
-
-                reconstruct_fn = _make_binary_op_reconstruct_fn(str.format)
-                fmt_str_var = variables.ConstantVariable.create(format_string)
-                try:
-                    return ComputedLazyConstantVariable.create(
-                        str.format,
-                        [fmt_str_var] + list(sym_args),
-                        reconstruct_fn,  # pyrefly: ignore[bad-argument-type]
-                    )
-                except (TypeError, ValueError, AsPythonConstantNotImplementedError):
-                    pass
-        elif all(x.is_python_constant() for x in all_args):
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
             return variables.ConstantVariable.create(
                 format_string.format(
                     *[v.as_python_constant() for v in sym_args],
@@ -2127,112 +1951,6 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
-
-    def _try_get_format_value(self) -> tuple[bool, str]:
-        """Try to get the formatted string value without realizing lazy constants.
-
-        Returns (success, value). If any argument cannot be peeked, returns (False, "").
-        """
-        arg_values = []
-        for arg in self.sym_args:
-            can_peek, _is_unrealized, value = arg.try_peek_constant()
-            if not can_peek:
-                return (False, "")
-            arg_values.append(value)
-
-        kwarg_values = {}
-        for k, v in self.sym_kwargs.items():
-            can_peek, _is_unrealized, value = v.try_peek_constant()
-            if not can_peek:
-                return (False, "")
-            kwarg_values[k] = value
-
-        return (True, self.format_string.format(*arg_values, **kwarg_values))
-
-    def is_python_constant(self) -> bool:
-        """Return True if this StringFormatVariable can be converted to a constant.
-
-        Returns False if any argument is an unrealized lazy constant, since those
-        should be reconstructed at runtime rather than loaded as a constant (to
-        avoid unnecessary guard installation and recompilation).
-        """
-        for x in itertools.chain(self.sym_args, self.sym_kwargs.values()):
-            can_peek, is_unrealized, _value = x.try_peek_constant()
-            if not can_peek or is_unrealized:
-                # Can't peek or has unrealized lazy constant - don't treat as constant
-                return False
-        return True
-
-    def as_python_constant(self) -> str:
-        """Return the formatted string value, realizing any lazy constants."""
-        self._realize_lazy_args()
-        return self.format_string.format(
-            *[v.as_python_constant() for v in self.sym_args],
-            **{k: v.as_python_constant() for k, v in self.sym_kwargs.items()},
-        )
-
-    def is_python_hashable(self) -> bool:
-        # Strings are always hashable, and we can peek at all values
-        success, _ = self._try_get_format_value()
-        return success
-
-    def get_python_hash(self) -> int:
-        success, value = self._try_get_format_value()
-        if not success:
-            raise RuntimeError(
-                "StringFormatVariable hash failed: could not peek all args"
-            )
-        return hash(value)
-
-    def _realize_lazy_args(self) -> None:
-        """Realize any lazy constant arguments to install guards."""
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        for arg in itertools.chain(self.sym_args, self.sym_kwargs.values()):
-            if isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable)):
-                arg.realize()
-
-    def is_python_equal(self, other: object) -> bool:
-        success, value = self._try_get_format_value()
-        if not success:
-            return False
-        if isinstance(other, StringFormatVariable):
-            other_success, other_value = other._try_get_format_value()
-            if not other_success:
-                return False
-            if value == other_value:
-                # Match found - realize lazy args to install guards
-                self._realize_lazy_args()
-                other._realize_lazy_args()
-                return True
-            return False
-        if not isinstance(other, VariableTracker):
-            return False
-        if other.is_python_constant():
-            if value == other.as_python_constant():
-                # Match found - realize lazy args to install guards
-                self._realize_lazy_args()
-                return True
-            return False
-        return False
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Peek at the formatted string value without triggering realization.
-
-        Returns (can_peek, is_unrealized, value).
-        """
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        success, value = self._try_get_format_value()
-        if not success:
-            return (False, False, None)
-        # Check if any arg is unrealized lazy constant
-        any_unrealized = any(
-            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
-            and not arg.is_realized()
-            for arg in itertools.chain(self.sym_args, self.sym_kwargs.values())
-        )
-        return (True, any_unrealized, value)
 
 
 class ObjectVariable(VariableTracker):
