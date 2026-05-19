@@ -1334,6 +1334,7 @@ class ReplacementPatternEntry(PatternEntry):
                     # Preserve the recompute tags in the replacement graph. We
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
+                    args_set, _ = pytree.tree_flatten(args)
                     # args (named as args in the replace_with_graph).
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
@@ -1342,7 +1343,7 @@ class ReplacementPatternEntry(PatternEntry):
                     for tag_name in ["recompute", "ac_graph_id"]:
                         if tag_name in old.meta:
                             percolate_tags(
-                                new, tag_name, old.meta[tag_name], OrderedSet(args)
+                                new, tag_name, old.meta[tag_name], OrderedSet(args_set)
                             )
 
                     old.replace_all_uses_with(
