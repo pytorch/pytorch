@@ -1116,8 +1116,10 @@ class _TorchDynamoContext:
                 )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
-                    prior_error_on_graph_break = _get_error_on_graph_break()
-                    _set_error_on_graph_break(self.error_on_graph_break)
+                    current_error_on_graph_break = _get_error_on_graph_break()
+                    if current_error_on_graph_break != self.error_on_graph_break:
+                        prior_error_on_graph_break = current_error_on_graph_break
+                        _set_error_on_graph_break(self.error_on_graph_break)
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
