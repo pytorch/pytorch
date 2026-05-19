@@ -305,6 +305,22 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
+        kwargs: dict[str, Any] = {}
+        if issubclass(self.python_type(), list):
+            kwargs["mutation_type"] = ValueMutationNew()
+        return type(self)(new_items, **kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -381,31 +397,6 @@ class BaseListVariable(VariableTracker):
                 return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
-                return self
-        elif name in ("__mul__", "__imul__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if not (args[0].is_python_constant() and args[0].python_type() is int):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
-                    ],
-                )
-
-            val = args[0].as_python_constant()
-
-            if name == "__mul__":
-                return type(self)(self.items * val, source=self.source)
-            else:
-                self.items *= val
                 return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
@@ -973,6 +964,26 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # list_inplace_repeat: https://github.com/python/cpython/blob/v3.13.13/Objects/listobject.c#L1071
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1109,7 +1120,7 @@ class ListVariable(CommonListMethodsVariable):
             return self.sq_ass_item_impl(tx, ConstantVariable(i), value)
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
-            # step==0 for both delete and assign paths.
+            # step==0 before the iterable check.
             key_as_const = key.as_python_constant()
             if key_as_const.step == 0:
                 raise_observed_exception(
@@ -1117,36 +1128,33 @@ class ListVariable(CommonListMethodsVariable):
                 )
             if value is None:
                 # delete slice
-                tx.output.side_effects.mutation(self)
                 try:
                     self.items.__delitem__(key_as_const)
-                except (IndexError, ValueError) as exc:
+                except ValueError as exc:
                     raise_observed_exception(
-                        type(exc),
+                        ValueError,
                         tx,
                         args=list(exc.args),
                     )
+                tx.output.side_effects.mutation(self)
             else:
                 # assign slice
+                # CPython list_ass_subscript runs PySequence_Fast on value
+                # before the step==1 branch, so this message applies to all
+                # slice forms.
                 if not value.has_force_unpack_var_sequence(tx):
-                    # CPython: step==1 -> "can only assign an iterable",
-                    # extended slice -> "must assign iterable to extended slice".
-                    msg = (
-                        "can only assign an iterable"
-                        if key_as_const.step is None or key_as_const.step == 1
-                        else "must assign iterable to extended slice"
-                    )
-                    raise_observed_exception(TypeError, tx, args=[msg])
+                    raise_type_error(tx, "must assign iterable to extended slice")
 
                 value_unpack = value.force_unpack_var_sequence(tx)
                 try:
                     self.items[key_as_const] = value_unpack
-                except Exception as exc:
+                except ValueError as exc:
                     raise_observed_exception(
-                        type(exc),
+                        ValueError,
                         tx,
                         args=list(exc.args),
                     )
+                tx.output.side_effects.mutation(self)
         else:
             raise_type_error(
                 tx,

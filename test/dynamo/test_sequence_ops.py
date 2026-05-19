@@ -719,6 +719,78 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             fs[0] = 1  # type: ignore[index]
 
+    # -- slice assignment errors --
+
+    @make_dynamo_test
+    def test_error_slice_step_zero(self):
+        lst = [1, 2, 3, 4, 5]
+        with self.assertRaisesRegex(ValueError, "slice step cannot be zero"):
+            lst[::0] = [10, 20]
+
+    @make_dynamo_test
+    def test_error_extended_slice_size_mismatch(self):
+        lst = [1, 2, 3, 4, 5]
+        with self.assertRaisesRegex(
+            ValueError, "attempt to assign sequence of size .* to extended slice"
+        ):
+            lst[::2] = [10, 20]
+
+    @make_dynamo_test
+    def test_error_slice_non_iterable_simple(self):
+        lst = [1, 2, 3]
+        with self.assertRaisesRegex(
+            TypeError, "must assign iterable to extended slice"
+        ):
+            lst[1:2] = 99  # type: ignore[assignment]
+
+    @make_dynamo_test
+    def test_error_slice_non_iterable_extended(self):
+        lst = [1, 2, 3, 4, 5]
+        with self.assertRaisesRegex(
+            TypeError, "must assign iterable to extended slice"
+        ):
+            lst[::2] = 99  # type: ignore[assignment]
+
+    # -- slice assignment: alternative RHS types --
+
+    @make_dynamo_test
+    def test_slice_assign_tuple_rhs(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[1:3] = (10, 20)
+        self.assertEqual(lst, [1, 10, 20, 4, 5])
+
+    @make_dynamo_test
+    def test_slice_assign_string_rhs(self):
+        lst = [1, 2, 3]
+        lst[1:2] = "ab"
+        self.assertEqual(lst, [1, "a", "b", 3])
+
+    @make_dynamo_test
+    def test_slice_assign_negative_step(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[::-1] = [50, 40, 30, 20, 10]
+        self.assertEqual(lst, [10, 20, 30, 40, 50])
+
+    @make_dynamo_test
+    def test_slice_assign_empty_to_simple_slice(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[1:4] = []
+        self.assertEqual(lst, [1, 5])
+
+    def test_slice_mutation_visible_outside(self):
+        # Outer list (captured by closure) mutated via slice assignment inside
+        # a compiled function. Verifies side_effects.mutation is registered on
+        # the slice path of mp_ass_subscript_impl.
+        outer = [1, 2, 3, 4, 5]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            outer[1:3] = [10, 20]
+            return x + 1
+
+        f(torch.zeros(1))
+        self.assertEqual(outer, [1, 10, 20, 4, 5])
+
     # -- __delitem__ (NULL value via mp_ass_subscript / sq_ass_item) --
     # Only list/deque among the parametrized types support __delitem__.
 

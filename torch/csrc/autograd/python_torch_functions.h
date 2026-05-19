@@ -14,8 +14,7 @@ inline PyObject* TypeError_to_NotImplemented_(
   PyObject* ret = Func(self, args, kwargs);
   if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
     PyErr_Clear();
-    Py_INCREF(Py_NotImplemented);
-    ret = Py_NotImplemented;
+    ret = Py_NewRef(Py_NotImplemented);
   }
   return ret;
 }
