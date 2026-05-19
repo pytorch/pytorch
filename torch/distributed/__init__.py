@@ -28,6 +28,13 @@ def is_available() -> bool:
     return hasattr(torch._C, "_c10d_init")
 
 
+def _is_spmd_types_available() -> bool:
+    """Check if the spmd_types package is installed."""
+    import importlib.util
+
+    return importlib.util.find_spec("spmd_types") is not None
+
+
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
