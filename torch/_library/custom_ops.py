@@ -107,7 +107,10 @@ def custom_op(
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
         tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
             operator. Use ``torch.Tag.inplace`` for operators that mutate their
-            first Tensor argument and return it.
+            first Tensor argument and return it. Use ``torch.Tag.out`` for
+            operators that mutate keyword-only output tensors and return them.
+            Like PyTorch's built-in ``out=`` operators, ``torch.Tag.out``
+            custom ops do not support autograd.
 
     The following types are supported for the wrapped function's input parameters:
 
@@ -189,6 +192,25 @@ def custom_op(
         >>> assert result is x
         >>> assert torch.allclose(x, expected)
         >>>
+        >>> # Example of a custom op with out= semantics
+        >>> @custom_op(
+        >>>     "mylib::numpy_sin_out",
+        >>>     mutates_args={"out"},
+        >>>     device_types="cpu",
+        >>>     tags=torch.Tag.out,
+        >>> )
+        >>> def numpy_sin_out(x: Tensor, *, out: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     out_np = out.numpy()
+        >>>     np.sin(x_np, out=out_np)
+        >>>     return out
+        >>>
+        >>> x = torch.randn(3)
+        >>> out = torch.empty_like(x)
+        >>> result = numpy_sin_out(x, out=out)
+        >>> assert result is out
+        >>> assert torch.allclose(out, x.sin())
+        >>>
         >>> # Example of a factory function
         >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
         >>> def bar(device: torch.device) -> Tensor:
@@ -218,7 +240,7 @@ def custom_op(
             schema_str = torch.library.infer_schema(
                 fn,
                 mutates_args=mutates_args,
-                _tags=normalized_tags,
+                tags=normalized_tags,
             )
         else:
             schema_str = schema
@@ -280,6 +302,8 @@ class CustomOpDef:
         self._vmap_fn: Callable | None = None
         self._autocast_dtype: dict[str, _dtype | None] = {}
         self._is_inplace = False
+        self._is_out = False
+        self._out_kwarg_names: tuple[str, ...] = ()
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
@@ -427,6 +451,25 @@ class CustomOpDef:
                                     f"{self._name} (with implementation in {get_module()}): "
                                     "An operator tagged with torch.Tag.inplace must "
                                     "return its first argument."
+                                )
+                        elif self._is_out:
+                            out_kwarg_names = self._out_kwarg_names
+                            if len(out_kwarg_names) == 1:
+                                returns_out_args = result is kwargs[out_kwarg_names[0]]
+                            else:
+                                returns_out_args = (
+                                    isinstance(result, tuple)
+                                    and len(result) == len(out_kwarg_names)
+                                    and all(
+                                        result[i] is kwargs[name]
+                                        for i, name in enumerate(out_kwarg_names)
+                                    )
+                                )
+                            if not returns_out_args:
+                                raise RuntimeError(
+                                    f"{self._name} (with implementation in {get_module()}): "
+                                    "An operator tagged with torch.Tag.out must "
+                                    "return its mutable keyword-only arguments."
                                 )
                         elif not schema._is_view_op():
                             utils._c_check_aliasing_constraint(
@@ -671,6 +714,11 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
+        if utils.is_out(self._opoverload):
+            raise RuntimeError(
+                f"Cannot register autograd formula for operator tagged with "
+                f"torch.Tag.out: {self}. Out variants do not support autograd."
+            )
         if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
@@ -687,12 +735,16 @@ class CustomOpDef:
         self._validate_schema(cpp_schema, schema_str)
         self._define_dispatcher_op(schema_str, tags)
         self._is_inplace = utils.is_inplace(self._opoverload)
+        self._is_out = utils.is_out(self._opoverload)
+        if self._is_out:
+            _, out_kwarg_names = utils.mutated_args_kwargs(self._opoverload._schema)
+            self._out_kwarg_names = tuple(out_kwarg_names)
         self._register_fake_dispatcher_impl()
         self._register_autograd_dispatcher_impl()
         self._register_adinplaceorview_dispatcher_impl()
 
     def _validate_schema(self, schema: _C.FunctionSchema, schema_str: str) -> None:
-        if utils.has_kwarg_only_tensors(schema):
+        if utils.has_kwarg_only_tensors(schema) and torch.Tag.out not in self._tags:
             # If you want to support this, the progression is:
             # - supporting kwarg-only Tensors that are non-differentiable
             # - supporting kwarg-only Tensors (regardless of differentiability)
