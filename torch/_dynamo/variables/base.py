@@ -149,6 +149,15 @@ class MutationType:
             )
 
 
+class AttrMutationKind(Enum):
+    # Replay through STORE_ATTR/DELETE_ATTR, preserving descriptor-aware
+    # setattr/delattr semantics. Used for slots, getset descriptors, and other
+    # ordinary attribute writes that should not bypass descriptors.
+    GENERIC_SETATTR = 0
+    # Replay a direct object.__dict__ mutation while bypassing descriptors.
+    INSTANCE_DICT = 1
+
+
 class ValueMutationNew(MutationType):
     """
     This case of VariableTracker.mutation_type marker indicates
@@ -500,24 +509,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Try to peek at the constant value without triggering realization.
-
-        Returns a tuple of (can_peek, is_unrealized, value):
-        - can_peek: True if this variable can be peeked as a constant
-        - is_unrealized: True if this is an unrealized lazy constant (guards not yet installed)
-        - value: The constant value (only valid if can_peek is True)
-
-        Default implementation for non-lazy variables: returns (is_python_constant, False, value).
-        LazyConstantVariable and ComputedLazyConstantVariable override this to peek without
-        realizing. Container types (TupleVariable, ListVariable) override this to recursively
-        peek at their contents.
-        """
-        try:
-            return (True, False, self.as_python_constant())
-        except NotImplementedError:
-            return (False, False, None)
-
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -820,6 +811,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name in ("__mul__", "__rmul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_imul, slot_wrapper_mul
+
+            if name == "__mul__":
+                return slot_wrapper_mul(tx, self, args[0])
+            if name == "__rmul__":
+                return slot_wrapper_mul(tx, self, args[0], reverse=True)
+            return slot_wrapper_imul(tx, self, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1252,6 +1257,61 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             gb_type="tp_as_number slot not implemented",
             context=f"{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
             explanation=f"The type {self.python_type_name()} does not implement the {tp_slot_name}",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmul__`` instead of ``__mul__``).  The base default
+        graph-breaks so unmigrated VTs surface loudly; ``binary_op1`` only
+        invokes this on types whose CPython type advertises the slot.
+        """
+        return self._nb_slot_not_implemented("nb_multiply_impl", other, reverse=reverse)
+
+    def nb_inplace_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
+
+    def sq_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_repeat slot.
+
+        Implements sequence repetition (e.g. ``[1, 2] * 3``).  ``count`` is
+        an int VariableTracker already produced by ``nb_index_impl``.
+        """
+        unimplemented(
+            gb_type="sq_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_repeat slot but no sq_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_repeat_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_inplace_repeat slot."""
+        unimplemented(
+            gb_type="sq_inplace_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_inplace_repeat slot but no sq_inplace_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_inplace_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
