@@ -469,6 +469,10 @@ class ComboKernel(Kernel):
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
         self.standalone_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]] = []
+        # (src_code, kernel, node_schedule) for each subkernel, populated by
+        # SIMDScheduling.generate_combo_kernel_code BEFORE process_kernel so the
+        # seed signature matches the combo subkernel's (incl. in_out_ptr0).
+        self.standalone_autotune_seed_kernels: list[tuple[str, Any, Any]] = []
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
