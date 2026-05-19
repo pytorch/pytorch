@@ -880,6 +880,7 @@ class MemTracker(TorchDispatchMode):
 
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
+            # Record whether the tracker itself started under FakeTensorMode.
             self._entered_under_fake_mode = active_fake_mode() is not None
             self._register_global_optimizer_hook()
             self._mod_tracker.register_user_hooks(
@@ -926,6 +927,13 @@ class MemTracker(TorchDispatchMode):
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
+        # Track either:
+        # 1) tracker contexts entered under FakeTensorMode; or
+        # 2) dispatches with no active FakeTensorMode.
+        # If the tracker was entered under FakeTensorMode, track those
+        # fake-mode dispatches normally.
+        # If the tracker was not entered under FakeTensorMode, ignore later
+        # dispatches in this context that run under FakeTensorMode.
         if self._entered_under_fake_mode or not active_fake_mode():
             # If we are tracking an optimizer state, we use the optimizer reference type.
             # If we are in backward region and not in AC region, we use the backward reference type.
