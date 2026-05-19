@@ -1358,6 +1358,10 @@ class TritonTemplateKernel(TritonKernel):
 
     @staticmethod
     def _is_generated_prologue_temp(name: str) -> bool:
+        # Keep this in sync with temporary names emitted by prologue pointwise
+        # codegen.  Unknown assigned temps still block hoisting via
+        # assigned_names, but recognizing the common forms keeps this helper
+        # conservative if a temp is referenced without a local assignment.
         return (
             re.fullmatch(r"tmp\d+", name) is not None
             or re.fullmatch(r"_tmp_var\d+", name) is not None
@@ -1389,9 +1393,13 @@ class TritonTemplateKernel(TritonKernel):
 
     @staticmethod
     def _rename_code_names(line: str, renames: dict[str, str]) -> str:
-        for old, new in renames.items():
-            line = re.sub(rf"\b{re.escape(old)}\b", new, line)
-        return line
+        if not renames:
+            return line
+
+        pattern = re.compile(
+            r"\b(" + "|".join(re.escape(name) for name in renames) + r")\b"
+        )
+        return pattern.sub(lambda match: renames[match.group(0)], line)
 
     def _hoist_loop_invariant_load_input_code(
         self,
@@ -5558,9 +5566,32 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
+    def _flex_attention_log_dim(dim: int | torch.SymInt | sympy.Expr) -> int:
+        if isinstance(dim, torch.SymInt):
+            dim = dim.node.expr
+
+        if type(dim) is int or isinstance(dim, sympy.Integer):
+            return int(dim)
+
+        if isinstance(dim, sympy.Expr):
+            return V.graph.sizevars.optimization_hint(dim)
+
+        raise TypeError(
+            f"Unexpected flex attention log dimension type {type(dim).__name__}: {dim}"
+        )
+
+    @staticmethod
+    def _flex_attention_log_shape(
+        size: Sequence[int | torch.SymInt | sympy.Expr],
+    ) -> str:
+        dims = [AlgorithmSelectorCache._flex_attention_log_dim(dim) for dim in size]
+        return f"[{', '.join(map(str, dims))}]"
+
+    @staticmethod
     def maybe_log_flex_attention_results(
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
+        """Log flex attention autotuning choices when logging is enabled."""
         flex_attention_filename = get_flex_attention_log_filename()
         # Support both flex_attention and flex_decoding
         if not flex_attention_filename or (
@@ -5607,13 +5638,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Create shape info dictionary
         shape_info = {
             "kernel_type": kernel_type,
-            "B": int(B),
-            "Hq": int(Hq),
-            "Hkv": int(Hkv),
-            "seq_len_q": int(seq_len_q),
-            "seq_len_kv": int(seq_len_kv),
-            "qk_head_dim": int(qk_head_dim),
-            "v_head_dim": int(v_head_dim),
+            "B": AlgorithmSelectorCache._flex_attention_log_dim(B),
+            "Hq": AlgorithmSelectorCache._flex_attention_log_dim(Hq),
+            "Hkv": AlgorithmSelectorCache._flex_attention_log_dim(Hkv),
+            "seq_len_q": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_q),
+            "seq_len_kv": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_kv),
+            "qk_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(qk_head_dim),
+            "v_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(v_head_dim),
         }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
@@ -5629,9 +5660,9 @@ class AlgorithmSelectorCache(PersistentCache):
             choices_with_shapes.append(choice_info)
 
         out_dict = {
-            "query_shape": str(query_size),
-            "key_shape": str(key_size),
-            "value_shape": str(value_size),
+            "query_shape": AlgorithmSelectorCache._flex_attention_log_shape(query_size),
+            "key_shape": AlgorithmSelectorCache._flex_attention_log_shape(key_size),
+            "value_shape": AlgorithmSelectorCache._flex_attention_log_shape(value_size),
             "kernel_type": kernel_type,
             "choices": choices_with_shapes,
         }
