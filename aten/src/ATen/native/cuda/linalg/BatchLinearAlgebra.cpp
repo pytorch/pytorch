@@ -875,11 +875,11 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_LINALG_SOLVER
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-    if (m != n || (batch_size == 1 || m >= 512)) {
+    //if (m != n || (batch_size == 1 || m >= 512)) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
-    } else {
-      lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
-    }
+    //} else {
+    //  lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
+    //}
   };
 
   if (preferred_backend == at::LinalgBackend::Cusolver) {
