@@ -171,9 +171,8 @@ def nvfp4_e2m1_pack(x: torch.Tensor) -> torch.Tensor:
 def _(x: torch.Tensor) -> torch.Tensor:
     if x.shape[-1] % 2 != 0:
         raise RuntimeError("nvfp4_e2m1_pack requires an even last dimension")
-    return torch.empty_strided(
+    return torch.empty(
         (*tuple(x.shape[:-1]), x.shape[-1] // 2),
-        (*tuple(x.stride()[:-1]), 1),
         device=x.device,
         dtype=torch.float4_e2m1fn_x2,
     )
@@ -949,6 +948,17 @@ def _match_quack_local_n_reduce(
     if shape[-2] != -1 or not isinstance(shape[-1], int) or shape[-1] <= 0:
         return None
     group_size = shape[-1]
+    mm_meta = mm_node.meta.get("val")
+    reduce_meta = sum_match.node.meta.get("val")
+    if mm_meta is None or reduce_meta is None or len(mm_meta.shape) != 2:
+        return None
+    expected_shape = (
+        (mm_meta.shape[0], mm_meta.shape[1] // group_size, 1)
+        if bool(sum_match.keepdim)
+        else (mm_meta.shape[0], mm_meta.shape[1] // group_size)
+    )
+    if tuple(reduce_meta.shape) != expected_shape:
+        return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
         reduce_node=sum_match.node,
@@ -1091,7 +1101,6 @@ def _match_quack_grouped_n_select(
     shape = _normalize_quack_shape(view.shape)
     if not (
         _is_quack_same_fragment_n_group_shape(shape)
-        and isinstance(shape[-1], int)
         and 0 <= node.args[2] < shape[-1]
     ):
         return None

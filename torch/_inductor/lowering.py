@@ -8524,7 +8524,11 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
 
         alpha = gemm_kwargs.get("alpha", 1.0)
         beta = gemm_kwargs.get("beta", 1.0)
-        quack_args = tuple(arg for arg in args if hasattr(arg, "get_size"))
+        quack_args = tuple(
+            arg
+            for arg in args
+            if isinstance(arg, IRNode) and arg.has_tensor_output()
+        )
         if gemm_op == torch.ops.aten._scaled_mm.default and (
             len(quack_args) != 4
             or gemm_kwargs.get("out_dtype") is None
