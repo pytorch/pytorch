@@ -246,9 +246,14 @@ def find_split_getitem(
             ]
             if not getitems:
                 return None
-            # Return the first getitem (rank 0's chunk); other ranks'
-            # getitems become dead after the transform.
-            return node, getitems[0]
+            # Pick the getitem with actual downstream users (the rank's
+            # own chunk). If multiple have users, pick the one with the
+            # lowest index (rank 0 in single-rank compilation).
+            used_getitems = [g for g in getitems if len(g.users) > 0]
+            if not used_getitems:
+                used_getitems = getitems
+            used_getitems.sort(key=lambda g: g.args[1] if len(g.args) > 1 else 0)
+            return node, used_getitems[0]
 
         if _is_collective_or_wait(node):
             return None
@@ -269,14 +274,59 @@ def _is_reduction(node: fx.Node) -> bool:
     return torch.Tag.reduction in target.tags
 
 
-def _is_norm_op(node: fx.Node) -> bool:
-    """True if node computes a vector/matrix norm."""
-    return node.op == "call_function" and node.target in (
+def _reduction_includes_sharded_dim(node: fx.Node) -> bool:
+    """True if a reduction reduces over dim 0 (the sharded dimension).
+
+    Reductions that only reduce non-sharded dims (e.g., sum(dim=1))
+    produce correct local results and don't need all_reduce.
+    Returns True conservatively (all-dim reductions, no-dim reductions).
+    """
+    if not _is_reduction(node):
+        return False
+
+    def _dims_include_zero(dims: object) -> bool:
+        if not isinstance(dims, (list, tuple)):
+            return True
+        inp = node.args[0] if node.args else None
+        inp_val = inp.meta.get("val") if isinstance(inp, fx.Node) else None
+        ndim: int = inp_val.dim() if inp_val is not None else 2
+        return any(int(d) % ndim == 0 for d in dims)
+
+    # Norms with dim arg
+    if node.target in (
         aten.linalg_vector_norm.default,
-        aten.frobenius_norm.dim,
-        aten.norm.Scalar,
         aten.norm.ScalarOpt_dim,
-    )
+        aten.frobenius_norm.dim,
+    ):
+        dims = node.args[2] if len(node.args) > 2 else None
+        return dims is None or _dims_include_zero(dims)
+
+    # sum/mean with dim arg
+    if node.target in (aten.sum.dim_IntList, aten.mean.dim):
+        dims = node.args[1] if len(node.args) > 1 else None
+        return dims is None or _dims_include_zero(dims)
+
+    # sum.default, mean.default, norm.Scalar — reduce all dims
+    return True
+
+
+def _is_l2_norm_op(node: fx.Node) -> bool:
+    """True if node computes an L2 (Frobenius) norm.
+
+    Only L2 norms decompose as sqrt(all_reduce(local^2)).
+    L1 needs all_reduce(sum(abs)), Linf needs all_reduce(max), etc.
+    We only handle L2 to avoid incorrect corrections.
+    """
+    if node.op != "call_function":
+        return False
+    if node.target is aten.frobenius_norm.dim:
+        return True
+    if node.target in (aten.linalg_vector_norm.default, aten.norm.ScalarOpt_dim):
+        ord_arg = node.args[1] if len(node.args) > 1 else 2
+        return bool(ord_arg == 2 or ord_arg == 2.0)
+    if node.target is aten.norm.Scalar:
+        return True  # default ord=2
+    return False
 
 
 def _gram_shape_is_decomposable(gram_node: fx.Node, gathered_dim: int) -> bool:
@@ -363,7 +413,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
     2. Trace each backward to find the feeding all_gather collective
     3. Group Gram mms by their source all_gather
     4. Validate each Gram's output shape is invariant under sharding
-    5. Require >= 3 decomposable Gram mms per group (filters forward/backward
+    5. Require >= 2 decomposable Gram mms per group (filters forward/backward
        patterns, targets iterative optimizer patterns like Newton-Schulz)
     6. For each group, find the downstream split+getitem
     7. Transform: replace all_gather with shard, insert all_reduce after each Gram mm
@@ -438,6 +488,10 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         # Route computation to use shard directly. If FSDP pads the shard
         # (shard rows > split_size), the slice was trimming padding off the
         # gathered tensor. We must trim the shard to match.
+        # Guard: split_size must not exceed shard_dim
+        if split_size > shard_dim:
+            continue
+
         replacement: fx.Node = info.shard
         if split_size < shard_dim:
             with graph.inserting_before(info.slice_node):
@@ -445,6 +499,22 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     aten.slice.Tensor, args=(info.shard, 0, 0, split_size)
                 )
                 _retrace_node_meta(replacement)
+
+        # Verify all slice users are in the chain ending at split.
+        # If slice has users outside the chain, replacing it would break them.
+        slice_chain: OrderedSet[fx.Node] = OrderedSet([info.slice_node])
+        sn = info.slice_node.next
+        while sn is not None and sn is not split_node:
+            if sn.op == "call_function" and any(
+                inp in slice_chain for inp in sn.all_input_nodes
+            ):
+                slice_chain.add(sn)
+            sn = sn.next
+        slice_chain.add(split_node)
+        slice_chain.add(getitem_node)
+        if any(u not in slice_chain for u in info.slice_node.users):
+            continue
+
         info.slice_node.replace_all_uses_with(replacement)
 
         # Find all nodes in the dependent chain (needed for reduction detection)
@@ -474,17 +544,21 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     user.replace_input_with(mm_node, wait_ar)
 
         # Insert all_reduce after reduction ops that reduce the sharded dim.
-        # Reductions like norm/sum compute partial results on the shard;
-        # they need global aggregation for correctness.
+        # Only reductions that include dim 0 (the sharded dimension) need
+        # correction. Reductions over only non-sharded dims (e.g. sum(dim=1))
+        # are already correct locally.
         #
-        # For norm: local_norm^2 → all_reduce(sum) → sqrt gives global norm.
+        # For L2 norm: local_norm^2 → all_reduce(sum) → sqrt gives global norm.
         # For sum/mean: all_reduce(sum) directly.
+        # Non-L2 norms (L1, Linf) are skipped — they need different corrections.
         for node in list(chain):
-            if node in gram_set or not _is_reduction(node):
+            if node in gram_set:
+                continue
+            if not _reduction_includes_sharded_dim(node):
                 continue
 
-            if _is_norm_op(node):
-                # norm decomposes as: global = sqrt(all_reduce(local^2))
+            if _is_l2_norm_op(node):
+                # L2: global = sqrt(all_reduce_sum(local^2))
                 with graph.inserting_before(node.next):
                     sq = graph.call_function(aten.pow.Tensor_Scalar, args=(node, 2.0))
                     ar = graph.call_function(
@@ -498,8 +572,20 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                 for user in list(node.users):
                     if user is not sq:
                         user.replace_input_with(node, corrected)
-            else:
-                # sum, mean, etc: all_reduce(sum) directly
+            # TODO: L1 norm: global = all_reduce_sum(local)  (no pow needed)
+            # TODO: Linf norm: global = all_reduce_max(local)
+            # TODO: Lp norm: global = pow(all_reduce_sum(local^p), 1/p)
+            elif _is_reduction(node):
+                # Only handle sum — all_reduce(sum) of local sums gives global sum.
+                # Skip mean: all_reduce(sum) of local means gives W * global_mean,
+                # which requires dividing by world_size (not available here).
+                if node.target in (aten.mean.default, aten.mean.dim):
+                    logger.debug(
+                        "decomp_gram_matrix_all_gather: skip mean reduction %s"
+                        " — needs world_size correction",
+                        node.name,
+                    )
+                    continue
                 with graph.inserting_before(node.next):
                     ar = graph.call_function(
                         c10d.all_reduce.default,
