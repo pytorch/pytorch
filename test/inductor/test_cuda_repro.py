@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfCachingAllocatorDisabled,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -1178,6 +1179,15 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo(inp), out)
 
         def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float32)
+        with config.patch({"eager_numerics.use_pytorch_libdevice": True}):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
             return x.sigmoid()
 
         inp = torch.ones(64, device=device_type).to(torch.float64)
@@ -2254,6 +2264,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(idxs, [0])
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
@@ -2292,6 +2303,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
