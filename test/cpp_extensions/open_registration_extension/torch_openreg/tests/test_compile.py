@@ -2,8 +2,8 @@
 
 import torch
 import torch._dynamo
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounterWithBackend
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestBackendRegistration(TestCase):
