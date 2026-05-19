@@ -2829,6 +2829,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
@@ -2909,6 +2910,14 @@ class eager_numerics:
 # emulate the eager numerics.
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# Targeted variant of emulate_precision_casts for saved low-precision outputs.
+# When a low-precision pointwise result is saved for backward and also used by
+# later forward math, this inserts a downcast-upcast at the saved value so
+# forward and backward consume the same precision.
+emulate_precision_casts_on_saved_tensors: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "0") == "1"
 )
 
 # adds patch, save_config, etc
