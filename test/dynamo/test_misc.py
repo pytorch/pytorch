@@ -10054,6 +10054,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(dynamic_sources="L['x']:0")
+    def test_dynamic_sources_per_dim_single(self):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Vary dim 0 only -> should not recompile (dim 0 is in the dynamic-sources list)
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        fn(torch.randn(4, 4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+        # Now vary dim 1 -> dim 1 is NOT in the dynamic-sources list, so we should recompile
+        fn(torch.randn(4, 5))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']:0, L['x']:2")
+    def test_dynamic_sources_per_dim_multiple(self):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Varying dims 0 and 2 should not recompile
+        fn(torch.randn(2, 4, 6))
+        fn(torch.randn(3, 4, 7))
+        fn(torch.randn(4, 4, 8))
+
+        self.assertEqual(counter.frame_count, 1)
+
+        # Varying dim 1 should recompile (not in the dynamic-sources list)
+        fn(torch.randn(4, 5, 8))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_no_dim_suffix_marks_all_dims(self):
+        # Backward-compat: an entry without ":N" still marks ALL dims dynamic.
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 5))
+        fn(torch.randn(4, 6))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x']:0")
+    def test_unbacked_sources_per_dim(self):
+        builder._UNBACKED_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Varying dim 0 should not recompile
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        fn(torch.randn(4, 4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+        # Varying dim 1 should recompile
+        fn(torch.randn(4, 5))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])
 
