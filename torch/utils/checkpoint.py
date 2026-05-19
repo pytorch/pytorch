@@ -5,7 +5,6 @@ import contextlib
 import functools
 import itertools
 import platform
-import sys
 import uuid
 import warnings
 import weakref
@@ -628,7 +627,7 @@ def checkpoint(
             raise ValueError(
                 "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
             )
-        return functools.partial(
+        factory = functools.partial(
             _checkpoint_decorator,
             use_reentrant=use_reentrant,
             preserve=preserve,
@@ -637,6 +636,15 @@ def checkpoint(
             debug=debug,
             early_stop=early_stop,
         )
+        factory._torch_checkpoint_kwargs = _get_checkpoint_kwargs(
+            use_reentrant=use_reentrant,
+            preserve=preserve,
+            context_fn=context_fn,
+            determinism_check=determinism_check,
+            debug=debug,
+            early_stop=early_stop,
+        )
+        return factory
 
     return _checkpoint_impl(
         function,
@@ -702,22 +710,26 @@ def _checkpoint_impl(
         next(gen)
         try:
             ret = function(*args, **kwargs)
-        except BaseException:
+        except BaseException as e:
             try:
-                gen.throw(*sys.exc_info())
-            except StopIteration as e:
+                gen.throw(e)
+            except StopIteration as stop:
                 raise RuntimeError(
                     "torch.utils.checkpoint: the forward context provided by "
                     "context_fn suppressed an exception raised during the "
                     "checkpointed forward. This is not supported because "
                     "checkpoint cannot return a value for a failed forward."
-                ) from e
+                ) from stop
             raise
         # Runs post-forward logic
         try:
             next(gen)
         except StopIteration:
             return ret
+        raise AssertionError(
+            "torch.utils.checkpoint: expected context_fn generator to yield "
+            "exactly twice, but it yielded more than twice."
+        )
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
