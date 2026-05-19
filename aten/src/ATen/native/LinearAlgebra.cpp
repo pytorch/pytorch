@@ -532,15 +532,15 @@ Tensor linalg_pinv(
     // therefore we need this early return for 'input.numel() == 0' case
     Tensor U, S, Vh;
     std::tie(U, S, Vh) = at::linalg_svd(input, false);
-    Tensor V = Vh.conj().transpose(-2, -1);
-    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.conj().transpose(-2, -1));
+    Tensor V = Vh.mH();
+    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
     Tensor U, S, Vh;
     std::tie(U, S, Vh) = at::linalg_svd(input, false);
-    Tensor V = Vh.conj().transpose(-2, -1);
+    Tensor V = Vh.mH();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
