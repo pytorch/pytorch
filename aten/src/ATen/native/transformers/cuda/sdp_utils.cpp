@@ -264,6 +264,11 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
 }
 
 bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+#if AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
+  return check_head_dim_size_flash_nested<true /* caller_is_meff */>(params, debug);
+#endif
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
 #ifdef USE_ROCM
@@ -988,17 +993,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-#if USE_ROCM_ATTENTION
-#if AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
-      check_head_dim_size_flash<true /* caller_is_meff */>,
-#else
-      // hdim_qk != hdim_vo is supported since AOTriton 0.12
       check_head_dim_size_mem_efficient,
-#endif
-#endif // AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
-#else
-      check_head_dim_size_mem_efficient,
-#endif // USE_ROCM_ATTENTION
       check_data_ptr_alignment_mem_efficient
   );
   for (auto& constraint : general_constraints) {
@@ -1009,14 +1004,6 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
-#ifndef USE_ROCM  // ME and FA shares backend on ROCM and thus supports training
-        check_requires_grad_and_nested,
-#elif AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
-        check_head_dim_size_mem_efficient,
-#else
-        // ME on ROCM share the limits of FA about head dimensions
-        check_head_dim_size_flash_nested<true /* caller_is_meff */>,
-#endif
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
