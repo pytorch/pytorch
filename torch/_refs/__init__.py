@@ -771,8 +771,7 @@ def floor(a):
     exact_dtype=True,
 )
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
-    return torch.sub(x, trunc_x)
+    return torch.sub(x, torch.trunc(x))
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -3386,23 +3385,27 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and weight is not None:
-        weight_reshaped = torch.reshape(
-            weight, [1, num_groups, num_channels // num_groups, 1]
-        )
-        w = rstd * weight_reshaped
-        b = -mean * w
+    if input.device.type == "cpu" and (weight is not None or bias is not None):
+        if weight is not None:
+            weight_reshaped = torch.reshape(
+                weight, [1, num_groups, num_channels // num_groups, 1]
+            )
+            w = rstd * weight_reshaped
+        else:
+            w = rstd.expand([batch_size, num_groups, num_channels // num_groups, 1])
         if bias is not None:
             bias_reshaped = torch.reshape(
                 bias, [1, num_groups, num_channels // num_groups, 1]
             )
-            b = b + bias_reshaped
+            b = torch.addcmul(bias_reshaped, -mean, w)
+        else:
+            b = -mean * w
         w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-        out = input_acc * unsqueeze_w + unsqueeze_b
+        out = torch.addcmul(unsqueeze_b, input_acc, unsqueeze_w)
     else:
         out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
@@ -5384,6 +5387,7 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64 or integer_args:
+        torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
