@@ -176,7 +176,7 @@ IF(NOT MKLDNN_FOUND)
   SET(DNNL_ENABLE_PRIMITIVE_CACHE TRUE CACHE BOOL "" FORCE)
   SET(DNNL_GRAPH_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
   IF(APPLE AND CPU_AARCH64)
-    # Without ACL, oneDNN has no optimized kernels for Apple Silicon and falls back to gemm:ref
+    # Without KleidiAI, oneDNN has no optimized kernels for Apple Silicon and falls back to gemm:ref
     SET(ONEDNN_BLAS_VENDOR "ACCELERATE" CACHE STRING "" FORCE)
     # PyTorch's FindBLAS shadows CMake's one and does not define the BLAS::BLAS target oneDNN links to
     IF(NOT TARGET BLAS::BLAS)

@@ -25,8 +25,8 @@ def configure_blas_env() -> None:
 
     On x86, MKL from /opt/intel is wired in via CMAKE_{INCLUDE,LIBRARY}_PATH.
     On aarch64, CMake otherwise hunts for MKL (which doesn't exist there);
-    we explicitly pick OpenBLAS or NVPL and enable ACL for oneDNN.
-    Explicit aarch64 MKLDNN, ACL, and BLAS settings take precedence over these defaults.
+    we explicitly pick OpenBLAS or NVPL.
+    Explicit aarch64 MKLDNN and BLAS settings take precedence over these defaults.    
     """
     arch = platform.machine()
     gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
@@ -42,20 +42,10 @@ def configure_blas_env() -> None:
         return
 
     elif arch == "aarch64":
-        use_mkldnn = get_env_flag_or_set_default("USE_MKLDNN", "1")
-        use_acl = get_env_flag_or_set_default(
-            "USE_MKLDNN_ACL", "1" if use_mkldnn else "0"
-        )
-        if use_mkldnn and use_acl:
-            acl_root = os.environ.setdefault("ACL_ROOT_DIR", "/acl")
-            if not Path(acl_root).is_dir():
-                sys.exit(f"ERROR: ARM Compute Library not found at {acl_root}")
-            print("Using ACL for MKLDNN on aarch64")
-
+        get_env_flag_or_set_default("USE_MKLDNN", "1")
         if "BLAS" in os.environ:
             print(f"Using explicitly configured BLAS: {os.environ['BLAS']}")
             return
-
         if gpu_arch_type == "cuda-aarch64":
             nvpl = Path("/usr/local/lib/libnvpl_blas_lp64_gomp.so.0")
             if not nvpl.is_file():

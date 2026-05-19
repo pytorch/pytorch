@@ -6,7 +6,6 @@ import torch
 class Module(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        # Grouped, as builds without ACL on aarch64 do not use oneDNN for ungrouped convolutions
         self.conv = torch.nn.Conv2d(2, 10, 5, 1, groups=2)
 
     def forward(self, x):

@@ -538,7 +538,7 @@ struct ConvParams {
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
-    // Without ACL, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
+    // Without KleidiAI, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
     if (mkldnn_lacks_aarch64_kernels() && !input.is_mkldnn() && (groups == 1 || transposed)) {
       return false;
     }

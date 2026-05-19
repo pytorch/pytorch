@@ -74,15 +74,6 @@ ARG OPENBLAS_VERSION
 ADD ./common/install_openblas.sh install_openblas.sh
 RUN bash ./install_openblas.sh && rm -f install_openblas.sh
 
-
-# Install Arm Compute Library
-FROM base as arm_compute
-# Install scons using the manylinux-provided CPython 3.9
-RUN /opt/python/cp39-cp39/bin/python -m pip install scons==4.7.0 && \
-    ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
-COPY ./common/install_acl.sh install_acl.sh
-RUN bash ./install_acl.sh && rm -f install_acl.sh
-
 # Build and install llvm-bolt from source
 FROM base as llvm
 COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
@@ -102,7 +93,6 @@ RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && \
     rm -f install_cuda.sh install_nccl.sh install_cusparselt.sh && \
     rm -f /ci_commit_pins/nccl*
 
-
 FROM base as magma
 ARG BASE_CUDA_VERSION
 # Install magma
@@ -118,8 +108,6 @@ RUN bash ./install_nvpl.sh && rm -f install_nvpl.sh
 
 FROM base as common_final
 COPY --from=llvm /llvm/install/ /usr/local/
-COPY --from=arm_compute /acl /acl
-ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm -f patch_libstdc.sh
 
