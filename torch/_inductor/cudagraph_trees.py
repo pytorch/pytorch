@@ -2565,6 +2565,35 @@ class CUDAGraphTreeManager:
 
         return False
 
+    def new_invocation_reenters_path(self, function_id: FunctionID) -> bool:
+        "Check if keeping the current path would re-enter function_id."
+        assert self.current_node is not None
+        return any(
+            node.wrapped_function.id == function_id
+            for node in self.current_node._path_from_root
+        )
+
+    def new_invocation_would_repeat_path(self, function_id: FunctionID) -> bool:
+        "Check if keeping the current path would put function_id in a repeated pattern."
+        assert self.current_node is not None
+        existing_nodes = [
+            node
+            for node in self.current_node._path_from_root
+            if node.wrapped_function.id == function_id
+        ]
+
+        if len(existing_nodes) <= 1:
+            return False
+
+        parents = OrderedSet(
+            [
+                n.parent.wrapped_function.id
+                for n in itertools.chain(existing_nodes, (self.current_node,))
+                if n.parent is not None
+            ]
+        )
+        return len(parents) != len(existing_nodes)
+
     def can_start_new_generation(
         self, function_id: FunctionID, new_inputs: list[InputType]
     ) -> bool:
@@ -2574,10 +2603,35 @@ class CUDAGraphTreeManager:
         if self.user_invoked_mark_step():
             return True
 
+        if self.new_invocation_uses_live_output(
+            function_id, new_inputs
+        ) and self.new_invocation_reenters_path(function_id):
+            return True
+
         if self.running_forwards_with_pending_backwards:
             return False
 
-        return not self.new_invocation_uses_live_output(function_id, new_inputs)
+        if self.new_invocation_uses_live_output(function_id, new_inputs):
+            # Preserve finite producer-consumer chains across compile boundaries,
+            # but do not extend cyclic live-output paths indefinitely.
+            return self.new_invocation_reenters_path(function_id)
+
+        return True
+
+    def raise_if_live_output_reenters_generation(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
+        if self.new_invocation_uses_live_output(function_id, new_inputs) and (
+            self.user_invoked_mark_step()
+            or self.new_invocation_reenters_path(function_id)
+        ):
+            raise RuntimeError(
+                "Error: accessing tensor output of CUDAGraphs that has been overwritten "
+                "by a subsequent run. The next torch.compile invocation consumes a live "
+                "CUDAGraph output while starting a new generation. To prevent overwriting, "
+                "clone the tensor outside of torch.compile() or call "
+                "torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+            )
 
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
@@ -2595,6 +2649,7 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation(function_id, new_inputs):
+            self.raise_if_live_output_reenters_generation(function_id, new_inputs)
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
@@ -2619,6 +2674,7 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation(function_id, new_inputs):
+            self.raise_if_live_output_reenters_generation(function_id, new_inputs)
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2629,6 +2685,7 @@ class CUDAGraphTreeManager:
         self, function_id: FunctionID, new_inputs: list[InputType]
     ) -> None:
         if self.can_start_new_generation(function_id, new_inputs):
+            self.raise_if_live_output_reenters_generation(function_id, new_inputs)
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
@@ -2649,24 +2706,7 @@ class CUDAGraphTreeManager:
             return
 
         assert self.current_node is not None
-        existing_nodes = [
-            node
-            for node in self.current_node._path_from_root
-            if node.wrapped_function.id == function_id
-        ]
-
-        if len(existing_nodes) <= 1:
-            return
-
-        # repeated same pattern
-        parents = OrderedSet(
-            [
-                n.parent.wrapped_function.id
-                for n in itertools.chain(existing_nodes, (self.current_node,))
-                if n.parent is not None
-            ]
-        )
-        if len(parents) == len(existing_nodes):
+        if not self.new_invocation_would_repeat_path(function_id):
             return
 
         self.warned_functions.add(function_id)
