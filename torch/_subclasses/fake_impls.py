@@ -1532,17 +1532,36 @@ _to_dense_functorch_lib.impl("to_dense", to_dense_functorch_frontmode_impl)
 
 
 # Register through torch.library so direct aten.to_dense dispatch is intercepted
-# before the native composite sees a fake MKLDNN tensor as strided.
+# before the native composite sees a fake MKLDNN tensor as strided.  Refuse to
+# silently replace an existing Python override; only the native C++ override
+# warning is expected here.
 _to_dense_composite_lib = torch.library.Library(
     "aten", "IMPL", "CompositeImplicitAutograd"
 )
-with warnings.catch_warnings():
-    warnings.filterwarnings(
-        "ignore",
-        message="Warning only once for all operators.*",
-        category=UserWarning,
+with warnings.catch_warnings(record=True) as _caught_warnings:
+    warnings.simplefilter("always")
+    _to_dense_composite_lib.impl(
+        "to_dense",
+        to_dense_composite_impl,
+        allow_override=False,
     )
-    _to_dense_composite_lib.impl("to_dense", to_dense_composite_impl)
+for _warning in _caught_warnings:
+    _message = str(_warning.message)
+    if (
+        issubclass(_warning.category, UserWarning)
+        and _message.startswith(
+            "Warning only once for all operators,  other operators may also be overridden."
+        )
+        and "operator: aten::to_dense(" in _message
+        and "dispatch key: CompositeImplicitAutograd" in _message
+    ):
+        continue
+    warnings.warn_explicit(
+        _warning.message,
+        _warning.category,
+        _warning.filename,
+        _warning.lineno,
+    )
 
 
 @register_op_impl(aten.to_mkldnn.default)
@@ -1590,7 +1609,6 @@ def to_mkldnn(
     )
 
 
-@register_op_impl(aten.to_dense.default)
 @register_op_impl(aten._to_dense.default)
 def _to_dense(
     fake_mode: FakeTensorMode,
