@@ -5242,6 +5242,22 @@ class AutogradFunctionApplyVariable(VariableTracker):
             # to the backward graph. If it is an input to the backward graph, we have to lookup bwd_freevars to get the inner proxy.
             return bwd_freevars.get(vt.proxy, vt.proxy).node  # type: ignore[attr-defined]
 
+        tensor_args_seen: list[Any] = []
+        for arg in orig_fwd_args:
+            if arg.is_tensor():
+                fake_tensor = _get_fake_value(arg)
+                if any(fake_tensor is seen for seen in tensor_args_seen):
+                    unimplemented(
+                        gb_type="autograd.Function.apply: duplicate tensor input",
+                        context="",
+                        explanation="Dynamo does not support tracing autograd.Function.apply "
+                        "when the same tensor is passed to multiple forward inputs.",
+                        hints=[
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                tensor_args_seen.append(fake_tensor)
+
         # Find the mapping between orig_fwd_args and bwd_out
         # pyrefly: ignore [implicit-any]
         outer_fwd_proxy_to_bwd_node = {}
