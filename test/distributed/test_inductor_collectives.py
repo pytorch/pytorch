@@ -62,10 +62,10 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-<<<<<<< distributed_2
+
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
-=======
+
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
     def test_trace_ignores_ambient_pending_unbacked_symbols(self):
         fake_mode = FakeTensorMode(
@@ -80,7 +80,7 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
 
         self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
         FileCheck().check("aten.add").run(gm.code)
->>>>>>> main
+
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
