@@ -2621,6 +2621,18 @@ def skip_if_pytest(fn):
 def skipIfNoXPU(fn):
     return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
 
+def skipIfCachingAllocatorDisabled(fn):
+    """Skip if the CUDA/HIP caching allocator is not active. Covers both the
+    runtime toggle (``torch.cuda.caching_allocator_enable(False)``) and the
+    env-var bypass (``PYTORCH_NO_CUDA_MEMORY_CACHING`` /
+    ``PYTORCH_NO_HIP_MEMORY_CACHING``). The CPU-only case (no CUDA built)
+    is treated as "allocator irrelevant", so the test is allowed to run."""
+    return lazy_skip_if(
+        lambda: torch.cuda.is_available()
+        and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
+        "requires the CUDA/HIP caching allocator (current allocator is uncached)",
+    )(fn)
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
