@@ -350,6 +350,150 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    def test_hopper_prunes_expensive_default_mm_configs(self):
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.template_heuristics.triton import (
+            CUDAMMTemplateConfigHeuristic,
+            GemmConfig,
+        )
+
+        mm_configs = [
+            GemmConfig(64, 128, 32, 5, 4, group_m=8),
+            GemmConfig(64, 128, 32, 4, 8, group_m=8),
+            GemmConfig(128, 256, 64, 4, 8, group_m=8),
+            GemmConfig(128, 128, 64, 3, 4, group_m=8),
+        ]
+        heuristic = CUDAMMTemplateConfigHeuristic()
+        original_mm_configs = heuristic.mm_configs
+        original_should_scale_configs = heuristic.should_scale_configs
+        convert_config_attr = "_convert_config_to_template_kwargs"
+        self.assertNotIn(convert_config_attr, heuristic.__dict__)
+        target_device = torch.device("cuda:1")
+
+        class FakeNode:
+            def get_dtype(self):
+                return torch.bfloat16
+
+        class FakeMMKernelInputs(MMKernelInputs):
+            def __init__(self):
+                super().__init__([FakeNode(), FakeNode()])
+
+            def mnk_symbolic(self):
+                return (9717, 512, 1152)
+
+            def dtype(self, idx=0):
+                return torch.bfloat16
+
+            def device(self):
+                return target_device
+
+            def out_dtype(self):
+                return torch.bfloat16
+
+        def get_target_device_capability(device=None):
+            if device is None:
+                return (8, 0)
+            self.assertEqual(device, target_device)
+            return (9, 0)
+
+        def convert_config_to_template_kwargs(triton_config, m, n, k, out_dtype):
+            return {
+                "BLOCK_M": triton_config.kwargs["BLOCK_M"],
+                "BLOCK_N": triton_config.kwargs["BLOCK_N"],
+                "BLOCK_K": triton_config.kwargs["BLOCK_K"],
+                "num_stages": triton_config.num_stages,
+                "num_warps": triton_config.num_warps,
+            }
+
+        try:
+            heuristic.mm_configs = mm_configs
+            heuristic.should_scale_configs = False
+            with (
+                config.patch({"max_autotune_gemm_search_space": "DEFAULT"}),
+                patch("torch.cuda.is_available", return_value=True),
+                patch(
+                    "torch.cuda.get_device_capability",
+                    side_effect=get_target_device_capability,
+                ),
+                patch.object(
+                    heuristic,
+                    convert_config_attr,
+                    convert_config_to_template_kwargs,
+                ),
+            ):
+                configs = list(
+                    heuristic._get_template_configs_impl(FakeMMKernelInputs(), "mm")
+                )
+        finally:
+            heuristic.mm_configs = original_mm_configs
+            heuristic.should_scale_configs = original_should_scale_configs
+
+        actual = [
+            (
+                c["BLOCK_M"],
+                c["BLOCK_N"],
+                c["BLOCK_K"],
+                c["num_stages"],
+                c["num_warps"],
+            )
+            for c in configs
+        ]
+        self.assertEqual(actual, [(128, 256, 64, 4, 8), (128, 128, 64, 3, 4)])
+        self.assertNotIn(convert_config_attr, heuristic.__dict__)
+
+    def test_hopper_mm_pruning_is_not_applied_to_other_cuda_arches(self):
+        from torch._inductor.template_heuristics.triton import (
+            CUDAMMTemplateConfigHeuristic,
+            GemmConfig,
+        )
+
+        mm_configs = [
+            GemmConfig(64, 128, 32, 5, 4, group_m=8),
+            GemmConfig(64, 128, 32, 4, 8, group_m=8),
+            GemmConfig(128, 128, 64, 3, 4, group_m=8),
+        ]
+        heuristic = CUDAMMTemplateConfigHeuristic()
+        original_mm_configs = heuristic.mm_configs
+        original_should_scale_configs = heuristic.should_scale_configs
+        capabilities = {
+            torch.device("cuda:0"): (8, 0),
+            torch.device("cuda:2"): (10, 0),
+        }
+
+        def get_target_device_capability(device=None):
+            if device is None:
+                return (9, 0)
+            self.assertIn(device, capabilities)
+            return capabilities[device]
+
+        try:
+            heuristic.mm_configs = mm_configs
+            heuristic.should_scale_configs = False
+            for target_device in capabilities:
+                with (
+                    self.subTest(target_device=target_device),
+                    config.patch({"max_autotune_gemm_search_space": "DEFAULT"}),
+                    patch("torch.cuda.is_available", return_value=True),
+                    patch(
+                        "torch.cuda.get_device_capability",
+                        side_effect=get_target_device_capability,
+                    ),
+                ):
+                    configs = list(
+                        heuristic.get_mm_configs()(
+                            9717,
+                            512,
+                            1152,
+                            dtype_size=2,
+                            op_name="mm",
+                            target_device=target_device,
+                        )
+                    )
+                    self.assertEqual(len(configs), len(mm_configs))
+        finally:
+            heuristic.mm_configs = original_mm_configs
+            heuristic.should_scale_configs = original_should_scale_configs
+
 
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
