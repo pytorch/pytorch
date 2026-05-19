@@ -212,6 +212,58 @@ class ImplDetailTest(MockSchedulerTest):
 @inductor_config.patch(
     {
         "benchmark_kernel": True,
+        "triton.unique_kernel_names": True,
+    }
+)
+class LoopOrderingDefaultTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        metrics.reset()
+
+    @unittest.skipIf(
+        "TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION" in os.environ,
+        "default behavior is overridden by the environment",
+    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
+    @unittest.skipIf(not SM90OrLater, "sm89 errors out on this test")
+    def test_fp8_cast_and_t_default_enabled(self):
+        self.assertTrue(inductor_config.loop_ordering_after_fusion)
+
+        def f(x, scale):
+            x = x * scale
+            x = x.clamp(-1 * E4M3_MAX_POS, E4M3_MAX_POS)
+            x = x.to(torch.float8_e4m3fn)
+            x_t = x.t().contiguous().t()
+            return x, x_t
+
+        def cast_fp8_to_fp32(x):
+            if isinstance(x, torch.Tensor) and x.dtype in (
+                torch.float8_e5m2,
+                torch.float8_e4m3fn,
+            ):
+                return x.to(torch.float32)
+            return x
+
+        x = torch.randn(128, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.tensor([10.0], device=GPU_TYPE)
+        E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+
+        expected = f(x, scale)
+        actual = torch.compile(f)(x, scale)
+
+        self.assertTrue(
+            same(
+                tree_map(cast_fp8_to_fp32, expected),
+                tree_map(cast_fp8_to_fp32, actual),
+            )
+        )
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+
+@inductor_config.patch(
+    {
+        "benchmark_kernel": True,
         "loop_ordering_after_fusion": True,
         "triton.unique_kernel_names": True,
     }
