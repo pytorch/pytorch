@@ -1486,6 +1486,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_integral_inplace_div_aot_eager_raises(self):
+        def fn(x, y):
+            x.div_(y)
+            return x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError, "can't be cast to the desired output type"
+        ):
+            opt_fn(torch.tensor([1]), torch.tensor([0]))
+
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
