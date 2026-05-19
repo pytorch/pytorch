@@ -36,6 +36,7 @@ from .bytecode_transformation import (
 )
 from .utils import ExactWeakKeyDictionary
 
+
 if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterable
