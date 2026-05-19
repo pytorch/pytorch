@@ -4833,6 +4833,26 @@ class CPUReproTests(TestCase):
             code,
         )
 
+    def test_group_norm_affine_fma_precision(self):
+        def fn(x, weight, bias):
+            y = F.group_norm(x, 5, weight, bias)
+            return torch.log(torch.clamp(y, min=1e-6))
+
+        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
+        test_cases = [
+            ("weight_and_bias", torch.ones(5), torch.zeros(5)),
+            ("weight_only", torch.ones(5), None),
+            ("bias_only", None, torch.zeros(5)),
+        ]
+
+        for name, weight, bias in test_cases:
+            with self.subTest(name=name):
+                expected = fn(x, weight, bias)
+                torch._dynamo.reset()
+                actual = torch.compile(fn, backend="inductor")(x, weight, bias)
+
+                self.assertLess((expected - actual).abs().max().item(), 1e-4)
+
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
         "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
