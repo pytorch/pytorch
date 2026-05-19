@@ -6022,6 +6022,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         out_dtype: Any | None = None,
         epilogue_arg_indices: Sequence[int] = (),
         local_reduce_out_index: int | None = None,
+        aux_out_index: int | None = None,
         local_reduce_group: int | None = None,
         local_reduce_dim: int | None = None,
         local_reduce_feeds_main: bool = False,
@@ -6036,6 +6037,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         self.out_dtype = out_dtype
         self.epilogue_arg_indices = tuple(epilogue_arg_indices)
         self.local_reduce_out_index = local_reduce_out_index
+        self.aux_out_index = aux_out_index
         self.local_reduce_group = local_reduce_group
         self.local_reduce_dim = local_reduce_dim
         self.local_reduce_feeds_main = local_reduce_feeds_main
