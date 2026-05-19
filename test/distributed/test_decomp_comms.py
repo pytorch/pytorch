@@ -14,16 +14,14 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.fx as fx
-
 from torch._inductor.fx_passes.decomp_comms import decomp_gram_matrix_all_gather
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.inductor_utils import HAS_GPU
+
 
 aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
@@ -36,7 +34,6 @@ def _count_ops(graph: fx.Graph, target) -> int:
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestDecompGramMatrixAllGather(InductorTestCase):
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -106,9 +103,7 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         self.assertEqual(
             _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 0
         )
-        self.assertEqual(
-            _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
-        )
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), ns_steps)
         self.assertEqual(_count_ops(traced.graph, aten.split.Tensor), 0)
 
     def test_shampoo_preconditioner(self):
@@ -179,7 +174,8 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         decomp_gram_matrix_all_gather(traced)
 
         self.assertEqual(
-            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 1,
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default),
+            1,
             "all_gather should remain when no Gram pattern detected",
         )
         self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
