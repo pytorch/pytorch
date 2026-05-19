@@ -1832,6 +1832,42 @@ class GemmEpilogueFusionTests(TestCase):
         self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_swiglu_shape_changing_main_fuses(self):
+        M = 64
+        K = 64
+        N = 64
+
+        def fn(a, b):
+            def epilogue(acc):
+                pair = acc.view(M, -1, 2)
+                gate = pair[..., 0]
+                up = pair[..., 1]
+                return torch.nn.functional.silu(gate) * up
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
+        gate_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
+        up_w = torch.randn(K, N, device="cuda", dtype=torch.float16)
+        b = torch.stack((gate_w, up_w), dim=-1).reshape(K, 2 * N).contiguous()
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        self.assertEqual(actual.shape, (M, N))
+        torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
+        FileCheck().check("main_output_transform='swiglu'").check_not(
+            "extern_kernels.mm"
+        ).run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_nvfp4_scale_aux_fuses(self):
         M = 64
         N = 64
