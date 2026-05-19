@@ -3037,14 +3037,15 @@ class PythonWrapperCodegen(CodeGen):
             name = name[1:]
 
         compile_wrapper = IndentedBuffer()
-        if config.triton.unique_user_kernel_names:
-            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
-        else:
-            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
+        compile_name = name if config.triton.unique_user_kernel_names else original_name
+        compile_wrapper.writeline(f"async_compile.triton({compile_name!r}, '''")
 
-        inductor_meta["kernel_name"] = name
+        source_inductor_meta = {**inductor_meta}
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
-        inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
+        inductor_meta_common = triton_info_kernel_cls.inductor_meta_common()
+        source_inductor_meta.update(inductor_meta_common)
+        inductor_meta["kernel_name"] = name
+        inductor_meta.update(inductor_meta_common)
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         if config.triton.proton_profiling:
@@ -3054,7 +3055,7 @@ class PythonWrapperCodegen(CodeGen):
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
-                inductor_meta={inductor_meta!r},
+                inductor_meta={source_inductor_meta!r},
                 triton_meta={triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
@@ -3078,7 +3079,9 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        compile_wrapper.writeline(
+            f"''', device_str='{current_device.type}', descriptive_name={name!r})"
+        )
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"

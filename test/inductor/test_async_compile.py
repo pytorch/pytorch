@@ -1,16 +1,22 @@
 # Owner(s): ["module: inductor"]
+import re
 from unittest.mock import patch
 
 import torch
 from torch._inductor import config
-from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.async_compile import (
+    AsyncCompile,
+    CompiledTritonKernels,
+    shutdown_compile_workers,
+)
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch.profiler import ProfilerActivity
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -64,6 +70,57 @@ class TestAsyncCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"triton.unique_kernel_names": False})
+    def test_descriptive_kernel_name_not_in_triton_source(self):
+        def add_only(x):
+            return x + 1
+
+        def sin_then_add(y, x):
+            return y.sin(), x + 1
+
+        x = torch.randn(16, device=GPU_TYPE)
+        y = torch.randn(16, device=GPU_TYPE)
+
+        def get_triton_blocks(fn, *args):
+            _, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+            code = "\n".join(codes)
+            blocks = re.findall(
+                r"async_compile\.triton\('triton_', '''\n(.*?)\n'''", code, re.DOTALL
+            )
+            return code, blocks
+
+        with fresh_cache():
+            add_code, add_blocks = get_triton_blocks(add_only, x)
+            both_code, both_blocks = get_triton_blocks(sin_then_add, y, x)
+
+        self.assertEqual(len(add_blocks), 1)
+        self.assertEqual(len(both_blocks), 2)
+        self.assertEqual(add_blocks[0], both_blocks[1])
+        self.assertEqual(
+            CompiledTritonKernels.key(add_blocks[0]),
+            CompiledTritonKernels.key(both_blocks[1]),
+        )
+        self.assertNotIn("'kernel_name'", add_blocks[0])
+        self.assertIn("descriptive_name='triton_poi_fused_add_0'", add_code)
+        self.assertIn("descriptive_name='triton_poi_fused_add_1'", both_code)
+
+        with fresh_cache():
+            compiled = torch.compile(sin_then_add, fullgraph=True)
+            for _ in range(2):
+                compiled(y, x)
+            getattr(torch, GPU_TYPE).synchronize()
+            with torch.profiler.profile(
+                activities=[ProfilerActivity.CPU], record_shapes=True
+            ) as prof:
+                compiled(y, x)
+            getattr(torch, GPU_TYPE).synchronize()
+
+        self.assertTrue(
+            any(event.name == "triton_poi_fused_add_1" for event in prof.events())
+        )
 
     @requires_gpu()
     @requires_triton()

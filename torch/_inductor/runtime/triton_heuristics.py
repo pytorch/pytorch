@@ -599,6 +599,19 @@ class CachingAutotuner(KernelInterface):
         self.compile_id = compile_id
         self.is_backward = is_backward
 
+    def with_kernel_name(self, kernel_name: str) -> CachingAutotuner:
+        if self.inductor_meta.get("kernel_name") == kernel_name:
+            return self
+
+        result = copy.copy(self)
+        result.inductor_meta = {**self.inductor_meta, "kernel_name": kernel_name}
+        result._debug_call = None
+        result._profiler_ctx = None
+        result._cached_launcher = None
+        result.cuda_kernel_saved = False
+        result.cpu_kernel_saved = False
+        return result
+
     def precompile(
         self,
         warm_cache_only=False,
