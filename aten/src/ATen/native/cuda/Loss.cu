@@ -6,7 +6,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
 
