@@ -5091,7 +5091,9 @@ class InstructionTranslatorBase(
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code, closure=closure, code_options=code_options
+                code=f_code,
+                closure=closure,
+                code_options=cast(dict[str, Any], code_options),
             )
         else:
             self.exec_recorder = None
@@ -5878,17 +5880,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if cached is not None:
             instructions = cached.instructions
             indexof = cached.indexof
-            code_options = cached.code_options
+            code_options = cast(CodeOptions, cached.code_options)
         else:
             instructions = cleaned_instructions(code)
             propagate_line_nums(instructions)
             indexof = get_indexof(instructions)
-            code_options = {k: getattr(code, k) for k in get_code_keys()}
+            code_options = cast(
+                CodeOptions, {k: getattr(code, k) for k in get_code_keys()}
+            )
             if tracing_ctx:
                 tracing_ctx.inlined_code_cache[code] = InlinedCodeCache(
                     instructions=instructions,
                     indexof=indexof,
-                    code_options=code_options,
+                    code_options=cast(dict[str, Any], code_options),
                 )
 
         super().__init__(
