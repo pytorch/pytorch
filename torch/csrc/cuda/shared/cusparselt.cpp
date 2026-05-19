@@ -1,6 +1,9 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
+#ifdef USE_HIPSPARSELT
+#include <hipsparselt/hipsparselt-version.h>
+#endif
 
 namespace {
 
@@ -9,7 +12,6 @@ size_t getVersionInt() {
   return CUSPARSELT_VERSION;
 }
 #elif defined(USE_HIPSPARSELT)
-#include <hipsparselt/hipsparselt-version.h>
 size_t getVersionInt() {
  int version = 0;
  version = hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100 +
