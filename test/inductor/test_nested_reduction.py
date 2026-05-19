@@ -600,7 +600,23 @@ class _NestedReductionBase:
         self.check_fusion()
 
     @inductor_config.patch(emulate_precision_casts=True)
-    def test_producer_consumer_residual_rmsnorm_quant(self):
+    @parametrize(
+        "weight_layout",
+        [
+            "scalar",
+            "scalar_1d",
+            "feature",
+            "singleton",
+            "singleton_batch",
+            "batch",
+            "full",
+            "leading_singleton",
+            "leading_singleton_feature",
+            "leading_singleton_batch",
+            "leading_singleton_full",
+        ],
+    )
+    def test_producer_consumer_residual_rmsnorm_quant(self, weight_layout):
         B, D, G = 128, 2048, 128
         qmax = 448.0
         min_scale = 1.0 / (qmax * 512.0)
@@ -609,8 +625,8 @@ class _NestedReductionBase:
             h = x.float() + residual.float()
             variance = h.pow(2).mean(dim=-1, keepdim=True)
             normed = h * torch.rsqrt(variance + 1e-6)
-            normed_fp16 = normed.to(torch.float16) * weight
-            grouped = normed_fp16.view(B, D // G, G)
+            normed_bf16 = normed.to(torch.bfloat16) * weight
+            grouped = normed_bf16.view(B, D // G, G)
             absmax = grouped.abs().amax(dim=-1, keepdim=True).float()
             scales = (absmax / qmax).clamp(min=min_scale)
             x_scaled = (grouped / scales).clamp(-qmax, qmax)
@@ -619,7 +635,26 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         residual = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        w = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight_shapes = {
+            "scalar": (),
+            "scalar_1d": (1,),
+            "feature": (D,),
+            "singleton": (1, 1),
+            "singleton_batch": (1, D),
+            "batch": (B, 1),
+            "full": (B, D),
+            "leading_singleton": (1, 1, 1),
+            "leading_singleton_feature": (1, 1, D),
+            "leading_singleton_batch": (1, B, 1),
+            "leading_singleton_full": (1, B, D),
+        }
+        w = torch.randn(
+            weight_shapes[weight_layout], device=GPU_TYPE, dtype=torch.bfloat16
+        )
+
+        weighted = x.to(torch.bfloat16) * w
+        self.assertEqual(weighted.dtype, torch.bfloat16)
+        self.assertEqual(weighted.numel(), x.numel())
         self.check_nested_matches_unnested(f, (x, residual, w))
         self.check_fusion()
 
