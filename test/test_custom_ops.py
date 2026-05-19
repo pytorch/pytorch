@@ -3089,6 +3089,18 @@ class TestCustomOpAPI(TestCase):
                 tags=torch.Tag.out,
             )
 
+    def test_custom_op_out_tag_manual_schema_requires_tensor_out(self):
+        with self.assertRaisesRegex(ValueError, "only supports Tensor"):
+
+            @torch.library.custom_op(
+                "_torch_testing::out_tag_manual_schema_requires_tensor_out",
+                mutates_args={"out"},
+                schema="(Tensor x, *, int(a!) out) -> int(a!)",
+                tags=torch.Tag.out,
+            )
+            def f(x, *, out):
+                return out
+
     def test_custom_op_out_tag_return_mismatch(self):
         def f(x: Tensor, *, out1: Tensor, out2: Tensor) -> Tensor:
             return out1
