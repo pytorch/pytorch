@@ -15,11 +15,48 @@ import hashlib
 import logging
 import os
 import pickle
+import struct
 from pathlib import Path
 from typing import Any
 
 
 log = logging.getLogger(__name__)
+
+
+def _fix_elf_dup_text_flags(data: bytes) -> bytes:
+    """Harmonize flags on duplicate .text ELF sections.
+
+    The CUTLASS MLIR compiler emits .o files with two .text sections:
+    one for code (ALLOC|EXECINSTR) and one for writable data
+    (WRITE|ALLOC). LLVM's MCJIT mishandles this in multi-process
+    workloads, causing non-deterministic SIGSEGV. Fix: set duplicate
+    .text sections' flags to match the first (ALLOC|EXECINSTR = 0x6).
+
+    See https://github.com/NVIDIA/cutlass/issues/3162
+    """
+    if len(data) < 64 or data[4] != 2 or data[5] != 1:
+        return data
+    e_shoff = struct.unpack_from("<Q", data, 40)[0]
+    e_shentsize = struct.unpack_from("<H", data, 58)[0]
+    e_shnum = struct.unpack_from("<H", data, 60)[0]
+    e_shstrndx = struct.unpack_from("<H", data, 62)[0]
+    if not e_shoff or not e_shnum or e_shstrndx >= e_shnum:
+        return data
+    shstr_hdr = e_shoff + e_shstrndx * e_shentsize
+    shstr_off = struct.unpack_from("<Q", data, shstr_hdr + 24)[0]
+    text_secs: list[tuple[int, int]] = []
+    for i in range(e_shnum):
+        sh = e_shoff + i * e_shentsize
+        ni = struct.unpack_from("<I", data, sh)[0]
+        ns = shstr_off + ni
+        if ns + 6 <= len(data) and data[ns : ns + 6] == b".text\x00":
+            text_secs.append((i, sh))
+    if len(text_secs) <= 1:
+        return data
+    r = bytearray(data)
+    for _, sh in text_secs[1:]:
+        struct.pack_into("<Q", r, sh + 8, 0x6)
+    return bytes(r)
 
 
 def _cache_dir() -> Path:
@@ -63,6 +100,11 @@ def disk_cache_get(
     obj_path = _cache_dir() / f"{h}.o"
     if obj_path.exists():
         try:
+            raw = obj_path.read_bytes()
+            patched = _fix_elf_dup_text_flags(raw)
+            if patched is not raw:
+                obj_path.write_bytes(patched)
+
             import cutlass.cute as cute
 
             m = cute.runtime.load_module(str(obj_path), enable_tvm_ffi=True)
@@ -98,6 +140,10 @@ def disk_cache_set(
             fd, tmp_path = tempfile.mkstemp(dir=str(d), suffix=".o.tmp")
             os.close(fd)
             compiled_fn.export_to_c(object_file_path=tmp_path, function_name="func")
+            with open(tmp_path, "rb") as f:
+                patched = _fix_elf_dup_text_flags(f.read())
+            with open(tmp_path, "wb") as f:
+                f.write(patched)
             os.replace(tmp_path, str(obj_path))
         except (AttributeError, RuntimeError, TypeError):
             log.debug(
