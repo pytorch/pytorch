@@ -496,13 +496,14 @@ def _walk_spec(
     return current_spec
 
 
-def lookup_spec_from_dynamo_source(
-    source: Source, shapes_spec: ShapesSpec | None
+def _lookup_spec_from_dynamo_source_or_none(
+    source: Source, shapes_spec: ShapesSpec
 ) -> LeafSpec:
     """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
-    Returns ``None`` if the source isn't covered.
+    Returns ``None`` if the source isn't specified. Throw error at contradictions between
+    source and spec
     """
-    if shapes_spec is None or shapes_spec._params is None:
+    if shapes_spec._params is None:
         return None
     path = _source_to_access_path(source)
     if not path or not isinstance(path[0], _LocalToken):
@@ -552,6 +553,65 @@ def lookup_spec_from_dynamo_source(
 
     current_spec: IntermediateSpec = params._named_args.get(root.name)
     return _walk_spec(current_spec, path[1:])
+
+
+def lookup_spec_from_dynamo_source(
+    source: Source, shapes_spec: ShapesSpec, value: Any
+) -> LeafSpec:
+    """Look up the LeafSpec for ``source`` in ``shapes_spec``, validating it
+    against ``value`` and synthesizing a fully-static spec when the source is
+    not covered.
+
+    - When no spec exists, returns a fully-static spec derived from ``value``
+      (the int itself for ints; ``TensorSpec`` with concrete dim sizes for
+      tensors).
+    - When a spec exists, validates it against ``value`` and fills any ``None``
+      dim entries of a ``TensorSpec`` from ``value.shape[i]``.
+
+    Always returns a concrete (non-``None``) ``LeafSpec``.
+    """
+    spec = _lookup_spec_from_dynamo_source_or_none(source, shapes_spec)
+    if spec is None:
+        if isinstance(value, torch.Tensor):
+            return TensorSpec(list(value.shape))
+        if type(value) is int:
+            return value
+        raise ValueError(
+            f"Cannot synthesize shapes_spec entry for {source.name}: "
+            f"unexpected value type {type(value).__name__}"
+        )
+    if isinstance(spec, int):
+        if value != spec:
+            raise ValueError(
+                f"shapes_spec declares {source.name} as static "
+                f"with value {spec}, but got {value}"
+            )
+        return spec
+    if isinstance(spec, IntVar):
+        return spec
+    if isinstance(spec, TensorSpec):
+        if len(spec) != value.dim():
+            raise ValueError(
+                f"TensorSpec has {len(spec)} dims but tensor {source.name} "
+                f"has {value.dim()} dims"
+            )
+        filled: list[Any] = []
+        for i in range(value.dim()):
+            dim_spec = spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = value.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                filled.append(dim_spec)
+            elif dim_spec is None:
+                filled.append(int(value.size(i)))
+            else:
+                filled.append(dim_spec)
+        return TensorSpec(filled)
+    return spec
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -2530,19 +2590,10 @@ class VariableBuilder:
             # Check for user-provided spec from shapes_spec.
             if config._shapes_spec is not None:
                 int_spec = lookup_spec_from_dynamo_source(
-                    self.source, config._shapes_spec
+                    self.source, config._shapes_spec, value=value
                 )
-                if int_spec is None:
-                    # shapes_spec is set but this int has no spec → force static
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return ConstantVariable.create(value=value, source=self.source)
-                elif isinstance(int_spec, int):
-                    # Explicit static value — verify the actual matches.
-                    if value != int_spec:
-                        raise ValueError(
-                            f"shapes_spec declares {self.source.name} as static "
-                            f"with value {int_spec}, but got {value}"
-                        )
+                if isinstance(int_spec, int):
+                    # Explicit (or synthesized) static value.
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
                     return ConstantVariable.create(value=value, source=self.source)
                 elif isinstance(int_spec, IntVar):
@@ -2691,10 +2742,15 @@ class VariableBuilder:
         # Without this check, specifying TensorSpec on an nn.Parameter would
         # be silently ignored.
         # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
-        _tensor_spec = cast(
-            TensorSpec | None,
-            lookup_spec_from_dynamo_source(source, config._shapes_spec),
-        )
+        if config._shapes_spec is not None:
+            _tensor_spec = cast(
+                TensorSpec | None,
+                lookup_spec_from_dynamo_source(
+                    source, config._shapes_spec, value=value
+                ),
+            )
+        else:
+            _tensor_spec = None
         _has_spec = _tensor_spec is not None
 
         if (
@@ -4205,11 +4261,6 @@ def _symbolic_context_from_shapes_spec(
     view_base_context: SymbolicContext | None,
     shape_env_to_source_to_symbol_cache: dict[Any, Any],
 ) -> StatefulSymbolicContext:
-    if tensor_spec is not None and len(tensor_spec) != e.dim():
-        raise ValueError(
-            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
-            f"has {e.dim()} dims"
-        )
     dynamic_sizes = []
     dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
 
@@ -4219,12 +4270,6 @@ def _symbolic_context_from_shapes_spec(
         else:
             dim_spec = tensor_spec[i]
             if isinstance(dim_spec, int):
-                actual_size = e.size(i)
-                if actual_size != dim_spec:
-                    raise ValueError(
-                        f"shapes_spec declares dim {i} as static with value "
-                        f"{dim_spec}, but got {actual_size}"
-                    )
                 dynamic_sizes.append(DimDynamic.STATIC)
             elif isinstance(dim_spec, IntVar):
                 dynamic_sizes.append(DimDynamic.UNBACKED)
