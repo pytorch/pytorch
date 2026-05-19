@@ -97,9 +97,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     unsupported_mutable = [
-        arg
-        for arg in mutable_args
-        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+        arg for arg in mutable_args if not isinstance(arg.type, torch.TensorType)
     ]
     if unsupported_mutable:
         names = [a.name for a in unsupported_mutable]
@@ -1407,6 +1405,11 @@ def register_autograd(
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
+    if _library.utils.is_out(op):
+        raise RuntimeError(
+            f"Cannot register autograd formula for operator tagged with "
+            f"torch.Tag.out: {op}. Out variants do not support autograd."
+        )
     if not _library.utils.is_functional_schema(schema):
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
