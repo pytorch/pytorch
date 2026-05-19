@@ -729,6 +729,10 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         self.n_regs = kernel.launchers[0].n_regs
 
+    def release_benchmark_artifacts(self) -> None:
+        if self.module_cache_key is not None and self.module_path is not None:
+            PyCodeCache.unload_by_key_path(self.module_cache_key, self.module_path)
+
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
