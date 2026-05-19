@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from concurrent.futures.process import BrokenProcessPool
 from threading import Event
 
 import torch._inductor.config as config
@@ -14,6 +15,7 @@ from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
     SubprocKind,
+    SubprocMain,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
@@ -23,6 +25,30 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class TestCompileWorkerStartup(TestCase):
+    def test_broken_pool_recovery_waits_for_shutdown(self):
+        shutdown_wait_args = []
+
+        class FakePool:
+            def shutdown(self, wait):
+                shutdown_wait_args.append(wait)
+
+        class BrokenOnceSubprocMain(SubprocMain):
+            def __init__(self):
+                self.running = True
+                self.pool = FakePool()
+                self.attempts = 0
+
+            def _submit_inner(self, job_id, data):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise BrokenProcessPool("test")
+
+        main = BrokenOnceSubprocMain()
+        main.submit(0, b"")
+        self.assertEqual(main.attempts, 2)
+        self.assertEqual(shutdown_wait_args, [True])
+        self.assertIsNone(main.pool)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires /proc")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_fork_sidecar_stays_single_threaded_before_first_job(self):

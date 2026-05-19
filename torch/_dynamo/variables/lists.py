@@ -293,6 +293,22 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
+        kwargs: dict[str, Any] = {}
+        if issubclass(self.python_type(), list):
+            kwargs["mutation_type"] = ValueMutationNew()
+        return type(self)(new_items, **kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -369,31 +385,6 @@ class BaseListVariable(VariableTracker):
                 return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
-                return self
-        elif name in ("__mul__", "__imul__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if not (args[0].is_python_constant() and args[0].python_type() is int):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
-                    ],
-                )
-
-            val = args[0].as_python_constant()
-
-            if name == "__mul__":
-                return type(self)(self.items * val, source=self.source)
-            else:
-                self.items *= val
                 return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
@@ -1031,6 +1022,26 @@ class ListVariable(CommonListMethodsVariable):
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # list_inplace_repeat: https://github.com/python/cpython/blob/v3.13.13/Objects/listobject.c#L1071
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
 
     def call_method(
         self,

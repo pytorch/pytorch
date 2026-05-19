@@ -26,13 +26,17 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum
 from multiprocessing.context import BaseContext
 from time import time
-from typing import Any, IO
+from typing import Any, IO, TypeVar
+from typing_extensions import ParamSpec
 
 
 log = logging.getLogger(__name__)
 _queue_stats_log = logging.getLogger(
     "torch._inductor.compile_worker.tracked_process_pool"
 )
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class MsgHeader(IntEnum):
@@ -73,6 +77,7 @@ def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
     return msg_header, job_id, data
 
 
+@dataclass(slots=True)
 class _SubprocExceptionInfo:
     """
     Carries exception info from subprocesses across the wire. traceback
@@ -80,8 +85,7 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details: str) -> None:
-        self.details = details
+    details: str
 
 
 class SubprocException(Exception):
@@ -117,7 +121,7 @@ class SubprocKind(Enum):
     SPAWN = "spawn"
 
 
-@dataclass
+@dataclass(slots=True)
 class _QueueStats:
     # Mapping from id(future) -> start time
     pending: dict[int, float] = dataclasses.field(default_factory=dict)
@@ -174,8 +178,8 @@ class TrackedProcessPoolExecutor(ProcessPoolExecutor):
             self._record_dequeue(f)
 
     def submit(
-        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
-    ) -> Future[Any]:
+        self, fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> Future[_R]:
         f = super().submit(fn, *args, **kwargs)
         self._record_enqueue(f)
         return f
@@ -266,8 +270,8 @@ class SubprocMain:
             except BrokenProcessPool:
                 # If any subprocess in the pool crashes, we get a BrokenProcessPool
                 # exception and the whole pool becomes unusable. Handle crashes by
-                # recreating the pool and resubmitting.
-                self.pool = None
+                # shutting it down before recreating the pool and resubmitting.
+                self._quiesce()
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
