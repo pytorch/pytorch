@@ -913,6 +913,16 @@ inline_invoke_subgraph: bool = False
 # Single-use subgraphs add overhead without deduplication benefit.
 inline_single_use_invoke_subgraph: bool = True
 
+# When True, observe recompile reasons across all torch.compile calls and
+# emit a suggested ShapesSpec on demand (via
+# torch.fx.experimental.dynamic_spec_optimizer.suggest_spec_for). Off by default
+# to keep zero overhead for normal users.
+dynamic_spec_suggest: bool = False
+
+# Minimum distinct-value count at a single source before the suggester
+# proposes promoting it from static to dynamic.
+dynamic_spec_suggest_threshold: int = 2
+
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
 # can block torch.utils.swap_tensors from working after compile.
