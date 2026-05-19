@@ -27,10 +27,13 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
+    _TestCUDACodeCacheBenchmarkRequest,
+    _TestEnvBenchmarkRequest,
     AsyncAutotuner,
     AutotuneProcessPool,
     CUDA_VISIBLE_DEVICES,
     ExternKernelBenchmarkRequest,
+    run_autotune_in_subprocess,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -4202,6 +4205,117 @@ class TestTuningProcess(TestCase):
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
+    def assert_path_in_dir(self, path, expected_dir):
+        self.assertEqual(
+            os.path.commonpath([path, expected_dir]),
+            expected_dir,
+        )
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(
+                _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            )
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                process = tuning_pool.processes[0]
+                process.put(
+                    choice.bmreq.benchmark,
+                    extra_env={"TRITON_CACHE_DIR": stale_triton_cache_dir},
+                )
+                self.assertEqual(process.get(), stale_triton_cache_dir)
+
+                self.assertIsNone(os.environ.get("TRITON_CACHE_DIR"))
+                self.assertIsNone(tuning_pool.target(choice))
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(_TestCUDACodeCacheBenchmarkRequest())
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                os.environ["TRITON_CACHE_DIR"] = stale_triton_cache_dir
+                self.assertEqual(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30),
+                    stale_triton_cache_dir,
+                )
+
+                os.environ.pop("TRITON_CACHE_DIR", None)
+                self.assertIsNone(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30)
+                )
+            finally:
+                autotune_pool._shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestCUDACodeCacheBenchmarkRequest()
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                autotune_pool._shutdown()
+
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()

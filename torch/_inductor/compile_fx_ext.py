@@ -24,6 +24,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstantsWithGm,
     OutputCode,
 )
+from torch._inductor.utils import patch_subprocess_env
 from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
@@ -544,15 +545,12 @@ class _SerializedFxCompile(FxCompile):
     def _run_in_child(
         cls,
         pickled_input: _WireProtocolPickledInput,
-        extra_env: Mapping[str, str] | None = None,
+        extra_env: Mapping[str, str | None] | None = None,
     ) -> _WireProtocolPickledOutput:
         metrics = CachedMetricsHelper()
 
         with contextlib.ExitStack() as stack:
-            if extra_env is not None:
-                import unittest
-
-                stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
+            stack.enter_context(patch_subprocess_env(extra_env))
 
             # Save warnings to "replay" in the parent
             warning_replay = stack.enter_context(warnings.catch_warnings(record=True))
