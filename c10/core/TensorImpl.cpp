@@ -415,24 +415,15 @@ IntArrayRef TensorImpl::sizes_custom() const {
       if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->sizes(this);
       }
+    } else {
+      // for C++ FakeTensors that haven't crossed the Python boundary, we don't
+      // have a PyInterpreter yet
+      // so we call guard_int() directly here to materialize the vector
+      // and we store this on the SymbolicShapeMeta in the tensor's TensorImpl
+      // so the lifetime is also equivalently tied to the lifetime of the tensor
+      // and is owned by SymbolicShapeMeta
+      return symbolic_shape_meta().materialized_sizes();
     }
-    // for C++ FakeTensors that haven't crossed the Python boundary, we don't
-    // have a PyInterpreter yet
-    // so we call guard_int() directly here to materialize the vector
-    // and we store this on the SymbolicShapeMeta in the tensor's TensorImpl
-    // so the lifetime is also equivalently tied to the lifetime of the tensor
-    // and is owned by SymbolicShapeMeta
-    auto& sym = symbolic_shape_meta();
-    sym.materialized_sizes_.resize(sym.sizes_.size());
-    for (size_t i = 0; i < sym.sizes_.size(); i++) {
-      sym.materialized_sizes_[i] =
-          // this creates a "guard" for the SymInt
-          // basically saying this is the concrete integer associated
-          // to this SymInt
-          // Python FakeTensor also calls this
-          sym.sizes_[i].guard_int(__FILE__, __LINE__);
-    }
-    return IntArrayRef(sym.materialized_sizes_);
   }
   return sizes_default();
 }
@@ -487,14 +478,9 @@ IntArrayRef TensorImpl::strides_custom() const {
       if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->strides(this);
       }
+    } else {
+      return symbolic_shape_meta().materialized_strides();
     }
-    auto& sym = symbolic_shape_meta();
-    sym.materialized_strides_.resize(sym.strides_.size());
-    for (size_t i = 0; i < sym.strides_.size(); i++) {
-      sym.materialized_strides_[i] =
-        sym.strides_[i].guard_int(__FILE__, __LINE__);
-    }
-    return IntArrayRef(sym.materialized_strides_);
   }
   return strides_default();
 }
@@ -1013,6 +999,7 @@ void TensorImpl::set_sizes_and_strides(
 
   refresh_numel();
   refresh_contiguous();
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
@@ -1042,6 +1029,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
@@ -1088,6 +1076,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  sym_shape_meta.refresh_materialized();
   // hard code some known true settings, for unbacked case
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
