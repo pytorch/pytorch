@@ -155,11 +155,12 @@ on:
 jobs:
   build:
     # Don't run on forked repos.
-    # Experiment (https://github.com/pytorch/pytorch/issues/183242): on
-    # pull_request events, always run the EC2 route so that callers passing
-    # use-arc=true execute OSDC in shadow mode alongside EC2. Pushed commits
-    # and scheduled workflows continue to honor use-arc as usual.
-    if: github.repository_owner == 'pytorch' && (!inputs.use-arc || github.event_name == 'pull_request')
+    # Experiment (https://github.com/pytorch/pytorch/issues/183242): always run
+    # the EC2 route on pull_request events and on ciflow/* tag pushes so that
+    # callers passing use-arc=true execute OSDC in shadow mode alongside EC2.
+    # Direct pushes to main/release branches and scheduled workflows continue
+    # to honor use-arc as usual (exactly one route).
+    if: github.repository_owner == 'pytorch' && (!inputs.use-arc || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/ciflow/'))
     # Skip runner_prefix on the EC2 route during the OSDC shadow-mode
     # experiment: the prefix (e.g. mt-) is meant for OSDC runner labels and
     # would turn an EC2 label like linux.c7i.2xlarge into mt-linux.c7i.2xlarge,
@@ -559,7 +560,13 @@ jobs:
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
         shell: bash
         run: |
-          python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+          # Run via uv so pyyaml is provisioned regardless of the build image's
+          # Python setup. Build containers like ubuntu-cross-riscv use the
+          # system apt python3, which doesn't include pyyaml. Matches the
+          # pattern used by parse_ref.py / filter_test_configs.py in
+          # .github/actions/filter-test-configs/action.yml.
+          uv run --no-project --with pyyaml==6.0.2 \
+            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         id: aws-creds
