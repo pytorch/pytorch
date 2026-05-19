@@ -281,7 +281,7 @@ class TritonSymbols:
         for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
-                var_shape = cse_var.shape
+                var_shape = tuple(cse_var.shape)
             elif symbol_is_type(
                 var,
                 (
@@ -1241,6 +1241,11 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        fp8_dtypes = (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        )
+
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -1251,10 +1256,6 @@ class TritonOverrides(OpOverrides):
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
-            fp8_dtypes = (
-                torch.float8_e4m3fn,
-                torch.float8_e5m2,
-            )
             # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
             assert not (
                 src_dtype in fp8_dtypes
@@ -1292,6 +1293,13 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            src_dtype is not None
+            and dtype in fp8_dtypes
+            and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
+        ):
+            return f"{x}.to(tl.float32).to({out_dtype})"
 
         return f"{x}.to({out_dtype})"
 
@@ -2045,6 +2053,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
+        if config.eager_numerics.use_pytorch_libdevice:
+            # Strict numerics should use the backend math library entry point.
+            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+            return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
     @staticmethod
@@ -6111,6 +6123,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         except ValueError:
             return False
 
+    @staticmethod
+    def apply_feature_required_overrides(
+        kernel_features: SIMDKernelFeatures, kernel_kwargs: dict[str, Any]
+    ) -> None:
+        # ops.sort only works with persistent reduction, and is not bandwidth
+        # bound anyway so taking the hit of non-coalesced loads is okay.
+        if kernel_features.contains_op("sort"):
+            kernel_kwargs["override_persistent_reduction"] = True
+            kernel_kwargs["override_cooperative_reduction"] = False
+        # Cannot use persistent reduction with unknown dynamic rnumel.
+        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+            assert not kernel_kwargs.get("override_persistent_reduction")
+            kernel_kwargs["override_persistent_reduction"] = False
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -6920,16 +6946,7 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
-        # so taking the hit of non-coalesced loads is okay
-        if kernel_features.contains_op("sort"):
-            kernel_kwargs["override_persistent_reduction"] = True
-            kernel_kwargs["override_cooperative_reduction"] = False
-
-        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
-            # Cannot use persistent reduction with unknown dynamic rnumel
-            assert not kernel_kwargs.get("override_persistent_reduction")
-            kernel_kwargs["override_persistent_reduction"] = False
+        kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs

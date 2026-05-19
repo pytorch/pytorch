@@ -4573,19 +4573,21 @@ def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any]]:
     }
 
 
-def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
-    entry = _torch_numpy_callable_id_map().get(id(obj))
+@functools.lru_cache(maxsize=1024)
+def _torch_numpy_callable_cache_key_by_id(
+    obj_id: int,
+) -> tuple[Callable[..., Any], str] | None:
+    entry = _torch_numpy_callable_id_map().get(obj_id)
     if entry is None:
         return None
 
     tnp_callable, np_callable = entry
-    if obj is not tnp_callable:
-        return None
-
     if np_callable is None:
         return None
 
     module = getattr(np_callable, "__module__", None) or "numpy"
+    # Random functions depend on global RNG state, so they are not safe to
+    # identify only by their canonical NumPy path in an AOTAutograd cache key.
     if module == "numpy.random" or module.startswith("numpy.random."):
         return None
 
@@ -4599,22 +4601,34 @@ def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
     except (AttributeError, ImportError):
         return None
 
-    return f"{module}.{name}"
+    return (tnp_callable, f"{module}.{name}")
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    entry = _torch_numpy_callable_cache_key_by_id(id(obj))
+    if entry is None:
+        return None
+
+    tnp_callable, cache_key = entry
+    if obj is not tnp_callable:
+        return None
+
+    return cache_key
 
 
 def is_safe_numpy_wrapper(obj: Any) -> bool:
-    return (
-        isinstance(obj, numpy_to_tensor_wrapper)
-        and _torch_numpy_callable_cache_key(obj.f) is not None
-    )
+    return numpy_wrapper_cache_key(obj) is not None
 
 
-def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str]:
-    if isinstance(obj, numpy_to_tensor_wrapper):
-        key = _torch_numpy_callable_cache_key(obj.f)
-        if key is not None:
-            return (type(obj).__qualname__, key)
-    raise TypeError(f"expected safe numpy wrapper, got {type(obj)!r}")
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
+    if type(obj) is not numpy_to_tensor_wrapper:
+        return None
+
+    key = _torch_numpy_callable_cache_key(obj.f)
+    if key is None:
+        return None
+
+    return (type(obj).__qualname__, key)
 
 
 def defake(x: Any) -> Any:

@@ -2930,23 +2930,36 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
-    # Calculate the maximum offset for the boundaries tensor
-    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
-    # This ensures the mask check in bucketize_binary_search works correctly
-    # for both contiguous and non-contiguous tensors.
     size = tb.get_size()
     stride = tb.get_stride()
-    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
         size[-1],
-        max_offset,
+        tb.get_layout().storage_size(),
         stride[-1],
     )
 
 
+def _realize_bucketize_lookup_tensor(tb: TensorBox) -> TensorBox:
+    # ops.bucketize needs a named strided tensor.  realize_input() also replays
+    # affine views over newly-realized inputs as ReinterpretViews when possible.
+    return TensorBox(ir.ExternKernel.realize_input(tb))
+
+
 def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
+
+
+def _bucketize_indices(
+    tb: TensorBox, index: Sequence[sympy.Expr], index_dtype: torch.dtype
+) -> Any:
+    strides = tb.get_stride()
+    flattened_index = tb.get_layout().offset + sum(
+        (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
+    )
+    if not index and isinstance(flattened_index, sympy.Integer):
+        return int(flattened_index)
+    return ops.index_expr(flattened_index, index_dtype)
 
 
 @register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
@@ -2985,14 +2998,12 @@ def searchsorted(
     index_dtype = torch.int32 if out_int32 else torch.int64
     values_loader = self.make_loader()
 
-    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
-    # realize it into global memory; or in other words, we can't guarantee that
-    # sorted_sequence.get_name() (used below) will exist unless we call
-    # sorted_sequence.realize().
-    sorted_sequence.realize()
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we
+    # need a named strided tensor for codegen below.
+    sorted_sequence = _realize_bucketize_lookup_tensor(sorted_sequence)
 
     if sorter is not None:
-        sorter.realize()
+        sorter = _realize_bucketize_lookup_tensor(sorter)
 
     if len(sorted_sequence.get_size()) == 1:
 
@@ -3001,11 +3012,15 @@ def searchsorted(
             return ops.bucketize(
                 val,
                 _boundaries_helper(sorted_sequence),
-                0,
+                _bucketize_indices(sorted_sequence, (), index_dtype),
                 index_dtype,
                 right,
                 sorter=None if sorter is None else _sorter_helper(sorter),
-                sorter_indices=None if sorter is None else 0,
+                sorter_indices=(
+                    None
+                    if sorter is None
+                    else _bucketize_indices(sorter, (), index_dtype)
+                ),
             )
 
     else:
@@ -3016,13 +3031,7 @@ def searchsorted(
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
             def get_flattened_index(tb: TensorBox):
-                strides = tb.get_stride()
-                return ops.index_expr(
-                    functools.reduce(
-                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
-                    ),
-                    index_dtype,
-                )
+                return _bucketize_indices(tb, idx, index_dtype)
 
             return ops.bucketize(
                 val,
@@ -3068,10 +3077,8 @@ def bucketize(
         )
 
     # The entire boundaries tensor needs to be used by ops.bucketize, so we
-    # need to realize it into global memory; or in other words, we can't
-    # guarantee that boundaries.get_name() (used below) will exist unless
-    # we call boundaries.realize().
-    boundaries.realize()
+    # need a named strided tensor for codegen below.
+    boundaries = _realize_bucketize_lookup_tensor(boundaries)
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -3082,7 +3089,7 @@ def bucketize(
         indices = ops.bucketize(
             val,
             _boundaries_helper(boundaries),
-            0,
+            _bucketize_indices(boundaries, (), index_dtype),
             index_dtype,
             right,
         )
@@ -4228,9 +4235,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
-            *idx[indices_ndim:]
-        ]
+        weight_idx = [
+            ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)
+        ] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -7735,7 +7742,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )

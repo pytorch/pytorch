@@ -3373,9 +3373,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         config2 = self.default_config()
-        config2.aot_id = 1
+        config2 = dataclasses.replace(config2, aot_id=1)
         config3 = self.default_config()
-        config3.fw_compiler = lambda gm, inputs: gm
+        config3 = dataclasses.replace(config3, fw_compiler=lambda gm, inputs: gm)
 
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
@@ -3385,13 +3385,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
     def test_to_cacheable_strips_runtime_only_fields(self):
         config = self.default_config()
-        config.fw_compiler = lambda gm, inputs: gm
-        config.bw_compiler = lambda gm, inputs: gm
-        config.partition_fn = lambda *args: args
-        config.decompositions = None
-        config.inference_compiler = lambda gm, inputs: gm
-        config.static_input_indices = [0]
-        config.precompile_backend_id = "backend"
+        config = dataclasses.replace(
+            config,
+            fw_compiler=lambda gm, inputs: gm,
+            bw_compiler=lambda gm, inputs: gm,
+            partition_fn=lambda *args: args,
+            decompositions=None,
+            inference_compiler=lambda gm, inputs: gm,
+            static_input_indices=[0],
+            precompile_backend_id="backend",
+        )
 
         cacheable = config.to_cacheable()
 
@@ -3408,11 +3411,15 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         base = self.gen_cache_key(fn, base_config)
 
         config_with_static_inputs = self.default_config()
-        config_with_static_inputs.static_input_indices = [0]
+        config_with_static_inputs = dataclasses.replace(
+            config_with_static_inputs, static_input_indices=[0]
+        )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_static_inputs))
 
         config_with_backend = self.default_config()
-        config_with_backend.precompile_backend_id = "backend"
+        config_with_backend = dataclasses.replace(
+            config_with_backend, precompile_backend_id="backend"
+        )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
     def test_different_graphs(self):
@@ -3433,7 +3440,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         config2 = self.default_config()
-        config2.dynamic_shapes = False
+        config2 = dataclasses.replace(config2, dynamic_shapes=False)
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
@@ -3613,6 +3620,47 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, "Unsupported call_function target"
         ):
             check_cacheable(gm)
+
+    def test_numpy_wrapper_rejects_subclass(self):
+        import torch._numpy as tnp
+
+        class CustomWrapper(torch._dynamo.utils.numpy_to_tensor_wrapper):
+            def __call__(self, x):
+                return x
+
+        wrapper = CustomWrapper(tnp.round)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_hash_distinguishes_safe_wrappers(self):
+        import torch._numpy as tnp
+
+        def make_gm(target):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            return torch.fx.GraphModule({}, graph)
+
+        round_gm = make_gm(tnp.round)
+        sin_gm = make_gm(tnp.sin)
+
+        check_cacheable(round_gm)
+        check_cacheable(sin_gm)
+
+        self.assertNotEqual(
+            AOTAutogradCachePickler(round_gm).get_hash(round_gm),
+            AOTAutogradCachePickler(sin_gm).get_hash(sin_gm),
+        )
 
     def test_graph_module_hash_preserves_kernel_idx_strings(self):
         def make_gm(message):
@@ -3887,6 +3935,51 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             results[1],
             "DTensor cache keys should be identical across processes",
         )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_fake_script_object_mesh_cache_key(self):
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        with _fake_process_group():
+            mesh = DeviceMesh("cpu", torch.arange(2))
+            fake_mesh = FakeScriptObject(
+                mesh,
+                f"{DeviceMesh.__module__}.{DeviceMesh.__qualname__}",
+                mesh,
+            )
+            local_tensor = torch.zeros(4, 4)
+            tensor_meta = TensorMeta(
+                local_tensor.shape, local_tensor.stride(), local_tensor.dtype
+            )
+            fake_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    fake_mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+            real_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+
+            pickler = AOTAutogradCachePickler(
+                torch.fx.GraphModule({}, torch.fx.Graph())
+            )
+            self.assertEqual(
+                pickler.get_hash(fake_mesh_dtensor),
+                pickler.get_hash(real_mesh_dtensor),
+            )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_dtensor_different_placements_different_cache_key(self):
