@@ -3623,8 +3623,14 @@ def copy(self, src, non_blocking=False):
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
-        return clone(out)
-    return clone(x)
+        result = clone(out)
+    else:
+        result = clone(x)
+
+    self_layout = self.maybe_get_layout()
+    if self_layout is not None and self_layout.is_pinned:
+        _realize_as_pinned(result)
+    return result
 
 
 @register_lowering(aten.clone)
@@ -4245,9 +4251,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
-            *idx[indices_ndim:]
-        ]
+        weight_idx = [
+            ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)
+        ] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -7752,7 +7758,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
