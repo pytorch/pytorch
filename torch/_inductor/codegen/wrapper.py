@@ -3347,10 +3347,11 @@ class PythonWrapperCodegen(CodeGen):
         )
         if triton_autotune_seed_infos:
             seed_args_to_buffers = {}
-            for seed_info in triton_autotune_seed_infos:
-                if seed_info is None:
-                    continue
-                _seed_name, seed_call_args, _seed_arg_types = seed_info
+            for (
+                _seed_name,
+                seed_call_args,
+                _seed_arg_types,
+            ) in triton_autotune_seed_infos:
                 seed_args_to_buffers.update(
                     {
                         arg: V.graph.try_get_buffer(arg)
@@ -3603,9 +3604,6 @@ class PythonWrapperCodegen(CodeGen):
             if triton_autotune_seed_infos:
                 seed_specs = []
                 for seed_info in triton_autotune_seed_infos:
-                    if seed_info is None:
-                        seed_specs.append("None")
-                        continue
                     (
                         seed_name,
                         seed_call_args,
