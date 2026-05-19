@@ -457,6 +457,19 @@ try:
         def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
             return self._ops.floor(x)
 
+        def expr_cond_pair(
+            self, expr: z3.ExprRef, cond: z3.BoolRef
+        ) -> tuple[z3.ExprRef, z3.BoolRef]:
+            return (expr, cond)
+
+        def piecewise(self, *pairs: tuple[z3.ExprRef, z3.BoolRef]) -> z3.ExprRef:
+            if not pairs:
+                raise AssertionError("expected at least one Piecewise pair")
+            result = pairs[-1][0]
+            for expr, cond in reversed(pairs[:-1]):
+                result = z3.If(cond, expr, result)
+            return result
+
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {
                 "and_": z3.And,
