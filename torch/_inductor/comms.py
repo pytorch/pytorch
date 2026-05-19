@@ -18,6 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 from . import config, config_comms, ir
 from .dependencies import WeakDep
 
+
 if TYPE_CHECKING:
     from .ir import IRNode, Operation
 
@@ -29,6 +30,7 @@ from .memory import (
 )
 from .utils import contains_collective, contains_wait, is_fallback_op, is_wait
 from .virtualized import V
+
 
 log = logging.getLogger(__name__)
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
@@ -1352,9 +1354,9 @@ def _schedule_for_comm(
             schedule(snode)
 
     for deps in unmet_deps.values():
-        assert (
-            len(deps) == 0
-        ), f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+        assert len(deps) == 0, (
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
+        )
     return scheduled
 
 
@@ -2324,7 +2326,7 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     elapsed = _time.perf_counter() - t0
     if n_moved_colls or n_moved_waits:
         log.info(
-            "simple_overlap: moved %d collectives, %d waits " "(peak %d MB, %.3fs)",
+            "simple_overlap: moved %d collectives, %d waits (peak %d MB, %.3fs)",
             n_moved_colls,
             n_moved_waits,
             peak_memory // (1024 * 1024),
@@ -2342,9 +2344,9 @@ def reorder_compute_and_comm_for_overlap(
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
-        assert callable(
-            p
-        ), f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
+        assert callable(p), (
+            f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
+        )
         order = p(order)  # type: ignore[operator]
     # pyrefly: ignore [bad-return]
     return order
