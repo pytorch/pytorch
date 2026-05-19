@@ -1212,6 +1212,59 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    def test_mutation_region_ids_update_after_replacement_adds_mutation(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.sin.default, KeywordArg("x")),
+            pass_dict=insert_mutation_pass,
+        )
+        def insert_mutation(match: Match, x):
+            def repl(a):
+                y = torch.sin(a)
+                a.copy_(a)
+                return y
+
+            match.replace_by_example(repl, [x], run_functional_passes=False)
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.cos.default,
+                CallFunction(aten.sin.default, KeywordArg("x")),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+
     def test_remove_pointless_clones(self):
         @torch.compile(fullgraph=True)
         def fn(a, b):
