@@ -20,6 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
     statically_known_true,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -586,6 +587,19 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 return None
             return typing.cast(list[int | torch.fx.Node], replaced)
 
+        def meta_value(value: int | torch.fx.Node) -> int | torch.SymInt | None:
+            if isinstance(value, torch.fx.Node):
+                return value.meta.get("val")
+            return value
+
+        def meta_values(
+            values: Sequence[int | torch.fx.Node],
+        ) -> list[int | torch.SymInt] | None:
+            replaced = [meta_value(value) for value in values]
+            if any(value is None for value in replaced):
+                return None
+            return typing.cast(list[int | torch.SymInt], replaced)
+
         for node, value in node_replacements.items():
             if "val" not in node.meta:
                 # This can only happen in AOTI
@@ -673,8 +687,25 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
                     as_strided_args = (shapes, strides, storage_offset)
 
+                full_meta = None
+                if as_strided_args is not None:
+                    full_meta_shape = meta_values(full_shapes)
+                    fake_mode = torch._guards.detect_fake_mode(fake_tensor)
+                    if full_meta_shape is None or fake_mode is None:
+                        continue
+
+                    with fake_mode:
+                        full_meta = aten.full.default(
+                            full_meta_shape,
+                            value,
+                            dtype=fake_tensor.dtype,
+                            layout=torch.strided,
+                            device=fake_tensor.device,
+                            pin_memory=node.kwargs.get("pin_memory", False),
+                        )
+
                 # zeros and ones just get traced into full, so we insert those
-                new_node = graph.call_function(
+                full_node = graph.call_function(
                     aten.full.default,
                     args=(full_shapes, value),
                     kwargs={
@@ -685,7 +716,12 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     },
                 )
 
+                new_node = full_node
                 if as_strided_args is not None:
+                    assert full_meta is not None
+                    full_node.meta.update(node.meta)
+                    full_node.meta["val"] = full_meta
+                    full_node.meta["tensor_meta"] = _extract_tensor_metadata(full_meta)
                     with graph.inserting_after(new_node):
                         new_node = graph.call_function(
                             aten.as_strided.default,
