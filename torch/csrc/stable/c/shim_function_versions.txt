@@ -98,3 +98,5 @@ aoti_torch_mps_grid_sampler_3d_backward: TORCH_VERSION_2_13_0
 torch_exception_get_what: TORCH_VERSION_2_13_0
 torch_exception_get_what_without_backtrace: TORCH_VERSION_2_13_0
 torch_library_set_python_module: TORCH_VERSION_2_13_0
+torch_tensor_from_pyobject: TORCH_VERSION_2_13_0
+torch_tensor_to_pyobject: TORCH_VERSION_2_13_0
