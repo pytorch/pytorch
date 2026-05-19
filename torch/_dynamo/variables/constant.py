@@ -482,8 +482,6 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
         v, w = self_.as_python_constant(), other_.as_python_constant()
-        if not isinstance(w, int):
-            return ConstantVariable.create(NotImplemented)
         try:
             return VariableTracker.build(tx, v << w)
         except (TypeError, ValueError, OverflowError) as e:
@@ -503,8 +501,6 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
         v, w = self_.as_python_constant(), other_.as_python_constant()
-        if not isinstance(w, int):
-            return ConstantVariable.create(NotImplemented)
         try:
             return VariableTracker.build(tx, v >> w)
         except (TypeError, ValueError, OverflowError) as e:
