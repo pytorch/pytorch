@@ -814,13 +814,19 @@ class _TorchDynamoContext:
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         if not (callable(callback) or callback is False or callback is None):
             raise AssertionError(
                 f"callback must be callable, False, or None, got {type(callback)}"
             )
+        # Normalize the shorthand forms: dict / ParamsSpec / ShapesSpec all
+        # land here as a ShapesSpec (or None).
+        from torch.fx.experimental.dynamic_spec import ShapesSpec as _ShapesSpec
+
+        if shapes_spec is not None and not isinstance(shapes_spec, _ShapesSpec):
+            shapes_spec = _ShapesSpec(shapes_spec)
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
@@ -1296,7 +1302,7 @@ class OptimizeContext(_TorchDynamoContext):
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1472,7 +1478,7 @@ def _optimize_catch_errors(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1682,7 +1688,7 @@ def _optimize(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -2655,7 +2661,7 @@ def _optimize_assert(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
