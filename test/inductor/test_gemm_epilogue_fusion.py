@@ -13,7 +13,7 @@ from torch._higher_order_ops import (
     matmul_epilogue,
     mm_epilogue,
 )
-from torch._higher_order_ops.gemm_epilogue import mx_e8m0_scale
+from torch._higher_order_ops.gemm_epilogue import mx_e8m0_scale, nvfp4_e4m3_scale
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1807,6 +1807,44 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("local_reduce_op='mx_e8m0_scale'").check_not("extern_kernels.mm").run(
             code
         )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_nvfp4_scale_aux_fuses(self):
+        M = 64
+        N = 64
+        group = 16
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, group)
+                scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
+                return acc.relu(), scale.view(M, -1)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual[1].dtype, torch.float8_e4m3fn)
+        torch.testing.assert_close(
+            actual[1].float(), expected[1].float(), atol=1e-1, rtol=1.25e-1
+        )
+        FileCheck().check(f"local_reduce_group={group}").check(
+            "local_reduce_out="
+        ).check("local_reduce_op='nvfp4_e4m3_scale'").check_not(
+            "extern_kernels.mm"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_addmm_fp8_main_output_fuses(self):
