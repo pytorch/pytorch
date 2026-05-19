@@ -1556,6 +1556,74 @@ class TestSDPAFailureModes(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    def assert_rejected_backends_error(self, error, *expected_substrings):
+        message = str(error.exception)
+        self.assertIn("No available kernel. Aborting execution.", message)
+        self.assertIn("Rejected backends:", message)
+        for expected_substring in expected_substrings:
+            self.assertIn(expected_substring, message)
+
+    def test_no_backend_aggregates_rejections_cpu(self):
+        q = torch.randn((2, 3, 8), dtype=torch.float32)
+        k = torch.randn((2, 3, 8), dtype=torch.float32)
+        v = torch.randn((2, 3, 8), dtype=torch.float32)
+
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            with self.assertRaises(RuntimeError) as error:
+                F.scaled_dot_product_attention(q, k, v)
+
+        self.assert_rejected_backends_error(
+            error,
+            "Flash attention: All fused kernels requires query, key and value to be 4 dimensional",
+        )
+
+    def test_no_backend_aggregates_rejections_nested_math_cpu(self):
+        q = torch.nested.nested_tensor(
+            [torch.randn(4, 2, 8), torch.randn(3, 2, 8)],
+            layout=torch.jagged,
+        ).transpose(1, 2)
+        k = torch.nested.nested_tensor(
+            [torch.randn(4, 2, 8), torch.randn(5, 2, 8)],
+            layout=torch.jagged,
+        ).transpose(1, 2)
+        v = torch.nested.nested_tensor(
+            [torch.randn(4, 2, 8), torch.randn(5, 2, 8)],
+            layout=torch.jagged,
+        ).transpose(1, 2)
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            with self.assertRaises(RuntimeError) as error:
+                F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        self.assert_rejected_backends_error(
+            error,
+            "Math attention: Nested tensors for query / key are not supported when is_causal=True.",
+        )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
+    def test_no_backend_aggregates_rejections_cuda(self, device):
+        dtype = torch.float16
+        q = torch.randn((2, 3, 8), device=device, dtype=dtype)
+        k = torch.randn((2, 3, 8), device=device, dtype=dtype)
+        v = torch.randn((2, 3, 8), device=device, dtype=dtype)
+
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION]):
+            with self.assertRaises(RuntimeError) as error:
+                F.scaled_dot_product_attention(q, k, v)
+
+        expected_cudnn_reason = (
+            "cuDNN attention: All fused kernels requires query, key and value to be 4 dimensional"
+            if PLATFORM_SUPPORTS_CUDNN_ATTENTION
+            else "cuDNN attention: Torch was not compiled with cuDNN attention."
+        )
+        self.assert_rejected_backends_error(
+            error,
+            "Memory efficient attention: Memory Efficient attention has been runtime disabled.",
+            "Flash attention: All fused kernels requires query, key and value to be 4 dimensional",
+            expected_cudnn_reason,
+        )
+
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice or not isSM120Device,
@@ -1602,10 +1670,22 @@ class TestSDPAFailureModes(NNTestCase):
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
             v = torch.randn(size, device=device, dtype=dtype)
-            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
-                                   lambda: torch._fused_sdp_choice(q, k, v))
-            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
-                                   lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
+            with self.assertRaises(RuntimeError) as error:
+                torch._fused_sdp_choice(q, k, v)
+            self.assert_rejected_backends_error(
+                error,
+                "Memory efficient attention:",
+                "Flash attention:",
+                "cuDNN attention:",
+            )
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            self.assert_rejected_backends_error(
+                error,
+                "Memory efficient attention:",
+                "Flash attention:",
+                "cuDNN attention:",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
@@ -1621,9 +1701,12 @@ class TestSDPAFailureModes(NNTestCase):
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
             v = torch.randn(size, device=device, dtype=dtype)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels requires query, key and value to be 4 dimensional"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "All fused kernels requires query, key and value to be 4 dimensional",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
@@ -1716,9 +1799,12 @@ class TestSDPAFailureModes(NNTestCase):
             size = SdpaShape(2, 2, 8, 8)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             q.as_strided_(size, [2, 2, 2, 2])
-            with self.assertWarnsRegex(UserWarning, "All fused kernels require the last dimension of the input to have stride 1."):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "All fused kernels require the last dimension of the input to have stride 1.",
+            )
 
     @onlyCUDA
     @unittest.skipIf(
@@ -1737,16 +1823,12 @@ class TestSDPAFailureModes(NNTestCase):
             # Passing in a attn_mask with last dim stride not equal to 1 will error
             attn_mask.as_strided_(size, [2, 2, 2, 2])
 
-            with self.assertWarnsRegex(
-                UserWarning,
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
                 "GPU backends require attn_mask's last dimension to have stride 1 while the CPU does not",
-            ):
-                self.assertRaises(
-                    RuntimeError,
-                    lambda: torch.nn.functional.scaled_dot_product_attention(
-                        q, k, v, attn_mask, 0.0, False
-                    ),
-                )
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
@@ -1757,11 +1839,19 @@ class TestSDPAFailureModes(NNTestCase):
         rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
 
         with sdpa_kernel(fused_kernel):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                with self.assertWarnsRegex(UserWarning, "For dense inputs, both fused kernels require query, "
-                                           "key and value to have"):
-                    F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
-                                                   is_causal=False, enable_gqa=True)
+            with self.assertRaises(RuntimeError) as error:
+                F.scaled_dot_product_attention(
+                    rand_query,
+                    rand_key,
+                    rand_value,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    enable_gqa=True,
+                )
+            self.assert_rejected_backends_error(
+                error,
+                "For dense input, both fused kernels require query, key and value to have the same num_heads.",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
@@ -1828,9 +1918,12 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "Expected query, key and value to all be of dtype: {Half, BFloat16}"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "Expected query, key and value to all be of dtype: {Half, BFloat16}",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
@@ -1919,9 +2012,12 @@ class TestSDPAFailureModes(NNTestCase):
         q, k, v = make_tensor().transpose(1, 2), make_tensor().transpose(1, 2), make_tensor().transpose(1, 2)
 
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "For NestedTensor inputs, Flash attention requires"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "For NestedTensor inputs, Flash attention requires",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isLessThanSM80Device,
@@ -1932,9 +2028,12 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "Expected query, key and value to all be of dtype: {Half, Float}"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assert_rejected_backends_error(
+                error,
+                "Memory efficient attention: Expected query, key and value to all be of dtype: {Half, Float}",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
@@ -1995,10 +2094,14 @@ class TestSDPAFailureModes(NNTestCase):
         value = value.transpose(1, 2)
 
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "Both fused kernels do not support training with broadcasted NT inputs"):
-                with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                    torch.nn.functional.scaled_dot_product_attention(
-                        query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False
+                )
+            self.assert_rejected_backends_error(
+                error,
+                "Both fused kernels do not support training with broadcasted NT inputs",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
@@ -2009,11 +2112,13 @@ class TestSDPAFailureModes(NNTestCase):
         make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
         make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
         q, k, v = make_q(), make_kv(), make_kv()
-        warning_str = "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k."
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, warning_str):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, is_causal=True))
+            with self.assertRaises(RuntimeError) as error:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, is_causal=True)
+            self.assert_rejected_backends_error(
+                error,
+                "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k.",
+            )
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")

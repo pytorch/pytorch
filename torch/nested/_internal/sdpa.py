@@ -22,6 +22,61 @@ from .nested_tensor import NestedTensor
 log = logging.getLogger(__name__)
 
 
+def _record_sdp_failure(
+    message: str, debug: bool, reason_collector: list[str] | None
+) -> None:
+    if reason_collector is not None:
+        reason_collector.append(message)
+        return
+    if debug:
+        log.warning(message)
+
+
+def _raise_rejected_backends_error(
+    rejected_backends: list[tuple[str, list[str]]],
+) -> None:
+    message = "No available kernel. Aborting execution.\nRejected backends:"
+    for backend_name, reasons in rejected_backends:
+        if not reasons:
+            continue
+        message = f"{message}\n{backend_name}: {reasons[0]}"
+        for reason in reasons[1:]:
+            message = f"{message}\n  - {reason}"
+    raise RuntimeError(message)
+
+
+def _raise_nested_sdp_backend_error(params: SDPAParams) -> None:
+    efficient_reasons = []
+    if not mem_efficient_sdp_enabled():
+        efficient_reasons.append(
+            "Memory Efficient attention has been runtime disabled."
+        )
+    _can_use_efficient_sdpa_jagged(params, reason_collector=efficient_reasons)
+
+    flash_reasons = []
+    if not flash_sdp_enabled():
+        flash_reasons.append("Flash attention has been runtime disabled.")
+    _can_use_flash_sdpa_jagged(params, reason_collector=flash_reasons)
+
+    math_reasons = []
+    if not math_sdp_enabled():
+        math_reasons.append("Math attention has been runtime disabled.")
+    _can_use_math_sdpa_jagged(params, reason_collector=math_reasons)
+
+    cudnn_reasons = []
+    if not cudnn_sdp_enabled():
+        cudnn_reasons.append("cuDNN attention has been runtime disabled.")
+
+    _raise_rejected_backends_error(
+        [
+            ("Memory efficient attention", efficient_reasons),
+            ("Flash attention", flash_reasons),
+            ("Math attention", math_reasons),
+            ("cuDNN attention", cudnn_reasons),
+        ]
+    )
+
+
 def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -73,7 +128,9 @@ def _validate_sdpa_input(
             )
 
 
-def _check_batch_size_nested(params: SDPAParams, debug=False) -> bool:
+def _check_batch_size_nested(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     # This is expected to be called after check_tensor_shapes ensuring that the
     # size() calls won't error since the inputs are all 4 dimensional
     q_batch_size = params.query.size(0)
@@ -83,10 +140,22 @@ def _check_batch_size_nested(params: SDPAParams, debug=False) -> bool:
     # num_heads logic for nested input is checked in
     # check_for_seq_len_0_nested_tensor as there is handling there to make sure
     # num_heads is not ragged
-    return q_batch_size == k_batch_size and q_batch_size == v_batch_size
+    same_batch_size = q_batch_size == k_batch_size and q_batch_size == v_batch_size
+    if not same_batch_size:
+        _record_sdp_failure(
+            "For NestedTensor inputs, query, key, and value must have the same batch size. "
+            f"Got query batch size: {q_batch_size}, key batch size: {k_batch_size}, "
+            f"value batch size: {v_batch_size} instead.",
+            debug,
+            reason_collector,
+        )
+        return False
+    return True
 
 
-def _check_head_dim_size_flash_nested(params: SDPAParams, debug=False) -> bool:
+def _check_head_dim_size_flash_nested(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     max_size = 256
     query_size_last = params.query.size(-1)
     key_size_last = params.key.size(-1)
@@ -99,15 +168,14 @@ def _check_head_dim_size_flash_nested(params: SDPAParams, debug=False) -> bool:
         and (query_size_last % 8 == 0)
         and (query_size_last <= max_size)
     ):
-        if debug:
-            log.warning(
-                "For NestedTensor inputs, Flash attention requires q,k,v to have the same "
-                "last dimension and to be a multiple of 8 and less than or equal to 256. "
-                "Got Query.size(-1): %d, Key.size(-1): %d, Value.size(-1): %d instead.",
-                query_size_last,
-                key_size_last,
-                value_size_last,
-            )
+        _record_sdp_failure(
+            "For NestedTensor inputs, Flash attention requires q,k,v to have the same "
+            "last dimension and to be a multiple of 8 and less than or equal to 256. "
+            f"Got Query.size(-1): {query_size_last}, Key.size(-1): {key_size_last}, "
+            f"Value.size(-1): {value_size_last} instead.",
+            debug,
+            reason_collector,
+        )
         return False
     return True
 
@@ -139,60 +207,64 @@ def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
 
 
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
-    param: torch.Tensor, param_name: str, debug=False
+    param: torch.Tensor,
+    param_name: str,
+    debug=False,
+    reason_collector: list[str] | None = None,
 ) -> bool:
     if not isinstance(param, NestedTensor):
         raise AssertionError("param should be a jagged NT")
 
     if param._ragged_idx == 1:
-        # num_head_dims is ragged
-        if debug:
-            log.warning(
-                "Fused kernels do not support ragged num_head_dims, %s has a ragged num_heads.",
-                param_name,
-            )
+        _record_sdp_failure(
+            f"Fused kernels do not support ragged num_head_dims, {param_name} has a ragged num_heads.",
+            debug,
+            reason_collector,
+        )
         return False
 
-    # This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
     if param._get_min_seqlen() == 0:
-        if debug:
-            log.warning(
-                "Fused kernels do not support seq_len == 0, %s has a seq len of 0.",
-                param_name,
-            )
+        _record_sdp_failure(
+            f"Fused kernels do not support seq_len == 0, {param_name} has a seq len of 0.",
+            debug,
+            reason_collector,
+        )
         return False
 
     return True
 
 
-def _try_broadcast_param_size(q_size, k_size, v_size, param_name, debug=False) -> bool:
+def _try_broadcast_param_size(
+    q_size,
+    k_size,
+    v_size,
+    param_name,
+    debug=False,
+    reason_collector: list[str] | None = None,
+) -> bool:
     max_size = max(q_size, k_size, v_size)
     if (
         (q_size != max_size and q_size != 1)
         or (k_size != max_size and k_size != 1)
         or (v_size != max_size and v_size != 1)
     ):
-        if debug:
-            log.warning(
-                "Both fused kernels require query, key and value to have broadcastable %s, "
-                "got Query %s %d, Key %s %d, Value %s %d instead.",
-                param_name,
-                param_name,
-                q_size,
-                param_name,
-                k_size,
-                param_name,
-                v_size,
-            )
+        _record_sdp_failure(
+            "Both fused kernels require query, key and value to have broadcastable "
+            f"{param_name}, got Query {param_name} {q_size}, Key {param_name} {k_size}, "
+            f"Value {param_name} {v_size} instead.",
+            debug,
+            reason_collector,
+        )
         return False
     return True
 
 
-def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
-    # When this function is called we are assured that the nt is dim==4
+def _check_for_seq_len_0_nested(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     q_is_safe = (
         _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
-            params.query, "query", debug
+            params.query, "query", debug, reason_collector
         )
         if params.query.is_nested
         else True
@@ -203,7 +275,7 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
 
     k_is_safe = (
         _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
-            params.key, "key", debug
+            params.key, "key", debug, reason_collector
         )
         if params.key.is_nested
         else True
@@ -214,7 +286,7 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
 
     v_is_safe = (
         _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
-            params.value, "value", debug
+            params.value, "value", debug, reason_collector
         )
         if params.value.is_nested
         else True
@@ -242,50 +314,63 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
                 )
             return False
         return _try_broadcast_param_size(
-            q_num_heads, k_num_heads, v_num_heads, "num heads", debug
+            q_num_heads,
+            k_num_heads,
+            v_num_heads,
+            "num heads",
+            debug,
+            reason_collector,
         )
     return True
 
 
-def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+def _can_use_flash_sdpa_jagged(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     constraints = (
         _check_batch_size_nested,
         _check_head_dim_size_flash_nested,
         _check_for_seq_len_0_nested,
     )
     for constraint in constraints:
-        if not constraint(params, debug):
+        if not constraint(params, debug, reason_collector):
             return False
     return True
 
 
-def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+def _can_use_efficient_sdpa_jagged(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     constraints = (
         _check_batch_size_nested,
         _check_for_seq_len_0_nested,
     )
     for constraint in constraints:
-        if not constraint(params, debug):
+        if not constraint(params, debug, reason_collector):
             return False
     return True
 
 
-def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+def _can_use_math_sdpa_jagged(
+    params: SDPAParams, debug=False, reason_collector: list[str] | None = None
+) -> bool:
     if (
         not params.query.transpose(1, 2).is_contiguous()
         or not params.key.transpose(1, 2).is_contiguous()
         or not params.value.transpose(1, 2).is_contiguous()
     ):
-        if debug:
-            log.warning(
-                "If inputs are nested tensors they must be contiguous after transposing."
-            )
+        _record_sdp_failure(
+            "If inputs are nested tensors they must be contiguous after transposing.",
+            debug,
+            reason_collector,
+        )
         return False
     if params.is_causal:
-        if debug:
-            log.warning(
-                "Nested tensors for query / key are not supported when is_causal=True."
-            )
+        _record_sdp_failure(
+            "Nested tensors for query / key are not supported when is_causal=True.",
+            debug,
+            reason_collector,
+        )
         return False
     return True
 
@@ -324,16 +409,6 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
             if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
                 return SDPBackend.MATH
 
-    log.warning("Memory efficient kernel not used because:")
-    can_use_efficient_attention(params, debug=True)
-    _can_use_efficient_sdpa_jagged(params, debug=True)
-    log.warning("Flash attention kernel not used because:")
-    can_use_flash_attention(params, debug=True)
-    _can_use_flash_sdpa_jagged(params, debug=True)
-    log.warning("Math attention kernel not used because:")
-    _can_use_math_sdpa_jagged(params, debug=True)
-    log.warning("cuDNN attention kernel not used because:")
-    can_use_cudnn_attention(params, debug=True)
     return SDPBackend.ERROR
 
 
@@ -931,6 +1006,6 @@ def jagged_scaled_dot_product_attention(
 
         return attn_out
     else:
-        raise RuntimeError(
-            "No viable backend for scaled_dot_product_attention was found."
+        _raise_nested_sdp_backend_error(
+            SDPAParams(query, key, value, attn_mask, dropout_p, is_causal, enable_gqa)
         )
