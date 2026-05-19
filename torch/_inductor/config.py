@@ -1840,6 +1840,11 @@ class triton:
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
 
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
