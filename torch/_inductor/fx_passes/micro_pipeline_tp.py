@@ -89,6 +89,7 @@ class _AllGatherMatch:
 
 def find_all_gather_patterns(graph: torch.fx.Graph):
     c10d = torch.ops._c10d_functional
+    split_targets = [aten.split.Tensor, aten.split.sizes, aten.split_with_sizes.default]
 
     def make_zero_dim_all_gather_pattern(shard):
         return CallFunction(
@@ -108,7 +109,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
         return CallFunction(
             operator.getitem,
             CallFunction(
-                aten.split.Tensor,
+                split_targets,
                 make_zero_dim_all_gather_pattern(shard),
                 Ignored(),
                 _users=MULTIPLE,
@@ -248,6 +249,7 @@ class _ReduceScatterMatch:
 
 def find_reduce_scatter_patterns(graph: torch.fx.Graph):
     c10d = torch.ops._c10d_functional
+    split_targets = [aten.split.Tensor, aten.split.sizes, aten.split_with_sizes.default]
 
     def reduce_scatter_template(inp: PatternExpr, users: int):
         return CallFunction(
@@ -280,7 +282,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                 CallFunction(
                     operator.getitem,
                     CallFunction(
-                        aten.split.Tensor,
+                        split_targets,
                         KeywordArg("input"),
                         Ignored(),
                         KeywordArg("scatter_dim"),
@@ -301,7 +303,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                 CallFunction(
                     operator.getitem,
                     CallFunction(
-                        aten.split.Tensor,
+                        split_targets,
                         KeywordArg("input"),
                         Ignored(),
                         KeywordArg("scatter_dim"),
