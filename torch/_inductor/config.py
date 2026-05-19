@@ -506,6 +506,14 @@ pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
 )
 
+# use torch profiler to benchmark kernels during autotuning
+# when enabled, this takes precedence over use_experimental_benchmarker
+use_torch_profiler_benchmarker: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
+    justknob="pytorch/inductor:use_torch_profiler_benchmarker",
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1277,6 +1285,9 @@ class aten_distributed_optimizations:
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
 
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
+
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
@@ -1653,7 +1664,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )
+    )  # type: ignore[assignment]
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2088,6 +2099,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
         == "1"
     )
+
+    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
+    # by per-block amax over a small group dimension like FP8 block size)
+    # into a single kernel with two sequential reduction passes.
+    nested_reduction = False
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2813,6 +2829,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
