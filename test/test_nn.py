@@ -10147,14 +10147,18 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
-        # cuda throws device assert for invalid data
-        # xla & mps ignore out of bound indices
-        if self.device_type == 'cpu':
+        # cpu raises synchronously; mps reports the bad index from its scatter
+        # kernel asynchronously, surfaced on the next sync. xla still ignores.
+        if self.device_type in ('cpu', 'mps'):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
         t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
