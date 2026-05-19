@@ -15,6 +15,7 @@ import glob
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import zipfile
@@ -98,6 +99,145 @@ def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
             for item in dylibs_dir.iterdir():
                 if item.suffix == ".dylib" and not should_exclude_lib(item.name):
                     shutil.copy2(item, libtorch_lib / item.name)
+
+
+def _rewrite_elf_rpath(filepath: Path, new_rpath: str) -> bool:
+    """Overwrite DT_RPATH/DT_RUNPATH string in an ELF file with new_rpath.
+
+    Finds the RPATH or RUNPATH entry in the .dynamic section, locates the
+    corresponding string in .dynstr, and overwrites it in-place (NUL-padded
+    to the original length).  Returns True on success.
+    """
+    # ELF constants
+    DT_RPATH = 15
+    DT_RUNPATH = 29
+    try:
+        with open(filepath, "r+b") as f:
+            ident = f.read(16)
+            if ident[:4] != b"\x7fELF":
+                return False
+            is_64 = ident[4] == 2
+            is_le = ident[5] == 1
+            endian = "<" if is_le else ">"
+
+            if is_64:
+                ehdr_fmt = f"{endian}HHI QQQ I HHHHHH"
+                ehdr_size = struct.calcsize(ehdr_fmt)
+                phdr_fmt = f"{endian}II QQQQQQ"
+                phdr_size = struct.calcsize(phdr_fmt)
+                dyn_fmt = f"{endian}qQ"
+                dyn_size = struct.calcsize(dyn_fmt)
+            else:
+                ehdr_fmt = f"{endian}HHI III I HHHHHH"
+                ehdr_size = struct.calcsize(ehdr_fmt)
+                phdr_fmt = f"{endian}IIIIIIII"
+                phdr_size = struct.calcsize(phdr_fmt)
+                dyn_fmt = f"{endian}iI"
+                dyn_size = struct.calcsize(dyn_fmt)
+
+            f.seek(0)
+            ehdr_data = f.read(ehdr_size)
+            ehdr = struct.unpack(ehdr_fmt, ehdr_data)
+            # e_phoff, e_phentsize, e_phnum
+            if is_64:
+                e_phoff, e_phnum = ehdr[4], ehdr[12]
+            else:
+                e_phoff, e_phnum = ehdr[4], ehdr[12]
+
+            # Find PT_DYNAMIC (type=2)
+            dyn_offset = dyn_filesz = 0
+            for i in range(e_phnum):
+                f.seek(e_phoff + i * phdr_size)
+                phdr = struct.unpack(phdr_fmt, f.read(phdr_size))
+                p_type = phdr[0]
+                if is_64:
+                    p_offset, p_filesz = phdr[2], phdr[5]
+                else:
+                    p_offset, p_filesz = phdr[1], phdr[4]
+                if p_type == 2:  # PT_DYNAMIC
+                    dyn_offset = p_offset
+                    dyn_filesz = p_filesz
+                    break
+            if not dyn_offset:
+                return False
+
+            # Scan .dynamic entries for DT_RPATH/DT_RUNPATH and DT_STRTAB
+            rpath_str_offset = None
+            rpath_tag = None
+            strtab_addr = 0
+            n_entries = dyn_filesz // dyn_size
+            for i in range(n_entries):
+                f.seek(dyn_offset + i * dyn_size)
+                tag, val = struct.unpack(dyn_fmt, f.read(dyn_size))
+                if tag == 5:  # DT_STRTAB
+                    strtab_addr = val
+                elif tag in (DT_RPATH, DT_RUNPATH):
+                    rpath_str_offset = val
+                    rpath_tag = tag
+            if rpath_str_offset is None or strtab_addr == 0:
+                return False
+
+            # Convert strtab virtual address to file offset using phdrs
+            strtab_file_offset = 0
+            for i in range(e_phnum):
+                f.seek(e_phoff + i * phdr_size)
+                phdr = struct.unpack(phdr_fmt, f.read(phdr_size))
+                p_type = phdr[0]
+                if p_type != 1:  # PT_LOAD
+                    continue
+                if is_64:
+                    p_offset, p_vaddr, p_filesz = phdr[2], phdr[3], phdr[5]
+                else:
+                    p_offset, p_vaddr, p_filesz = phdr[1], phdr[2], phdr[4]
+                if p_vaddr <= strtab_addr < p_vaddr + p_filesz:
+                    strtab_file_offset = p_offset + (strtab_addr - p_vaddr)
+                    break
+            if not strtab_file_offset:
+                return False
+
+            # Read old rpath string to determine available space
+            str_file_pos = strtab_file_offset + rpath_str_offset
+            f.seek(str_file_pos)
+            old_bytes = b""
+            while True:
+                b = f.read(1)
+                if b == b"\x00" or b == b"":
+                    break
+                old_bytes += b
+            max_len = len(old_bytes)
+
+            new_bytes = new_rpath.encode("utf-8")
+            if len(new_bytes) > max_len:
+                print(
+                    f"  Warning: new rpath too long for {filepath.name}, truncating",
+                    file=sys.stderr,
+                )
+                new_bytes = new_bytes[:max_len]
+
+            padded = new_bytes + b"\x00" * (max_len - len(new_bytes))
+            f.seek(str_file_pos)
+            f.write(padded)
+            return True
+    except Exception as e:
+        print(f"  Warning: failed to rewrite rpath for {filepath.name}: {e}", file=sys.stderr)
+        return False
+
+
+def fix_rpath(libtorch_lib: Path, platform: str) -> None:
+    """Rewrite RPATH on all shared libraries to $ORIGIN.
+
+    The wheel sets RPATH relative to the pip site-packages layout
+    (e.g. $ORIGIN/../../nvidia/nvshmem/lib).  For libtorch, libraries
+    live in a flat lib/ directory and NVIDIA deps come from the user's
+    system CUDA installation, so $ORIGIN is sufficient.
+    """
+    if platform != "linux":
+        return
+
+    for item in libtorch_lib.iterdir():
+        if item.is_file() and ".so" in item.name:
+            if _rewrite_elf_rpath(item, "$ORIGIN"):
+                print(f"  Fixed rpath: {item.name}")
 
 
 def copy_includes(torch_dir: Path, libtorch_include: Path) -> None:
@@ -306,6 +446,7 @@ def main() -> None:
 
         # Copy components
         copy_libraries(torch_dir, libtorch_dir / "lib", args.platform)
+        fix_rpath(libtorch_dir / "lib", args.platform)
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)
