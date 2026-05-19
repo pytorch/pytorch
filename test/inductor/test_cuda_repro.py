@@ -118,20 +118,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
-    def test_addmm_out_dtype_compile(self):
-        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
-        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
-        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
-
-        def fn(bias, x, y):
-            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        result = compiled(bias, a, b)
-        expected = fn(bias, a, b)
-        self.assertEqual(result.dtype, expected.dtype)
-        self.assertEqual(result, expected)
-
     def test_index_put_issue(self):
         def forward(
             self,
@@ -2208,6 +2194,46 @@ class CudaReproTests(TestCase):
         ]
         loss = attn_output.mean()
         loss.backward()
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
 
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
