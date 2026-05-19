@@ -3136,8 +3136,9 @@ def get_device_tflops(
     then fall back to the inaccurate triton estimation.
     """
     ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
-        device=device
+        dtype,
+        is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+        device=device,
     )
     if ds_tops is not None:
         return ds_tops

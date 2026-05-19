@@ -242,18 +242,18 @@ def datasheet_tops(
 
     device_info = lookup_device_info(name)
     if device_info is None:
-        log_str = f"Device {name} not in datasheet, returning None"
-        log.info(log_str)
+        log.info("Device %s not in datasheet, returning None", name)
         return None
-    if dtype not in device_info.tops:
+
+    dtype_key = "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
+
+    if dtype_key not in device_info.tops:
         log.info(
             "Device %s does not have a datasheet entry for %s, returning None",
             name,
-            dtype,
+            dtype_key,
         )
         return None
 
-    tops = device_info.tops[
-        "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
-    ]
+    tops = device_info.tops[dtype_key]
     return tops / device_info.tops_sparsity_factor

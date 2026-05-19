@@ -166,9 +166,16 @@ class ManualOverlapScheduler(OverlapScheduler):
     ):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
+        # ManualOverlapScheduler is plan-driven rather than estimation-driven.
+        # If the caller does not provide an estimator, use a no-op estimator so
+        # manual scheduling does not fall into CUDA/NCCL analytical estimation paths
+        # on non-CUDA devices or compile-on-one-rank graphs.
         if custom_runtime_estimation is None:
 
-            def default_custom_runtime_estimation(node, size):
+            def default_custom_runtime_estimation(
+                node: fx.Node,
+                size: int | None,
+            ) -> float | None:
                 return 0.0
 
             custom_runtime_estimation = default_custom_runtime_estimation
