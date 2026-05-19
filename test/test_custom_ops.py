@@ -5008,11 +5008,16 @@ class TestCustomOpFastPath(TestCase):
         result = torch._C._custom_op_fast_path_check(args)
         self.assertIsNotNone(result)
         self.assertEqual(result[0], "cpu")
-        self.assertEqual(result[1], False)
+        # result[1] is the raw keyset; verify it contains the full dispatch chain
+        keyset = torch._C.DispatchKeySet.from_raw_repr(result[1])
+        ks_str = str(keyset)
+        self.assertIn("CPU", ks_str)
+        self.assertIn("ADInplaceOrView", ks_str)
 
         args_grad = (torch.randn(4, requires_grad=True),)
         result = torch._C._custom_op_fast_path_check(args_grad)
-        self.assertEqual(result[1], True)
+        keyset = torch._C.DispatchKeySet.from_raw_repr(result[1])
+        self.assertIn("AutogradCPU", str(keyset))
 
         with torch.autocast("cpu"):
             result = torch._C._custom_op_fast_path_check(args)

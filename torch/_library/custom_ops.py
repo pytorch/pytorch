@@ -760,7 +760,6 @@ class CustomOpDef:
         raw_fns = self._raw_fns
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
-        keyset_cache: dict[str, _C.DispatchKeySet] = {}
 
         def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -770,8 +769,8 @@ class CustomOpDef:
             if not args or kwargs:
                 return _DO_SLOW_PATH
 
-            # Returns (device_type,) or None; rejects subclasses, modes,
-            # autocast, multi-device, nested/sparse/quantized, tensor lists
+            # Returns (device_type, keyset_raw) or None; rejects subclasses,
+            # modes, autocast, multi-device, nested/sparse/quantized
             check = _C._custom_op_fast_path_check(args)  # pyrefly: ignore[missing-attribute]
             if check is None:
                 return _DO_SLOW_PATH
@@ -786,11 +785,7 @@ class CustomOpDef:
             if fn is None:
                 return _DO_SLOW_PATH
 
-            keyset = keyset_cache.get(device_type)
-            if keyset is None:
-                key_name = _C._dispatch_key_for_device(device_type)
-                keyset = _C.DispatchKeySet(getattr(_C.DispatchKey, key_name))
-                keyset_cache[device_type] = keyset
+            keyset = _C.DispatchKeySet.from_raw_repr(check[1])
             return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
 
         self._fast_path = fast_path

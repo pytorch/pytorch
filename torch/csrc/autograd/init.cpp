@@ -1219,7 +1219,9 @@ static PyObject* any_output_is_alias_to_input_or_output(
 // with tensor-list parameters must be excluded by the caller
 // (_install_fast_path checks has_tensorlist).
 // Returns None when any guard fails (caller should fall back).
-// Otherwise returns (device_type: str, any_requires_grad: bool).
+// Otherwise returns (device_type: str, keyset_raw: int) where keyset_raw
+// is the full resolved dispatch keyset ((tensor_keys | tls.included) &
+// ~tls.excluded) that the caller should pass to autograd_impl.
 static PyObject* custom_op_fast_path_check(
     PyObject* _unused,
     PyObject* py_args) {
@@ -1256,7 +1258,6 @@ static PyObject* custom_op_fast_path_check(
 
   c10::DeviceType first_device = c10::DeviceType::CPU;
   bool seen_tensor = false;
-  bool any_requires_grad = false;
   bool mixed_device = false;
 
   for (Py_ssize_t i = 0; i < n; i++) {
@@ -1276,9 +1277,6 @@ static PyObject* custom_op_fast_path_check(
       seen_tensor = true;
     } else if (dev != first_device) {
       mixed_device = true;
-    }
-    if (t.requires_grad()) {
-      any_requires_grad = true;
     }
   }
 
@@ -1302,7 +1300,7 @@ static PyObject* custom_op_fast_path_check(
   std::string device_name =
       c10::DeviceTypeName(first_device, /*lower_case=*/true);
   return Py_BuildValue(
-      "(sO)", device_name.c_str(), any_requires_grad ? Py_True : Py_False);
+      "(sK)", device_name.c_str(), static_cast<unsigned long long>(active));
   END_HANDLE_TH_ERRORS
 }
 
