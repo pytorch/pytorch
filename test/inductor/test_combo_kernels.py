@@ -1395,6 +1395,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         graph = SimpleNamespace(
             wrapper_code=wrapper,
             removed_buffers={"old_buf"},
+            cpp_wrapper=False,
         )
         kernel = ComboKernel(object, enable_autotune=True)
         kernel.args = FakeArgs()
