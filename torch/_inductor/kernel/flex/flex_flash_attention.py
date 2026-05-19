@@ -56,6 +56,12 @@ class AuxLoadVecInfo(NamedTuple):
     is_direct_contiguous: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class AuxIndexedTensor:
+    buffer: TensorBox
+    indices: tuple[object, ...]
+
+
 def get_flex_flash_fwd_configs(
     has_score_mod: bool,
     has_aux_tensors: bool,
@@ -93,16 +99,21 @@ def get_flex_flash_fwd_configs(
         and score_mod_vec_size is None
         and torch._inductor.config.max_autotune
     ):
-        return [
+        configs = [
             FlexFlashConfig(score_mod_vec_size=v, mask_mod_vec_size=mask_mod_vec_size)
             for v in (1, 2, 4, 8, 16, 32, 64, 128)
         ]
-    return [
-        FlexFlashConfig(
-            score_mod_vec_size=score_mod_vec_size,
-            mask_mod_vec_size=mask_mod_vec_size,
-        )
-    ]
+    else:
+        configs = [
+            FlexFlashConfig(
+                score_mod_vec_size=score_mod_vec_size,
+                mask_mod_vec_size=mask_mod_vec_size,
+            )
+        ]
+    max_configs = torch._inductor.config.test_configs.max_flex_configs
+    if max_configs is not None and len(configs) > max_configs:
+        configs = configs[:max_configs]
+    return configs
 
 
 def select_mask_mod_vec_size(
@@ -149,6 +160,7 @@ def select_score_mod_vec_size(
         q_idx_placeholder=3,
         kv_idx_placeholder=4,
         max_vec_size=8,
+        non_lane_placeholder_start=1,
     )
 
 
@@ -162,6 +174,7 @@ def _select_aux_mod_vec_size(
     min_index_rank_for_contiguous_load: int = 1,
     allow_gather_loads: bool = False,
     require_contiguous_load: bool = False,
+    non_lane_placeholder_start: int = 0,
 ) -> int:
     """Choose a safe vector width for captured tensor loads.
 
@@ -181,7 +194,13 @@ def _select_aux_mod_vec_size(
     if len(placeholders) < num_fixed_placeholders:
         return 1
 
-    capture_to_buffer = dict(zip(placeholders[num_fixed_placeholders:], other_buffers))
+    aux_indexed_tensors = {
+        placeholder: AuxIndexedTensor(buffer, ())
+        for placeholder, buffer in zip(
+            placeholders[num_fixed_placeholders:], other_buffers
+        )
+    }
+    non_lane_index_nodes = placeholders[non_lane_placeholder_start:q_idx_placeholder]
     selected_vec_size = max_vec_size
     found_vectorizable_load = False
     found_contiguous_load = False
@@ -189,13 +208,38 @@ def _select_aux_mod_vec_size(
         if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
             continue
         buffer_node, indices = node.args
-        if buffer_node not in capture_to_buffer:
+        if buffer_node not in aux_indexed_tensors:
             continue
+        indexed_tensor = aux_indexed_tensors[buffer_node]
+        if not isinstance(indices, (list, tuple)) or not indices:
+            if allow_gather_loads:
+                continue
+            return 1
+        full_indices = indexed_tensor.indices + tuple(indices)
+        rank = len(indexed_tensor.buffer.get_size())
+        if len(full_indices) < rank:
+            if _is_safe_partial_aux_index(
+                full_indices,
+                placeholders[q_idx_placeholder],
+                placeholders[kv_idx_placeholder],
+                non_lane_index_nodes,
+            ):
+                aux_indexed_tensors[node] = AuxIndexedTensor(
+                    indexed_tensor.buffer, full_indices
+                )
+            elif not allow_gather_loads:
+                return 1
+            continue
+        if len(full_indices) > rank:
+            if allow_gather_loads:
+                continue
+            return 1
         aux_load_vec_info = direct_aux_load_vec_size_and_kind(
-            indices,
-            capture_to_buffer[buffer_node],
+            full_indices,
+            indexed_tensor.buffer,
             placeholders[q_idx_placeholder],
             placeholders[kv_idx_placeholder],
+            non_lane_index_nodes=non_lane_index_nodes,
             max_vec_size=max_vec_size,
             min_index_rank_for_contiguous_load=min_index_rank_for_contiguous_load,
         )
@@ -214,11 +258,33 @@ def _select_aux_mod_vec_size(
     return selected_vec_size if found_vectorizable_load else 1
 
 
+def _is_safe_partial_aux_index(
+    indices: tuple[object, ...],
+    q_idx_node: torch.fx.Node,
+    kv_idx_node: torch.fx.Node,
+    non_lane_index_nodes: Sequence[torch.fx.Node],
+) -> bool:
+    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
+    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
+    index_symbols = {
+        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
+        for node in non_lane_index_nodes
+    }
+    index_symbols[q_idx_node] = q_idx
+    index_symbols[kv_idx_node] = kv_idx
+    for index in indices:
+        expr = _fx_aux_index_to_sympy(index, index_symbols)
+        if expr is None or kv_idx in expr.free_symbols:
+            return False
+    return True
+
+
 def direct_aux_load_vec_size_and_kind(
     indices: object,
     buffer: TensorBox,
     q_idx_node: torch.fx.Node,
     kv_idx_node: torch.fx.Node,
+    non_lane_index_nodes: Sequence[torch.fx.Node] = (),
     max_vec_size: int = 8,
     min_index_rank_for_contiguous_load: int = 1,
 ) -> AuxLoadVecInfo:
@@ -227,29 +293,36 @@ def direct_aux_load_vec_size_and_kind(
     vec_size is the largest safe KV-lane vector width, or None if the load cannot
     use a direct vector/scalar load. is_direct_contiguous is True only when the
     vector lanes map to consecutive memory locations; lane-uniform scalar loads
-    return False. min_index_rank_for_contiguous_load excludes lower-rank loads
-    from contiguous-vector consideration while still allowing uniform loads.
+    return False. non_lane_index_nodes are placeholders such as batch/head that
+    may appear in non-KV prefix dimensions. min_index_rank_for_contiguous_load
+    excludes lower-rank loads from contiguous-vector consideration while still
+    allowing uniform loads.
     """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo(None, False)
 
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
     kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
-    last_expr = _fx_aux_index_to_sympy(
-        indices[-1], q_idx_node, kv_idx_node, q_idx, kv_idx
-    )
-    if last_expr is None:
+    index_symbols = {
+        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
+        for node in non_lane_index_nodes
+    }
+    index_symbols[q_idx_node] = q_idx
+    index_symbols[kv_idx_node] = kv_idx
+    index_exprs = [_fx_aux_index_to_sympy(index, index_symbols) for index in indices]
+    if any(expr is None for expr in index_exprs):
         return AuxLoadVecInfo(None, False)
-    if kv_idx not in last_expr.free_symbols:
+    if all(kv_idx not in expr.free_symbols for expr in index_exprs):
         return AuxLoadVecInfo(max_vec_size, False)
+
+    last_expr = index_exprs[-1]
+    if kv_idx not in last_expr.free_symbols:
+        return AuxLoadVecInfo(None, False)
     if len(indices) < min_index_rank_for_contiguous_load:
         return AuxLoadVecInfo(None, False)
 
-    prefix_exprs = [
-        _fx_aux_index_to_sympy(index, q_idx_node, kv_idx_node, q_idx, kv_idx)
-        for index in indices[:-1]
-    ]
-    if any(expr is None or kv_idx in expr.free_symbols for expr in prefix_exprs):
+    prefix_exprs = index_exprs[:-1]
+    if any(kv_idx in expr.free_symbols for expr in prefix_exprs):
         return AuxLoadVecInfo(None, False)
 
     sizes = buffer.get_size()
@@ -286,19 +359,14 @@ def direct_aux_load_vec_size_and_kind(
 
 def _fx_aux_index_to_sympy(
     index: object,
-    q_idx_node: torch.fx.Node,
-    kv_idx_node: torch.fx.Node,
-    q_idx: sympy.Symbol,
-    kv_idx: sympy.Symbol,
+    index_symbols: dict[torch.fx.Node, sympy.Symbol],
 ) -> sympy.Expr | None:
     if isinstance(index, int | sympy.Integer):
         return sympy.Integer(index)
     if not isinstance(index, torch.fx.Node):
         return None
-    if index is q_idx_node:
-        return q_idx
-    if index is kv_idx_node:
-        return kv_idx
+    if index in index_symbols:
+        return index_symbols[index]
     if index.op != "call_function":
         return None
 
@@ -306,8 +374,8 @@ def _fx_aux_index_to_sympy(
     target = index.target
     if len(args) < 2:
         return None
-    lhs = _fx_aux_index_to_sympy(args[0], q_idx_node, kv_idx_node, q_idx, kv_idx)
-    rhs = _fx_aux_index_to_sympy(args[1], q_idx_node, kv_idx_node, q_idx, kv_idx)
+    lhs = _fx_aux_index_to_sympy(args[0], index_symbols)
+    rhs = _fx_aux_index_to_sympy(args[1], index_symbols)
     if lhs is None or rhs is None:
         return None
     if target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar):
