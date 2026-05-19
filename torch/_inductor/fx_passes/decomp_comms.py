@@ -13,6 +13,10 @@ Current passes:
     Exploits the Gram matrix identity X.T @ X = sum_i(Xi.T @ Xi).
     Applicable to Muon (Newton-Schulz), Shampoo/K-FAC (Kronecker factors),
     and other optimizers with self-product patterns.
+- batch_all_reduces:
+    N independent all_reduce(sum) -> flatten + cat + 1 all_reduce + split + reshape
+    Reduces NCCL launch overhead for per-weight reductions.
+    Works for any tensor shapes (scalars, vectors, matrices).
 
 Gated by config.aten_distributed_optimizations.allow_comms_decompositions.
 """
@@ -26,12 +30,60 @@ import torch
 import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_tensor
 from torch._inductor.pattern_matcher import CallFunction, Ignored, KeywordArg
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
 logger = logging.getLogger(__name__)
+
+
+def _get_fake_mode(graph: fx.Graph) -> FakeTensorMode | None:
+    """Extract FakeTensorMode from any FakeTensor in the graph's metadata."""
+    for n in graph.nodes:
+        val = n.meta.get("val")
+        if isinstance(val, FakeTensor):
+            return val.fake_mode
+        if isinstance(val, (tuple, list)):
+            for v in val:
+                if isinstance(v, FakeTensor):
+                    return v.fake_mode
+    return None
+
+
+def _retrace_node_meta(node: fx.Node) -> None:
+    """Compute node.meta["val"] by executing the op on input FakeTensors.
+
+    Extracts FakeTensor values from input nodes' metadata, runs the
+    target op under the graph's FakeTensorMode, and stores the result.
+    """
+    if node.op != "call_function":
+        return
+
+    def _resolve(x):  # type: ignore[no-untyped-def]
+        if isinstance(x, fx.Node):
+            return x.meta.get("val")
+        if isinstance(x, list):
+            return [_resolve(v) for v in x]
+        if isinstance(x, tuple):
+            return tuple(_resolve(v) for v in x)
+        return x
+
+    args = _resolve(node.args)
+    kwargs = {k: _resolve(v) for k, v in node.kwargs.items()}
+
+    fake_mode = _get_fake_mode(node.graph)
+    try:
+        target = node.target
+        assert callable(target)
+        if fake_mode is not None:
+            with fake_mode:
+                node.meta["val"] = target(*args, **kwargs)
+        else:
+            node.meta["val"] = target(*args, **kwargs)
+    except Exception as e:
+        logger.debug("_retrace_node_meta: failed for %s: %s", node.name, e)
 
 
 def _is_collective_or_wait(node: fx.Node) -> bool:
@@ -315,10 +367,12 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     c10d.all_reduce.default,
                     args=(mm_node, "sum", info.group_name),
                 )
+                _retrace_node_meta(ar)
                 wait_ar = graph.call_function(
                     c10d.wait_tensor.default,
                     args=(ar,),
                 )
+                _retrace_node_meta(wait_ar)
             for user in list(mm_node.users):
                 if user is not ar:
                     user.replace_input_with(mm_node, wait_ar)
@@ -354,6 +408,197 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
     return gm
 
 
+def _depends_on_any(
+    node: fx.Node, targets: OrderedSet[fx.Node], max_depth: int = 100
+) -> bool:
+    """BFS backward: True if node transitively depends on any node in targets."""
+    visited: OrderedSet[fx.Node] = OrderedSet()
+    queue: list[tuple[fx.Node, int]] = [(node, 0)]
+    while queue:
+        n, depth = queue.pop(0)
+        if n in visited or depth > max_depth or n.op == "placeholder":
+            continue
+        visited.add(n)
+        if n in targets:
+            return True
+        for inp in n.all_input_nodes:
+            queue.append((inp, depth + 1))
+    return False
+
+
+def batch_all_reduces(gm: fx.GraphModule) -> fx.GraphModule:
+    """Batch independent scalar all_reduce calls into a single all_reduce.
+
+    Muon-h and similar optimizers compute per-weight norms that each require
+    an independent all_reduce of a scalar value. With N weights this means
+    N separate all_reduces, each paying full NCCL launch + latency overhead.
+
+    This pass detects independent scalar all_reduce → wait_tensor pairs with
+    the same (reduce_op, group_name), and batches them:
+
+    Before (N all_reduces of any shape)::
+
+        ar_0 = all_reduce(tensor_4x4, "sum", group) → wait_0
+        ar_1 = all_reduce(scalar, "sum", group)      → wait_1
+        ar_2 = all_reduce(tensor_128x64, "sum", group) → wait_2
+
+    After (1 all_reduce)::
+
+        flat_0 = flatten(tensor_4x4)  # [16]
+        flat_1 = flatten(scalar)  # [1]
+        flat_2 = flatten(tensor_128x64)  # [8192]
+        catted = cat([flat_0, flat_1, flat_2])  # [8209]
+        ar = all_reduce(catted, "sum", group)
+        wait = wait_tensor(ar)
+        chunk_0, chunk_1, chunk_2 = split(wait, [16, 1, 8192])
+        result_0 = view(chunk_0, [4, 4])
+        result_1 = view(chunk_1, [])  # back to scalar
+        result_2 = view(chunk_2, [128, 64])
+
+    Reduces N NCCL calls to 1, saving (N-1) * latency_per_call.
+    Works for any combination of tensor shapes via flatten+cat+split+view.
+    """
+    graph = gm.graph
+
+    # 1. Find all_reduce → wait_tensor pairs where all_reduce has single user
+    ar_wait_pairs: list[tuple[fx.Node, fx.Node]] = []
+    for node in graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target is c10d.all_reduce.default
+            and len(node.users) == 1
+        ):
+            wait = next(iter(node.users))
+            if wait.op == "call_function" and wait.target is c10d.wait_tensor.default:
+                ar_wait_pairs.append((node, wait))
+
+    if len(ar_wait_pairs) < 2:
+        return gm
+
+    # 2. Group by (reduce_op, group_name)
+    groups: dict[tuple, list[tuple[fx.Node, fx.Node]]] = defaultdict(list)
+    for ar_node, wait_node in ar_wait_pairs:
+        reduce_op = ar_node.args[1] if len(ar_node.args) > 1 else None
+        group_name = ar_node.args[2] if len(ar_node.args) > 2 else None
+        groups[(reduce_op, group_name)].append((ar_node, wait_node))
+
+    transformed = 0
+
+    for (reduce_op, group_name), pairs in groups.items():
+        if len(pairs) < 2:
+            continue
+
+        # 3. Validate inputs: must be fx.Nodes with known shapes
+        valid_pairs: list[tuple[fx.Node, fx.Node, torch.Size]] = []
+        for ar_node, wait_node in pairs:
+            inp = ar_node.args[0]
+            if not isinstance(inp, fx.Node):
+                continue
+            val = inp.meta.get("val")
+            if val is None:
+                continue
+            valid_pairs.append((ar_node, wait_node, val.shape))
+
+        if len(valid_pairs) < 2:
+            continue
+
+        # 4. Check independence: no input depends on any wait in the group
+        wait_set: OrderedSet[fx.Node] = OrderedSet(wait for _, wait, _ in valid_pairs)
+        independent = True
+        for ar_node, _, _ in valid_pairs:
+            assert isinstance(ar_node.args[0], fx.Node)
+            if _depends_on_any(ar_node.args[0], wait_set):
+                independent = False
+                break
+        if not independent:
+            continue
+
+        # 5. Find insertion point: after the last input in graph order
+        inputs = [ar_node.args[0] for ar_node, _, _ in valid_pairs]
+        assert all(isinstance(inp, fx.Node) for inp in inputs)
+        input_set: OrderedSet[fx.Node] = OrderedSet(inputs)  # type: ignore[arg-type]
+        last_input: fx.Node | None = None
+        for n in graph.nodes:
+            if n in input_set:
+                last_input = n
+        assert last_input is not None
+
+        # 6. Compute flat sizes and original shapes for split+reshape
+        flat_sizes: list[int] = []
+        orig_shapes: list[list[int]] = []
+        for _, _, shape in valid_pairs:
+            numel = 1
+            for s in shape:
+                numel *= s
+            flat_sizes.append(max(numel, 1))
+            orig_shapes.append(list(shape))
+
+        # 7. Create batched all_reduce: flatten → cat → all_reduce → split → view
+        with graph.inserting_before(last_input.next):
+            flat_nodes = []
+            for inp in inputs:
+                flat = graph.call_function(aten.reshape.default, args=(inp, [-1]))
+                _retrace_node_meta(flat)
+                flat_nodes.append(flat)
+
+            catted = graph.call_function(aten.cat.default, args=(flat_nodes,))
+            _retrace_node_meta(catted)
+
+            batched_ar = graph.call_function(
+                c10d.all_reduce.default,
+                args=(catted, reduce_op, group_name),
+            )
+            _retrace_node_meta(batched_ar)
+            batched_wait = graph.call_function(
+                c10d.wait_tensor.default, args=(batched_ar,)
+            )
+            _retrace_node_meta(batched_wait)
+
+            chunks = graph.call_function(
+                aten.split_with_sizes.default, args=(batched_wait, flat_sizes)
+            )
+            _retrace_node_meta(chunks)
+
+            results = []
+            for i, shape in enumerate(orig_shapes):
+                chunk = graph.call_function(operator.getitem, args=(chunks, i))
+                _retrace_node_meta(chunk)
+                reshaped = graph.call_function(
+                    aten.reshape.default, args=(chunk, shape)
+                )
+                _retrace_node_meta(reshaped)
+                results.append(reshaped)
+
+        # 8. Replace original waits with reshaped chunks
+        for i, (ar_node, wait_node, _) in enumerate(valid_pairs):
+            wait_node.replace_all_uses_with(results[i])
+
+        # 9. Erase dead nodes
+        for ar_node, wait_node, _ in valid_pairs:
+            if len(wait_node.users) == 0:
+                graph.erase_node(wait_node)
+            if len(ar_node.users) == 0:
+                graph.erase_node(ar_node)
+
+        transformed += 1
+        logger.info(
+            "batch_all_reduces: batched %d all_reduces (group=%s, op=%s) into 1",
+            len(valid_pairs),
+            group_name,
+            reduce_op,
+        )
+
+    if transformed > 0:
+        from torch._inductor.pattern_matcher import stable_topological_sort
+
+        stable_topological_sort(graph)
+        graph.eliminate_dead_code()
+        graph.lint()
+        gm.recompile()
+
+    return gm
+
+
 def decomp_comms(gm: fx.GraphModule) -> fx.GraphModule:
     """Run all collective decomposition passes sequentially."""
     from torch._logging import trace_structured
@@ -363,6 +608,7 @@ def decomp_comms(gm: fx.GraphModule) -> fx.GraphModule:
         len(list(gm.graph.nodes)),
     )
     decomp_gram_matrix_all_gather(gm)
+    batch_all_reduces(gm)
 
     trace_structured(
         "artifact",
