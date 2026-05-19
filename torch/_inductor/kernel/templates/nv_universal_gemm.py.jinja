@@ -48,11 +48,26 @@ _disk_fn_cache = {}
 
 {% macro compute_cache_key() %}
 {% if is_grouped %}
-    cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape)
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        in_ptr2.shape, in_ptr2.stride(), in_ptr2.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
 {% elif is_scaled %}
-    cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        in_ptr2.shape, in_ptr2.stride(), in_ptr2.dtype,
+        in_ptr3.shape, in_ptr3.stride(), in_ptr3.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
 {% else %}
-    cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
 {% endif %}
 {% endmacro %}
 
@@ -86,19 +101,21 @@ def {{ kernel_name }}_main({{ params_str }}):
     kernel.run(args, artifact, stream=stream, workspace={{ workspace_arg }}, assume_supported_args=True)
 
 
-def {{ kernel_name }}_precompile(precompile_shapes, precompile_dtypes, device_index=0):
+def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0):
     global _compiled_cache
     torch.cuda.set_device(device_index)
     device = f"cuda:{device_index}"
 
 {% for ptr_name in input_ptrs %}
-    {{ ptr_name }} = torch.empty(
+    {{ ptr_name }} = torch.empty_strided(
         tuple(precompile_shapes["{{ ptr_name }}"]),
+        tuple(precompile_strides["{{ ptr_name }}"]),
         device=device,
         dtype=getattr(torch, precompile_dtypes["{{ ptr_name }}"]))
 {% endfor %}
-    out_ptr0 = torch.empty(
+    out_ptr0 = torch.empty_strided(
         tuple(precompile_shapes["output"]),
+        tuple(precompile_strides["output"]),
         device=device,
         dtype=getattr(torch, precompile_dtypes["output"]))
 
