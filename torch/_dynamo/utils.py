@@ -4211,6 +4211,8 @@ def run_node(
             )
         except Unsupported:
             raise
+        except IndexError:
+            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
