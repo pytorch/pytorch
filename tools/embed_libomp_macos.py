@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Embed macOS OpenMP into the PyTorch wheel.
 
-Invoked at CMake install time. Copies libomp.dylib next to libtorch_cpu.dylib
-and rewrites libtorch_cpu's load command / rpath so the bundled copy is the
-sole resolution path at runtime.
+Invoked at CMake install time. Rewrites libtorch_cpu's load command / rpath
+so the bundled libomp.dylib (already installed alongside libtorch_cpu.dylib
+by PostBuildSteps.cmake's install(FILES ...)) is the sole resolution path
+at runtime.
 
 Handles two build environments:
   1. Homebrew-style:  LC_LOAD_DYLIB = "<abs>/libomp.dylib"
@@ -16,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -61,7 +61,17 @@ def main() -> int:
     lib_dir = Path(args.lib_dir)
     libtorch_cpu = lib_dir / "libtorch_cpu.dylib"
 
-    if not libtorch_cpu.exists() or not libomp_path.exists():
+    if not libtorch_cpu.exists():
+        print(
+            f"embed_libomp_macos: skipping; {libtorch_cpu} not present",
+            file=sys.stderr,
+        )
+        return 0
+    if not libomp_path.exists():
+        print(
+            f"embed_libomp_macos: skipping; libomp source {libomp_path} not present",
+            file=sys.stderr,
+        )
         return 0
 
     libomp_name = libomp_path.name
@@ -71,10 +81,6 @@ def main() -> int:
     # Skip if libtorch_cpu doesn't actually link libomp.
     if str(libomp_path) not in libs and rpath_ref not in libs:
         return 0
-
-    target = lib_dir / libomp_name
-    if not target.exists():
-        shutil.copy2(libomp_path, target)
 
     # Homebrew/abs-path case: rewrite the load command to @rpath form.
     if str(libomp_path) in libs:
@@ -88,11 +94,13 @@ def main() -> int:
             ]
         )
 
-    # Replace any rpath pointing at the build-time libomp directory so dyld
-    # cannot fall back to it at runtime.
-    libomp_dir = libomp_path.parent
+    # Replace any rpath that resolves to the build-time libomp directory so
+    # dyld cannot fall back to it at runtime. Resolve both sides so symlink
+    # variants of the same directory (e.g. Homebrew's opt/libomp -> Cellar)
+    # still match.
+    libomp_dir_real = libomp_path.parent.resolve()
     for rp in rpaths:
-        if Path(rp) == libomp_dir:
+        if Path(rp).resolve() == libomp_dir_real:
             subprocess.check_call(
                 [
                     "install_name_tool",
