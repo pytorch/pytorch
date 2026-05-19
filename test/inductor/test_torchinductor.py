@@ -8451,6 +8451,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         template([1, 1, 8, 8], [2, 2, 0, -1])
         template([1, 1, 8, 8], [2, 2, -1, 0])
 
+    @parametrize("ndim", (2, 3))
+    def test_pad_memory_format_preservation(self, ndim):
+        padding = [2 for _ in range(2 * ndim)]
+        shape = list(range(2, ndim + 4))
+        memory_format = torch.channels_last if ndim == 2 else torch.channels_last_3d
+
+        def fn(x):
+            return F.pad(x, padding, mode="reflect")
+
+        x = torch.randn(shape).to(memory_format=memory_format)
+
+        eager_result = fn(x)
+        compiled_fn = torch.compile(fn)
+        compiled_result = compiled_fn(x.clone())
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertTrue(eager_result.is_contiguous(memory_format=memory_format))
+        self.assertTrue(compiled_result.is_contiguous(memory_format=memory_format))
+
     def test_grid_sampler_2d(self):
         def fn(a, b):
             return (

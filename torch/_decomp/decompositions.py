@@ -5213,7 +5213,7 @@ def _reflection_or_replication_pad(
         result = aten._unsafe_index(result, idx)
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
