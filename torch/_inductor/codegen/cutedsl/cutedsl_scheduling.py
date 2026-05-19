@@ -100,19 +100,13 @@ class CuteDSLScheduling(BaseScheduling):
             _, _, kernel_path = get_path(code_hash(src_code_str), "py")
 
             compile_wrapper = IndentedBuffer()
+            compile_wrapper.writeline(f"async_compile.cutedsl({kernel_name!r}, r'''")
+            compile_wrapper.splice(src_code_str, strip=True)
             if precompile_metadata is not None:
-                compile_wrapper.writeline(
-                    f"async_compile.cutedsl({kernel_name!r}, r'''"
-                )
-                compile_wrapper.splice(src_code_str, strip=True)
                 compile_wrapper.writeline(
                     f"''', precompile_metadata={precompile_metadata!r})"
                 )
             else:
-                compile_wrapper.writeline(
-                    f"async_compile.cutedsl({kernel_name!r}, r'''"
-                )
-                compile_wrapper.splice(src_code_str, strip=True)
                 compile_wrapper.writeline("''')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
@@ -174,6 +168,7 @@ class CuteDSLScheduling(BaseScheduling):
             return None
 
         precompile_shapes = {}
+        precompile_strides = {}
         precompile_dtypes = {}
 
         try:
@@ -181,14 +176,18 @@ class CuteDSLScheduling(BaseScheduling):
                 template_name = arg_name.removeprefix("arg_")
                 size = input_node.get_size()
                 precompile_shapes[template_name] = [int(s) for s in size]
+                stride = input_node.get_stride()
+                precompile_strides[template_name] = [int(s) for s in stride]
                 precompile_dtypes[template_name] = str(
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 
             output_size = ctb.layout.size
             precompile_shapes["output"] = [int(s) for s in output_size]
+            output_stride = ctb.layout.stride
+            precompile_strides["output"] = [int(s) for s in output_stride]
             precompile_dtypes["output"] = str(ctb.layout.dtype).removeprefix("torch.")
-        except TypeError:
+        except (TypeError, RuntimeError, ValueError):
             log.debug(
                 "Skipping CuteDSL precompile metadata: symbolic sizes cannot be "
                 "resolved to concrete values"
@@ -200,6 +199,7 @@ class CuteDSLScheduling(BaseScheduling):
 
         return {
             "precompile_shapes": precompile_shapes,
+            "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
         }
