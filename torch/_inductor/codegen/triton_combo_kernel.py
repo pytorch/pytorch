@@ -800,7 +800,7 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
-        elif self.per_subkernel_blocks and self.enable_autotune:
+        elif self.per_subkernel_blocks:
             # Combo with per-subkernel tuning: use its own decorator.
             # Each subkernel is tuned individually by a standalone seed
             # kernel; the combo only needs a placeholder config + metadata.
@@ -1224,6 +1224,9 @@ class ComboKernel(Kernel):
                     seed_specs_str = f"({seed_specs[0]},)"
                 else:
                     seed_specs_str = f"({', '.join(seed_specs)})"
+                # Emit into runtime call path. The bench fires on first fn_c(x).
+                # Seeds are already compiled by async_compile; only the bench
+                # (serial, ~50ms per unique seed) runs at first call.
                 wrapper.writeline(
                     f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
                 )
