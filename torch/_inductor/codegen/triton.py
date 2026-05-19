@@ -4759,7 +4759,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # If BF16/F16 upcasting was done, ensure the output is downcast to the
         # expected dtype.
-        if do_upcast:
+        # Skip for argmax/argmin: their output dtype is int64 (the index),
+        # not the input floating dtype, so downcasting to original_dtype would
+        # produce a lossy int64->float16 round-trip.
+        if do_upcast and reduction_type not in ("argmax", "argmin"):
             for result in result_tuple:
                 if result.dtype != original_dtype:
                     self.post_loop_combine.writeline(
