@@ -7604,13 +7604,22 @@ class Scheduler:
 
             # The epilogue must be an in-place, unary pointwise operation.
             # Any other tensor/s would require additional load expressions.
-            reads = list(node2.read_writes.reads)
+            epilogue_reads = list(node2.read_writes.reads)
+            epilogue_writes = list(node2.read_writes.writes)
             if (
-                len(reads) != 1
-                or reads[0].name != written_buffer_name
-                or not node2.can_inplace(reads[0])
+                len(epilogue_reads) != 1
+                or len(epilogue_writes) != 1
+                or epilogue_reads[0].name != written_buffer_name
             ):
-                why("epilogue is not unary in-place pointwise on the output buffer")
+                why("epilogue is not a unary read of the output buffer")
+                return False
+
+            write_dep = epilogue_writes[0]
+            read_dep = epilogue_reads[0]
+            assert isinstance(read_dep, MemoryDep)
+            assert isinstance(write_dep, MemoryDep)
+            if read_dep.index != write_dep.index or read_dep.size != write_dep.size:
+                why("epilogue's read and write indices differ")
                 return False
 
             # the epilogue depends on expressions which may not available in the user triton kernel
