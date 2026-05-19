@@ -166,7 +166,6 @@ endif()
 
 # ---[ BLAS
 
-set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 set(AT_KLEIDIAI_ENABLED 0)
@@ -1514,9 +1513,6 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
-    endif()
-    if(USE_MKLDNN_ACL)
-      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)

@@ -256,13 +256,11 @@ case "$tag" in
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    ACL=yes
     OPENBLAS=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    ACL=yes
     OPENBLAS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -356,7 +354,6 @@ docker buildx build \
        --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \

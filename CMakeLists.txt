@@ -346,9 +346,6 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
   "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
-cmake_dependent_option(
-  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
-  "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
                        OFF)
