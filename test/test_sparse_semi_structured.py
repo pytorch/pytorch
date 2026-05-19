@@ -351,7 +351,13 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B)
             else:
                 if torch.version.hip:
+                    dense_result = torch.mm(A.cpu(), B.cpu()).to(
+                        device, dtype=torch.int8
+                    )
                     sparse_result = torch.mm(A_sparse, B)
+                    torch.testing.assert_close(
+                        dense_result, sparse_result, rtol=1e-3, atol=1e-3
+                    )
                 else:
                     with self.assertRaisesRegex(
                         RuntimeError,
@@ -390,7 +396,13 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 if torch.version.hip:
+                    dense_result = torch.mm(A.cpu(), B.t().cpu()).to(
+                        device, dtype=torch.int8
+                    )
                     sparse_result = torch.mm(A_sparse, B.t())
+                    torch.testing.assert_close(
+                        dense_result, sparse_result, rtol=1e-3, atol=1e-3
+                    )
                 else:
                     with self.assertRaisesRegex(
                         RuntimeError,
