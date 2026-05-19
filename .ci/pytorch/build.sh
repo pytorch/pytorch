@@ -80,6 +80,21 @@ else
     export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
     export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
   fi
+
+  # scikit-build-core's set_environment_for_gen() falls back to
+  # sysconfig.get_config_var("CC"/"CXX") when CC/CXX are unset; in conda envs
+  # that returns "gcc -pthread -B <prefix>/compiler_compat" (and similar for
+  # CXX). The compat linker's sysroot is older than modern libraries on the
+  # docker image, so CMake try_compile fails for any test that needs to link
+  # (FindBLAS check_function_exists(sgemm_) is the visible symptom; FindOpenMP
+  # also fails the same way). Export bare compilers so the sysconfig fallback
+  # is skipped.
+  if [[ -z "${CC:-}" ]]; then
+    export CC=$(command -v gcc)
+  fi
+  if [[ -z "${CXX:-}" ]]; then
+    export CXX=$(command -v g++)
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
