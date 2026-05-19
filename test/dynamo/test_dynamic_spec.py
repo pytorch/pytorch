@@ -928,6 +928,41 @@ class TestVarargsCompile(TestCase):
             self.assertIsInstance(shape[0], torch.SymInt)
             self.assertIsInstance(shape[1], int)
 
+    def test_varargs_extra_positions_are_static(self):
+        """Positional args past the end of the ``*args`` spec list are
+        treated as fully static — changing their shape triggers a recompile."""
+
+        def f(*args):
+            return args[0].sum() + args[1].sum() + args[2].sum()
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            f,
+            backend=backend,
+            shapes_spec={
+                # Spec covers only the first 2 *args entries.
+                "*args": [
+                    TensorSpec([ShapeVar("a"), None]),
+                    TensorSpec([ShapeVar("b"), None]),
+                ],
+            },
+        )
+
+        # Vary the third (unspecified) arg's shape — each new shape recompiles
+        # because it is treated as static.
+        compiled(torch.randn(4, 3), torch.randn(4, 3), torch.randn(4, 3))
+        compiled(torch.randn(8, 3), torch.randn(8, 3), torch.randn(4, 5))
+        compiled(torch.randn(16, 3), torch.randn(16, 3), torch.randn(4, 7))
+        self.assertEqual(len(backend.graphs), 3)
+
+        # First two *args have SymInt dim 0 (ShapeVar); third is fully static.
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 3)
+        self.assertIsInstance(phs[0].meta["example_value"].shape[0], torch.SymInt)
+        self.assertIsInstance(phs[1].meta["example_value"].shape[0], torch.SymInt)
+        self.assertIsInstance(phs[2].meta["example_value"].shape[0], int)
+        self.assertIsInstance(phs[2].meta["example_value"].shape[1], int)
+
     def test_pure_varkw(self):
         """A ``**kwargs``-only spec marks each keyword tensor's dim 0 dynamic."""
 
