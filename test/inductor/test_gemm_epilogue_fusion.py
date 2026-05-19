@@ -1050,6 +1050,67 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_local_amax_feeds_main_groups(self):
+        M = 32
+        N = 64
+
+        for group in (2, 4, 8, 16, 32):
+            with self.subTest(group=group):
+
+                def fn(a, b):
+                    def epilogue(acc):
+                        x = acc.float().view(M, -1, group)
+                        denom = x.abs().amax(-1, keepdim=True)
+                        return (x / denom).view(M, N)
+
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.mm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+                b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                torch.testing.assert_close(
+                    actual.float(), expected, atol=5e-2, rtol=5e-2
+                )
+                FileCheck().check("@cute.jit").check("cute.ReductionOp.MAX").check(
+                    "broadcast_to"
+                ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_amax_without_abs_feeding_main(self):
+        M = 32
+        N = 64
+        group = 16
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, group)
+                denom = x.amax(-1, keepdim=True)
+                return (x / denom).view(M, N)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "requires an abs/nonnegative input"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_row_reduce_feeds_main_groups(self):
         M = 128
         N = 64

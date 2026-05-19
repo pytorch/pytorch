@@ -173,6 +173,42 @@ class QuackOutputPlan:
     local_norm: QuackLocalNormInfo | None
 
 
+@dataclass(frozen=True)
+class QuackGroupedTensorSSAInfo:
+    group_size: int
+    groups_per_fragment: int
+    nonnegative: bool = False
+
+    @property
+    def keepdim_reshape(self) -> str:
+        return f"((1, 1, {self.groups_per_fragment}), 1, 1)"
+
+
+@dataclass(frozen=True)
+class QuackTensorSSAReduceMatch:
+    node: torch.fx.Node
+    input_node: Any
+    dims: tuple[Any, ...]
+    keepdim: Any
+    dtype: Any
+    kind: str
+
+
+@dataclass(frozen=True)
+class QuackTensorSSAReduceDesc:
+    cute_op: str
+    init_val: str
+    requires_nonnegative: bool = False
+
+
+_QUACK_TENSORSSA_REDUCTIONS = {
+    "sum": QuackTensorSSAReduceDesc("cute.ReductionOp.ADD", "0.0"),
+    "amax": QuackTensorSSAReduceDesc(
+        "cute.ReductionOp.MAX", "0.0", requires_nonnegative=True
+    ),
+}
+
+
 def _quack_cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
     if isinstance(value, torch.fx.Node):
         if value in env:
@@ -395,6 +431,50 @@ def _match_quack_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | No
         dtype = node.kwargs.get("dtype")
         return QuackSumMatch(
             node=node, view_node=view_node, dims=dims, keepdim=keepdim, dtype=dtype
+        )
+    return None
+
+
+def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None:
+    sum_match = _match_quack_sum(node, allow_method_sum=True)
+    if sum_match is not None:
+        return QuackTensorSSAReduceMatch(
+            node=sum_match.node,
+            input_node=sum_match.view_node,
+            dims=sum_match.dims,
+            keepdim=sum_match.keepdim,
+            dtype=sum_match.dtype,
+            kind="sum",
+        )
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten.amax.default,
+        torch.amax,
+    ):
+        input_node = node.args[0]
+        dims = _normalize_reduce_dims(
+            node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        )
+        keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+        return QuackTensorSSAReduceMatch(
+            node=node,
+            input_node=input_node,
+            dims=dims,
+            keepdim=keepdim,
+            dtype=None,
+            kind="amax",
+        )
+    if node.op == "call_method" and node.target == "amax":
+        if len(node.args) < 2:
+            return None
+        return QuackTensorSSAReduceMatch(
+            node=node,
+            input_node=node.args[0],
+            dims=_normalize_reduce_dims(node.args[1]),
+            keepdim=node.kwargs.get("keepdim", False),
+            dtype=None,
+            kind="amax",
         )
     return None
 
@@ -670,44 +750,74 @@ def _lower_quack_view_or_reshape_node(
     raise NotImplementedError(f"unsupported QUACK epilogue view/reshape: {node.format_node()}")
 
 
-def _lower_quack_sum_node(
-    sum_match: QuackSumMatch,
+def _lower_quack_tensorssa_reduce_node(
+    reduce_match: QuackTensorSSAReduceMatch,
     env: dict[torch.fx.Node, Any],
     kernel: _QuackCuteDSLKernel,
+    grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
 ) -> Any:
-    if sum_match.dims not in ((-1,), (2,)) or sum_match.dtype is not None:
+    if reduce_match.dims not in ((-1,), (2,)) or reduce_match.dtype is not None:
         raise NotImplementedError(
-            f"unsupported QUACK epilogue reduction: {sum_match.node.format_node()}"
+            f"unsupported QUACK epilogue reduction: {reduce_match.node.format_node()}"
         )
-    view_match = _match_quack_view_or_reshape(sum_match.view_node)
-    if view_match is None:
+    info = (
+        grouped_tensors.get(reduce_match.input_node)
+        if isinstance(reduce_match.input_node, torch.fx.Node)
+        else None
+    )
+    if info is None:
         raise NotImplementedError(
-            f"unsupported QUACK epilogue reduction input: {sum_match.node.format_node()}"
+            f"unsupported QUACK epilogue reduction input: {reduce_match.node.format_node()}"
         )
-    shape = _normalize_quack_shape(view_match.shape)
-    if not _is_quack_same_fragment_n_group_shape(shape):
+    desc = _QUACK_TENSORSSA_REDUCTIONS[reduce_match.kind]
+    if desc.requires_nonnegative and not info.nonnegative:
         raise NotImplementedError(
-            f"unsupported QUACK epilogue reduction shape: {sum_match.node.format_node()}"
+            "QUACK amax TensorSSA reduction currently requires an abs/nonnegative input"
         )
-    group_size = shape[-1]
-    groups_per_fragment = 32 // group_size
-    source = _quack_cute_arg(sum_match.view_node, env)
+    source = _quack_cute_arg(reduce_match.input_node, env)
     reduced = _emit_quack_tensorssa_reduce(
         kernel,
         source,
-        op="cute.ReductionOp.ADD",
-        init_val="0.0",
+        op=desc.cute_op,
+        init_val=desc.init_val,
         reduction_profile="((None, 1, None), 1, 1)",
     )
-    if bool(sum_match.keepdim):
+    if bool(reduce_match.keepdim):
         return _emit_quack_tensorssa_broadcast_to(
             kernel,
-            _emit_quack_tensorssa_reshape(
-                kernel, reduced, f"((1, 1, {groups_per_fragment}), 1, 1)"
-            ),
+            _emit_quack_tensorssa_reshape(kernel, reduced, info.keepdim_reshape),
             f"{source}.shape",
         )
     return reduced
+
+
+def _propagate_quack_grouped_tensorssa_info(
+    node: torch.fx.Node,
+    grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
+) -> None:
+    input_infos = [
+        grouped_tensors[arg]
+        for arg in pytree.tree_leaves((node.args, node.kwargs))
+        if isinstance(arg, torch.fx.Node) and arg in grouped_tensors
+    ]
+    if not input_infos:
+        return
+    first = input_infos[0]
+    if any(
+        info.group_size != first.group_size
+        or info.groups_per_fragment != first.groups_per_fragment
+        for info in input_infos
+    ):
+        return
+    is_abs = (
+        (node.op == "call_function" and node.target in (torch.ops.aten.abs.default, torch.abs))
+        or (node.op == "call_method" and node.target == "abs")
+    )
+    grouped_tensors[node] = QuackGroupedTensorSSAInfo(
+        group_size=first.group_size,
+        groups_per_fragment=first.groups_per_fragment,
+        nonnegative=is_abs or all(info.nonnegative for info in input_infos),
+    )
 
 
 def _compile_quack_pointwise_nodes(
@@ -720,6 +830,7 @@ def _compile_quack_pointwise_nodes(
 ) -> None:
     from torch._inductor.virtualized import ops, V
 
+    grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo] = {}
     with V.set_kernel_handler(kernel), V.set_ops_handler(handler):
         for node in graph_module.graph.nodes:
             if (
@@ -731,18 +842,31 @@ def _compile_quack_pointwise_nodes(
             with V.set_current_node(node):
                 view_match = _match_quack_view_or_reshape(node)
                 if view_match is not None:
+                    shape = _normalize_quack_shape(view_match.shape)
                     env[node] = _lower_quack_view_or_reshape_node(
                         node, view_match, env, kernel, mm_node
                     )
+                    if _is_quack_same_fragment_n_group_shape(shape):
+                        grouped_tensors[node] = QuackGroupedTensorSSAInfo(
+                            group_size=shape[-1],
+                            groups_per_fragment=32 // shape[-1],
+                        )
                     continue
-                sum_match = _match_quack_sum(node, allow_method_sum=True)
-                if sum_match is not None:
-                    env[node] = _lower_quack_sum_node(sum_match, env, kernel)
+                reduce_match = _match_quack_tensorssa_reduce(node)
+                if reduce_match is not None:
+                    env[node] = _lower_quack_tensorssa_reduce_node(
+                        reduce_match, env, kernel, grouped_tensors
+                    )
                     continue
                 if node.op == "call_method":
                     arg = _quack_cute_arg(node.args[0], env)
                     if node.target == "relu":
                         env[node] = ops.relu(arg).value
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if node.target == "abs":
+                        env[node] = ops.abs(arg).value
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == "clamp":
                         result = arg
@@ -751,6 +875,7 @@ def _compile_quack_pointwise_nodes(
                         if node.kwargs.get("max") is not None:
                             result = ops.minimum(result, node.kwargs["max"]).value
                         env[node] = result
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
                     env[node] = _quack_cute_call_function(
@@ -761,6 +886,7 @@ def _compile_quack_pointwise_nodes(
                             for key, value in node.kwargs.items()
                         },
                     )
+                    _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                     continue
             raise NotImplementedError(
                 f"unsupported epilogue node: {node.format_node()}"
