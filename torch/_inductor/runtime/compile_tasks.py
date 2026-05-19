@@ -131,6 +131,7 @@ def _worker_compile_pycodecache_kernel(
 
     Used by both CuteDSL and NV Universal GEMM backends.
     """
+    # No need to restore: this runs in a subprocess worker that exits after returning.
     os.environ.update(extra_env)
 
     start_ns = time.time_ns()
