@@ -737,7 +737,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def combine_contiguous_dims(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> sympy.Expr:
-        if expand_res := V.graph.sizevars.expand_floor_div(index):
+        if isinstance(index, sympy.Add) and index.has(FloorDiv):
+            tree.vars_and_sizes(index)
+            candidate_vars = OrderedSet(self.range_tree_nodes)
+        else:
+            candidate_vars = None
+        if expand_res := V.graph.sizevars.expand_floor_div(index, candidate_vars):
             new_index, denominator = expand_res  # type: ignore[misc]
             return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
         else:
