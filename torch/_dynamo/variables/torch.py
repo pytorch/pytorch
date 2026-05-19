@@ -505,7 +505,25 @@ class BaseTorchVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        dunder = "__ror__" if reverse else "__or__"
+        return self._nb_binop_impl(tx, other, "__or__", "__ror__", reverse)
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._nb_binop_impl(tx, other, "__sub__", "__rsub__", reverse)
+
+    def _nb_binop_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        forward: str,
+        reverse_dunder: str,
+        reverse: bool,
+    ) -> VariableTracker:
+        dunder = reverse_dunder if reverse else forward
         method = getattr(type(self.value), dunder, None)
         if method is None:
             return VariableTracker.build(tx, NotImplemented)
@@ -1047,7 +1065,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
-        @register(torch.library.wrap_triton)
+        @register(torch.library.wrap_triton, torch._library.capture_triton)
         def handle_wrap_triton(
             self,
             tx: "InstructionTranslator",
@@ -1055,15 +1073,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if len(args) == 1:
-                # torch.library.wrap_triton is a no-op in dynamo
+                # wrap_triton / capture_triton is a no-op in dynamo
                 return args[0]
 
             unimplemented(
                 gb_type="torch.library.wrap_triton call with > 1 args",
                 context=f"args={args}, kwargs={kwargs}",
-                explanation="Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+                explanation="Attempted to call `wrap_triton`/`capture_triton`"
+                " with > 1 args. Dynamo does not support this.",
                 hints=[
-                    "Remove the torch.library.wrap_triton call or its additional args.",
+                    "Remove the wrap_triton/capture_triton call or its additional args.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
