@@ -623,9 +623,23 @@ def _split_quack_scalar_scale(node: Any) -> tuple[Any, float] | None:
 def _match_quack_local_n_amax_scale_view(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
+    aux_output_node = node
+    extra_skip_nodes: set[torch.fx.Node] = set()
+    if (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target
+        in (
+            torch.ops.aten._to_copy.default,
+            torch.ops.prims.convert_element_type.default,
+        )
+    ):
+        extra_skip_nodes.add(node)
+        node = node.args[0]
     aux_view = _match_quack_view_or_reshape(node)
     if aux_view is None:
         return None
+    extra_skip_nodes.add(aux_view.node)
     scaled = _split_quack_scalar_scale(aux_view.base)
     if scaled is None:
         return None
@@ -664,13 +678,14 @@ def _match_quack_local_n_amax_scale_view(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=aux_view.node,
+        reduce_node=aux_output_node,
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
         kind="amax_abs",
         scale=scale,
+        extra_skip_nodes=frozenset(extra_skip_nodes),
     )
 
 
