@@ -163,6 +163,84 @@ class TestTimer(TestCase):
         t.quit()
 
 
+class _FakeTritonKernel:
+    def __init__(self):
+        self.precompiled = False
+        self.prepared_for_pickle = False
+
+    def precompile(self, *, warm_cache_only):
+        self.precompiled = warm_cache_only
+
+    def prepare_for_pickle(self):
+        self.prepared_for_pickle = True
+
+
+class TestSubprocessEnv(TestCase):
+    def test_worker_compile_triton_clears_libdevice_path(self):
+        try:
+            from triton import knobs
+        except ImportError:
+            self.skipTest("triton not available")
+
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        old_env = os.environ.get("TRITON_LIBDEVICE_PATH")
+        old_knob = knobs.nvidia.libdevice_path
+        stale_libdevice_path = "/tmp/stale-libdevice.bc"
+
+        try:
+            kernel, _ = _worker_compile_triton(
+                _FakeTritonKernel,
+                {"TRITON_LIBDEVICE_PATH": stale_libdevice_path},
+                {},
+            )
+            self.assertTrue(kernel.precompiled)
+            self.assertTrue(kernel.prepared_for_pickle)
+            self.assertEqual(os.environ["TRITON_LIBDEVICE_PATH"], stale_libdevice_path)
+            self.assertEqual(knobs.nvidia.libdevice_path, stale_libdevice_path)
+
+            _worker_compile_triton(
+                _FakeTritonKernel,
+                {"TRITON_LIBDEVICE_PATH": None},
+                {},
+            )
+            self.assertNotIn("TRITON_LIBDEVICE_PATH", os.environ)
+            self.assertIsNone(knobs.nvidia.libdevice_path)
+        finally:
+            if old_env is None:
+                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+            else:
+                os.environ["TRITON_LIBDEVICE_PATH"] = old_env
+            knobs.nvidia.libdevice_path = old_knob
+
+    def test_serialized_fx_compile_restores_subprocess_env(self):
+        from torch._inductor.compile_fx_ext import _SerializedFxCompile
+
+        key = "TEST_INDUCTOR_SUBPROCESS_ENV"
+        old_env = os.environ.get(key)
+        os.environ[key] = "parent-value"
+
+        class StopAfterEnvCheck(Exception):
+            pass
+
+        testcase = self
+
+        class Input:
+            def deserialize(self):
+                testcase.assertNotIn(key, os.environ)
+                raise StopAfterEnvCheck
+
+        try:
+            with self.assertRaises(StopAfterEnvCheck):
+                _SerializedFxCompile._run_in_child(Input(), {key: None})
+            self.assertEqual(os.environ[key], "parent-value")
+        finally:
+            if old_env is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_env
+
+
 class TestSetTritonLibdevicePath(TestCase):
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
