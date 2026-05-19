@@ -57,7 +57,7 @@ from torch.utils._sympy.functions import (
 )
 
 from .._dynamo.utils import import_submodule
-from . import config, inductor_prims, ir, test_operators  # NOQA: F401
+from . import config, cpu_vec_isa, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     BaseView,
@@ -7716,11 +7716,12 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     """
     Computes self + value * tensor1 * tensor2 using FMA for better precision.
 
-    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
-    This is computed as: fma(value, tensor1 * tensor2, self)
+    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2).
+    For value=1, this is computed as fma(tensor1, tensor2, self).
 
-    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
-    we fall back to regular arithmetic since FMA doesn't support integers.
+    Note: FMA is only used for floating-point types on non-AMD GPUs, and on CPU
+    for value=1. For integer types, we fall back to regular arithmetic since FMA
+    doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
@@ -7745,13 +7746,19 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
+    use_cpu_fma = (
+        dtype.is_floating_point
+        and device is not None
+        and device.type == "cpu"
+        and cpu_vec_isa.pick_vec_isa() != cpu_vec_isa.invalid_vec_isa
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        if value == 1 and use_fma:
+        if value == 1 and (use_fma or use_cpu_fma):
             return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
