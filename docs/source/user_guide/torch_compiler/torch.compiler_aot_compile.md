@@ -62,6 +62,8 @@ with open("compiled_add.pt", "rb") as f:
 result = loaded_fn(torch.randn(3, 4), torch.randn(3, 4))
 ```
 
+(compiling-a-module)=
+
 ### Compiling a module
 
 When compiling an `nn.Module`, call `aot_compile()` on the `.forward` method
@@ -85,16 +87,16 @@ model = MyModel()
 # AOT compile the forward method.
 compiled_fn = torch.compile(
     model, fullgraph=True
-).forward.aot_compile(((torch.randn(3, 4, requires_grad=True),), {}))
+).forward.aot_compile(((torch.randn(3, 4),), {}))
 
 # Call with the module instance as the first argument.
-inputs = torch.randn(3, 4, requires_grad=True)
-result = compiled_fn(model, inputs)
+result = compiled_fn(model, torch.randn(3, 4))
 
-# Backward works through the compiled function.
+# Backward works through the compiled function because model parameters
+# require gradients.
 loss = result.sum()
 loss.backward()
-print(inputs.grad)  # gradients flow back correctly
+print(model.linear.weight.grad)  # gradients flow to model parameters
 
 # Save and load.
 compiled_fn.save_compiled_function("compiled_model.pt")
@@ -103,10 +105,10 @@ with open("compiled_model.pt", "rb") as f:
     loaded_fn = torch.compiler.load_compiled_function(f)
 
 # Backward also works after loading from disk.
-inputs = torch.randn(3, 4, requires_grad=True)
-result = loaded_fn(model, inputs)
+model.zero_grad()
+result = loaded_fn(model, torch.randn(3, 4))
 result.sum().backward()
-print(inputs.grad)
+print(model.linear.weight.grad)
 ```
 
 ## API reference
@@ -219,37 +221,26 @@ with open("fn_with_model.pt", "rb") as f:
 
 ## Training
 
-`aot_compile()` supports training out of the box. When any input or parameter
-requires gradients, the compilation automatically traces the joint
-forward+backward graph, partitions it, and compiles both halves. The resulting
-function is autograd-aware -- calling `.backward()` on its output works as
-expected.
+`aot_compile()` supports training out of the box. When any parameter requires
+gradients, the compilation automatically traces the joint forward+backward
+graph, partitions it, and compiles both halves. The resulting function is
+autograd-aware -- calling `.backward()` on its output works as expected.
+
+Using the same `MyModel` from {ref}`Compiling a module <compiling-a-module>`
+above:
 
 ```python
-import torch
-import torch.nn as nn
-
-class MyModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(4, 4)
-
-    def forward(self, x):
-        return self.linear(x)
-
 model = MyModel()
 
-# AOT compile -- backward is captured automatically when inputs require grad.
 compiled_fn = torch.compile(
     model, fullgraph=True
-).forward.aot_compile(((torch.randn(3, 4, requires_grad=True),), {}))
+).forward.aot_compile(((torch.randn(3, 4),), {}))
 
 # Training loop using the AOT-compiled function.
 optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 for _ in range(3):
     optimizer.zero_grad()
-    inputs = torch.randn(3, 4, requires_grad=True)
-    output = compiled_fn(model, inputs)
+    output = compiled_fn(model, torch.randn(3, 4))
     loss = output.sum()
     loss.backward()
     optimizer.step()
@@ -264,12 +255,9 @@ compiled_fn.save_compiled_function("train_model.pt")
 with open("train_model.pt", "rb") as f:
     loaded_fn = torch.compiler.load_compiled_function(f)
 
-inputs = torch.randn(3, 4, requires_grad=True)
-output = loaded_fn(model, inputs)
+output = loaded_fn(model, torch.randn(3, 4))
 output.sum().backward()  # gradients flow correctly
 ```
-
-(distributed-training-with-dtensor)=
 
 ### Distributed training with DTensor
 
@@ -354,8 +342,7 @@ def main():
             mesh, [Replicate()], run_check=False,
         )
         out = compiled_fn(model, x)
-        local_out = out.to_local() if isinstance(out, DTensor) else out
-        loss = local_out.sum()
+        loss = out.to_local().sum()
         loss.backward()
         optimizer.step()
         if rank == 0:
@@ -367,6 +354,11 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+Saving and loading works the same way as the single-process case -- call
+`save_compiled_function` on any rank and `load_compiled_function` on any rank.
+Because `compile_on_one_rank=True` produces rank-independent graphs, the same
+artifact can be loaded on every rank without per-rank compilation.
 
 ## Limitations
 
