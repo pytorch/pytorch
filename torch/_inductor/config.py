@@ -13,7 +13,6 @@ from torch.utils._config_module import (
     install_config_module,
 )
 
-
 if TYPE_CHECKING:
     from torch._inductor.choices import InductorChoices
     from torch._inductor.cudagraph_utils import CUDAGraphPolicy
