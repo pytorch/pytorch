@@ -42,7 +42,7 @@ from types import (
     ModuleType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self
+from typing_extensions import NotRequired, override, Self, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -88,9 +88,10 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
-    CustomGraphPassType,
+    CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -142,6 +143,40 @@ from .virtualized import V
 
 
 T = TypeVar("T")
+
+
+class SystemDeviceInfo(TypedDict):
+    name: str | None
+
+
+class SystemVersionInfo(TypedDict, total=False):
+    triton: str | None
+    cuda: str
+    hip: str | None
+
+
+class SystemInfo(TypedDict):
+    hash: str
+    device: NotRequired[SystemDeviceInfo]
+    version: NotRequired[SystemVersionInfo]
+
+
+class CacheInfo(TypedDict, total=False):
+    cache_state: Literal["bypass", "hit", "miss"]
+    cache_status_detailed: str
+    cache_status_guard_expr: str
+    triton_bundler_meta: str
+    time_saved_ns: int
+    time_taken_ns: int
+    ephemeral_timeout_increase: int
+    cache_bypass_reason: str
+    cache_event_time: int
+    key: str
+    components: list[str]
+    cache_bypass_exception_type: str
+    cache_bypass_traceback: list[str]
+    cache_bypass_hard_exception: bool
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, KeysView, Sequence
@@ -216,33 +251,34 @@ def triton_key() -> str | None:
 class CacheBase:
     @staticmethod
     @functools.cache
-    def get_system() -> dict[str, Any]:
+    def get_system() -> SystemInfo:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
         try:
-            system: dict[str, Any] = {
-                "device": {"name": None},
-                "version": {
-                    "triton": triton_version,
-                },
-            }
+            device_info: SystemDeviceInfo = {"name": None}
+            version_info: SystemVersionInfo = {"triton": triton_version}
             device_properties = torch.cuda.get_device_properties(
                 torch.cuda.current_device()
             )
             if torch.version.cuda is not None:
-                system["device"]["name"] = device_properties.name
-                system["version"]["cuda"] = torch.version.cuda
+                device_info["name"] = device_properties.name
+                version_info["cuda"] = torch.version.cuda
             else:
-                system["device"]["name"] = device_properties.gcnArchName
-                system["version"]["hip"] = torch.version.hip
+                device_info["name"] = device_properties.gcnArchName
+                version_info["hip"] = torch.version.hip
+            hash_input: dict[str, Any] = {
+                "device": device_info,
+                "version": version_info,
+            }
+            return {
+                "device": device_info,
+                "version": version_info,
+                "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
+            }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
-            system = {}
-
-        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system)
-
-        return system
+            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
 
     @staticmethod
     @clear_on_fresh_cache
@@ -998,17 +1034,21 @@ class CacheabilityValidator:
         # When timing is EARLY, pre-grad passes already ran before the cache
         # lookup so there's nothing to validate here.
         if resolve_pre_grad_pass_timing() != "early":
-            if config.pre_grad_custom_pass and (
-                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                or not config.pre_grad_custom_pass.uuid()
-            ):
-                self.bypass("Unsupported pre grad custom pass")
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+            for p in get_custom_graph_passes(config.pre_grad_custom_pass):
+                if not isinstance(p, CustomGraphPass) or not p.uuid():
+                    self.bypass("Unsupported pre grad custom pass")
+        for p in itertools.chain(
+            get_custom_graph_passes(config.post_grad_custom_pre_pass),
+            get_custom_graph_passes(config.post_grad_custom_post_pass),
+        ):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported post grad custom pass")
         # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+        for p in itertools.chain(
+            get_custom_graph_passes(config.joint_custom_pre_pass),
+            get_custom_graph_passes(config.joint_custom_post_pass),
+        ):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
@@ -1077,6 +1117,14 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
+def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+    return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
+
+
+def _custom_pass_name(custom_pass: Any) -> str:
+    return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+
+
 def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """Resolve the effective pre-grad pass timing from the config.
 
@@ -1088,39 +1136,39 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     run "late", since the cache key cannot account for it.
     """
     timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
-    custom_pass = config.pre_grad_custom_pass
-    has_uuid = (
+    custom_passes = get_custom_graph_passes(config.pre_grad_custom_pass)
+    passes_missing_uuid = [
         custom_pass
-        and isinstance(custom_pass, CustomGraphPass)
-        and custom_pass.uuid() is not None
-    )
-    pass_name = (
-        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
-        if custom_pass is not None
+        for custom_pass in custom_passes
+        if not _custom_pass_has_uuid(custom_pass)
+    ]
+    missing_uuid_pass_names = (
+        ", ".join(_custom_pass_name(custom_pass) for custom_pass in passes_missing_uuid)
+        if passes_missing_uuid
         else "<none>"
     )
 
     if timing == "default":
-        supports_late = custom_pass is None or has_uuid
+        supports_late = not passes_missing_uuid
         timing = "late" if supports_late else "early"
-        if timing == "early" and custom_pass:
-            if pass_name not in _warned_pre_grad_pass_missing_uuid:
-                _warned_pre_grad_pass_missing_uuid.add(pass_name)
+        if timing == "early" and custom_passes:
+            if missing_uuid_pass_names not in _warned_pre_grad_pass_missing_uuid:
+                _warned_pre_grad_pass_missing_uuid.add(missing_uuid_pass_names)
                 log.warning(
                     "pre_grad_custom_pass %s does not implement uuid(); "
                     "falling back to early timing (pre-grad pass cache will be bypassed). "
                     "Implement uuid() on your CustomGraphPass to enable caching.",
-                    pass_name,
+                    missing_uuid_pass_names,
                 )
                 CompileEventLogger.try_add_pt2_compile(
                     "backend_compile",
                     pre_grad_pass_missing_uuid=True,
-                    pre_grad_pass_name=pass_name,
+                    pre_grad_pass_name=missing_uuid_pass_names,
                 )
 
-    if timing == "late" and custom_pass and not has_uuid:
+    if timing == "late" and passes_missing_uuid:
         raise RuntimeError(
-            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
+            f"pre_grad_custom_pass {missing_uuid_pass_names} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
@@ -1354,6 +1402,8 @@ class FxGraphHashDetails:
             return None
         if isinstance(custom_pass, list):
             return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
+        if isinstance(custom_pass, tuple):
+            return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
         if isinstance(custom_pass, CustomGraphPass):
@@ -1365,11 +1415,22 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType | CustomGraphModulePass
+        self,
+        custom_pass: (
+            CustomGraphPassCallable
+            | list[CustomGraphPassCallable]
+            | tuple[CustomGraphPassCallable, ...]
+            | CustomGraphModulePass
+            | None
+        ),
     ) -> Any | None:
         if not custom_pass:
+            # Empty custom-pass lists mean no passes, matching None.
             return None
-        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
+        if isinstance(custom_pass, (list, tuple)):
+            return tuple(self._get_custom_pass_detail(x) for x in custom_pass)
+        if not isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass)):
+            raise AssertionError(f"unknown custom pass type: {str(type(custom_pass))}")
         return custom_pass.uuid()
 
     def _get_custom_partitioner_fn_detail(
@@ -1495,7 +1556,7 @@ class GuardedCache(Generic[T]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool],
         hints: list[int],
-    ) -> tuple[T | None, bytes | None, dict[str, str]]:
+    ) -> tuple[T | None, bytes | None, CacheInfo]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
 
@@ -1546,7 +1607,7 @@ class GuardedCache(Generic[T]):
                 result_status = "guard_miss"
                 sample_guards_expr = candidate.guards_expr
 
-        info = {"cache_status_detailed": result_status}
+        info: CacheInfo = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
             info["cache_status_guard_expr"] = sample_guards_expr
 
@@ -1693,9 +1754,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
     @staticmethod
     def cache_hit_post_compile(
         graph: CompiledFxGraph,
-        cache_info: dict[str, Any],
+        cache_info: CacheInfo,
         constants: CompiledFxGraphConstants,
-    ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
+    ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Cache specific post compile steps that need to run if we find a graph in the cache
         This includes putting bundled triton artifacts in the right place,
@@ -1802,7 +1863,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         constants: CompiledFxGraphConstants,
         evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
-    ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
+    ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1827,7 +1888,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         if evaluate_guards is None:
             evaluate_guards = shape_env.evaluate_guards_expression
 
-        cache_info: dict[str, Any] = dict()
+        cache_info: CacheInfo = {}
 
         # Use the find_graph_for_key method to find a graph for the given key
         graph, pickled_content, guard_info = FxGraphCache.find_guarded_entry(
@@ -1972,7 +2033,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
-    ) -> tuple[tuple[str, list[str]] | None, dict[str, Any]]:
+    ) -> tuple[tuple[str, list[str]] | None, CacheInfo]:
         """
         Checks that the inductor input is cacheable, then computes
         and returns the cache key for the input.
@@ -1993,7 +2054,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             log.info("Bypassing FX Graph Cache because '%s'", e)
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
-            cache_info = {
+            cache_info: CacheInfo = {
                 "cache_state": "bypass",
                 "cache_bypass_reason": str(e),
                 "cache_event_time": time_ns(),
@@ -2026,7 +2087,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         constants: CompiledFxGraphConstants,
         evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
-    ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
+    ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup the graph with the given key, and return results and metadata.
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
@@ -2035,7 +2096,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
             key, example_inputs, local, remote_cache, constants, evaluate_guards
         )
-        cache_info = {
+        cache_info: CacheInfo = {
             **cache_info,
             "key": key,
             "components": debug_lines,
