@@ -3210,6 +3210,21 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             lambda: torch.compile(fn, fullgraph=True, backend="aot_eager")(x),
         )
 
+    def test_reference_opaque_subclass_creation_errors(self):
+        class Issue175968ChildMeta(Issue175968Meta):
+            def __init__(self):
+                self.value = 1
+
+        def fn(x):
+            meta = Issue175968ChildMeta()
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "created during tracing",
+            lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+        )
+
     def test_hoisted_value_type_make_fx(self):
         def foo(x, hoisted_str):
             return op_with_string(x, hoisted_str)

@@ -49,6 +49,7 @@ from torch._library.opaque_object import (
     should_hoist,
 )
 from torch._logging import trace_structured
+from torch._opaque_base import enable_reference_opaque_creation_guard
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -1953,6 +1954,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[ProxyTorchDispatchMode | None] = []
+        self._reference_opaque_creation_guards: list[Any] = []
         self.decomposition_table: Mapping[OpOverload, Callable[..., Any]] = (
             decomposition_table or {}
         )
@@ -1989,7 +1991,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Stash and store the previous proxy mode (there may or may not be one)
         maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
         self.enter_stack.append(maybe_prev_proxy_mode)
-        return super().__enter__()
+        result = super().__enter__()
+        guard = enable_reference_opaque_creation_guard()
+        guard.__enter__()
+        self._reference_opaque_creation_guards.append(guard)
+        return result
 
     def __exit__(
         self,
@@ -1998,6 +2004,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         traceback: types.TracebackType | None,
     ) -> bool | None:
         b = super().__exit__(exc_type, exc_value, traceback)
+        guard = self._reference_opaque_creation_guards.pop()
+        guard.__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
         mb_previous_proxy_mode = self.enter_stack.pop()
