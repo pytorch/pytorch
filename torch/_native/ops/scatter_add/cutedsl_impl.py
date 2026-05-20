@@ -179,16 +179,12 @@ def _alignment_contract_ok(self: torch.Tensor, src: torch.Tensor) -> bool:
     which has its own predicate + safe fallback to
     ``vectorized_scatter_add_kernel_launch`` / ``indexFunc{Small,Large}Index``.
     """
-    if (
-        self.data_ptr() % _ALIGNMENT_BYTES
-        or src.data_ptr() % _ALIGNMENT_BYTES
-    ):
+    if self.data_ptr() % _ALIGNMENT_BYTES or src.data_ptr() % _ALIGNMENT_BYTES:
         return False
     elem = self.element_size()
-    if (
-        (self.stride(0) * elem) % _ALIGNMENT_BYTES
-        or (src.stride(0) * elem) % _ALIGNMENT_BYTES
-    ):
+    if (self.stride(0) * elem) % _ALIGNMENT_BYTES or (
+        src.stride(0) * elem
+    ) % _ALIGNMENT_BYTES:
         return False
     return True
 
