@@ -1957,7 +1957,7 @@ class SIMDScheduling(BaseScheduling):
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
-        Given a set of pre-fused nodes, generate a Triton kernel.
+        Given a set of pre-fused nodes, generate a SIMD kernel.
         """
         assert self.scheduler
         nodes = [
