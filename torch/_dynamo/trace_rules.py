@@ -63,7 +63,6 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
-    HasAttrBuiltinVariable,
     InspectSignatureVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
@@ -74,7 +73,6 @@ from .variables import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
-    SetAttrBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
     TorchInGraphFunctionVariable,
@@ -374,7 +372,6 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
-    "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -402,7 +399,6 @@ manual_torch_name_rule_map: dict[
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
-    "torch._library.capture_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -577,7 +573,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_getCheckpointState",
         "torch._C._cuda_getCompiledVersion",
         "torch._C._cuda_getCurrentBlasHandle",
-        "torch._C._cuda_getCurrentSolverHandle",
         "torch._C._cuda_getCurrentRawStream",
         "torch._C._cuda_getCurrentStream",
         "torch._C._cuda_getDefaultStream",
@@ -2657,7 +2652,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
-        "torch.cuda.current_solver_handle",
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",
@@ -4043,10 +4037,8 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 BUILTIN_CALLABLES = {
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
-    hasattr: HasAttrBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
-    setattr: SetAttrBuiltinVariable,
 }
 
 

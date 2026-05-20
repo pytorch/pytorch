@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests
 
 # ======= END DYNAMO PATCH =======
 
@@ -2002,8 +2002,7 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         attrs = ", ".join(f"Z._{n:03d}" for n in range(280))
         code = f"def number_attrs(Z):\n    return [ {attrs} ]"
         ns = {}
-        with torch._dynamo.error_on_graph_break(False):
-            exec(code, ns)
+        exec(code, ns)
         number_attrs = ns["number_attrs"]
         # Warm up the function for quickening (PEP 659)
         for _ in range(30):
@@ -4492,10 +4491,6 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             with self.assertRaises(RuntimeError):
                 print("Oops!")
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_vicious_descriptor_nonsense(self):
         # Testing vicious_descriptor_nonsense...
 
@@ -4619,8 +4614,7 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.subTest(expr=expr, x=x, y=y),
                 self.assertRaises(TypeError),
             ):
-                with torch._dynamo.error_on_graph_break(False):
-                    exec(expr, {'x': x, 'y': y})
+                exec(expr, {'x': x, 'y': y})
 
         N1 = sys.maxsize + 1    # might trigger OverflowErrors instead of
                                 # TypeErrors
@@ -5186,10 +5180,6 @@ class AAAPTypesLongInitTest(CPythonTestCase):
 
 
 class MiscTests(CPythonTestCase):
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_type_lookup_mro_reference(self):
         # Issue #14199: _PyType_Lookup() has to keep a strong reference to
         # the type MRO because it may be modified during the lookup, if

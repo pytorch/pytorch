@@ -276,13 +276,6 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
-  virtual DataPtr allocateWithAddress(size_t size, void* addr) {
-    TORCH_CHECK(
-        false,
-        name(),
-        " does not yet support allocateWithAddress. "
-        "If you need it, please file an issue describing your use case.");
-  }
   virtual std::string name() = 0;
   std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
     c10::DeviceGuard device_guard({at::kCUDA, device});
@@ -387,10 +380,6 @@ inline CheckpointDelta setCheckpointPoolState(
     c10::DeviceIndex device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, std::move(pps));
-}
-
-inline DataPtr allocateWithAddress(size_t size, void* addr) {
-  return get()->allocateWithAddress(size, addr);
 }
 
 // CUDAGraph interactions

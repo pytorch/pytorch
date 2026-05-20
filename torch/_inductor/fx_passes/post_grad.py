@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -15,10 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._inductor.custom_graph_pass import (
-    CustomInferenceAwareGraphPass,
-    get_custom_graph_passes,
-)
+from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -164,9 +161,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
-    for post_grad_custom_pre_pass in get_custom_graph_passes(
-        config.post_grad_custom_pre_pass
-    ):
+    if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_pre_pass = functools.partial(
                 post_grad_custom_pre_pass, is_inference=is_inference
@@ -236,7 +231,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     ),
                 )
         if config.b2b_gemm_pass:
-            B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
+            B2B_GEMM_PASS.apply(gm.graph)
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
@@ -250,9 +245,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    for post_grad_custom_post_pass in get_custom_graph_passes(
-        config.post_grad_custom_post_pass
-    ):
+    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
         if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_post_pass = functools.partial(
                 post_grad_custom_post_pass, is_inference=is_inference
@@ -312,7 +305,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
+                config.bucket_reduce_scatters_bucket_mode,
             )
         )
         collectives_bucketing = True
@@ -324,7 +317,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: bucket_all_reduce(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_reduces_fx_bucket_size_determinator,
-                config.bucket_all_reduces_fx,  # type: ignore[arg-type]
+                config.bucket_all_reduces_fx,
             )
         )
         collectives_bucketing = True
@@ -336,7 +329,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
 
         p = (
-            bucket_fsdp_all_gather  # type: ignore[assignment]
+            bucket_fsdp_all_gather
             if "fsdp" in config.bucket_all_gathers_fx
             else bucket_all_gather
         )
@@ -344,7 +337,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
+                config.bucket_all_gathers_bucket_mode,
             )
         )
         collectives_bucketing = True
@@ -729,13 +722,13 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             def cond_fn(*flat_args):
                 loop_idx, _, _, _, _ = pytree.tree_unflatten(
                     flat_args, operands_and_additional_inputs_spec
-                )  # type: ignore[has-type]
-                return loop_idx < scan_length  # type: ignore[has-type]
+                )
+                return loop_idx < scan_length
 
             def body_fn(*flat_args):
                 loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
                     flat_args,
-                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                    operands_and_additional_inputs_spec,
                 )
 
                 idx_int = loop_idx.item()
@@ -1313,39 +1306,6 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
-def _get_single_replacement_node(
-    replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
-) -> torch.fx.Node:
-    nodes = [
-        node
-        for node in replacement_nodes
-        if node.op == "call_function" and node.target is target
-    ]
-    if len(nodes) != 1:
-        raise AssertionError(f"Expected exactly one replacement node for {target}")
-    return nodes[0]
-
-
-def _propagate_triton_eager_input_vals(
-    replacement_nodes: Sequence[torch.fx.Node],
-    hop_node: torch.fx.Node,
-) -> None:
-    eager_input_vals = hop_node.meta.get("eager_input_vals")
-    if eager_input_vals is None:
-        return
-
-    _, eager_kwargs = eager_input_vals
-    mutation_eager_kwargs = {
-        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
-    }
-    # The dense decomposition introduces clones plus the mutation HOP, but only
-    # the mutation HOP should receive the eager-mode tensor metadata.
-    mutation_node = _get_single_replacement_node(
-        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
-    )
-    mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
-
-
 def decompose_triton_kernel_wrapper_functional(graph):
     """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
     mutation node.
@@ -1369,7 +1329,6 @@ def decompose_triton_kernel_wrapper_functional(graph):
             triton_kernel_wrapper_functional_dense,
         )
 
-        hop_node = match.nodes[0]
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -1380,10 +1339,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
         # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 

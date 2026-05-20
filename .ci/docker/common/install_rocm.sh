@@ -241,8 +241,7 @@ EOF
         rm -rf HIP clr
     fi
 
-    # Note: rocm-composable-kernel (ck4inductor) is now built as a wheel
-    # alongside PyTorch in .ci/pytorch/build.sh and installed at test time
+    pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
     # Write environment file (sourced by CI scripts and interactive shells)
     cat > /etc/rocm_env.sh << ROCM_ENV

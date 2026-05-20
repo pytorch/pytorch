@@ -250,19 +250,6 @@ def example_ordering_fn(op_symbol, dispatch_key, nodes):
     return out_nodes
 ```
 
-# Logging
-
-All modules under `torch._native` route through Python's standard `logging` and are wired into `TORCH_LOGS` under the `native_dsl` shorthand. Use it to surface registration-time diagnostics (missing optional deps, version mismatches, DSL availability checks) without spamming stderr on stock `import torch`.
-
-```
-# show INFO and above from torch._native
-TORCH_LOGS=+native_dsl python my_script.py
-```
-
-When adding new code under `torch/_native`, follow the existing pattern:
-* Use `log = logging.getLogger(__name__)` per module.
-* Default to `log.info(...)` for registration-time diagnostics that the average user does not need to see; reserve `log.warning(...)` for genuine misuse (e.g. user-supplied callbacks that fail).
-
 # Testing Native Ops
 
 Adding operators means that they should be tested. Given that we're dealing with overrides, which by definition change behavior, we need to be a little careful.

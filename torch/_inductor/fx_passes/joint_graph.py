@@ -24,7 +24,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -656,9 +655,9 @@ def joint_graph_passes(
     # must occur before other passes
     canonicalize_aten_ir_passes(graph)
 
-    for joint_custom_pre_pass in get_custom_graph_passes(config.joint_custom_pre_pass):
+    if config.joint_custom_pre_pass is not None:
         GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            joint_custom_pre_pass
+            config.joint_custom_pre_pass
         )
         count += 1
 
@@ -699,11 +698,9 @@ def joint_graph_passes(
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
-    for joint_custom_post_pass in get_custom_graph_passes(
-        config.joint_custom_post_pass
-    ):
+    if config.joint_custom_post_pass is not None:
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
-            joint_custom_post_pass
+            config.joint_custom_post_pass
         )
         count += 1
 
@@ -744,7 +741,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             and user.target in (aten.index.Tensor, aten.index_put.default)
             and hasattr(user.meta.get("val"), "device")
         ):
-            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
+            user_devices.add(user.meta["val"].device)
         else:
             return  # bail out
 

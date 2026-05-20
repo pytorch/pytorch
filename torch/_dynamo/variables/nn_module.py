@@ -103,7 +103,7 @@ def initialize_lazy_module(
             if is_namedtuple(x):
                 return type(x)(*(convert_to_fake(elem) for elem in x))
             elif isinstance(x, dict):
-                return {k: convert_to_fake(v) for k, v in x.items()}  # type: ignore[misc]
+                return {k: convert_to_fake(v) for k, v in x.items()}
             elif isinstance(x, (list, tuple, set)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
@@ -260,7 +260,7 @@ class NNModuleVariable(VariableTracker):
                     submod,
                     self.module_key,
                     name,
-                    source=NNModuleSource(GetItemSource(self.source, name)),  # type: ignore[arg-type]
+                    source=NNModuleSource(GetItemSource(self.source, name)),
                 )
                 result.append(name_var)
             return result
@@ -433,7 +433,7 @@ class NNModuleVariable(VariableTracker):
             return VariableTracker.build(tx, base.__class__, source=source)
 
         if object_member:
-            out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
+            out = VariableTracker.build(tx, subobj, NNModuleSource(source))
 
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
@@ -470,7 +470,7 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
-                return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
+                return VariableTracker.build(tx, subobj, NNModuleSource(source))
             else:
                 unimplemented(
                     gb_type="Unsupported nn.Module attribute type",
@@ -528,7 +528,7 @@ class NNModuleVariable(VariableTracker):
                             submod,
                             self.module_key,
                             child_name,
-                            source=NNModuleSource(AttrSource(self.source, child_name)),  # type: ignore[arg-type]
+                            source=NNModuleSource(AttrSource(self.source, child_name)),
                         ),
                         [arg],
                         {},
@@ -634,7 +634,7 @@ class NNModuleVariable(VariableTracker):
             if not isinstance(fn, types.FunctionType):
                 raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
-            src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
+            src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=src),
                 [self, key],
@@ -969,7 +969,7 @@ class NNModuleVariable(VariableTracker):
         ):
             # Inline the function
             fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
+            fn_source = AttrSource(AttrSource(self.source, name), "__func__")
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=fn_source),
                 [self] + list(args),
@@ -1088,7 +1088,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
-        if is_lazy_module(mod):  # type: ignore[arg-type]
+        if is_lazy_module(mod):
             if mod.cls_to_become is not None:  # type: ignore[attr-defined]
                 self.value_type = mod.cls_to_become  # type: ignore[attr-defined,assignment]
             initialize_lazy_module(tx, mod, args, kwargs)  # type: ignore[arg-type]

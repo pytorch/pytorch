@@ -530,7 +530,7 @@ MetalOverrides._initialize_special_ops()
 class MetalKernel(SIMDKernel):
     """Implement Metal codegen based on the SIMDKernel abstraction"""
 
-    overrides = MetalOverrides  # type: ignore[assignment]
+    overrides = MetalOverrides
     suffix = ";"
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
@@ -674,14 +674,6 @@ class MetalKernel(SIMDKernel):
 
         acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
         acc_buf_size_str = self.sexpr(acc_buf_size)
-        # metal threadgroup arrays need a compile time constant size, so
-        # fall back to the static upper bound when acc buf size is symbolic
-        # happens when dynamic=True
-        acc_buf_alloc_size = (
-            acc_buf_size
-            if isinstance(acc_buf_size, sympy.Integer)
-            else self.max_threadgroup_size
-        )
         shmem_buf_size = (
             ceildiv(acc_buf_size, self.simd_group_size)
             if isinstance(acc_buf_size, sympy.Integer)
@@ -785,7 +777,7 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar(src_dtype, acc_buf_alloc_size)
+                acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
                     self.compute,
@@ -793,7 +785,7 @@ class MetalKernel(SIMDKernel):
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             self.compute.writeline(
@@ -801,13 +793,13 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -828,7 +820,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = self.sexpr(index_expr)  # type: ignore[misc]
+        index_str = self.sexpr(index_expr)
 
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
@@ -1188,7 +1180,7 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
-    kernel_type = MetalKernel  # type: ignore[assignment]
+    kernel_type = MetalKernel
     _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:

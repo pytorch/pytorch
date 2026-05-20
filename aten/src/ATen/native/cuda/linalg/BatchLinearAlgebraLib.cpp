@@ -802,7 +802,7 @@ void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& inf
     return;
   }
 
-  if (batchCount(input) > 1) {
+  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
       apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
     });

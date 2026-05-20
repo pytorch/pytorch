@@ -22,10 +22,8 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
-    HasAttrBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
-    SetAttrBuiltinVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -59,7 +57,6 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
-    DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
@@ -118,7 +115,6 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
-    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -231,7 +227,6 @@ __all__ = [
     "GetAttrBuiltinVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "HasAttrBuiltinVariable",
     "InspectSignatureVariable",
     "InspectVariable",
     "IterBuiltinVariable",
@@ -259,7 +254,6 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
-    "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",

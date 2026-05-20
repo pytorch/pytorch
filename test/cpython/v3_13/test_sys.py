@@ -119,7 +119,6 @@ class DisplayHookTest(__TestCase):
         finally:
             sys.stdout = stdout
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_lost_displayhook(self):
         displayhook = sys.displayhook
         try:
@@ -129,7 +128,6 @@ class DisplayHookTest(__TestCase):
         finally:
             sys.displayhook = displayhook
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_custom_displayhook(self):
         def baddisplayhook(obj):
             raise ValueError
@@ -1619,7 +1617,6 @@ class SizeofTest(__TestCase):
         self.assertEqual(sys.getsizeof(True), size('') + self.longdigit)
         self.assertEqual(sys.getsizeof(True, -1), size('') + self.longdigit)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_objecttypes(self):
         # check all types defined in Objects/
         calcsize = struct.calcsize

@@ -280,10 +280,10 @@ PyObject* THPModule_skip_one_hop_torch_function(
   if (!PyArg_ParseTuple(a, "OOOO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
-  py::tuple py_args = Py_IsNone(args) ? py::make_tuple()
+  py::tuple py_args = args == Py_None ? py::make_tuple()
                                       : py::reinterpret_borrow<py::tuple>(args);
 
-  if (Py_IsNone(kwargs)) {
+  if (kwargs == Py_None) {
     kwargs = nullptr;
   } else {
     TORCH_CHECK_TYPE(PyDict_Check(kwargs), "kwargs must be a dictionary");

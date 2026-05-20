@@ -215,7 +215,7 @@ TritonGrid = (
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: list[triton.Config],  # type: ignore[name-defined]
+    configs: list[triton.Config],
     grids: list[TritonGrid],
     wrapper: PythonWrapperCodegen | None = None,
     original_fxnode_name: str | None = None,
@@ -340,8 +340,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     # Also include any possible kernel being called indirectly
     import triton
-    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-    from triton.language import constexpr  # type: ignore[name-defined]
+    from triton import JITFunction
+    from triton.language import constexpr
     from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
@@ -681,6 +681,10 @@ class ExternKernelMultiOutLine(WrapperLine):
             args.append(f"{out_name}={out_node.get_name()}")
 
         code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
+
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self.wrapper)
 
 
 @dataclasses.dataclass
@@ -1106,7 +1110,7 @@ class MultiOutputLine(WrapperLine):
     indices: Sequence[Any]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
+        def codegen_list_tuple_access(basename, indices):
             if len(indices) > 0:
                 itype, i = indices[0]
                 if issubclass(itype, list):
@@ -1220,11 +1224,10 @@ class AssertSizeStrideLine(WrapperLine):
     name: str
     size: str
     stride: str
-    op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name
+        self.wrapper.write_assert_size_stride(
+            self.name, self.size, self.stride, "input"
         )
 
     @staticmethod
@@ -1695,28 +1698,12 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.write_assert_size_stride(name, size, stride, "input")
+                self.writeline(AssertSizeStrideLine(self, name, size, stride))
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
-
-    def _codegen_assert_size_stride(
-        self,
-        code: IndentedBuffer,
-        name: str,
-        size: str,
-        stride: str,
-        op_name: str,
-    ) -> None:
-        """Emit one assert_size_stride line to `code` (replay-phase target).
-
-        Subclasses override to change the emitted form (e.g., C++ assert with
-        an AOTI runtime env guard).
-        """
-        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1918,9 +1905,6 @@ class PythonWrapperCodegen(CodeGen):
         for out_node in node.out_variant_output_nodes:
             self.codegen_allocation(out_node)
         self.writeline(ExternKernelMultiOutLine(self, node))
-        for out_node in node.out_variant_output_nodes:
-            if isinstance(out_node.layout, ir.Layout):
-                out_node.codegen_size_asserts(self)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -2201,7 +2185,7 @@ class PythonWrapperCodegen(CodeGen):
             del async_compile
         """
         )
-        scope = {}  # type: ignore[var-annotated]
+        scope = {}
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
@@ -2806,15 +2790,6 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
-        """Codegen a user-defined Triton kernel and return its cache entry.
-
-        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
-        name (with a leading dunder stripped to avoid Python class-based name
-        mangling at the call site), and records the kernel in
-        ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
-        inductor_meta, extra_launcher_call_args)``; subsequent calls with the
-        same ``cache_key`` reuse the previously assigned name.
-        """
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -2931,7 +2906,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg,
-                        1,  # type: ignore[arg-type]
+                        1,
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -2959,7 +2934,6 @@ class PythonWrapperCodegen(CodeGen):
                 config_of(
                     signature,
                     indices=arg_indices,
-                    pointer_range_override=(),
                 )
             ],
         }
@@ -3046,11 +3020,6 @@ class PythonWrapperCodegen(CodeGen):
             )
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
-        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
-        # when the generated call site is inside a class body.
-        # See https://github.com/pytorch/pytorch/issues/170398
-        if name.startswith("__") and not name.endswith("__"):
-            name = name[1:]
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
@@ -3084,7 +3053,6 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = kernel_src.replace("\\", "\\\\")
         if config.cpp_wrapper:
             # With cpp_wrapper + autotune_at_compile_time=False, the source is
             # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
@@ -3205,14 +3173,12 @@ class PythonWrapperCodegen(CodeGen):
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     kernel.cuda_kernel_saved = False
-                    kernel.cpu_kernel_saved = False
             """
         )
 
     def generate_save_uncompiled_kernels(self):
         """
-        Precompile and save the per-config kernel artifacts (CUBINs on GPU,
-        ``.so`` + launcher ``.so`` on CPU) for Triton kernels that haven't
+        Precompile and save the CUBINs of the Triton kernels that haven't
         been precompiled and saved as a side effect of running the generated
         JIT model (Python wrapper). This can happen when the model contains
         control flow: only one pass through the control flow operators covers
@@ -3225,19 +3191,13 @@ class PythonWrapperCodegen(CodeGen):
             f"""
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
-                    if kernel.device_props.type == "cpu":
-                        if not kernel.cpu_kernel_saved:
-                            if len(kernel.launchers) == 0:
-                                kernel.precompile()
-                            kernel.save_cpu_kernel(launcher=kernel.launchers[0])
-                    else:
-                        if not kernel.cuda_kernel_saved:
-                            if len(kernel.launchers) == 0:
-                                kernel.precompile()
-                            kernel.save_gpu_kernel(
-                                stream="stream",  # use dummy stream
-                                launcher=kernel.launchers[0],
-                            )
+                    if not kernel.cuda_kernel_saved:
+                        if len(kernel.launchers) == 0:
+                            kernel.precompile()
+                        kernel.save_gpu_kernel(
+                            stream="stream",  # use dummy stream
+                            launcher=kernel.launchers[0],
+                        )
             """
         )
 
@@ -3934,7 +3894,7 @@ class PythonWrapperCodegen(CodeGen):
             # `go_outer` manages the top-level logic for generating the final expression.
             # It handles special cases for C++ code generation and adjusts
             # the keypath based on the context (e.g., single vs. multiple outputs).
-            def go_outer():  # type: ignore[no-untyped-def]
+            def go_outer():
                 if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
@@ -4268,7 +4228,7 @@ class PythonWrapperCodegen(CodeGen):
             val = V.graph._shape_env._maybe_evaluate_static(x)
             if val is None:
                 return val
-            return int(val)  # type: ignore[call-overload]
+            return int(val)
         except Exception:
             return None
 

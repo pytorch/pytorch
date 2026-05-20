@@ -17,13 +17,7 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import (
-    common_constant_types,
-    istype,
-    np,
-    raise_args_mismatch,
-    unpack_iterable,
-)
+from ..utils import common_constant_types, istype, np, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
 
 
@@ -89,10 +83,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
+            return variables.SetVariable(items, **kwargs)
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
+            return variables.FrozensetVariable(items, **kwargs)
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars: list[VariableTracker] = [
@@ -280,7 +274,7 @@ class ConstantVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            arg_unpacked = unpack_iterable(tx, args[0])
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
                 return ConstantVariable.create(self.value.join(arg_const))
@@ -424,10 +418,14 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        if isinstance(other, ConstantVariable):
+            return self.as_python_constant() == other.as_python_constant()
+        # Delegate to other's is_python_equal - this handles cases like
+        # StringFormatVariable which can compare against constants and
+        # install guards for any lazy constants it contains.
+        if isinstance(other, VariableTracker):
+            return other.is_python_equal(self)
+        return False
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
@@ -513,53 +511,6 @@ class ConstantVariable(VariableTracker):
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
-    def nb_multiply_impl(
-        self,
-        tx: InstructionTranslator,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # int, float, and complex all define nb_multiply (bool inherits int's slot).
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4242-L4260 (long_mul)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L608-L616 (float_mul)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L506 (complex_mul)
-        # str/bytes/bytearray do NOT have nb_multiply — they go through sq_repeat,
-        # so this method should not see them as ``self``.
-        if not isinstance(self.value, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        other_val = other.as_python_constant()
-        # CPython's nb_multiply (e.g. long_mul, float_mul) returns NotImplemented
-        # whenever the other operand isn't numeric — sequence repetition is
-        # then handled by PyNumber_Multiply's sq_repeat fallback.
-        if not isinstance(other_val, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        # Numeric multiplication is commutative; ignore reverse.
-        try:
-            res = self.value * other_val
-        except OverflowError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, res)
-
-    def sq_repeat_impl(
-        self,
-        tx: InstructionTranslator,
-        count: VariableTracker,
-    ) -> VariableTracker:
-        # Only str / bytes are reachable via ConstantVariable since list, tuple,
-        # bytearray have their own VTs.  ``count`` was already validated as an
-        # index by sequence_repeat -> nb_index_impl.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L12371 (unicode_repeat)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L1448 (bytes_repeat)
-        if not isinstance(self.value, (str, bytes)):
-            raise AssertionError("Expected str or bytes in sq_repeat_impl")
-        n = count.as_python_constant()
-        try:
-            return ConstantVariable.create(self.value * n)
-        except (MemoryError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
     def nb_negative_impl(
         self,
         tx: Any,
@@ -600,21 +551,6 @@ class ConstantVariable(VariableTracker):
             return VariableTracker.build(tx, v + w)
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_absolute_impl(
-        self,
-        tx: Any,
-    ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
-        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
-        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L588-L600
-        #   _Py_c_abs can set errno=ERANGE on overflow, which complex_abs
-        #   converts to OverflowError("absolute value too large").
-        # bool inherits nb_absolute from int via slot inheritance.
-        try:
-            return ConstantVariable.create(abs(self.value))
-        except OverflowError as e:
-            raise_observed_exception(OverflowError, tx, args=list(e.args))
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
