@@ -1153,8 +1153,20 @@ class TestCompiledDTensorOps(TestDTensorOps):
             def compiled_func(*a, **kw):
                 return func(*a, **kw)
 
-            # Just run - if it compiles and runs without error, we pass
-            compiled_func(*dtensor_args, **dtensor_kwargs)
+            try:
+                compiled_func(*dtensor_args, **dtensor_kwargs)
+            except torch._C._LinAlgError as compiled_exc:
+                try:
+                    func(*dtensor_args, **dtensor_kwargs)
+                except torch._C._LinAlgError as eager_exc:
+                    # Some valid OpInfo samples can raise for particular DTensor
+                    # placements. This test is a compile smoke, so accept
+                    # runtime errors that eager DTensor raises in the same way.
+                    if type(compiled_exc) is type(eager_exc) and str(
+                        compiled_exc
+                    ) == str(eager_exc):
+                        continue
+                raise
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))

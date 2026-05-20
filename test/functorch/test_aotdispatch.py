@@ -7693,7 +7693,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("def _backward_prologue(", source)
-        self.assertIn("_raise_if_functorch_active_", source)
+        self.assertIn("torch._C._functorch.peek_interpreter_stack()", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
         with capture_codegen_source("backward_prologue") as captured:
@@ -7980,7 +7980,8 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("def _compiled_forward(", source)
-        self.assertIn("_normalize_as_list_", source)
+        self.assertIn("if isinstance(fw_outs, tuple):", source)
+        self.assertIn("elif not isinstance(fw_outs, list):", source)
 
     def test_compiled_forward_elides_backward_state(self):
         with capture_codegen_source("compiled_function_forward") as captured:
