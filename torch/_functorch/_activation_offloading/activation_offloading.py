@@ -577,15 +577,17 @@ def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
 
 def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
     """
-    Prefetch backward reload operations by moving ao.reload nodes earlier
-    in the graph to overlap data transfer with computation, while keeping
-    ao.wait_tensor at its original position.
+    Prefetch backward reload operations structurally using a prefetch window.
+    Places each reload node W steps ahead of its corresponding wait_tensor node,
+    and enforces staggering in Inductor's scheduler by making the reload node
+    depend on a backward compute node of the prior layer.
     """
     graph: fx.Graph = bwd_module.graph
     nodes_list: list[fx.Node] = list(graph.nodes)
+    node_to_idx = {node: idx for idx, node in enumerate(nodes_list)}
 
     # Identify reload + wait pairs
-    reload_patterns: dict[fx.Node, ReloadNodeInfo] = {}
+    pairs: list[tuple[fx.Node, fx.Node]] = []
     for node in graph.nodes:
         if not (
             node.op == "call_function" and node.target == torch.ops.ao.reload.default
@@ -597,16 +599,71 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
         )
         if wait_node is None:
             continue
-        transfer_size_bytes: int = _calculate_transfer_size(node)
-        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
-        reload_patterns[node] = ReloadNodeInfo(
-            reload_group_nodes=[node],
-            wait_event_node=wait_node,
-            transfer_size_bytes=transfer_size_bytes,
-            transfer_time_ms=transfer_time_ms,
-        )
+        pairs.append((node, wait_node))
 
-    reorder_for_prefetch(nodes_list, reload_patterns)
+    if not pairs:
+        return
+
+    # Sort pairs chronologically based on their wait_node's index in the graph
+    pairs.sort(key=lambda p: node_to_idx[p[1]])
+
+    # Get prefetch window
+    W = config.activation_reload_prefetch_window
+    if W <= 0:
+        W = 1
+
+    # Place the reload nodes
+    placeholders = [n for n in graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return
+    start_node = placeholders[-1]
+
+    def find_first_compute_user(wait_node: fx.Node) -> fx.Node:
+        queue = [wait_node]
+        visited = set()
+        while queue:
+            curr = queue.pop(0)
+            if curr in visited:
+                continue
+            visited.add(curr)
+
+            if curr != wait_node:
+                is_view = (
+                    curr.op == "call_function"
+                    and (
+                        curr.target in _LIFETIME_TRANSPARENT_TARGETS
+                        or "view" in str(curr.target)
+                        or "reshape" in str(curr.target)
+                        or "permute" in str(curr.target)
+                        or "transpose" in str(curr.target)
+                        or curr.target == operator.getitem
+                    )
+                )
+                if curr.op == "call_function" and not is_view:
+                    return curr
+
+            for user in curr.users:
+                queue.append(user)
+
+        return wait_node
+
+    for i, (reload_node, wait_node) in enumerate(pairs):
+        if i < W:
+            # Place reload node right after the last placeholder (start of backward)
+            start_node.append(reload_node)
+            start_node = reload_node
+        else:
+            # Place reload node immediately after a compute user of the pair W steps ahead
+            _, target_wait_node = pairs[i - W]
+            target_compute_node = find_first_compute_user(target_wait_node)
+            target_compute_node.append(reload_node)
+
+            # Enforce staggering in Inductor's scheduler by making this reload depend on target_compute_node
+            args = list(reload_node.args)
+            while len(args) < 3:
+                args.append(None)
+            args[2] = target_compute_node
+            reload_node.args = tuple(args)
 
 
 def _calculate_transfer_size(device_put_node: fx.Node) -> int:

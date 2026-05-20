@@ -104,6 +104,7 @@ def _(tensor: torch.Tensor) -> torch.Tensor:
 def reload(
     tensor: torch.Tensor,
     device: torch.device,
+    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Async reload a CPU tensor to GPU on the dedicated transfer stream.
 
@@ -112,6 +113,9 @@ def reload(
     """
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
+
+    if prefetch_dependency is not None:
+        transfer_stream.wait_stream(current_stream)
 
     torch.accelerator.set_stream(transfer_stream)
     result = torch.empty_like(tensor, device=device)
@@ -127,6 +131,7 @@ def reload(
 def _(
     tensor: torch.Tensor,
     device: torch.device,
+    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(tensor, device=device)
 
