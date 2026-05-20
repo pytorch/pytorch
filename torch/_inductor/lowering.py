@@ -3404,8 +3404,7 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten._trilinear)
-
+make_fallback(aten._trilinear, warn=False, override_decomp=True)
 
 # 3) Difficult
 # Scans
