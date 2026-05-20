@@ -1,4 +1,5 @@
 import collections
+import contextlib
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -335,8 +336,16 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
+        stream_idx = self.get_stream().user_object_index
+        # self.annotation is the dict consumed by
+        # torch.fx.traceback.annotate at enter() time; it carries the
+        # "stream" -> stream-user-object-index pair that inductor reads
+        # off node.meta["custom"] for stream-affinity scheduling.
+        # Stored on a dedicated attribute so target_values (the
+        # positional rebuild-args tuple) does not have to do double duty.
+        self.annotation = {"stream": stream_idx}
         super().__init__(
-            target_values={"stream": self.get_stream().user_object_index},
+            target_values=(),
             initial_values=None,
             **kwargs,
         )
@@ -347,7 +356,17 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
         tx.symbolic_stream_state.enter_stream(self.get_stream())
-        return super().enter(tx)
+        # Eagerly annotate + preserve_node_meta; this ensures the captured
+        # nodes have appropriate node.meta["custom"]["stream"] annotations.
+        # We inlined this part of FxTracebackAnnotateVariable because
+        # FxTracebackAnnotateVariable uses self.target_values for the
+        # annotation and for us target_values is a tuple of args---and it must
+        # remain a tuple of args for reconstruct_type.
+        stack = contextlib.ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(self.annotation))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
+        return ConstantVariable.create(None)
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -362,6 +381,62 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     def supports_graph_breaks(self) -> bool:
         return True
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        # Bypass FxTracebackAnnotateVariable.reconstruct_type's
+        # unconditional Unsupported("annotate escaped from compiled
+        # region") raise (it would otherwise fire via
+        # WithExitFunctionVariable.reconstruct -> self.ctx.reconstruct_type
+        # on every graph break inside with torch.cuda.stream(s): and
+        # silently drop the post-break body).
+        #
+        # Instead, push a 0-arg callable that returns the ctx mgr value
+        # at runtime: functools.partial(torch.cuda.stream, <Stream>).
+        # The partial is installed as a global on the compiled function
+        # so the resume prologue can LOAD_GLOBAL it.  The standard
+        # ContextWrappingVariable.reconstruct contract then emits
+        # CALL 0 (target_values is empty), invoking the partial to
+        # produce a fresh StreamContext just in time for the prologue's
+        # BEFORE_WITH.
+        #
+        # functools.partial (rather than a freshly-defined closure)
+        # is critical: dynamo retraces the resume prologue and a
+        # closure defined inside torch/_dynamo would be classified as
+        # MOD_SKIPLIST'd and refuse-to-trace, breaking the prologue.
+        # functools.partial is a builtin that dynamo handles
+        # natively, and the wrapped target is the plainly-traceable
+        # torch.cuda.stream(<Stream>) call.
+        #
+        # Using install_global_by_id (rather than the user-object
+        # table via register_graph_created_object) keeps the value
+        # indirection in user-visible Python globals: dynamo retraces
+        # the prologue and sees LOAD_GLOBAL ; CALL 0 to a partial,
+        # which lowers cleanly without any torch/_dynamo internal
+        # functions on the call path -- no ResumePrologueTracingError.
+        import functools
+
+        # self.stream is None when we're really a StreamVariable
+        # entering itself as a ctx mgr (with foo: where foo is a
+        # bare Stream), in which case self IS the stream and
+        # self.value holds it.  Otherwise we're a true
+        # StreamContextVariable wrapping someone else's StreamVariable
+        # and the value lives on the wrapped stream.
+        if self.stream is not None:
+            stream_value = self.stream.value
+        else:
+            stream_value = getattr(self, "value", None)
+        if stream_value is None:
+            raise AssertionError(
+                "StreamContextVariable.reconstruct_type called without a "
+                "stream value to rebuild; this should be impossible for "
+                "a properly-constructed ctx manager."
+            )
+
+        thunk = functools.partial(torch.cuda.stream, stream_value)
+        name = codegen.tx.output.install_global_by_id(
+            "_stream_ctx_thunk", thunk
+        )
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
     def get_stream(self) -> "StreamVariable":
         if not self.stream:

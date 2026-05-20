@@ -210,6 +210,39 @@ class <lambda>(torch.nn.Module):
         self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
 
     @requires_cuda
+    def test_target_values_dict_round_trips_through_graph_break(self):
+
+        # Regression test for a dict-vs-tuple issue interpreting
+        # `target_values`. This was initially a tuple and got repurposed as a
+        # dict, but some oft-unexecuted paths still assumed it was a tuple.
+        # Here we ensure that an in-use stream gets properly reconstructed on
+        # the other side of a graph break.
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                z = x + 1
+                torch._dynamo.graph_break()
+                z = z + 2
+            return z
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        expected = fn(*inp)
+        actual, _, fw_graphs, _ = extract_graph(fn, *inp)
+        self.assertEqual(expected, actual)
+        # A graceful graph break inside with torch.cuda.stream(s):
+        # should split into two graph fragments.  Without the fix the
+        # post-break code is dropped and only the pre-break fragment is
+        # captured (or the whole frame falls back to eager and zero are
+        # captured).
+        self.assertEqual(
+            len(fw_graphs),
+            2,
+            f"expected 2 graph fragments after a graceful graph break "
+            f"inside 'with torch.cuda.stream(s):', got {len(fw_graphs)} "
+            f"-- the post-break body was likely dropped",
+        )
+
+    @requires_cuda
     def test_stream_input(self):
         def fn(x, y, s):
             z = torch.add(x, y)
