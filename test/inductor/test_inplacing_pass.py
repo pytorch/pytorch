@@ -283,9 +283,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         x1 = torch.randn(3, device=device)
         gm = make_fx(f, tracing_mode="fake")(x1)
-        print(gm.graph)
         reinplace_inplaceable_ops_core(gm.graph)
-        print(gm.graph)
 
         self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 

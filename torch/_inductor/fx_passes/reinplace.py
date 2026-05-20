@@ -413,6 +413,23 @@ META_ONLY_OPS = OrderedSet(
 )
 
 
+def _is_node_reachable_from(target: torch.fx.Node, source: torch.fx.Node) -> bool:
+    """Check if target is reachable from source through view ops."""
+    visited: set[torch.fx.Node] = set()
+    queue = [source]
+    while queue:
+        current = queue.pop()
+        if current is target:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        for user in current.users:
+            if _is_view_op(user.target) or user is target:
+                queue.append(user)
+    return False
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -719,9 +736,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         for view in storage_to_nodes.get(storage, []):
                             if view.op in ("placeholder", "get_attr"):
                                 base_copy = copy_nodes.get(view)
-                                if (
-                                    base_copy is not None
-                                    and get_node_storage(base_copy.args[1]) == storage
+                                # Verify copy_'s src is derived from this op's
+                                # result via view ops. Can't use storage comparison
+                                # because meta["val"] still reflects functional
+                                # semantics (new storage) before inplace conversion.
+                                if base_copy is not None and _is_node_reachable_from(
+                                    base_copy.args[1], node
                                 ):
                                     replace_dict[base_copy] = base_copy.args[0]
                 node.target = inplaceable_op.inplace_op
