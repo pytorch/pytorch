@@ -5880,7 +5880,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if cached is not None:
             instructions = cached.instructions
             indexof = cached.indexof
-            code_options = cast(CodeOptions, cached.code_options)
+            code_options = cached.code_options
         else:
             instructions = cleaned_instructions(code)
             propagate_line_nums(instructions)
@@ -5892,7 +5892,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracing_ctx.inlined_code_cache[code] = InlinedCodeCache(
                     instructions=instructions,
                     indexof=indexof,
-                    code_options=cast(dict[str, Any], code_options),
+                    code_options=code_options,
                 )
 
         super().__init__(
