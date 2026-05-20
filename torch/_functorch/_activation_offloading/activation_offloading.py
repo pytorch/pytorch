@@ -16,6 +16,10 @@ from torch._functorch._activation_offloading.offload_ops import (  # noqa: F401 
     reload,
     wait_tensor,
 )
+from torch._inductor.fx_passes.control_dependencies import (
+    add_order_only_dependency,
+    apply_order_only_dependencies,
+)
 from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.utils._ordered_set import OrderedSet
@@ -383,7 +387,9 @@ def can_offload(
     if node in static_lifetime_input_nodes:
         log.debug("\tSkipped! Cannot offload static input nodes.")
         return False
-    if op_types.is_view(node):
+    if op_types.is_view(node) and not node.meta.get(
+        "allow_activation_offload_view", False
+    ):
         log.debug("\tSkipped! Cannot offload views.")
         return False
     if node.target == operator.getitem:
@@ -565,14 +571,14 @@ def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
     # prepend moves the node from its current position (no manual removal needed)
     for wait_node in wait_nodes_to_sink:
         if prefetch_dep is not None:
-            # We must use prefetch_dependency to force the Inductor scheduler
-            # to schedule this wait_tensor node at the end of the graph.
-            args = list(wait_node.args)
-            while len(args) < 4:
-                args.append(None)
-            args[3] = prefetch_dep
-            wait_node.args = tuple(args)
+            # Order-only edge: force the Inductor scheduler to place wait_tensor
+            # after the last compute node, without adding a real tensor argument
+            # that would otherwise keep the dep alive across the wait.
+            add_order_only_dependency(wait_node, prefetch_dep)
         output_node.prepend(wait_node)
+
+    if prefetch_dep is not None:
+        apply_order_only_dependencies(graph)
 
 
 def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
@@ -607,10 +613,9 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
     # Sort pairs chronologically based on their wait_node's index in the graph
     pairs.sort(key=lambda p: node_to_idx[p[1]])
 
-    # Get prefetch window
-    W = config.activation_reload_prefetch_window
-    if W <= 0:
-        W = 1
+    # Always prefetch one layer ahead. Larger windows submit H2Ds too early and
+    # do not match the intended staggered reload pipeline.
+    W = 1
 
     # Place the reload nodes
     placeholders = [n for n in graph.nodes if n.op == "placeholder"]
@@ -647,23 +652,62 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
 
         return wait_node
 
+    def is_real_compute_node(node: fx.Node) -> bool:
+        if node.op != "call_function":
+            return False
+        if node.target in (
+            torch.ops.ao.offload.default,
+            torch.ops.ao.reload.default,
+            torch.ops.ao.wait_tensor.default,
+        ):
+            return False
+        is_view = (
+            node.target in _LIFETIME_TRANSPARENT_TARGETS
+            or "view" in str(node.target)
+            or "reshape" in str(node.target)
+            or "permute" in str(node.target)
+            or "transpose" in str(node.target)
+            or node.target == operator.getitem
+        )
+        return not is_view
+
+    def find_compute_before(node: fx.Node) -> fx.Node | None:
+        node_idx = node_to_idx.get(node)
+        if node_idx is None:
+            return None
+        for prev in reversed(nodes_list[:node_idx]):
+            if is_real_compute_node(prev):
+                return prev
+        return None
+
     for i, (reload_node, wait_node) in enumerate(pairs):
         if i < W:
             # Place reload node right after the last placeholder (start of backward)
             start_node.append(reload_node)
             start_node = reload_node
         else:
-            # Place reload node immediately after a compute user of the pair W steps ahead
+            # Submit each reload right after the previous reload is consumed.
+            # ao.reload then waits for the compute stream up to this point only,
+            # so the H2D copy can overlap the next layer's backward compute.
             _, target_wait_node = pairs[i - W]
             target_compute_node = find_first_compute_user(target_wait_node)
-            target_compute_node.append(reload_node)
+            consumer_compute_node = find_first_compute_user(wait_node)
+            pre_consumer_compute_node = find_compute_before(consumer_compute_node)
+            target_wait_node.append(reload_node)
+            add_order_only_dependency(wait_node, target_compute_node)
+            if pre_consumer_compute_node is not None:
+                add_order_only_dependency(wait_node, pre_consumer_compute_node)
 
-            # Enforce staggering in Inductor's scheduler by making this reload depend on target_compute_node
+            # Stagger transfer-stream submissions: ao.reload reads
+            # prefetch_dependency only to wait for the current stream at this
+            # graph point. Must be a single Tensor.
             args = list(reload_node.args)
             while len(args) < 3:
                 args.append(None)
-            args[2] = target_compute_node
+            args[2] = target_wait_node
             reload_node.args = tuple(args)
+
+    apply_order_only_dependencies(graph)
 
 
 def _calculate_transfer_size(device_put_node: fx.Node) -> int:
@@ -915,8 +959,11 @@ def enable_activation_offloading(
         offload_chosen_sets_async(fwd_module, bwd_module)
         if config.activation_offload_sink_wait:
             activation_offload_sink_wait_async(fwd_module)
-        if config.activation_reload_prefetch:
-            activation_reload_prefetch_async(bwd_module)
+        # Bwd reload prefetch is mandatory under separate-stream offload.
+        # Without it, the natural reload placement under sink_wait produces
+        # wrong gradients (the reload-result lifetimes are too short, and
+        # the wait registry can't sequence the H2D pile correctly).
+        activation_reload_prefetch_async(bwd_module)
     else:
         # Use synchronous device_put (1 node each)
         offload_chosen_sets(fwd_module, bwd_module)

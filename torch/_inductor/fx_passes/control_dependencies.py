@@ -58,6 +58,17 @@ class ControlDeps(HigherOrderOperator):
 
 control_deps = ControlDeps()
 
+# Meta key for declaring order-only (happens-before) dependencies on an fx.Node.
+# Callers stamp the consumer node with `add_order_only_dependency(consumer, dep)`;
+# `apply_order_only_dependencies` later materializes the edges by wrapping the
+# consumer in `control_deps`. This is the lightweight alternative to threading a
+# fake tensor argument through the consumer op just to force scheduling order.
+ORDER_ONLY_DEPENDENCIES_META_KEY = "inductor_order_only_dependencies"
+
+
+def add_order_only_dependency(node: fx.Node, dep: fx.Node) -> None:
+    node.meta.setdefault(ORDER_ONLY_DEPENDENCIES_META_KEY, []).append(dep)
+
 # control_deps wraps side-effecting ops (e.g. record_event, wait_event)
 # and must not be eliminated by DCE even when its outputs are unused.
 from torch.fx.node import has_side_effect
@@ -281,3 +292,28 @@ def _create_subgraph_for_node(
             out.meta["val"] = result.meta["val"]
 
     return _LazyGraphModule(owning_module, subgraph)
+
+
+def apply_order_only_dependencies(graph: fx.Graph, verbose: bool = False) -> None:
+    """Materialize meta-declared order-only edges into control_deps wrappers.
+
+    Scans every node for ORDER_ONLY_DEPENDENCIES_META_KEY entries and routes
+    them through `preserve_node_ordering`. After this call the meta key is
+    cleared from each processed node so the pass is idempotent.
+    """
+    additional_deps_map: dict[fx.Node, OrderedSet[fx.Node]] = {}
+    for node in graph.nodes:
+        deps = node.meta.pop(ORDER_ONLY_DEPENDENCIES_META_KEY, None)
+        if not deps:
+            continue
+        # Filter out self-deps and non-Node entries defensively.
+        filtered: OrderedSet[fx.Node] = OrderedSet(
+            d for d in deps if isinstance(d, fx.Node) and d is not node
+        )
+        if filtered:
+            additional_deps_map[node] = filtered
+
+    if not additional_deps_map:
+        return
+
+    preserve_node_ordering(graph, additional_deps_map, verbose=verbose)

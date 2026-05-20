@@ -13,8 +13,8 @@ Offload pattern (AC-inspired -- no keepalive):
     cpu_tensor = ao.wait_tensor(cpu_tensor)
         The GPU buffer is freed by the compiler right after offload, exactly as
         activation checkpointing would free it after the last forward consumer.
-        The caching allocator's record_stream guards the D2H window, preventing
-        reuse of the GPU block until the transfer stream finishes reading it.
+        An explicit record_stream guards the D2H window, preventing reuse of the
+        GPU block until the transfer stream finishes reading it.
 
 Reload pattern:
     gpu_tensor = ao.reload(cpu_tensor, device)
@@ -69,21 +69,25 @@ def _clear_wait_registry() -> None:
     _wait_registry.clear()
 
 
-@custom_op("ao::offload", mutates_args=())
+# Treat the source as logically mutated: the async D2H copy is an outstanding
+# read of its storage, so later compiler-generated in-place writes must not
+# reuse that storage until the copy is sequenced.
+@custom_op("ao::offload", mutates_args={"tensor"})
 def offload(tensor: torch.Tensor) -> torch.Tensor:
     """Async offload a GPU tensor to CPU on the dedicated transfer stream.
 
-    Uses set_stream + copy_ so that the caching allocator calls record_stream
-    on the source GPU tensor. This is intentional: without keepalive, the
-    compiler frees the GPU buffer right after this op (the AC free point).
-    record_stream prevents the allocator from reusing the block while the D2H
-    is still reading it on the transfer stream, without stalling compute.
+    Explicitly records the source GPU tensor on the transfer stream. This is
+    intentional: without keepalive, the compiler frees the GPU buffer right
+    after this op (the AC free point). record_stream prevents the allocator from
+    reusing the block while the D2H is still reading it on the transfer stream,
+    without stalling compute.
     """
     device = tensor.device
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
     transfer_stream.wait_stream(current_stream)
+    tensor.record_stream(transfer_stream)
 
     torch.accelerator.set_stream(transfer_stream)
     result = torch.empty_like(tensor, device="cpu", pin_memory=True)
@@ -163,7 +167,7 @@ def _(
 # before the transfer finishes.
 _lib = torch.library.Library("ao", "DEF")
 _lib.define(
-    "wait_tensor(Tensor(a) tensor, Tensor? keepalive=None, Tensor? last_use_of_storage=None, Tensor? prefetch_dependency=None) -> Tensor(a)"
+    "wait_tensor(Tensor(a) tensor, Tensor? keepalive=None, Tensor? last_use_of_storage=None) -> Tensor(a)"
 )
 
 
@@ -172,7 +176,6 @@ def _ao_wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
     last_use_of_storage: torch.Tensor | None = None,
-    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     completion_event, device = _pop_wait(tensor)
     current_stream = torch.accelerator.current_stream(device)
@@ -188,7 +191,6 @@ def _ao_wait_tensor_fake(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
     last_use_of_storage: torch.Tensor | None = None,
-    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return tensor
 
@@ -202,9 +204,8 @@ def wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
     last_use_of_storage: torch.Tensor | None = None,
-    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Callable wrapper so ``wait_tensor`` can be imported by name for op registration."""
     return torch.ops.ao.wait_tensor.default(
-        tensor, keepalive, last_use_of_storage, prefetch_dependency
+        tensor, keepalive, last_use_of_storage
     )
