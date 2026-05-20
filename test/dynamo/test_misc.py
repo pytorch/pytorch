@@ -16799,6 +16799,51 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
 
+    def test_tensorify_scalar_only_bin_ops(self):
+        """When tensorify is enabled, torch bin_ops on scalar-only args should
+        not graph-break. The scalars are lifted as 0-dim tensor placeholders by
+        Dynamo; the tensorify pass converts them back to tensor ops."""
+        for op, expected in [
+            (torch.add, lambda a, b: a + b),
+            (torch.sub, lambda a, b: a - b),
+            (torch.mul, lambda a, b: a * b),
+            (torch.div, lambda a, b: a / b),
+        ]:
+            with self.subTest(op=op.__name__):
+
+                def fn(a, b):
+                    return op(a, b)
+
+                compiled = torch.compile(
+                    fn, backend="eager", dynamic=True, fullgraph=True
+                )
+                result = compiled(3.5, 2.0)
+                self.assertEqual(result, expected(3.5, 2.0))
+
+    def test_tensorify_scalar_only_bin_ops_int(self):
+        """When tensorify is enabled, torch bin_ops on integer scalar-only
+        args should not graph-break either. The ints are lifted as SymInts
+        and symbolic arithmetic traces correctly."""
+
+        def fn(a, b):
+            return torch.add(a, b)
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        result = compiled(5, 3)
+        self.assertEqual(result, 8)
+
+    def test_tensorify_symint_div_from_size(self):
+        """torch.div on SymInt args from tensor.size() should compile
+        without graph break when tensorify is enabled."""
+
+        def fn(x, divisor):
+            seq_len = x.size(0)
+            return torch.div(seq_len, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        result = compiled(torch.randn(1024), 256)
+        self.assertEqual(result, 4)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
