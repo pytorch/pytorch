@@ -1,4 +1,8 @@
 # Owner(s): ["module: inductor"]
+import multiprocessing
+import queue
+import traceback
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -14,6 +18,7 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -22,8 +27,78 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
+def _daemon_compile_worker(q, worker_start_method):
+    try:
+        with config.patch(
+            {"compile_threads": 2, "worker_start_method": worker_start_method}
+        ):
+            shutdown_compile_workers()
+            AsyncCompile.warm_pool()
+            AsyncCompile.wakeup()
+            AsyncCompile.wait_pool_ready()
+
+            def fn(x):
+                return (x + 1).relu()
+
+            x = torch.randn(4)
+            compiled = torch.compile(fn, backend="inductor")
+            torch.testing.assert_close(compiled(x), fn(x))
+            q.put(("ok", (AsyncCompile.use_process_pool(), worker_start_method)))
+    except BaseException:
+        q.put(("err", traceback.format_exc()))
+    finally:
+        shutdown_compile_workers()
+
+
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
+    def _run_daemon_compile_worker(self, worker_start_method):
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        p = ctx.Process(target=_daemon_compile_worker, args=(q, worker_start_method))
+        p.daemon = True
+        p.start()
+        p.join(120)
+
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            self.fail("daemon compile worker timed out")
+
+        try:
+            kind, payload = q.get(timeout=1)
+        except queue.Empty:
+            self.fail(f"daemon compile worker exited without a result: {p.exitcode}")
+
+        self.assertEqual(p.exitcode, 0, payload)
+        self.assertEqual(kind, "ok", payload)
+        return payload
+
+    @unittest.skipIf(
+        "spawn" not in multiprocessing.get_all_start_methods(),
+        "requires spawn multiprocessing start method",
+    )
+    @parametrize("method", ("fork", "spawn"))
+    def test_daemon_process_disables_direct_compile_process_pool(self, method):
+        if method not in multiprocessing.get_all_start_methods():
+            self.skipTest(f"requires {method} multiprocessing start method")
+
+        use_process_pool, worker_start_method = self._run_daemon_compile_worker(method)
+        self.assertEqual(worker_start_method, method)
+        self.assertFalse(use_process_pool)
+
+    @unittest.skipIf(
+        "spawn" not in multiprocessing.get_all_start_methods(),
+        "requires spawn multiprocessing start method",
+    )
+    @skipIfWindows(msg="SubprocPool uses pass_fds, which is not supported on Windows.")
+    def test_daemon_process_allows_subprocess_compile_process_pool(self):
+        use_process_pool, worker_start_method = self._run_daemon_compile_worker(
+            "subprocess"
+        )
+        self.assertEqual(worker_start_method, "subprocess")
+        self.assertTrue(use_process_pool)
+
     @requires_gpu()
     @requires_triton()
     @parametrize("method", ("subprocess", "fork", "spawn"))

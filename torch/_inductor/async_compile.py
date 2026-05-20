@@ -202,6 +202,16 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+def _process_pool_allowed() -> bool:
+    # multiprocessing daemons are not allowed to create child processes.  This
+    # only applies to direct multiprocessing modes; SubprocPool creates a
+    # sidecar subprocess that owns its own ProcessPoolExecutor.
+    return (
+        config.worker_start_method == "subprocess"
+        or not multiprocessing.current_process().daemon
+    )
+
+
 @clear_on_fresh_cache
 class CompiledTritonKernels:
     """
@@ -282,6 +292,11 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
+        if not _process_pool_allowed():
+            raise RuntimeError(
+                "Inductor async compile process pools are disabled in daemonic "
+                "multiprocessing processes"
+            )
         AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
@@ -317,7 +332,7 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
             return
         _compile_start()
         # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
@@ -340,7 +355,7 @@ class AsyncCompile:
 
     @classmethod
     def use_process_pool(cls):
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
             return False
 
         # Proton instrumentation backend requires compilation to happen in the main
