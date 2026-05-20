@@ -788,6 +788,9 @@ class PackedMaskAnalyzer:
                 and index
                 not in (self.q_idx, self.placeholders[0], self.placeholders[1])
             ):
+                if not isinstance(dim_size, int | sympy.Integer):
+                    # For wrap around indexing we add the dim size and this can be a symint under dynamic shapes
+                    return None
                 dtype = fx_node_dtype(index)
                 integer_type = "Int64" if dtype == torch.int64 else "Int32"
                 size_code = f"cutlass.{integer_type}({dim_size})"
@@ -850,7 +853,12 @@ class PackedMaskAnalyzer:
         *,
         strict: bool,
     ) -> tuple[PackedMaskInterval, ...] | None:
-        """Lower an affine lane comparison into one packed mask interval."""
+        """Lower an affine lane comparison into one packed mask interval.
+
+        ``strict`` distinguishes ``<`` from ``<=`` after rewriting the predicate
+        as ``lhs_expr - rhs_expr <= 0``. Strict comparisons exclude the equality
+        lane by shifting the generated half-open interval bound by one.
+        """
         diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
         affine = decompose_affine_lane_expr(diff, self.lane_analysis.lane)
         if affine is None:

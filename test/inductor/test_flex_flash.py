@@ -2171,6 +2171,51 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask_dynamic(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        for tensor in (q, k, v):
+            torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+
+        def fn(q, k, v):
+            q_len = q.size(2)
+            kv_len = k.size(2)
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=True), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("utils.shr_u32", src)
+        self.assertIn("utils.shl_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
     @parametrize("vec_size", [None, 16])
     def test_flash_attention_sm100_packed_mask_respects_forced_vec_size(self, vec_size):
         seq_len = 128
@@ -2256,6 +2301,62 @@ class TestFlexFlash(InductorTestCase):
         src = "\n".join(code)
         self.assertIn("utils.shr_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_document_offsets_dynamic_falls_back_from_packed_mask(
+        self,
+    ):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        for tensor in (q, k, v):
+            torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        doc_ids = (positions // 32).expand(1, -1).contiguous()
+        torch._dynamo.mark_dynamic(doc_ids, 1, min=seq_len, max=seq_len)
+        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
+
+        def fn(q, k, v, doc_ids, offsets):
+            q_len = q.size(2)
+            kv_len = k.size(2)
+
+            def mask_mod(b, _h, q_idx, kv_idx):
+                doc = doc_ids[b, q_idx]
+                start = offsets[doc]
+                return (kv_idx >= start) & (kv_idx <= q_idx)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, doc_ids, offsets)
+        expected = fn(*args)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=True), *args
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertNotIn("utils.shr_u32", src)
+        self.assertNotIn("mask_mod.__mask_vec_size__", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),

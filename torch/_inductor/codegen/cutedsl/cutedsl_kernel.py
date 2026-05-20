@@ -414,6 +414,9 @@ class CuteDSLTemplateKernel(Kernel):
         """Register extra tensor buffers and return their rendered input names."""
         buffer_names = []
         for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                # Symbolic size/index expressions are not kernel tensor inputs yet.
+                continue
             remapped_name = self.args.input(buffer.get_name())
             if remapped_name not in self.collected_tensor_buffers:
                 self.collected_tensor_buffers.append(remapped_name)
