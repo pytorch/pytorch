@@ -704,18 +704,19 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
                 result = CuteDSLOpOverrides.atan2(mock_cse_a, mock_cse_b)
                 self.assertIsInstance(result, CSEVariable)
 
+                # Logical ops
                 result = CuteDSLOpOverrides.logical_xor(mock_cse_a, mock_cse_b)
                 self.assertIsInstance(result, CSEVariable)
 
             body = kernel.body.getvalue()
 
-            # Verify codegen strings for existing ops
+            # Arithmetic ops
             self.assertIn("(tensor_a + tensor_b)", body)
             self.assertIn("(tensor_a * tensor_b)", body)
             self.assertIn("(tensor_a / tensor_b)", body)
-            self.assertIn("cute.math.sqrt(tensor_a)", body)
 
-            # Verify codegen strings for new unary math ops
+            # Unary math ops
+            self.assertIn("cute.math.sqrt(tensor_a)", body)
             self.assertIn("cute.math.rsqrt(tensor_a)", body)
             self.assertIn("cute.math.exp2(tensor_a)", body)
             self.assertIn("cute.math.log2(tensor_a)", body)
@@ -726,10 +727,10 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             self.assertIn("cute.math.atan(tensor_a)", body)
             self.assertIn("cute.math.floor(tensor_a)", body)
 
-            # Verify codegen strings for new binary math ops
+            # Binary math ops
             self.assertIn("cute.math.atan2(tensor_a, tensor_b)", body)
 
-            # Verify codegen strings for logical op
+            # Logical ops
             self.assertIn("(tensor_a ^ tensor_b)", body)
 
         scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa(
