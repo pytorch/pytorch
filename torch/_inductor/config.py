@@ -506,6 +506,14 @@ pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
 )
 
+# use torch profiler to benchmark kernels during autotuning
+# when enabled, this takes precedence over use_experimental_benchmarker
+use_torch_profiler_benchmarker: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
+    justknob="pytorch/inductor:use_torch_profiler_benchmarker",
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1657,6 +1665,10 @@ class cpp:
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
     )  # type: ignore[assignment]
+
+    # Target CPU architecture for C++ wrapper compilation. When unset, Inductor
+    # uses the platform default. Set to "" to suppress the architecture flag.
+    march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2821,6 +2833,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
