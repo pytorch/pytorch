@@ -1422,36 +1422,24 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
-    share_triton: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
-
-    When share_triton=True, the Triton compilation cache is placed in a
-    persistent shared directory rather than inside the per-test temp dir.
-    Triton compilation is a pure function of the kernel source, so sharing
-    compiled kernels across tests is safe and avoids redundant compilation.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
-    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            if share_triton:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(default_cache_dir(), "triton")
-                )
-            else:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(inductor_cache_dir, "triton")
-                )
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
