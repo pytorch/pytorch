@@ -11,44 +11,32 @@ at the bottom.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._ops import OpOverload
 from torch._subclasses.complex_tensor import ComplexTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
-class _ComplexDecompInterpreter(fx.Interpreter):
-    """Interpreter that decomposes complex ops via ComplexTensor dispatch.
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
-    When a node's result is a complex tensor (but not already a ComplexTensor),
-    it gets wrapped so downstream nodes decompose correctly.
-    """
+    from torch._ops import OpOverload
 
-    def call_function(
-        self, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> Any:
-        if (
-            isinstance(target, torch._ops.OpOverload)
-            and target.overloadpacket == torch.ops.aten.complex
-        ):
-            return ComplexTensor(args[0], args[1])
 
-        result = super().call_function(target, args, kwargs)
-        return _maybe_wrap(result)
+def _can_wrap(value: Any) -> bool:
+    return (
+        isinstance(value, Tensor)
+        and value.dtype.is_complex
+        and not isinstance(value, ComplexTensor)
+    )
 
 
 def _maybe_wrap(value: Any) -> Any:
-    if (
-        isinstance(value, Tensor)
-        and not isinstance(value, ComplexTensor)
-        and value.dtype.is_complex
-    ):
+    if _can_wrap(value):
         return ComplexTensor(torch.real(value), torch.imag(value))
     return value
 
@@ -59,29 +47,29 @@ def _maybe_unwrap(value: Any) -> Any:
     return value
 
 
-def _has_complex(gm: fx.GraphModule, example_inputs: list[Any]) -> bool:
-    for inp in example_inputs:
-        if isinstance(inp, Tensor) and inp.dtype.is_complex:
+def _has_complex(gm: fx.GraphModule, flat_args: list[Any]) -> bool:
+    for arg in flat_args:
+        if _can_wrap(arg):
             return True
     for node in gm.graph.nodes:
         if node.op == "call_function":
             val = node.meta.get("val")
-            if isinstance(val, Tensor) and val.dtype.is_complex:
+            if _can_wrap(val):
                 return True
     return False
 
 
 def decompose_complex_in_graph(
     gm: fx.GraphModule,
-    example_inputs: list[Any],
+    flat_args: list[Any],
     decompositions: Mapping[OpOverload, Callable[..., Any]] | None = None,
 ) -> fx.GraphModule:
-    if not _has_complex(gm, example_inputs):
+    if not _has_complex(gm, flat_args):
         return gm
 
     def wrapper(*args: Any) -> Any:
         wrapped = tuple(_maybe_wrap(a) for a in args)
-        result = _ComplexDecompInterpreter(gm).run(*wrapped)
+        result = fx.Interpreter(gm).run(*wrapped)
         return pytree.tree_map(_maybe_unwrap, result)
 
-    return make_fx(wrapper, decomposition_table=decompositions or {})(*example_inputs)
+    return make_fx(wrapper, decomposition_table=decompositions or {})(*flat_args)
