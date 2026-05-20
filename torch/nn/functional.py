@@ -2180,7 +2180,7 @@ def gumbel_softmax(
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
-      tau: non-negative scalar temperature
+      tau: positive scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
       dim (int): A dimension along which softmax will be computed. Default: -1.
@@ -2220,6 +2220,8 @@ def gumbel_softmax(
         )
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.", stacklevel=2)
+    if tau <= 0:
+        raise ValueError(f"gumbel_softmax: tau must be positive, got {tau}")
 
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format)

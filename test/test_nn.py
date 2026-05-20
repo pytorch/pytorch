@@ -11816,6 +11816,13 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_straight_through(device, dtype)
         self._test_gumbel_softmax_grad(device, dtype)
 
+    def test_gumbel_softmax_invalid_tau(self, device):
+        logits = torch.randn(4, device=device)
+        with self.assertRaisesRegex(ValueError, "tau must be positive"):
+            F.gumbel_softmax(logits, tau=0.0)
+        with self.assertRaisesRegex(ValueError, "tau must be positive"):
+            F.gumbel_softmax(logits, tau=-1.0)
+
     def _test_rnn_retain_variables(self, device, dtype):
         rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
                 nn.GRU(10, 20, num_layers=2).to(device, dtype),
