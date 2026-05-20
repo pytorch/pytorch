@@ -315,10 +315,7 @@ void namedTupleConstruct(
     Stack& stack,
     c10::TypePtr tuple_type,
     size_t num_inputs) {
-  std::vector<IValue> elems{
-      std::make_move_iterator(stack.end() - num_inputs),
-      std::make_move_iterator(stack.end())};
-  drop(stack, num_inputs);
+  auto elems = pop(stack, num_inputs);
   push(
       stack,
       c10::ivalue::Tuple::createNamed(std::move(elems), std::move(tuple_type)));
