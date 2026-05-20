@@ -491,20 +491,12 @@ def meta_select(
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
-    if guard_or_false(index >= 0):
-        if guard_or_false(index >= size):
-            torch._check_index(
-                False,
-                lambda: f"select(): index {index} out of range for tensor of size "
-                f"{list(self.size())} at dimension {dim}",
-            )
-    elif guard_or_false(index < 0):
-        if guard_or_false(index < -size):
-            torch._check_index(
-                False,
-                lambda: f"select(): index {index} out of range for tensor of size "
-                f"{list(self.size())} at dimension {dim}",
-            )
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())

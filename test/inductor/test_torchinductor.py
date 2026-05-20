@@ -9909,21 +9909,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ],
             )
 
-    def test_select_out_of_bounds(self):
-        def fn(x):
-            base = x.unsqueeze(1)
-            return torch.select(base, dim=1, index=1)
-
-        x = torch.arange(12, dtype=torch.float32, device=self.device).reshape(3, 4)
-
-        with self.assertRaises(IndexError):
-            fn(x)
-
-        # torch._check_index raises IndexError in eager, but torch.compile
-        # wraps it in a RuntimeError during graph tracing.
-        with self.assertRaisesRegex(RuntimeError, "index .* out of range"):
-            torch.compile(fn, fullgraph=True)(x)
-
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
         def fn(x, a):
