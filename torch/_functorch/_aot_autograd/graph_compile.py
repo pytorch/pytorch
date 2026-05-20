@@ -84,6 +84,8 @@ from .schemas import (
     FlatFn,
     FxValue,
     MutationType,
+    OutputType,
+    SubclassCreationMeta,
     SubclassMeta,
     ViewAndMutationMeta,
 )
@@ -188,6 +190,61 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
+def _is_lazy_backward_error_candidate(exc: BaseException) -> bool:
+    if not isinstance(exc, RuntimeError):
+        return False
+    msg = str(exc)
+    return (
+        "one of the variables needed for gradient computation has been modified"
+        in msg
+        and "inplace operation" in msg
+        and any(
+            frame.name == "grad" and "autograd" in frame.filename
+            for frame in traceback.extract_tb(exc.__traceback__)
+        )
+    )
+
+
+def _can_defer_autograd_version_error(
+    fw_metadata: ViewAndMutationMeta,
+    flat_args: list[Any],
+) -> bool:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        return False
+    if any(isinstance(x, BackwardState) for x in flat_args):
+        return False
+    if fw_metadata.tokens or fw_metadata.is_rng_op_functionalized:
+        return False
+    if fw_metadata.grad_enabled_mutation is not None:
+        return False
+    if fw_metadata.num_intermediate_bases != 0:
+        return False
+    if len(fw_metadata.output_info) != 1:
+        return False
+    output_info = fw_metadata.output_info[0]
+    if output_info.output_type is not OutputType.non_alias:
+        return False
+    if not issubclass(output_info.raw_type, Tensor):
+        return False
+    if not output_info.requires_grad_for_backward:
+        return False
+    if len(fw_metadata.traced_tangents) != 1:
+        return False
+    if any(
+        info.mutation_type is not MutationType.NOT_MUTATED
+        for info in fw_metadata.input_info
+    ):
+        return False
+    subclass_metas = itertools.chain(
+        fw_metadata.subclass_inp_meta,
+        fw_metadata.subclass_fw_graph_out_meta,
+        fw_metadata.subclass_tangent_meta,
+    )
+    return not any(
+        isinstance(meta, SubclassCreationMeta) for meta in subclass_metas
+    )
+
+
 def aot_stage1_graph_capture(
     aot_state: AOTState,
     orig_flat_fn: FlatFn,
@@ -226,25 +283,52 @@ def aot_stage1_graph_capture(
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+    lazy_backward_error_message: str | None = None
 
     with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
         # if config.selective_decompose, skip decomposition and apply selective_decompose
         # after we get the joint graph. See [Note: Selective Decomposition] for details.
         if aot_state.needs_autograd and not aot_config.pre_dispatch:
-            # FYI: this being moved to trigger in export is new, seems fine!
-            with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+            try:
+                with dynamo_timed(
+                    "aot_trace_joint_graph", log_pt2_compile_event=True
+                ):
+                    (
+                        graph,
+                        updated_flat_args,
+                        updated_flat_args_descs,
+                        maybe_subclass_meta,
+                    ) = aot_dispatch_autograd_graph(
+                        flat_fn,
+                        aot_state.flat_args,
+                        aot_state.flat_args_descs,
+                        graph_capture_aot_config,
+                        fw_metadata=aot_state.fw_metadata,
+                    )
+            except RuntimeError as exc:
+                if not (
+                    _is_lazy_backward_error_candidate(exc)
+                    and _can_defer_autograd_version_error(
+                        aot_state.fw_metadata,
+                        aot_state.flat_args,
+                    )
+                ):
+                    raise
+                lazy_backward_error_message = str(exc)
                 (
                     graph,
                     updated_flat_args,
                     updated_flat_args_descs,
                     maybe_subclass_meta,
-                ) = aot_dispatch_autograd_graph(
+                ) = aot_dispatch_base_graph(
                     flat_fn,
                     aot_state.flat_args,
                     aot_state.flat_args_descs,
                     graph_capture_aot_config,
                     fw_metadata=aot_state.fw_metadata,
                 )
+                if maybe_subclass_meta is not None:
+                    raise
         else:
             graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
                 aot_dispatch_base_graph(
@@ -264,7 +348,9 @@ def aot_stage1_graph_capture(
             *updated_flat_args,
             decomposition=aot_config.decompositions,
             should_decompose=_needs_inductor_compile,
-            trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
+            trace_joint_graph=aot_state.needs_autograd
+            and not aot_config.pre_dispatch
+            and lazy_backward_error_message is None,
         )
 
     return AOTGraphCapture(
@@ -273,6 +359,7 @@ def aot_stage1_graph_capture(
         updated_flat_args=updated_flat_args,
         updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
+        lazy_backward_error_message=lazy_backward_error_message,
     )
 
 
@@ -344,6 +431,14 @@ def aot_stage2_compile(
         bw_compiler = fw_compiler
     if inference_compiler is None:
         inference_compiler = fw_compiler
+
+    if aot_graph_capture.lazy_backward_error_message is not None:
+        return aot_stage2_lazy_backward_error(
+            aot_state,
+            aot_graph_capture,
+            fw_compiler,
+            bw_compiler,
+        )
 
     if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
         return aot_stage2_autograd(
@@ -2411,6 +2506,88 @@ def _aot_stage2b_bw_compile(
             return lazy_backward_info, compiled_bw_func
 
 
+def _set_empty_backward_metadata(
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    fw_metadata.num_symints_saved_for_bw = 0
+    fw_metadata.num_tensors_saved_with_no_vc_check = 0
+    fw_metadata.num_opaque_objects_saved_for_bw = 0
+    fw_metadata.bw_donated_idxs = []
+    fw_metadata.num_backward_tokens = 0
+
+
+def _make_lazy_backward_error_func(message: str) -> Callable[..., Any]:
+    def lazy_backward_error(_args: list[Any]) -> None:
+        raise RuntimeError(message)
+
+    lazy_backward_error._boxed_call = True  # type: ignore[attr-defined]
+    return lazy_backward_error
+
+
+def aot_stage2_lazy_backward_error(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
+    # pyrefly: ignore [implicit-any]
+    fw_compiler: Callable,
+    # pyrefly: ignore [implicit-any]
+    bw_compiler: Callable,
+) -> DispatchReturn:
+    fw_module = aot_graph_capture.graph_module
+    adjusted_flat_args = aot_graph_capture.updated_flat_args
+    if not isinstance(adjusted_flat_args, list):
+        raise AssertionError(
+            "lazy backward error path expects forward-only graph inputs"
+        )
+
+    fw_metadata = aot_state.fw_metadata
+    aot_config = aot_state.aot_config
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+    if maybe_subclass_meta is not None:
+        raise AssertionError(
+            "lazy backward error path does not support tensor subclasses"
+        )
+    _set_empty_backward_metadata(fw_metadata)
+
+    CompileEventLogger.try_add_pt2_compile(
+        "backend_compile", dispatch_mode="autograd"
+    )
+    _apply_tensorify_python_scalars(fw_module)
+
+    _, compiled_fw_func = _aot_stage2b_compile_forward_or_inference(
+        fw_module,
+        adjusted_flat_args,
+        maybe_subclass_meta,
+        fw_metadata,
+        aot_config,
+        fw_compiler,
+        is_inference=False,
+        num_fw_outs_saved_for_bw=0,
+    )
+
+    if aot_graph_capture.lazy_backward_error_message is None:
+        raise AssertionError("lazy_backward_error_message must not be None")
+    compiled_bw_func = _make_lazy_backward_error_func(
+        aot_graph_capture.lazy_backward_error_message
+    )
+
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+    return _aot_stage2c_make_autograd_function(
+        aot_config,
+        aot_state.flat_args,
+        fw_metadata,
+        maybe_subclass_meta,
+        aot_graph_capture.wrappers,
+        compiled_fw_func,
+        compiled_bw_func,
+        bw_compiler,
+        lazy_backward_info=None,
+        try_save_cache_entry=None,
+        entry=None,
+        _indices_of_inps_to_detach=[],
+        num_symints_saved_for_bw=0,
+    )
+
+
 def aot_stage2_autograd(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
@@ -2524,7 +2701,7 @@ def _aot_stage2c_make_autograd_function(
     # pyrefly: ignore [implicit-any]
     bw_compiler: Callable,
     lazy_backward_info: AutogradLazyBackwardCompileInfo | None,
-    try_save_cache_entry: Callable[..., Any],
+    try_save_cache_entry: Callable[..., Any] | None,
     entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,

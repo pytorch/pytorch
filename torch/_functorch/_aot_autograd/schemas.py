@@ -1417,6 +1417,9 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
 
+    # Set when joint capture failed but a forward graph was captured.
+    lazy_backward_error_message: str | None = None
+
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 

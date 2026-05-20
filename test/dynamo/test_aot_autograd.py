@@ -47,6 +47,22 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
 class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
+    @staticmethod
+    def _copy_relu_output_model():
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = torch.nn.Linear(1, 1)
+                self.layer1 = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = self.layer0(x)
+                z = self.layer1(y)
+                z.copy_(y)
+                return z
+
+        return Model()
+
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -152,6 +168,119 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         x = torch.randn(4)
         aot_fn = torch.compile(fn, backend="aot_eager")
         aot_fn(x, y)
+
+    def test_forward_only_copy_relu_output_with_trainable_params(self):
+        # https://github.com/pytorch/pytorch/issues/158561
+        x = torch.randn(1, 1)
+        model = self._copy_relu_output_model()
+
+        eager_out = copy.deepcopy(model)(x)
+        self.assertIsNotNone(eager_out.grad_fn)
+        with self.assertRaisesRegex(RuntimeError, "ReluBackward0"):
+            eager_out.sum().backward()
+
+        compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
+        compiled_out = compiled_model(x)
+        self.assertEqual(eager_out.detach(), compiled_out.detach())
+        self.assertIsNotNone(compiled_out.grad_fn)
+        with self.assertRaisesRegex(RuntimeError, "ReluBackward0"):
+            compiled_out.sum().backward()
+
+    def test_parameter_grad_with_non_grad_input(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.ReLU(),
+            torch.nn.Linear(3, 1),
+        )
+        eager_model = copy.deepcopy(model)
+        compiled_model = copy.deepcopy(model)
+        x = torch.randn(4, 2)
+
+        eager_model(x).sum().backward()
+        torch.compile(compiled_model, backend="aot_eager")(x).sum().backward()
+
+        self.assertFalse(x.requires_grad)
+        for eager_param, compiled_param in zip(
+            eager_model.parameters(),
+            compiled_model.parameters(),
+        ):
+            self.assertIsNotNone(eager_param.grad)
+            self.assertIsNotNone(compiled_param.grad)
+            self.assertEqual(eager_param.grad, compiled_param.grad)
+
+    def test_input_and_parameter_grad(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.Sigmoid(),
+            torch.nn.Linear(3, 1),
+        )
+        eager_model = copy.deepcopy(model)
+        compiled_model = copy.deepcopy(model)
+        eager_x = torch.randn(4, 2, requires_grad=True)
+        compiled_x = eager_x.detach().clone().requires_grad_(True)
+
+        eager_model(eager_x).sum().backward()
+        torch.compile(compiled_model, backend="aot_eager")(compiled_x).sum().backward()
+
+        self.assertEqual(eager_x.grad, compiled_x.grad)
+        for eager_param, compiled_param in zip(
+            eager_model.parameters(),
+            compiled_model.parameters(),
+        ):
+            self.assertIsNotNone(eager_param.grad)
+            self.assertIsNotNone(compiled_param.grad)
+            self.assertEqual(eager_param.grad, compiled_param.grad)
+
+    def test_copy_relu_output_inference_controls(self):
+        x = torch.randn(1, 1)
+
+        model = self._copy_relu_output_model()
+        eager_model = copy.deepcopy(model)
+        compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
+        with torch.no_grad():
+            eager_out = eager_model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(eager_out, compiled_out)
+            self.assertIsNone(compiled_out.grad_fn)
+
+        model = self._copy_relu_output_model()
+        eager_model = copy.deepcopy(model)
+        compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
+        with torch.inference_mode():
+            eager_out = eager_model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(eager_out, compiled_out)
+            self.assertIsNone(compiled_out.grad_fn)
+
+        model = self._copy_relu_output_model().requires_grad_(False)
+        eager_model = copy.deepcopy(model)
+        compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
+        eager_out = eager_model(x)
+        compiled_out = compiled_model(x)
+        self.assertEqual(eager_out, compiled_out)
+        self.assertIsNone(compiled_out.grad_fn)
+
+    def test_forward_copy_shape_error_is_not_delayed(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                y = self.layer0(x)
+                y.copy_(torch.randn(2, 2))
+                return y
+
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(RuntimeError, "broadcast shape"):
+            Model()(x)
+
+        compiled_model = torch.compile(Model(), backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "broadcast shape|attempting to expand",
+        ):
+            compiled_model(x)
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
