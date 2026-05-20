@@ -411,6 +411,10 @@ class DeferredTritonCallWrapper:
             ", "
         )
         device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
+        # Triton reports per-CTA scratch via kernel.metadata.global_scratch_size;
+        # the kernel writes its slot at offset (pid * scratch_size). Scale by the
+        # full launch grid so concurrent CTAs don't collide.
+        grid_extent = "static_cast<int64_t>(grid_0) * grid_1 * grid_2"
         for scratch_name in ("global_scratch", "profile_scratch"):
             size_expr = f"{kernel_name}_result.{scratch_name}"
             var = f"{scratch_name}_ptr"
@@ -420,7 +424,7 @@ class DeferredTritonCallWrapper:
                 {device_ptr_type} {var} = 0;
                 RAIIAtenTensorHandle {var}_tensor;
                 if ({size_expr} > 0) {{
-                    int64_t {var}_size[] = {{{size_expr}}};
+                    int64_t {var}_size[] = {{{size_expr} * {grid_extent}}};
                     int64_t {var}_stride[] = {{1}};
                     AtenTensorHandle {var}_handle;
                     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
