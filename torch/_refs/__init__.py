@@ -3817,9 +3817,12 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    length = max(0, end - start)
-    y = y.narrow(dim=1, start=start, length=length)
-    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+    # Clamp narrow length to available tensor extent so that we don't error
+    # when length exceeds the reconstructed signal size (matching eager behavior
+    # which uses slice that silently clamps, then zero-pads afterward).
+    narrow_length = max(0, min(end, expected_output_signal_len) - start)
+    y = y.narrow(dim=1, start=start, length=narrow_length)
+    window_envelop = window_envelop.narrow(dim=1, start=start, length=narrow_length)
 
     y = y / window_envelop
     if original_ndim == 2:
