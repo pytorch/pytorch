@@ -2271,9 +2271,8 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         coll_deps = deps_of[coll]
         moved = False
 
-        while _prev[coll] is not None:
-            pred = _prev[coll]
-            assert pred is not None
+        pred = _prev[coll]
+        while pred is not None:
             if outputs_of[pred] & coll_deps:
                 break
             if contains_async_collective(pred):
@@ -2292,6 +2291,7 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
             _curr_memory[coll] = tuple(v - pd for v in _curr_memory[coll])
             _curr_memory[pred] = tuple(v + cd for v in _curr_memory[pred])
             moved = True
+            pred = _prev[coll]
 
         if moved:
             n_moved_colls += 1
@@ -2301,9 +2301,8 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         wait_outs = outputs_of[wait]
         moved = False
 
-        while _next[wait] is not None:
-            succ = _next[wait]
-            assert succ is not None
+        succ = _next[wait]
+        while succ is not None:
             if deps_of[succ] & wait_outs:
                 break
             if contains_wait(succ):
@@ -2321,6 +2320,7 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
             _curr_memory[wait] = tuple(v + sd for v in _curr_memory[wait])
             _curr_memory[succ] = tuple(v - wd for v in _curr_memory[succ])
             moved = True
+            succ = _next[wait]
 
         if moved:
             n_moved_waits += 1
