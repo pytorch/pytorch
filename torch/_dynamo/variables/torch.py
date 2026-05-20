@@ -74,6 +74,7 @@ from ..source import (
     SyntheticLocalSource,
 )
 from ..utils import (
+    _is_tensorify_enabled,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -1065,7 +1066,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
-        @register(torch.library.wrap_triton)
+        @register(torch.library.wrap_triton, torch._library.capture_triton)
         def handle_wrap_triton(
             self,
             tx: "InstructionTranslator",
@@ -1073,15 +1074,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if len(args) == 1:
-                # torch.library.wrap_triton is a no-op in dynamo
+                # wrap_triton / capture_triton is a no-op in dynamo
                 return args[0]
 
             unimplemented(
                 gb_type="torch.library.wrap_triton call with > 1 args",
                 context=f"args={args}, kwargs={kwargs}",
-                explanation="Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+                explanation="Attempted to call `wrap_triton`/`capture_triton`"
+                " with > 1 args. Dynamo does not support this.",
                 hints=[
-                    "Remove the torch.library.wrap_triton call or its additional args.",
+                    "Remove the wrap_triton/capture_triton call or its additional args.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -2991,11 +2993,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         all_ints_or_floats = all(
             isinstance(x, SymNodeVariable) or x.is_python_constant() for x in args
         )
+        # Intentional abstraction violation: when tensorify is enabled,
+        # skip this graph break. Scalar-only bin_ops on SymInt/SymFloat
+        # args are valid symbolic arithmetic that Dynamo can trace.
+        # The tensorify pass (in AOTAutograd) will convert SymFloat
+        # scalar ops to tensor ops downstream; SymInt ops flow through
+        # as symbolic expressions.
         if (
             getattr(self.value, "__module__", "") == "torch"
             and self.value.__name__ in bin_ops
             and any_symints_or_symfloats
             and all_ints_or_floats
+            and not _is_tensorify_enabled()
         ):
             msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.

@@ -22,7 +22,6 @@ intercept the in-place method.
 """
 
 import functools
-import importlib.util
 import math
 
 import torch
@@ -33,16 +32,16 @@ from ...registry import _OpCondFn, _OpImplFn
 
 _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 
-
-@functools.cache
-def _has_cutedsl() -> bool:
-    try:
-        return (
-            importlib.util.find_spec("cutlass") is not None
-            and importlib.util.find_spec("tvm_ffi") is not None
-        )
-    except ModuleNotFoundError:
-        return False
+# 16B alignment for `src.data_ptr()` and `src.stride(0) * elem`: required
+# for the LDG.128 / tile-mode TMA load of `src` and the row-start 16B
+# boundary that LDG.128 reads from. Applies to both paths.
+_SRC_ALIGN_BYTES = 16
+# Path-specific destination alignment. TMA: cp.reduce.async.bulk gmem
+# operand needs 16B base + stride. vec-scatter: scalar fp32 atomicAdd /
+# f16x2 / bf16x2 paired atomics need natural alignment of the 4B atomic
+# operand on both base and per-row stride.
+_TMA_DST_ALIGN_BYTES = 16
+_VEC_DST_ALIGN_BYTES = 4
 
 
 @functools.cache
@@ -70,7 +69,7 @@ def _any_cow(*tensors: torch.Tensor) -> bool:
 
 def _base_cond_ok(*tensors: torch.Tensor) -> bool:
     """Pre-checks shared by every path: env sanity, all CUDA, non-COW."""
-    if not _has_cutedsl() or _deterministic():
+    if _deterministic():
         return False
     if not all(t.is_cuda for t in tensors):
         return False
@@ -157,6 +156,37 @@ def _flatten_2d_view(t: torch.Tensor) -> torch.Tensor:
     return t.as_strided((t.shape[0], N), (t.stride(0), 1))
 
 
+def _alignment_contract_ok(
+    self: torch.Tensor, src: torch.Tensor, *, dst_ptr_align: int
+) -> bool:
+    """Alignment of effective ptrs and outer row strides.
+
+    The src side is always read via 16B-wide vector ops (LDG.128 /
+    tile-mode TMA load), so its data_ptr and per-row stride must be
+    16B-aligned. The dst side's requirement is path-specific:
+
+      - TMA: ``cp.reduce.async.bulk`` writes the gmem operand via a TMA
+        descriptor that requires 16B alignment of both base and stride.
+      - vec-scatter: writes via scalar fp32 atomicAdd / f16x2 / bf16x2
+        paired atomics, which need natural alignment of the 4B atomic
+        operand on both base address and per-row stride.
+
+    When this returns False the cond rejects and the call falls through
+    to aten, which has its own predicate and safe fallback to
+    ``vectorized_scatter_add_kernel_launch`` / ``indexFunc{Small,Large}Index``.
+    """
+    if src.data_ptr() % _SRC_ALIGN_BYTES:
+        return False
+    if self.data_ptr() % dst_ptr_align:
+        return False
+    elem = self.element_size()
+    if (src.stride(0) * elem) % _SRC_ALIGN_BYTES:
+        return False
+    if (self.stride(0) * elem) % dst_ptr_align:
+        return False
+    return True
+
+
 def _flatten_for_expanded_1d(
     self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -193,6 +223,8 @@ def _is_tma_supported(
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
         return False
+    if not _alignment_contract_ok(self, src, dst_ptr_align=_TMA_DST_ALIGN_BYTES):
+        return False
     # TMA transfer size is baked in at compile time (chunk_bytes =
     # min(row_bytes, 512)); row_bytes must evenly divide by chunk_bytes
     # and chunk_bytes must be 16-byte aligned.
@@ -204,8 +236,14 @@ def _is_tma_supported(
 def _is_vec_scatter_supported(
     self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
 ) -> bool:
+    # ``red.global.add.noftz.bf16x2`` requires sm_90+. fp16x2 (sm_70+)
+    # and scalar fp32 atomicAdd (sm_60+) work everywhere we care about.
+    if self.dtype is torch.bfloat16 and not _has_sm90_plus():
+        return False
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
+        return False
+    if not _alignment_contract_ok(self, src, dst_ptr_align=_VEC_DST_ALIGN_BYTES):
         return False
     # Each lane owns vec_elems consecutive elements; the loop is either
     # fully in-bounds or fully skipped per lane. Only requirement is
@@ -225,12 +263,18 @@ def _is_vec_scatter_supported(
 def _make_cond(
     support_check,
     *,
-    requires_out: bool = False,
+    out_dst_ptr_align: int | None = None,
 ) -> _OpCondFn:
     """Build a cond function that runs ``support_check`` behind the shared
     boilerplate (cutedsl availability, non-deterministic mode, CUDA tensors,
-    non-COW, dtype/shape match on ``out`` when present)."""
-    if requires_out:
+    non-COW, dtype/shape match on ``out`` when present).
+
+    ``out_dst_ptr_align`` is None for the functional / inplace variants.
+    For the ``.out`` variant it is the path-specific destination
+    alignment (TMA: 16, vec-scatter: 4) used to alignment-check ``out``,
+    which the ``.out`` impl runs the kernel on instead of ``self``.
+    """
+    if out_dst_ptr_align is not None:
 
         def _cond(self, dim, index, src, *, out):
             if not _base_cond_ok(self, index, src, out):
@@ -243,6 +287,15 @@ def _make_cond(
             # stride can differ from prod(shape[1:]) (same relaxation as
             # self/src). Inner dims must be packed for the 2D view.
             if not _inner_contiguous(out):
+                return False
+            # The .out impl runs the kernel on ``out``, not ``self``
+            # (see _make_impls.out_impl). ``support_check`` below
+            # validates self/src alignment via _alignment_contract_ok,
+            # but ``out`` may be a distinct buffer with different
+            # alignment from ``self`` -- check it explicitly here so a
+            # misaligned ``out`` falls through to aten instead of
+            # faulting in the kernel.
+            if not _alignment_contract_ok(out, src, dst_ptr_align=out_dst_ptr_align):
                 return False
             return support_check(self, dim, index, src)
 
@@ -306,9 +359,11 @@ _tma_impl, _tma_out_impl, _tma_inplace_impl = _make_impls(_tma_kernel)
 _vs_impl, _vs_out_impl, _vs_inplace_impl = _make_impls(_vs_kernel)
 
 _tma_cond = _make_cond(_is_tma_supported)
-_tma_out_cond = _make_cond(_is_tma_supported, requires_out=True)
+_tma_out_cond = _make_cond(_is_tma_supported, out_dst_ptr_align=_TMA_DST_ALIGN_BYTES)
 _vs_cond = _make_cond(_is_vec_scatter_supported)
-_vs_out_cond = _make_cond(_is_vec_scatter_supported, requires_out=True)
+_vs_out_cond = _make_cond(
+    _is_vec_scatter_supported, out_dst_ptr_align=_VEC_DST_ALIGN_BYTES
+)
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +408,5 @@ def _register_path(
 
 
 def register_to_dispatch() -> None:
-    if not _has_cutedsl():
-        return
     for path in _PATHS:
         _register_path("CUDA", *path)
