@@ -21,9 +21,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
-    IDENTIFIER_MATCHERS,
     LintMessage,
     LintSeverity,
+    MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
 
@@ -150,7 +150,7 @@ def check_file(filename: str) -> list[LintMessage]:
         lines = f.readlines()
 
     # Use PreprocessorTracker to handle preprocessor directives
-    tracker = PreprocessorTracker(IDENTIFIER_MATCHERS)
+    tracker = PreprocessorTracker(MULTILINE_MATCHERS)
 
     # Track extern "C" blocks separately
     inside_extern_c = False

@@ -196,7 +196,7 @@ class MatcherAccumulator:
         """
         self._buffer = ""
         self._end_token_found = False
-        self._active_matcher = None
+        self._active_multiline_matcher = None
         self._found_identifiers = []
 
     def set_scope_version(self, scope_version: tuple[int, int, int] | None):
@@ -221,19 +221,19 @@ class MatcherAccumulator:
         self._found_identifiers = []
 
         # If no matcher is active yet, check if any of them found a start token.
-        if not self._active_matcher:
+        if not self._active_multiline_matcher:
             for matcher in self._multi_line_matchers:
                 found_start = matcher.start_pattern.finditer(line)
                 for match in found_start:
-                    self._active_matcher = matcher
+                    self._active_multiline_matcher = matcher
                     line = line[match.start() :]
                     break
-                if self._active_matcher:
+                if self._active_multiline_matcher:
                     break
 
-        if self._active_matcher:
+        if self._active_multiline_matcher:
             # First see if the end token is present, if so strip the line down to just that segment.
-            for match in self._active_matcher.end_pattern.finditer(line):
+            for match in self._active_multiline_matcher.end_pattern.finditer(line):
                 line = line[: match.end()]
                 self._end_token_found = True
 
@@ -242,7 +242,7 @@ class MatcherAccumulator:
 
             # Now that the buffer is complete, parse it with the handler.
             if self._end_token_found:
-                self._found_identifiers = self._active_matcher.handler(
+                self._found_identifiers = self._active_multiline_matcher.handler(
                     self._buffer, self._scope_version
                 )
         else:
@@ -256,7 +256,7 @@ class MatcherAccumulator:
                         )
                     )
 
-        return self._active_matcher is not None
+        return self._active_multiline_matcher is not None
 
     def identifiers_used(self) -> list[IdentifierUse]:
         """

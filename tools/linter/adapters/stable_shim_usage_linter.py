@@ -20,10 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
-    IDENTIFIER_MATCHERS,
     IdentifierMatcher,
     LintMessage,
     LintSeverity,
+    MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
 
@@ -74,7 +74,7 @@ def get_shim_functions(
         with open(shim_file) as f:
             lines = f.readlines()
 
-        tracker = PreprocessorTracker(IDENTIFIER_MATCHERS)
+        tracker = PreprocessorTracker(MULTILINE_MATCHERS)
 
         for line in lines:
             tracker.process_line(line)
