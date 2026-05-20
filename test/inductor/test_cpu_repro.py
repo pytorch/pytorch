@@ -4805,6 +4805,25 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    def test_loop_split_rollback_mismatched_groups(self):
+        # https://github.com/pytorch/pytorch/issues/183370
+        torch.manual_seed(31)
+        in2d = nn.InstanceNorm2d(7)
+        rrelu = nn.RReLU().eval()
+        bn1 = nn.BatchNorm1d(63).eval()
+        x = torch.randn([8, 7, 3, 3])
+
+        def model():
+            t = in2d(x)
+            t = rrelu(t)
+            t = torch.flatten(t, start_dim=1)
+            t = torch.exp(torch.clamp(t, max=10))
+            return bn1(t)
+
+        expected = model()
+        actual = torch.compile(model, backend="inductor")()
+        torch.testing.assert_close(actual, expected)
+
     @requires_vectorization
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     def test_group_norm_sum_conv1d_tail_reduction_store(self):
