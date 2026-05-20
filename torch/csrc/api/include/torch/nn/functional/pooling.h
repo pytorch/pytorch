@@ -1010,7 +1010,7 @@ inline Tensor lp_pool1d(
     ExpandingArray<1> stride,
     bool ceil_mode) {
   Tensor out = detail::avg_pool1d(
-      input.pow(norm_type),
+      input.abs().pow_(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,
@@ -1058,7 +1058,7 @@ inline Tensor lp_pool2d(
   auto kw = (*kernel_size)[0];
   auto kh = (*kernel_size)[1];
   Tensor out = detail::avg_pool2d(
-      input.pow(norm_type),
+      input.abs().pow_(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,
@@ -1108,7 +1108,7 @@ inline Tensor lp_pool3d(
   auto kw = (*kernel_size)[1];
   auto kh = (*kernel_size)[2];
   Tensor out = detail::avg_pool3d(
-      input.pow(norm_type),
+      input.abs().pow_(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,

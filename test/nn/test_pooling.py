@@ -918,6 +918,24 @@ torch.cuda.synchronize()
             avgpool(inp)
 
     @onlyNativeDeviceTypes
+    def test_LPPool_nan_on_non_integer_norm(self, device):
+        # https://github.com/pytorch/pytorch/issues/184037
+        torch.manual_seed(0)
+        p = 2.3273891720497133
+
+        x = torch.randn(2, 8, 8, 8, device=device)
+        out = torch.nn.LPPool2d(p, kernel_size=3, stride=2)(x)
+        self.assertFalse(out.isnan().any())
+
+        x = torch.randn(2, 8, 16, device=device)
+        out = torch.nn.LPPool1d(p, kernel_size=3, stride=2)(x)
+        self.assertFalse(out.isnan().any())
+
+        x = torch.randn(2, 4, 4, 4, 4, device=device)
+        out = torch.nn.LPPool3d(p, kernel_size=3, stride=2)(x)
+        self.assertFalse(out.isnan().any())
+
+    @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
