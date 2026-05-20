@@ -112,12 +112,7 @@ sycl::event convolution(
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
-    pattr.set_deterministic(true);
-  }
-#endif
+  pattr.set_deterministic(true);
 
   at::native::onednn::apply_tf32_if_allowed(pattr);
 
@@ -204,12 +199,7 @@ sycl::event convolution_backward_weights(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
-    pattr.set_deterministic(true);
-  }
-#endif
+  pattr.set_deterministic(true);
 
   at::native::onednn::apply_tf32_if_allowed(pattr);
 
@@ -307,12 +297,7 @@ sycl::event convolution_backward_data(
   // create fwd primitive desc hint
   dnnl::primitive_attr pattr;
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
-    pattr.set_deterministic(true);
-  }
-#endif
+  pattr.set_deterministic(true);
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   dnnl::memory::dims _stride = stride.vec();
