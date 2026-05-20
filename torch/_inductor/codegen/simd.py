@@ -2431,7 +2431,7 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
+        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
 
     def generate_combo_kernel_code(
         self,
@@ -2522,9 +2522,14 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     # Generate regular kernel
+                    kernel_kwargs: dict[str, Any] = {}
+                    self.kernel_type.apply_feature_required_overrides(
+                        node_info.features, kernel_kwargs
+                    )
                     kernel = self.kernel_type(
                         node_info.tiling,
                         features=node_info.features,
+                        **kernel_kwargs,
                     )
                     self.process_kernel(
                         kernel, node_info.node_schedule, only_gen_src_code
