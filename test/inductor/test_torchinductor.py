@@ -4299,6 +4299,102 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
 
+    def test_trilinear_decomposition(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("MPS does not exercise Inductor trilinear codegen")
+
+        def fn(i1, i2, i3):
+            y = torch._trilinear(i1, i2, i3, [1, 3], [0], [1, 2], [2, 3])
+            return torch.cos(torch.sin(y) + 1)
+
+        inputs = (
+            torch.randn(4, 3, device=self.device),
+            torch.randn(5, 3, 6, device=self.device),
+            torch.randn(4, 6, device=self.device),
+        )
+
+        expected = fn(*inputs)
+        torch._inductor.metrics.reset()
+        actual, codes = run_and_get_code(
+            torch.compile(fn, fullgraph=True),
+            *inputs,
+        )
+
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+        code = "\n".join(codes)
+        (
+            FileCheck()
+            .check_not("torch.ops.aten._trilinear.default(")
+            .check_not("aten::_trilinear")
+            .run(code)
+        )
+        if self.device == "cuda":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+        def unsupported_unroll_fn(i1, i2, i3):
+            return torch._trilinear(i1, i2, i3, [0], [], [1], [], 0)
+
+        unsupported_inputs = (
+            torch.randn(2, 3, device=self.device),
+            torch.randn(4, 2, 3, device=self.device),
+            torch.randn(2, 3, device=self.device),
+        )
+        expected = unsupported_unroll_fn(*unsupported_inputs)
+        actual, _ = run_and_get_code(
+            torch.compile(unsupported_unroll_fn, fullgraph=True),
+            *unsupported_inputs,
+        )
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+
+        if self.device == "cpu":
+
+            def int_fn(i1, i2, i3):
+                return torch._trilinear(i1, i2, i3, [1, 3], [0], [1, 2], [2, 3])
+
+            int_inputs = (
+                torch.randint(-3, 3, (4, 3), dtype=torch.int8),
+                torch.randint(-3, 3, (5, 3, 6), dtype=torch.int8),
+                torch.randint(-3, 3, (4, 6), dtype=torch.int8),
+            )
+            expected = int_fn(*int_inputs)
+            actual, _ = run_and_get_code(
+                torch.compile(int_fn, fullgraph=True),
+                *int_inputs,
+            )
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual, expected)
+
+        mixed_inputs = (
+            torch.randn(4, 3, device=self.device),
+            torch.randn(5, 3, 6, device=self.device, dtype=torch.float64),
+            torch.randn(4, 6, device=self.device),
+        )
+        with self.assertRaisesRegex(Exception, "expected scalar type"):
+            torch.compile(fn, fullgraph=True)(*mixed_inputs)
+
+        bool_inputs = (
+            torch.randint(0, 2, (4, 3), device=self.device, dtype=torch.bool),
+            torch.randint(0, 2, (5, 3, 6), device=self.device, dtype=torch.bool),
+            torch.randint(0, 2, (4, 6), device=self.device, dtype=torch.bool),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.compile(fn, fullgraph=True)(*bool_inputs)
+
+        if hasattr(torch, "float8_e4m3fn"):
+
+            def float8_fn(i1, i2, i3):
+                return torch._trilinear(i1, i2, i3, [1, 3], [0], [1, 2], [2, 3])
+
+            float8_inputs = tuple(x.to(torch.float8_e4m3fn) for x in inputs)
+            with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+                torch.compile(float8_fn, fullgraph=True)(*float8_inputs)
+
+        def duplicate_dim_fn(i1, i2, i3):
+            return torch._trilinear(i1, i2, i3, [1, 1], [0], [1, 2], [2, 3])
+
+        with self.assertRaisesRegex(Exception, "appears multiple times"):
+            torch.compile(duplicate_dim_fn, fullgraph=True)(*inputs)
+
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
     @skipIfXpu(msg="Double and complex datatype matmul is not supported in oneDNN")
