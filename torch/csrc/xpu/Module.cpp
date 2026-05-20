@@ -340,6 +340,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(memory_bus_width)                                       \
       ._(sub_group_sizes)                                        \
       ._(local_mem_size)                                         \
+      ._(global_mem_cache_size)                                  \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \
       ._(has_atomic64)                                           \
@@ -372,6 +373,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, global_mem_cache_size="
+                   << prop.global_mem_cache_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
