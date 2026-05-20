@@ -439,6 +439,14 @@ class _PipelineSchedule(ABC):
             }
         )
         device_type = devices[0].type if devices else None
+        # Assert all device types are the same
+        if device_type is not None and not all(
+            device.type == device_type for device in devices
+        ):
+            raise AssertionError(
+                "All stages must have the same device type for RNG forking. "
+                f"Found device types: { {device.type for device in devices} }"
+            )
         with torch.random.fork_rng(devices=devices, device_type=device_type):
             if needs_fwd:
                 next_stage_args: Any = None
