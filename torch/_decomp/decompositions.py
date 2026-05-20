@@ -1207,11 +1207,22 @@ def unfold_backward(
                 return source.expand(target_shape)
             if statically_known_true(view_shape[target_dim] == 1):
                 view_shape[target_dim] = source.shape[source_dim]
+            else:
+                # Multiple grad dimensions may align to the unfolded input
+                # dimension after select(); only singleton collisions can
+                # still be reshaped and broadcast to the target shape.
+                torch._check(
+                    source.shape[source_dim] == 1,
+                    lambda: "unfold_backward grad shape is not broadcastable "
+                    "to input_size",
+                )
 
         return source.reshape(view_shape).expand(target_shape)
 
     input_dim_size = input_size[dim]
     grad_dim_size = grad.size(dim)
+    # Descending offsets make each grad_input element accumulate overlapping
+    # windows in increasing fold-index order, matching native numerics.
     for offset in reversed(range(size)):
         max_valid_len = _sym_max_if_needed(
             (input_dim_size - offset + step - 1) // step, 0
@@ -3242,7 +3253,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -5286,8 +5297,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
