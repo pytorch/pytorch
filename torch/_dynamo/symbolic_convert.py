@@ -5093,7 +5093,7 @@ class InstructionTranslatorBase(
             self.exec_recorder = ExecutionRecorder(
                 code=f_code,
                 closure=closure,
-                code_options=cast(dict[str, Any], code_options),
+                code_options=code_options,
             )
         else:
             self.exec_recorder = None
