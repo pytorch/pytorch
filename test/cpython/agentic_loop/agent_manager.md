@@ -97,8 +97,9 @@ Review subagent:
    intended non-Markdown files, run `lintrunner -a`, and create the gate
    commit/amend. The manager does not commit.
 11. Append the audit log line.
-12. Start the next cycle unless the plan is complete or a blocker requires
-   human input.
+12. Immediately start the next cycle unless the plan is complete or a blocker
+   requires human input. Do not stop for human confirmation after a successful
+   gate commit. A user-facing status summary is not a stopping condition.
 
 ## Implementation Prompt
 
@@ -138,6 +139,14 @@ reporting unless your fix proves they should be removed.
 Prefer source fixes in `torch/_dynamo` and focused regression tests in the
 normal Dynamo test suite. Do not edit vendored CPython tests under
 `test/cpython/v3_13`.
+
+Avoid low-value helper functions. Inline small, local checks when that is
+clearer, especially when a helper only wraps one or two lines near its call
+sites. Add a helper only when it removes real duplication, encodes a shared
+semantic rule across separated paths, or matches an established local pattern.
+When a helper is justified, do not default to a leading underscore. Prefer a
+plain descriptive name such as `validate_sequence_repeat_count` unless the
+surrounding module consistently uses private helper names for the same pattern.
 
 Run the single repro, the focused regression test, the affected CPython file,
 and the active gate subset needed by the plan. Before the gate commit, run the
@@ -184,6 +193,13 @@ Review for:
 - Incorrect sentinel removals or additions
 - Unsupported gate-completion claims
 - Plan updates that change exit criteria or status without evidence
+- Unnecessary helper functions or abstractions. Push back on helpers that wrap
+  tiny local checks, have only one call site, or make adjacent code harder to
+  read without encoding a meaningful shared semantic rule.
+- Unnecessary leading underscores on helper function names. Push back when a
+  helper is named like `_validate_sequence_repeat_count` without a local module
+  convention or real private-helper reason; prefer a descriptive public-style
+  helper name if the helper is kept.
 - Markdown files staged for a gate commit
 - Accidental files, caches, logs, or scratch output
 - Test evidence that is too narrow for the claimed fix
