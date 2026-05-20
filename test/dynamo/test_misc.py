@@ -5840,6 +5840,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_torch_size_from_tensor_buffer(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("shape", torch.tensor([4, 64], dtype=torch.int64))
+
+            def forward(self, x):
+                return torch.reshape(x, torch.Size(self.shape))
+
+        mod = Mod()
+        x = torch.randn(4, 64)
+        ref = mod(x)
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        res = opt_mod(x)
+
+        self.assertTrue(same(ref, res))
+
     def test_torch_size_numel(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
