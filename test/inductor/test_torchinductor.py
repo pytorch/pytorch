@@ -1655,6 +1655,32 @@ class CommonTemplate:
             msg=f"Expected complex add with strided inputs to fall back to extern kernels, got:\n{code}",
         )
 
+    @skipCPUIf(True, "requires CUDA")
+    @requires_cuda_and_triton
+    def test_complex_abs_angle_backward_permuted_stride(self):
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest("complex64 not supported on device")
+
+        def check(fn, dynamic):
+            x = torch.randn(
+                4,
+                8,
+                dtype=torch.complex64,
+                device=self.device,
+                requires_grad=True,
+            )
+            eager_x = x.detach().clone().requires_grad_(True)
+
+            fn(eager_x).backward()
+            torch.compile(fn, backend="inductor", dynamic=dynamic)(x).backward()
+
+            self.assertEqual(x.grad, eager_x.grad)
+
+        for dynamic in (False, True):
+            check(lambda x: x.T.abs().sum(), dynamic)
+            check(lambda x: x.T.angle().sum(), dynamic)
+            check(lambda x: (x.T * 1).abs().sum(), dynamic)
+
     def test_add_complex5(self):
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
