@@ -373,7 +373,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
-                   << "KB, global_mem_cache_size=" << prop.global_mem_cache_size / 1024ull
+                   << "KB, global_mem_cache_size="
+                   << prop.global_mem_cache_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
