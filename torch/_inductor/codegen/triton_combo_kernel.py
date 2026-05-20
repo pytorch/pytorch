@@ -76,40 +76,42 @@ def _node_partition_log_context(
     )
 
 
-def _large_pointwise_separation_log_context(
-    large_pointwise: list[BaseSchedulerNode],
-    partition_candidates: list[BaseSchedulerNode],
+def _partition_separation_log_context(
+    separated_nodes: list[BaseSchedulerNode],
+    companion_nodes: list[BaseSchedulerNode],
     node_info_map: dict[BaseSchedulerNode, NodeInfo],
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     return (
-        tuple(_node_partition_log_context(n, node_info_map) for n in large_pointwise),
-        tuple(
-            _node_partition_log_context(n, node_info_map) for n in partition_candidates
-        ),
+        tuple(_node_partition_log_context(n, node_info_map) for n in separated_nodes),
+        tuple(_node_partition_log_context(n, node_info_map) for n in companion_nodes),
     )
 
 
-def _log_large_pointwise_separation(
-    large_pointwise: list[BaseSchedulerNode],
-    partition_candidates: list[BaseSchedulerNode],
+def _log_partition_separation(
+    log_message: str,
+    separated_nodes: list[BaseSchedulerNode],
+    companion_nodes: list[BaseSchedulerNode],
     node_info_map: dict[BaseSchedulerNode, NodeInfo],
 ) -> None:
     if log.isEnabledFor(logging.DEBUG):
-        _log_large_pointwise_separation_once(
-            len(large_pointwise),
-            _large_pointwise_separation_log_context(
-                large_pointwise, partition_candidates, node_info_map
+        _log_partition_separation_once(
+            log_message,
+            len(separated_nodes),
+            _partition_separation_log_context(
+                separated_nodes, companion_nodes, node_info_map
             ),
         )
 
 
 # This diagnostic is otherwise repeated once per equivalent recompile.
 @cache
-def _log_large_pointwise_separation_once(
-    num_nodes: int, _partition_context: tuple[tuple[Any, ...], tuple[Any, ...]]
+def _log_partition_separation_once(
+    log_message: str,
+    num_nodes: int,
+    partition_context: tuple[tuple[Any, ...], tuple[Any, ...]],
 ) -> None:
     log.debug(
-        "ComboKernels: %d large pointwise nodes are separated",
+        log_message,
         num_nodes,
     )
 
@@ -161,9 +163,11 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
-            log.debug(
+            _log_partition_separation(
                 "ComboKernels: %d long reduction nodes are separated",
-                len(long_reduction),
+                long_reduction,
+                not_reduction + short_reduction,
+                node_info_map,
             )
         large_pointwise = [
             n
@@ -176,11 +180,17 @@ def _default_custom_combo_kernel_horizontal_partition(
             > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
+            companion_nodes = [n for n in not_reduction if n not in large_pointwise]
             # TODO benchmark the performance when large pointwise nodes combining with others
-            _log_large_pointwise_separation(
-                large_pointwise, group_per_dim, node_info_map
+            # Include the non-large pointwise companions because the diagnostic
+            # describes a partition decision for the current candidate group.
+            _log_partition_separation(
+                "ComboKernels: %d large pointwise nodes are separated",
+                large_pointwise,
+                companion_nodes,
+                node_info_map,
             )
-            not_reduction = [n for n in not_reduction if n not in large_pointwise]
+            not_reduction = companion_nodes
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
         nodes_per_ndim.extend(
@@ -559,9 +569,7 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        return triton_kernel_cls(
-            tiling,
-            features=features,
+        kwargs: dict[str, Any] = dict(
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
@@ -569,6 +577,9 @@ class ComboKernel(Kernel):
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
         )
+        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
+
+        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
