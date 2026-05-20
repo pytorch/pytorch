@@ -88,7 +88,6 @@ struct dummy_int1_7_t {};
   _(float, Float)                              \
   _(double, Double)                            \
   _(c10::complex<c10::Half>, ComplexHalf)      \
-  _(c10::complex<c10::BFloat16>, BComplex32)   \
   _(c10::complex<float>, ComplexFloat)         \
   _(c10::complex<double>, ComplexDouble)       \
   _(bool, Bool)                                \
