@@ -1637,6 +1637,16 @@ class SizeVariable(TupleVariable):
         if tracer is None:
             return torch.Size(proxies)
 
+        # AOTAutograd can execute this FX graph with FunctionalTensor scalar
+        # elements, which torch.Size rejects. Shape consumers already accept
+        # tensor scalar aggregates directly, so avoid the runtime torch.Size node.
+        if any(
+            isinstance(p, torch.fx.Proxy)
+            and isinstance(p.node.meta["example_value"], torch.Tensor)
+            for p in proxies
+        ):
+            return proxies
+
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         set_example_value(
             proxy.node,

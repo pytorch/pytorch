@@ -110,6 +110,35 @@ class ViewTests(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(result, expected)
 
 
+class SizeTests(torch._dynamo.test_case.TestCase):
+    def test_torch_size_from_shape_tensor(self):
+        def method_reshape(x, shape):
+            return x.reshape(torch.Size(shape))
+
+        def torch_reshape(x, shape):
+            return torch.reshape(x, torch.Size(shape))
+
+        x = torch.randn(1, 4, 16, 16)
+        shape = torch.tensor([1, 4, 256])
+
+        compile_options = (
+            {"backend": "eager", "fullgraph": True},
+            {"fullgraph": True},
+        )
+
+        for fn in (method_reshape, torch_reshape):
+            for options in compile_options:
+                with self.subTest(fn=fn.__name__, options=options):
+                    expected = fn(x, shape)
+
+                    compiled_fn = torch.compile(fn, **options)
+                    result = compiled_fn(x, shape)
+
+                    torch.testing.assert_close(result, expected)
+
+                    torch._dynamo.reset()
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
