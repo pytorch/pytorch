@@ -2681,13 +2681,21 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+
+    # NOTE: Expected-failure tests for known scheduler issues.
+    #
+    # These tests should be converted to normal regression tests once
+    # the underlying behavior is fixed.
+
+
     @expectedFailure
     def test_sequentiallr_resume_reproducibility(self):
-        # SequentialLR switches between multiple schedulers at milestone
-        # boundaries. If we save and restore both the optimizer and the
-        # scheduler state partway through training, continuing from that
-        # checkpoint should produce exactly the same LR sequence as if the
-        # training had never been interrupted.
+        # Note: Saving and restoring both the optimizer and SequentialLR
+        # state mid training should reproduce the same LR sequence as a
+        # continuous uninterrupted run.
+        #
+        # This currently fails around scheduler transition boundaries after
+        # restoring from checkpoint state.
 
         base_lr = 0.1
         milestone = 5
@@ -2736,14 +2744,88 @@ class TestLRScheduler(TestCase):
         sched3 = make_scheduler(optim3)
         sched3.load_state_dict(sched_state)
 
-        # Continue stepping and check LR with reference 
-        for i in range(resume_step, total_steps):
+        resumed_lrs = []
+        for _ in range(resume_step, total_steps):
             optim3.step()
             sched3.step()
-            self.assertEqual(
-                sched3.get_last_lr()[0],
-                reference_lrs[i],
+            resumed_lrs.append(sched3.get_last_lr()[0])
+
+        self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
+
+    @expectedFailure
+    def test_sequentiallr_resume_restores_optimizer_lr(self):
+        # Note: This is the mechanism level companion to the behavior level
+        # reproducibility test above.
+        #
+        # The problematic state transition comes from SequentialLR's restore
+        # model:
+        # 1. SequentialLR.__init__() sets last_epoch, resets each param group
+        #    lr back to initial_lr, calls recursive_undo(), and then replays
+        #    _schedulers[0]._initial_step().
+        # 2. At this resume point, that constructor path leaves the optimizer
+        #    lr at 0.05 even though the saved scheduler state corresponds to
+        #    an effective lr of 0.08.
+        # 3. SequentialLR.load_state_dict() restores scheduler fields like
+        #    last_epoch and _last_lr, but it does not re-synchronize the
+        #    optimizer param-group lr with that loaded scheduler state.
+        # 4. LinearLR.get_lr() is recursive: it multiplies the current
+        #    optimizer lr, so the next resumed step advances
+        #    0.05 -> 0.05625 instead of the uninterrupted run's 0.08 -> 0.09.
+
+        base_lr = 0.1
+        milestone = 5
+        resume_step = 3
+
+        def make_scheduler(optim):
+            return SequentialLR(
+                optim,
+                [
+                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
+                    ExponentialLR(optim, gamma=0.5),
+                ],
+                milestones=[milestone],
             )
+
+        model = torch.nn.Linear(1, 1)
+        optim = torch.optim.SGD(model.parameters(), lr=base_lr)
+        sched = make_scheduler(optim)
+
+        for _ in range(resume_step):
+            optim.step()
+            sched.step()
+
+        optim_state = optim.state_dict()
+        sched_state = sched.state_dict()
+
+        model2 = torch.nn.Linear(1, 1)
+        optim2 = torch.optim.SGD(model2.parameters(), lr=base_lr)
+        optim2.load_state_dict(optim_state)
+
+        sched2 = make_scheduler(optim2)
+        sched2.load_state_dict(sched_state)
+
+        loaded_optimizer_lr = optim2.param_groups[0]["lr"]
+        loaded_scheduler_lr = sched2.get_last_lr()[0]
+
+        optim2.step()
+        sched2.step()
+        resumed_next_lr = sched2.get_last_lr()[0]
+
+        problems = []
+        if loaded_optimizer_lr != loaded_scheduler_lr:
+            problems.append(
+                "optimizer LR is out of sync with restored scheduler state: "
+                f"optimizer LR = {loaded_optimizer_lr}, "
+                f"scheduler LR = {loaded_scheduler_lr}"
+            )
+
+        if resumed_next_lr != 0.09:
+            problems.append(
+                "first resumed step produced an incorrect LR transition: "
+                f"got {resumed_next_lr}, expected 0.09"
+            )
+
+        self.assertEqual([], problems, "\n".join(problems))
 
 instantiate_parametrized_tests(TestLRScheduler)
 
