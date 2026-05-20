@@ -232,13 +232,15 @@ class MatcherAccumulator:
                     break
 
         if self._active_multiline_matcher:
-            # First see if the end token is present, if so strip the line down to just that segment.
+            # Ignore the part of the line that is commented because comments may have the end token in them.
+            line = line[: line.find("//") if "//" in line else None]
+
+            # See if the end token is present, if so strip the line down to just that segment.
             for match in self._active_multiline_matcher.end_pattern.finditer(line):
                 line = line[: match.end()]
                 self._end_token_found = True
 
-            # Ignore the part of the line that is commented because comments may have the end token in them.
-            self._buffer += line[: line.find("//") if "//" in line else None]
+            self._buffer += line
 
             # Now that the buffer is complete, parse it with the handler.
             if self._end_token_found:

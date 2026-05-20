@@ -62,6 +62,13 @@ class TestStableShimUtils(unittest.TestCase):
         int arg,
         void* foo,
         );
+
+        // Situation where there's an end token ";" in a comment
+        AOTI_TORCH_EXPORT int  // deprecated; was unnecessary
+        amazing_long_function_name_with_end_in_comment(
+        int arg,
+        void* foo,
+        );
         """
 
         expected = {
@@ -69,6 +76,7 @@ class TestStableShimUtils(unittest.TestCase):
             5: ["secondary_path"],
             9: ["amazing_long_function_name_that_pushes_it_to_newline"],
             16: ["amazing_long_function_name_with_args"],
+            23: ["amazing_long_function_name_with_end_in_comment"],
         }
         result = self._run_match_on_sample(sample, matcher, expected_version)
 
