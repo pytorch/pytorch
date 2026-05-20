@@ -334,6 +334,38 @@ class GemmEpilogueFusionTests(TestCase):
                     "offs="
                 ).check_not("extern_kernels._grouped_mm").run(code)
 
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_grouped_mm_grouped_contract_fuses(self):
+        M = 64
+        N = 64
+        group = 2
+
+        def fn(a, b, offs):
+            def epilogue(acc):
+                lanes = acc.float().view(M * 2, -1, group)
+                return (torch.relu(lanes[..., 0]) * lanes[..., 1]).to(acc.dtype)
+
+            return grouped_mm_epilogue(
+                a,
+                b,
+                epilogue,
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a, b, offs = self._grouped_mm_inputs("2d/3d", "cuda")
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
+        )
+        expected = fn(a, b, offs)
+
+        self.assertEqual(actual.shape, (M * 2, N))
+        torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
+        FileCheck().check("offs=").check("main_output_transform='grouped_n_contract'").check(
+            "main_output_transform_group=2"
+        ).check_not("extern_kernels._grouped_mm").run(code)
+
     def _run_split_k_epilogue_test(self, backend, expected_kernel):
         if backend == "QUACK":
             try:
