@@ -154,7 +154,15 @@ try:
 
         # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        is_fake,
+        is_handled_meta_copy_runtime_error,
+        is_meta_copy_internal_overlap_runtime_error,
+        is_meta_copy_size_mismatch_runtime_error,
+        maybe_get_fake_mode,
+        suppress_fake_tensor_meta_copy_error_logging,
+    )
 except ImportError:
     pass
 
@@ -3893,6 +3901,112 @@ def get_fake_value(
         tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
 
 
+def _is_tracing_exception_handler(tx: InstructionTranslatorBase) -> bool:
+    if sys.version_info >= (3, 11):
+        return tx.current_instruction.exn_tab_entry is not None
+
+    return bool(tx.block_stack)
+
+
+def _is_mutable_fx_node(node: torch.fx.Node) -> bool:
+    if node.op == "call_function" and isinstance(node.target, torch._ops.OpOverload):
+        return node.target._schema.is_mutable
+    if node.op == "call_method" and isinstance(node.target, str):
+        return node.target.endswith("_")
+    return False
+
+
+def _fx_node_target_name(node: torch.fx.Node) -> str | None:
+    if node.op == "call_function" and isinstance(node.target, torch._ops.OpOverload):
+        return node.target._schema.name.removeprefix("aten::")
+    if node.op == "call_method" and isinstance(node.target, str):
+        return node.target
+    return None
+
+
+_BAD_INPLACE_CALL_TARGETS = {
+    # These ops can compute an output whose size differs from the mutated
+    # destination, so the fake decompositions surface eager's in-place size
+    # validation through meta_copy_.
+    "addmm_",
+    "addmv_",
+    "baddbmm_",
+}
+
+
+def _can_raise_observed_runtime_error_from_fake(
+    node: torch.fx.Node, tx: InstructionTranslatorBase
+) -> bool:
+    if node.op not in ("call_function", "call_method") or node.users:
+        return False
+
+    return (
+        _is_tracing_exception_handler(tx)
+        and _is_mutable_fx_node(node)
+        and _fx_node_target_name(node) in _BAD_INPLACE_CALL_TARGETS
+    )
+
+
+def _format_size(size: Iterable[Any], fake_mode: FakeTensorMode) -> str:
+    def format_dim(dim: Any) -> str:
+        if isinstance(dim, torch.SymInt):
+            shape_env = fake_mode.shape_env
+            if shape_env is not None:
+                expr = dim.node.expr.xreplace(shape_env.replacements).xreplace(
+                    shape_env.backed_var_to_val
+                )
+                try:
+                    return str(int(expr))
+                except (TypeError, ValueError):
+                    pass
+        return str(dim)
+
+    return "[" + ", ".join(format_dim(s) for s in size) + "]"
+
+
+def _meta_copy_error_sizes(
+    exc: BaseException,
+) -> tuple[Iterable[Any], Iterable[Any]] | None:
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        if (
+            frame.f_code.co_name == "meta_copy_"
+            and frame.f_globals.get("__name__") == "torch._meta_registrations"
+        ):
+            dst = frame.f_locals.get("self")
+            src = frame.f_locals.get("src")
+            if dst is None or src is None:
+                return None
+            try:
+                return dst.size(), src.size()
+            except AttributeError:
+                return None
+        tb = tb.tb_next
+    return None
+
+
+def _observed_runtime_error_msg_from_meta_copy(
+    exc: BaseException, fake_mode: FakeTensorMode
+) -> str | None:
+    if is_meta_copy_size_mismatch_runtime_error(exc):
+        sizes = _meta_copy_error_sizes(exc)
+        if sizes is None:
+            return None
+        input_size, output_size = sizes
+        return (
+            f"Bad in-place call: input tensor size {_format_size(input_size, fake_mode)} "
+            f"and output tensor size {_format_size(output_size, fake_mode)} should match"
+        )
+    if is_meta_copy_internal_overlap_runtime_error(exc):
+        return (
+            "unsupported operation: more than one element of the written-to tensor "
+            "refers to a single memory location. Please clone() the tensor before "
+            "performing the operation."
+        )
+    raise AssertionError("expected a handled meta_copy_ RuntimeError")
+
+
 def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -3909,7 +4023,13 @@ def _get_fake_value_impl(
     from torch.utils._sympy.value_ranges import ValueRangeError
 
     from . import graph_break_hints
-    from .exc import unimplemented, Unsupported, UserError, UserErrorType
+    from .exc import (
+        raise_observed_exception,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -3971,8 +4091,17 @@ def _get_fake_value_impl(
             for arg in args
         )
 
+    can_raise_observed_runtime_error = _can_raise_observed_runtime_error_from_fake(
+        node, tx
+    )
+    fake_meta_error_logging = (
+        suppress_fake_tensor_meta_copy_error_logging()
+        if can_raise_observed_runtime_error
+        else contextlib.nullcontext()
+    )
+
     try:
-        with fake_mode, enable_python_dispatcher():
+        with fake_mode, enable_python_dispatcher(), fake_meta_error_logging:
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4079,6 +4208,17 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+        # Arbitrary fake RuntimeErrors may be compiler/meta bugs.  The case we
+        # can safely reify here is copy_ meta validation from a mutable op,
+        # which mirrors eager's destination-shape checks for in-place ops.
+        elif can_raise_observed_runtime_error and is_handled_meta_copy_runtime_error(
+            cause
+        ):
+            observed_msg = _observed_runtime_error_msg_from_meta_copy(cause, fake_mode)
+            if observed_msg is not None:
+                msg = get_concrete_sizes_from_symints(observed_msg, fake_mode)
+                tx.output.remove_node(node)
+                raise_observed_exception(RuntimeError, tx, args=[msg])
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
