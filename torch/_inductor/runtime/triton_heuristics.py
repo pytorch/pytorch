@@ -1166,14 +1166,12 @@ class CachingAutotuner(KernelInterface):
         kernel_name: str,
     ) -> None:
         """
-        Emit a clearer error when too many positional args would bind to a kwarg.
+        A clearer error when too many positional args would bind to a kwarg.
 
-        If a generated Triton launcher has a fixed Python signature (e.g.
-        `def launcher(arg0, arg1, ..., stream):`), passing too many positional
-        args will start binding them to later parameters (like `stream`, or `grid`
-        in older launcher variants). If we also pass that parameter by keyword,
+        If a generated Triton launcher has a fixed Python signature passing too many positional
+        args will start binding them to later parameters. If we also pass that parameter by keyword,
         the runtime error becomes "got multiple values for argument ...", which
-        is hard to diagnose. Detect that scenario and raise a direct message.
+        is hard to diagnose. Detect that scenario and raise a clear message.
         """
         cache_key = "_inductor_launcher_positional_limits"
         cached = getattr(launcher, cache_key, None)
