@@ -152,12 +152,12 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
       dims[1]);
 
   // check range of dims
-  TORCH_CHECK(
+  TORCH_CHECK_INDEX(
       dims[0] < total_dims && dims[0] >= -total_dims,
       "Rotation dim0 out of range, dim0 = ",
       dims[0]);
 
-  TORCH_CHECK(
+  TORCH_CHECK_INDEX(
       dims[1] < total_dims && dims[1] >= -total_dims,
       "Rotation dim1 out of range, dim1 = ",
       dims[1]);

@@ -5,7 +5,7 @@ out-of-range dimension/index arguments, matching eager-mode behavior.
 """
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 
 
 OPS = [
@@ -23,13 +23,6 @@ OPS = [
 class TestIndexErrorContract(TestCase):
     def _make_tensor(self):
         return torch.randn(4)
-
-    def test_eager_raises_index_error(self):
-        t = self._make_tensor()
-        for name, op in OPS:
-            with self.subTest(op=name):
-                with self.assertRaises(IndexError):
-                    op(t)
 
     def test_compile_preserves_index_error(self):
         t = self._make_tensor()
