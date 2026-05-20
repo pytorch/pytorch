@@ -852,6 +852,13 @@ class NestedReduction:
         if grouped_reduction_info is None:
             return False
 
+        # Total-element equality also implies divisibility of the grouped
+        # parent extent by group_size (grouped_total factors through
+        # FloorDiv(extent, group_size) * group_size). No separate Mod check
+        # is needed. The sizevars divisible set records Mod(s, s//G) from
+        # the view op, not Mod(s, G), so statically_known_equals on
+        # Mod(extent, group_size) would fail with dynamic shapes.
+        # TODO: teach sizevars to infer Mod(s, G)==0 from Mod(s, s//G)==0
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
         if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
@@ -867,15 +874,10 @@ class NestedReduction:
         )
         if grouped_axis is None:
             return False
+        if grouped_axis is cls.GroupedAxis.X:
+            return False
         group_size_int = int(group_size)
         if not (1 <= group_size_int and is_power_of_2(group_size_int)):
-            return False
-        grouped_parent_extent = (
-            outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
-        )
-        if not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(grouped_parent_extent, group_size), 0
-        ):
             return False
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
@@ -3256,6 +3258,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
                 len(mix_order),
             )
+        nested_reductions = [x for x in nodes if isinstance(x, FusedNestedReductions)]
+        if nested_reductions:
+            log.debug(
+                "ComboKernels: %d FusedNestedReductions nodes are filtered",
+                len(nested_reductions),
+            )
 
         filtered_nodes = [
             x
@@ -3267,6 +3275,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
                     FusedMixOrderReductions,
+                    FusedNestedReductions,
                 ),
             )
         ]
@@ -7281,7 +7290,7 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node1.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
