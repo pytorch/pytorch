@@ -91,6 +91,94 @@ class TestBenchmarker(TestCase):
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
 
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda" or torch.version.hip,
+        "requires CUDA non-HIP",
+    )
+    def test_triton_benchmarker_uses_l2_cache_helper(self, device=GPU_TYPE):
+        from triton import runtime
+
+        active_driver = runtime.driver.active
+
+        benchmarker = TritonBenchmarker()
+        _, _callable = self.make_params(device, size=16)
+
+        captured_buffer_sizes = []
+        original_empty = torch.empty
+
+        def empty_spy(*args, **kwargs):
+            result = original_empty(*args, **kwargs)
+            if kwargs.get("dtype") is torch.int and result.device.type == "cuda":
+                captured_buffer_sizes.append(result.numel() * result.element_size())
+            return result
+
+        expected_l2_size = torch.cuda.get_device_properties(
+            torch.cuda.current_device()
+        ).L2_cache_size
+
+        with (
+            patch.object(
+                active_driver,
+                "get_empty_cache_for_benchmark",
+                side_effect=AssertionError("Triton's cache factory should not be used"),
+            ),
+            patch(
+                "torch._inductor.runtime.benchmarking.torch.empty",
+                side_effect=empty_spy,
+            ),
+        ):
+            timing = benchmarker.benchmark_gpu(_callable, warmup=0, rep=0)
+
+        self.assertGreater(timing, 0)
+        self.assertGreater(len(captured_buffer_sizes), 0)
+        self.assertEqual(captured_buffer_sizes[0], expected_l2_size)
+
+    def test_l2_cache_uses_active_device(self):
+        class FakeDriver:
+            device = torch.device("cuda", 0)
+
+            def get_active_torch_device(self):
+                return self.device
+
+        class Props:
+            def __init__(self, l2_cache_size):
+                self.L2_cache_size = l2_cache_size
+
+        benchmarker = TritonBenchmarker()
+        driver = FakeDriver()
+        captured_allocations = []
+        original_empty = torch.empty
+
+        def get_device_properties(device):
+            device = torch.device(device)
+            return Props(1024 if device.index == 0 else 2048)
+
+        def empty_spy(size, **kwargs):
+            captured_allocations.append((size, kwargs["device"]))
+            return original_empty(0, dtype=kwargs["dtype"])
+
+        with (
+            patch(
+                "torch._inductor.runtime.benchmarking.torch.cuda.get_device_properties",
+                side_effect=get_device_properties,
+            ),
+            patch(
+                "torch._inductor.runtime.benchmarking.torch.empty",
+                side_effect=empty_spy,
+            ),
+        ):
+            benchmarker._make_l2_cache(driver)
+            driver.device = torch.device("cuda", 1)
+            benchmarker._make_l2_cache(driver)
+
+        self.assertEqual(
+            captured_allocations,
+            [
+                (1024 // 4, torch.device("cuda", 0)),
+                (2048 // 4, torch.device("cuda", 1)),
+            ],
+        )
+
     @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
     @unittest.expectedFailure
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
@@ -234,7 +322,6 @@ class TestBenchmarker(TestCase):
         self, hip_value, expected_buffer_size_bytes, device=GPU_TYPE
     ):
         benchmarker = TorchProfilerBenchmarker()
-        benchmarker.__dict__["L2_cache_size"] = 1024
         _, _callable = self.make_params(device, size=16)
 
         captured_buffer_lengths = []
@@ -249,17 +336,18 @@ class TestBenchmarker(TestCase):
             "get_event_pairs",
             wraps=benchmarker.get_event_pairs,
         ) as mock_get_event_pairs:
-            with patch.object(torch.version, "hip", hip_value):
-                with patch(
-                    "torch._inductor.runtime.benchmarking.torch.empty",
-                    side_effect=empty_spy,
-                ):
-                    timing = benchmarker.benchmark_gpu(
-                        _callable,
-                        rep=1,
-                        estimation_iters=1,
-                        memory_warmup_iters=0,
-                    )
+            with patch.object(benchmarker, "get_l2_cache_size", return_value=1024):
+                with patch.object(torch.version, "hip", hip_value):
+                    with patch(
+                        "torch._inductor.runtime.benchmarking.torch.empty",
+                        side_effect=empty_spy,
+                    ):
+                        timing = benchmarker.benchmark_gpu(
+                            _callable,
+                            rep=1,
+                            estimation_iters=1,
+                            memory_warmup_iters=0,
+                        )
 
         self.assertGreater(timing, 0)
         mock_get_event_pairs.assert_called_once_with(1)

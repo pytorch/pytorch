@@ -1,11 +1,12 @@
 import functools
 import inspect
+import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import cached_property, wraps
 from itertools import chain
-from statistics import median
-from typing import Any, Concatenate
+from statistics import mean, median
+from typing import Any, cast, Concatenate
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -13,6 +14,7 @@ import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
+from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -35,6 +37,44 @@ T = TypeVar("T")
 # Values are callables with signature:
 #   fn(self: Benchmarker, _callable: Callable[..., Any], *, warmup: int, rep: int, **kwargs) -> Any
 _BENCHMARK_DISPATCH: dict[str, Callable[..., Any]] = {}
+
+
+def _quantile(times: list[float], quantiles: Sequence[float]) -> list[float]:
+    sorted_times = sorted(times)
+    last_index = len(sorted_times) - 1
+
+    def get_quantile(q: float) -> float:
+        if not (0 <= q <= 1):
+            raise ValueError("Quantiles must be in the range [0, 1]")
+        point = q * last_index
+        lower = math.floor(point)
+        upper = math.ceil(point)
+        scale = point - lower
+        return (1 - scale) * sorted_times[lower] + scale * sorted_times[upper]
+
+    return [get_quantile(q) for q in quantiles]
+
+
+def _summarize_statistics(
+    times: list[float], quantiles: Sequence[float] | None, return_mode: str
+) -> float | list[float]:
+    if quantiles is not None:
+        ret = _quantile(times, quantiles)
+        if len(ret) == 1:
+            return ret[0]
+        return ret
+    if return_mode == "all":
+        return times
+    elif return_mode == "min":
+        return min(times)
+    elif return_mode == "max":
+        return max(times)
+    elif return_mode == "mean":
+        return mean(times)
+    elif return_mode == "median":
+        return median(times)
+    else:
+        raise ValueError(f"Unsupported return_mode: {return_mode}")
 
 
 def register_benchmarker(
@@ -325,11 +365,11 @@ def _default_cpu_bench(self, f, *, warmup, rep, **kw):
 
 
 def _default_cuda_bench(self, f, *, warmup, rep, **kw):
-    return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
+    return self.benchmark_gpu(f, warmup=warmup, rep=rep, device_type="cuda", **kw)
 
 
 def _default_xpu_bench(self, f, *, warmup, rep, **kw):
-    return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
+    return self.benchmark_gpu(f, warmup=warmup, rep=rep, device_type="xpu", **kw)
 
 
 register_benchmarker("cpu", _default_cpu_bench, override=True)
@@ -338,6 +378,8 @@ register_benchmarker("xpu", _default_xpu_bench, override=True)
 
 
 class TritonBenchmarker(Benchmarker):
+    """Benchmarker that delegates GPU timing to Triton's do_bench."""
+
     @cached_property
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's `do_bench`."""
@@ -346,6 +388,95 @@ class TritonBenchmarker(Benchmarker):
         except ImportError as e:
             raise NotImplementedError("requires Triton") from e
         return do_bench
+
+    def get_l2_cache_size(self: Self, device: torch.device | int | None = None) -> int:
+        """Get the L2 cache size, in bytes, for a CUDA device."""
+        if device is None:
+            device = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device)
+        return props.L2_cache_size
+
+    def _make_l2_cache(self: Self, active_driver: Any) -> torch.Tensor:
+        device = active_driver.get_active_torch_device()
+        return torch.empty(
+            max(self.get_l2_cache_size(device) // 4, 1),
+            dtype=torch.int,
+            device=device,
+        )
+
+    def _can_benchmark_with_l2_cache(
+        self: Self, device_type: str | None, kwargs: dict[str, Any]
+    ) -> bool:
+        if device_type not in (None, "cuda"):
+            return False
+        if torch.version.hip or not torch.cuda.is_available():
+            return False
+        if not OrderedSet(kwargs).issubset(
+            OrderedSet(["warmup", "rep", "grad_to_none", "quantiles", "return_mode"])
+        ):
+            return False
+
+        from triton import runtime
+
+        return runtime.driver.active.get_current_target().backend == "cuda"
+
+    def _do_bench_with_l2_cache(
+        self: Self,
+        fn: Callable[[], Any],
+        warmup: int = 25,
+        rep: int = 100,
+        grad_to_none: list[torch.Tensor] | None = None,
+        quantiles: Sequence[float] | None = None,
+        return_mode: str = "mean",
+    ) -> float | list[float]:
+        assert return_mode in ["min", "max", "mean", "median", "all"]
+
+        from triton import runtime
+
+        active_driver = runtime.driver.active
+        device_interface = active_driver.get_device_interface()
+
+        fn()
+        device_interface.synchronize()
+
+        cache = self._make_l2_cache(active_driver)
+
+        start_event = device_interface.Event(enable_timing=True)
+        end_event = device_interface.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(5):
+            active_driver.clear_cache(cache)
+            fn()
+        end_event.record()
+        device_interface.synchronize()
+        estimate_ms = start_event.elapsed_time(end_event) / 5
+
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
+        start_events = [
+            device_interface.Event(enable_timing=True) for _ in range(n_repeat)
+        ]
+        end_events = [
+            device_interface.Event(enable_timing=True) for _ in range(n_repeat)
+        ]
+
+        for _ in range(n_warmup):
+            fn()
+
+        for i in range(n_repeat):
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            active_driver.clear_cache(cache)
+            start_events[i].record()
+            fn()
+            end_events[i].record()
+
+        device_interface.synchronize()
+        times = [
+            start.elapsed_time(end) for start, end in zip(start_events, end_events)
+        ]
+        return _summarize_statistics(times, quantiles, return_mode)
 
     @may_distort_benchmarking_result
     @time_and_count
@@ -375,16 +506,34 @@ class TritonBenchmarker(Benchmarker):
         if not is_vetted_benchmarking:
             may_ban_benchmarking()
 
+        device_type = kwargs.pop("device_type", None)
         do_bench_params = inspect.signature(self.triton_do_bench).parameters
         for kwarg in list(kwargs.keys()):
             if kwarg not in do_bench_params:
                 del kwargs[kwarg]
         try:
-            if "quantiles" in kwargs:
-                return self.triton_do_bench(_callable, **kwargs)[0]
-            elif "return_mode" in kwargs:
-                return self.triton_do_bench(_callable, **kwargs)
-            return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+            if self._can_benchmark_with_l2_cache(device_type, kwargs):
+                if "quantiles" in kwargs:
+                    return cast(
+                        list[float],
+                        self._do_bench_with_l2_cache(_callable, **kwargs),
+                    )[0]
+                elif "return_mode" in kwargs:
+                    return cast(
+                        float, self._do_bench_with_l2_cache(_callable, **kwargs)
+                    )
+                return cast(
+                    float,
+                    self._do_bench_with_l2_cache(
+                        _callable, **kwargs, return_mode="median"
+                    ),
+                )
+            else:
+                if "quantiles" in kwargs:
+                    return self.triton_do_bench(_callable, **kwargs)[0]
+                elif "return_mode" in kwargs:
+                    return self.triton_do_bench(_callable, **kwargs)
+                return self.triton_do_bench(_callable, **kwargs, return_mode="median")
         except Exception as e:
             # ErrorInvalidConfiguration
             # Return inf to skip this config during autotuning
@@ -399,13 +548,6 @@ class TritonBenchmarker(Benchmarker):
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
-    @cached_property
-    def L2_cache_size(self: Self) -> int:
-        """Get the L2 cache size, in bytes, of the current device."""
-        device = torch.cuda.current_device()
-        props = torch.cuda.get_device_properties(device)
-        return props.L2_cache_size
-
     def get_event_pairs(
         self: Self, iters: int
     ) -> list[tuple[torch.cuda.Event, torch.cuda.Event]]:
@@ -484,7 +626,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         torch.cuda.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        device = torch.device("cuda", torch.cuda.current_device())
+        buffer = torch.empty(
+            self.get_l2_cache_size(device) // 4, dtype=torch.int, device=device
+        )
         buffer.zero_()
 
         # estimate the runtime of `_callable`
@@ -600,11 +745,12 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         # Keep Triton's 256 MB cache flush on ROCm. On other backends, reuse
         # the shared L2-sized flush from InductorBenchmarker.
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        device = torch.device("cuda", torch.cuda.current_device())
         if torch.version.hip:
             buffer_size_bytes = 256 * 1024 * 1024
         else:
-            buffer_size_bytes = self.L2_cache_size
-        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
+            buffer_size_bytes = self.get_l2_cache_size(device)
+        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device=device)
         buffer.zero_()
 
         # Estimation phase with separate event pairs — also serves as warmup.
