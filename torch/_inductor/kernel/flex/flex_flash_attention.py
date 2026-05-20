@@ -761,9 +761,7 @@ class PackedMaskAnalyzer:
             return f"aux_tensors[{self.placeholders[4:].index(expr)}]"
 
         if is_aten_index_node(expr):
-            return self._lane_uniform_index_cute_expr(
-                expr, for_index=for_index, index_dim_size=index_dim_size
-            )
+            return self._lane_uniform_index_cute_expr(expr, for_index=for_index)
         return self._lane_uniform_binary_cute_expr(expr)
 
     def _literal_cute_expr(
@@ -805,7 +803,6 @@ class PackedMaskAnalyzer:
         expr: torch.fx.Node,
         *,
         for_index: bool,
-        index_dim_size: int | sympy.Expr | None,
     ) -> str | None:
         """Render a KV-lane-uniform aux tensor index expression.
 
