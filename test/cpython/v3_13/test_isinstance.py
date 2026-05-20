@@ -375,4 +375,4 @@ def blowstack(fxn, arg, compare_to):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

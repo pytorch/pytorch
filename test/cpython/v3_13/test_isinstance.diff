@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_isinstance.py b/test/cpython/v3_13/test_isinstance.py
-index 95a119ba683..2285a8a53ca 100644
+index 95a119ba683..296da49ff4f 100644
 --- a/test/cpython/v3_13/test_isinstance.py
 +++ b/test/cpython/v3_13/test_isinstance.py
 @@ -1,3 +1,20 @@
@@ -50,3 +50,9 @@ index 95a119ba683..2285a8a53ca 100644
      # Tests to ensure that isinstance and issubclass work on abstract
      # classes and instances.  Before the 2.2 release, TypeErrors were
      # raised when boolean values should have been returned.  The bug was
+@@ -358,4 +375,4 @@ def blowstack(fxn, arg, compare_to):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
