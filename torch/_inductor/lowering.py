@@ -52,6 +52,8 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
 )
@@ -6287,10 +6289,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
