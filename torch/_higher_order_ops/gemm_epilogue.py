@@ -1395,7 +1395,6 @@ def _lower_quack_view_or_reshape_node(
     if (
         mm_meta is not None
         and isinstance(shape, (list, tuple))
-        and len(shape) == 2
         and tuple(shape) == tuple(mm_meta.shape)
     ):
         return _emit_quack_tensorssa_reshape(kernel, source, f"{env[mm_node]}.shape")
