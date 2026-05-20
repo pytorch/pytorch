@@ -4,6 +4,7 @@ import contextlib
 
 import torch
 import torch.distributed as dist
+import torch.export._trace
 import torch.fx.traceback as fx_traceback
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
@@ -119,6 +120,15 @@ class FlexAttentionModel(torch.nn.Module):
         # Output projection
         output = self.proj_out(attn_output)
         return output
+
+
+class TinyLinear(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.lin = torch.nn.Linear(64, 64, bias=False, device=device)
+
+    def forward(self, x, scale: int):
+        return self.lin(x) * scale
 
 
 def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
@@ -497,6 +507,49 @@ class DTensorExportTest(TestCase):
             _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
             2,
         )
+
+    def test_trace_export_deferred_asserts_colwise_parallel(self):
+        registered_dtensor_spec = False
+        try:
+            torch.utils._pytree.register_constant(DTensorSpec)
+            registered_dtensor_spec = True
+        except ValueError:
+            pass
+
+        try:
+            mesh = init_device_mesh(
+                self.device_type,
+                mesh_shape=(2,),
+                mesh_dim_names=("tp",),
+            )
+            x = torch.randn(1, 7, 64, device=self.device_type)
+            scale = 2
+            dynamic_shapes = ({1: torch.export.Dim("seq_len", min=1, max=128)}, None)
+
+            torch.export._trace._export(
+                TinyLinear(self.device_type),
+                args=(x, scale),
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+                prefer_deferred_runtime_asserts_over_guards=True,
+            )
+
+            dtensor_model = parallelize_module(
+                TinyLinear(self.device_type), mesh, {"lin": ColwiseParallel()}
+            )
+            ep = torch.export._trace._export(
+                dtensor_model,
+                args=(x, scale),
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+                prefer_deferred_runtime_asserts_over_guards=True,
+            )
+        finally:
+            if registered_dtensor_spec:
+                torch.utils._pytree._deregister_pytree_node(DTensorSpec)
+
+        self.assertEqual(tuple(ep.graph_signature.parameters), ("lin.weight",))
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x", scale))
 
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):
