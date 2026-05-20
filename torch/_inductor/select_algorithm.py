@@ -871,7 +871,6 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta.update(triton_meta)
 
         inductor_meta = {
-            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }

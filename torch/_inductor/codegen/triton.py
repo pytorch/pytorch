@@ -6065,7 +6065,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
-            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
             **self.inductor_meta_per_kernel(),
@@ -6841,13 +6840,15 @@ class TritonScheduling(SIMDScheduling):
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
-            async_compile.triton(subs_name, src_code)
+            async_compile.triton(subs_name, src_code, descriptive_name=kernel_name)
 
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
 
         compile_wrapper.splice(src_code, strip=True)
         current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        compile_wrapper.writeline(
+            f"''', device_str='{current_device.type}', descriptive_name={kernel_name!r})"
+        )
 
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -6910,6 +6911,13 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
+    @staticmethod
+    def _set_benchmark_kernel_name(mod: ModuleType) -> None:
+        # Benchmark modules do not go through wrapper emission, so attach the
+        # runtime name after loading instead of storing it in the cached source.
+        # pyrefly: ignore [missing-attribute]
+        mod.triton_ = mod.triton_.with_kernel_name("triton_")
+
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
@@ -6959,6 +6967,7 @@ class TritonScheduling(SIMDScheduling):
             if ms is not None:
                 return ms, mod.__file__
 
+            self._set_benchmark_kernel_name(mod)
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
@@ -7153,6 +7162,7 @@ class TritonScheduling(SIMDScheduling):
             assert src_code is not None
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
             mod = PyCodeCache.load(src_code)
+            self._set_benchmark_kernel_name(mod)
 
             log.debug(
                 "kernel src code for %s written to: %s",

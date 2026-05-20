@@ -368,7 +368,20 @@ class AsyncCompile:
         if isinstance(pool, SubprocPool):
             pool.wakeup()
 
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+    @staticmethod
+    def _with_triton_kernel_name(
+        kernel: CachingAutotuner, kernel_name: str
+    ) -> CachingAutotuner:
+        return kernel.with_kernel_name(kernel_name)
+
+    def triton(
+        self,
+        kernel_name: str,
+        source_code: str,
+        device_str: str = "cuda",
+        *,
+        descriptive_name: str | None = None,
+    ):
         """
         Async_compile.triton is more complicated than the other backends because
         we're trying to optimize compile time as much as possible for this hot callsite.
@@ -390,6 +403,7 @@ class AsyncCompile:
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
           and pickled by to us via `CachingAutotuner.save_cache_hook`.
         """
+        kernel_name_for_profiling = descriptive_name or kernel_name
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
         )
@@ -397,7 +411,15 @@ class AsyncCompile:
         def reload_kernel_in_parent():
             # Benchmark how often this happens
             with dynamo_timed("reload_kernel_in_parent"):
-                return load_kernel()
+                return self._with_triton_kernel_name(
+                    load_kernel(), kernel_name_for_profiling
+                )
+
+        def wrap_future(future: CodeCacheFuture, kernel_name: str) -> CodeCacheFuture:
+            return LambdaFuture(
+                lambda: self._with_triton_kernel_name(future.result(), kernel_name),
+                future=getattr(future, "future", None),
+            )
 
         counters["inductor"]["async_compile_cache_miss"] += 1
 
@@ -405,8 +427,11 @@ class AsyncCompile:
         _compile_start()
 
         if os.environ.get("TRITON_INTERPRET", "0") == "1":
-            return getattr(
-                torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
+            return self._with_triton_kernel_name(
+                getattr(
+                    torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
+                ),
+                kernel_name_for_profiling,
             )
 
         is_parallel = self.use_process_pool()
@@ -423,9 +448,11 @@ class AsyncCompile:
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
-                return future
+                return wrap_future(future, kernel_name_for_profiling)
             else:
-                return future.result()
+                return self._with_triton_kernel_name(
+                    future.result(), kernel_name_for_profiling
+                )
 
         # Cache miss
         if is_parallel:
@@ -469,16 +496,20 @@ class AsyncCompile:
                 load_kernel,
                 extra_env,
                 extra_config,
+                kernel_name_for_profiling,
             )
 
             def get_result() -> CachingAutotuner:
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
-                    raise e.with_name(kernel_name) from e
+                    raise e.with_name(kernel_name_for_profiling) from e
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
+                kernel = self._with_triton_kernel_name(
+                    kernel, kernel_name_for_profiling
+                )
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
@@ -489,7 +520,9 @@ class AsyncCompile:
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
-                _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
+                _emit_triton_kernel_compile_metric(
+                    kernel, kernel_name_for_profiling, elapsed_us
+                )
                 return kernel
 
             future = LambdaFuture(get_result, future=task)
@@ -508,14 +541,18 @@ class AsyncCompile:
                     start_ns = time_ns()
                     _set_triton_ptxas_path()
                     _set_triton_libdevice_path()
-                    kernel = load_kernel()
+                    kernel = self._with_triton_kernel_name(
+                        load_kernel(), kernel_name_for_profiling
+                    )
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
                         warm_cache_only=False,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
-                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
+                    _emit_triton_kernel_compile_metric(
+                        kernel, kernel_name_for_profiling, elapsed_us
+                    )
                     return kernel
                 except Exception as e:
                     fail = str(e)
