@@ -175,14 +175,14 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def devices_supporting_triton() -> list[str]:
     if not has_triton_package():
-        return False
+        return []
 
     from torch._inductor.config import triton_disable_device_detection
 
     if triton_disable_device_detection:
-        return False
+        return []
 
     from torch._dynamo.device_interface import get_interface_for_device
 
@@ -204,14 +204,17 @@ def has_triton() -> bool:
         "mtia": _return_true,
     }
 
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
+    res: list[str] = []
+    for device, extra_check in triton_supported_devices.items():
+        device_interface = get_interface_for_device(device)
+        if device_interface.is_available() and extra_check(device_interface):
+            res.append(device)
+    return res
 
-    return is_device_compatible_with_triton()
+
+@functools.cache
+def has_triton() -> bool:
+    return len(devices_supporting_triton()) > 0
 
 
 @functools.cache
