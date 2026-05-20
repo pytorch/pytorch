@@ -1306,6 +1306,51 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.SetVariable,
+            variables.TupleVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -3880,6 +3925,9 @@ def _fx_node_target_name(node: torch.fx.Node) -> str | None:
 
 
 _BAD_INPLACE_CALL_TARGETS = {
+    # These ops can compute an output whose size differs from the mutated
+    # destination, so the fake decompositions surface eager's in-place size
+    # validation through meta_copy_.
     "addmm_",
     "addmv_",
     "baddbmm_",
@@ -3916,7 +3964,9 @@ def _format_size(size: Iterable[Any], fake_mode: FakeTensorMode) -> str:
     return "[" + ", ".join(format_dim(s) for s in size) + "]"
 
 
-def _meta_copy_error_sizes(exc: BaseException) -> tuple[Iterable[Any], Iterable[Any]]:
+def _meta_copy_error_sizes(
+    exc: BaseException,
+) -> tuple[Iterable[Any], Iterable[Any]] | None:
     tb = exc.__traceback__
     while tb is not None:
         frame = tb.tb_frame
@@ -3924,18 +3974,26 @@ def _meta_copy_error_sizes(exc: BaseException) -> tuple[Iterable[Any], Iterable[
             frame.f_code.co_name == "meta_copy_"
             and frame.f_globals.get("__name__") == "torch._meta_registrations"
         ):
-            dst = frame.f_locals["self"]
-            src = frame.f_locals["src"]
-            return dst.size(), src.size()
+            dst = frame.f_locals.get("self")
+            src = frame.f_locals.get("src")
+            if dst is None or src is None:
+                return None
+            try:
+                return dst.size(), src.size()
+            except AttributeError:
+                return None
         tb = tb.tb_next
-    raise AssertionError("expected meta_copy_ in traceback")
+    return None
 
 
 def _observed_runtime_error_msg_from_meta_copy(
     exc: BaseException, fake_mode: FakeTensorMode
-) -> str:
+) -> str | None:
     if is_meta_copy_size_mismatch_runtime_error(exc):
-        input_size, output_size = _meta_copy_error_sizes(exc)
+        sizes = _meta_copy_error_sizes(exc)
+        if sizes is None:
+            return None
+        input_size, output_size = sizes
         return (
             f"Bad in-place call: input tensor size {_format_size(input_size, fake_mode)} "
             f"and output tensor size {_format_size(output_size, fake_mode)} should match"
@@ -4153,14 +4211,14 @@ def _get_fake_value_impl(
         # Arbitrary fake RuntimeErrors may be compiler/meta bugs.  The case we
         # can safely reify here is copy_ meta validation from a mutable op,
         # which mirrors eager's destination-shape checks for in-place ops.
-        if can_raise_observed_runtime_error and is_handled_meta_copy_runtime_error(
+        elif can_raise_observed_runtime_error and is_handled_meta_copy_runtime_error(
             cause
         ):
-            msg = get_concrete_sizes_from_symints(
-                _observed_runtime_error_msg_from_meta_copy(cause, fake_mode), fake_mode
-            )
-            tx.output.remove_node(node)
-            raise_observed_exception(RuntimeError, tx, args=[msg])
+            observed_msg = _observed_runtime_error_msg_from_meta_copy(cause, fake_mode)
+            if observed_msg is not None:
+                msg = get_concrete_sizes_from_symints(observed_msg, fake_mode)
+                tx.output.remove_node(node)
+                raise_observed_exception(RuntimeError, tx, args=[msg])
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
@@ -5636,6 +5694,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
