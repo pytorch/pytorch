@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 
+#include <c10/util/ScopeExit.h>
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
 
@@ -264,6 +265,8 @@ static PyObject* THPStorage_fromBuffer(
 
   if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
     return nullptr;
+  auto buffer_guard =
+      c10::make_scope_exit([&buffer]() { PyBuffer_Release(&buffer); });
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_SetString(
@@ -272,7 +275,6 @@ static PyObject* THPStorage_fromBuffer(
             "offset must be non-negative and no greater than buffer length ({}) , but got {}",
             offset,
             buffer.len));
-    PyBuffer_Release(&buffer);
     return nullptr;
   }
 
@@ -285,7 +287,6 @@ static PyObject* THPStorage_fromBuffer(
               "buffer size ({}) must be a multiple of element size ({})",
               buffer.len,
               element_size));
-      PyBuffer_Release(&buffer);
       return nullptr;
     }
     size_bytes = buffer.len - offset;
@@ -302,7 +303,6 @@ static PyObject* THPStorage_fromBuffer(
             buffer.len - offset,
             offset,
             count));
-    PyBuffer_Release(&buffer);
     return nullptr;
   }
 
@@ -346,7 +346,6 @@ static PyObject* THPStorage_fromBuffer(
     }
   }
 
-  PyBuffer_Release(&buffer);
   return THPStorage_Wrap(storage);
   END_HANDLE_TH_ERRORS
 }
