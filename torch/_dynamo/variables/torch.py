@@ -3092,7 +3092,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             torch._foreach_addcdiv_,
         }
         ctx = nullcontext
-        if fn_ in ops_consuming_unbacked_scalars:
+        alpha_kwarg_vt = kwargs.get("alpha")
+        if fn_ in ops_consuming_unbacked_scalars or (
+            fn_ is torch.add
+            and alpha_kwarg_vt is not None
+            and alpha_kwarg_vt.is_tensor()
+        ):
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 

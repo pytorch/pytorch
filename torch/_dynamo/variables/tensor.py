@@ -943,23 +943,6 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        try:
-            proxy = tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            )
-        except NotImplementedError as e:
-            unimplemented(
-                gb_type="Unsupported argument type in tensor method call",
-                context=f"call_method {self} {name} {args} {kwargs}",
-                explanation=f"Dynamo could not create a proxy for an argument in the call "
-                f"to Tensor.{name}(). This usually means an unsupported type was passed "
-                f"as an argument to a tensor method.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                from_exc=e,
-            )
-
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the
         # arguments to self. For example:
@@ -968,8 +951,37 @@ class TensorVariable(VariableTracker):
         # after wrap_fx_proxy (which runs get_fake_value internally).
         # We only synchronize when there's a tensor argument, since that's when
         # metadata propagation is relevant.
-        version_before = self._get_fake_version()
-        result = wrap_fx_proxy(tx, proxy)
+        ctx = nullcontext
+        alpha_kwarg_vt = kwargs.get("alpha")
+        if (
+            name == "add"
+            and alpha_kwarg_vt is not None
+            and alpha_kwarg_vt.is_tensor()
+            and tx.fake_mode
+            and tx.fake_mode.shape_env
+        ):
+            ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        with ctx():
+            try:
+                proxy = tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self, *args], kwargs),
+                )
+            except NotImplementedError as e:
+                unimplemented(
+                    gb_type="Unsupported argument type in tensor method call",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=f"Dynamo could not create a proxy for an argument in the call "
+                    f"to Tensor.{name}(). This usually means an unsupported type was passed "
+                    f"as an argument to a tensor method.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=e,
+                )
+
+            version_before = self._get_fake_version()
+            result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(
             tx, version_before, any(arg.is_tensor() for arg in args)
         )

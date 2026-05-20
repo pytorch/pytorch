@@ -1552,6 +1552,33 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(32),))
 
+    def test_add_tensor_alpha_from_buffer_dynamic(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("alpha_buf", torch.tensor(6.0))
+                self.register_buffer("other", torch.ones(3, 2))
+
+            def forward(self, x):
+                alpha = torch.sub(
+                    self.alpha_buf,
+                    torch.tensor(-4.0, dtype=torch.float32, device=x.device),
+                )
+                return torch.sin(torch.relu(x).add(self.other, alpha=alpha))
+
+        model = M().to(self.device).eval()
+        x = torch.randn(3, 2, device=self.device)
+
+        expected = model(x)
+        actual = torch.compile(
+            model,
+            backend="inductor",
+            fullgraph=True,
+            dynamic=True,
+        )(x)
+
+        self.assertEqual(actual, expected)
+
     def test_add_inplace_permuted(self):
         if config.cpu_backend == "halide":
             raise unittest.SkipTest(
