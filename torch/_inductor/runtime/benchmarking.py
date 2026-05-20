@@ -658,28 +658,34 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
 
         torch.accelerator.synchronize()
 
-        # Extract _CALLABLE GPU time directly from raw kineto events.
-        # This avoids prof.key_averages() which triggers expensive lazy
-        # processing: _parse_kineto_results (wrapping every raw event in
-        # a Python FunctionEvent), _build_tree, and grouping/aggregation.
-        from torch.autograd import DeviceType as _DeviceType
-
         callable_gpu_time_us = 0.0
-        for kineto_event in prof.profiler.kineto_results.events():
-            if (
-                kineto_event.name() == "_CALLABLE"
-                and kineto_event.device_type() == getattr(_DeviceType, acc.type)
-            ):
-                callable_gpu_time_us += (
-                    kineto_event.end_ns() - kineto_event.start_ns()
-                ) / 1000.0
+        if acc.type == "cuda":
+            # Extract _CALLABLE GPU time directly from raw kineto events.
+            # This avoids prof.key_averages() which triggers expensive lazy
+            # processing: _parse_kineto_results (wrapping every raw event in
+            # a Python FunctionEvent), _build_tree, and grouping/aggregation.
+            from torch.autograd import DeviceType as _DeviceType
 
-        if callable_gpu_time_us <= 0:
-            raise AssertionError(
-                f"TorchProfilerBenchmarker: '_CALLABLE' {dispatchkey} event not found in "
-                "raw kineto results. This indicates record_function('_CALLABLE') did "
-                "not produce a GPU_USER_ANNOTATION profiler event."
-            )
+            for kineto_event in prof.profiler.kineto_results.events():
+                if (
+                    kineto_event.name() == "_CALLABLE"
+                    and kineto_event.device_type() == _DeviceType.CUDA
+                ):
+                    callable_gpu_time_us += (
+                        kineto_event.end_ns() - kineto_event.start_ns()
+                    ) / 1000.0
+
+            if callable_gpu_time_us <= 0:
+                raise AssertionError(
+                    "TorchProfilerBenchmarker: '_CALLABLE' CUDA event not found in "
+                    "raw kineto results. This indicates record_function('_CALLABLE') did "
+                    "not produce a GPU_USER_ANNOTATION profiler event."
+                )
+        else:
+            for avg in prof.key_averages():
+                if avg.key == "_CALLABLE":
+                    callable_gpu_time_us = avg.device_time_total
+                    break
 
         # TODO: Revisit incorporating launch overhead effects.
         total_time_us = callable_gpu_time_us
