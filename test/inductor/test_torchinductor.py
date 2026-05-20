@@ -17412,7 +17412,9 @@ if RUN_GPU:
 
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [
-                torch.tensor([[0.0, 1.0, 2.0], [0.0, 1.0, 2.0]], device=GPU_TYPE),
+                torch.tensor(
+                    [[0.0, 1.0, 2.0], [0.0, 1.0, 2.0]], device=GPU_TYPE
+                ),
                 torch.tensor([[0.1, 0.5], [1.5, 2.5]], device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)

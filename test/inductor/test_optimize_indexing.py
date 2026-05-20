@@ -133,8 +133,12 @@ class TestOptimizeIndexing(TestCase):
         graph = Graph()
         ops = graph.placeholder("ops")
         get_index = graph.call_module("get_index", ("i0",))
-        sort_index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
-        scan_index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        sort_index_expr = graph.call_method(
+            "index_expr", (ops, get_index, torch.int64)
+        )
+        scan_index_expr = graph.call_method(
+            "index_expr", (ops, get_index, torch.int64)
+        )
         sort = graph.call_method(
             "sort",
             (ops, (torch.int64,), (sort_index_expr,), False, False),

@@ -181,12 +181,9 @@ _NON_VALUE_PROPAGATING_TARGETS: OrderedSet[str] = OrderedSet(
         "placeholder",
     ]
 )
-_VALUE_PROPAGATING_TARGETS = (
-    OP_NAMES
-    - OrderedSet(_INDEXING_SINK_ARGS)
-    - OrderedSet(_VALUE_SINK_ARGS)
-    - _NON_VALUE_PROPAGATING_TARGETS
-)
+_VALUE_PROPAGATING_TARGETS = OP_NAMES - OrderedSet(_INDEXING_SINK_ARGS) - OrderedSet(
+    _VALUE_SINK_ARGS
+) - _NON_VALUE_PROPAGATING_TARGETS
 
 
 def _is_masked_subblock(node: torch.fx.Node) -> bool:
@@ -296,10 +293,9 @@ def _compute_value_expr_dtype(
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
     value_use: OrderedSet[torch.fx.Node],
 ) -> torch.dtype | None:
-    dtype_arg = node.args[2] if len(node.args) > 2 else None
-    if not isinstance(dtype_arg, torch.dtype):
+    dtype = node.args[2] if len(node.args) > 2 else None
+    if dtype is None:
         return None
-    dtype: torch.dtype = dtype_arg
     if dtype == torch.int32:
         return torch.int32
 
@@ -309,9 +305,7 @@ def _compute_value_expr_dtype(
         or get_index_node.target != "get_index"
     ):
         return None
-    index_name = get_index_node.args[0]
-    assert isinstance(index_name, str)
-    sympy_expr = loop_body.indexing_exprs.get(index_name)
+    sympy_expr = loop_body.indexing_exprs.get(get_index_node.args[0])
     if not isinstance(sympy_expr, sympy.Expr):
         return None
 
