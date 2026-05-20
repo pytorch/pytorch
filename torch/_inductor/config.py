@@ -2833,7 +2833,6 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
-    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
@@ -2901,6 +2900,8 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
+    # This can be enabled directly; Inductor also enables it while
+    # emulate_precision_casts is active.
     use_pytorch_libdevice: bool = False
 
 
