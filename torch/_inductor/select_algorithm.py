@@ -3647,7 +3647,7 @@ def _classify_kernel_operation(
                 elif template_name.startswith("flex_"):
                     return "flex"
 
-            elif isinstance(choice, ExternKernelChoice):
+            elif isinstance(choice, ExternKernelCaller):
                 # Check extern kernel names
                 choice_name = choice.name
                 if choice_name in (
@@ -3771,7 +3771,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
         assert len(choices) >= 2
         externs = [
-            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+            choice for choice in choices if isinstance(choice, ExternKernelCaller)
         ]
         if len(externs) > 0:
             return externs[0]
