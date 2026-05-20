@@ -8633,9 +8633,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
                 )
         if aux_output is not None:
-            if gemm_op != torch.ops.aten.mm.default or len(size) != 2:
+            if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
                 raise NotImplementedError(
-                    "QUACK generic aux tuple epilogues currently support only 2D aten.mm"
+                    "QUACK generic aux tuple epilogues currently support only aten.mm and aten.bmm"
                 )
             if epilogue_arg_indices:
                 raise NotImplementedError(

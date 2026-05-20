@@ -1091,14 +1091,22 @@ def _match_quack_grouped_n_select(
         node.op == "call_function"
         and node.target == torch.ops.aten.select.int
         and len(node.args) >= 3
-        and node.args[1] in (-1, 2)
         and isinstance(node.args[2], int)
     ):
         return None
     view = _match_quack_view_or_reshape(node.args[0])
+    view_shape = _normalize_quack_shape(view.shape) if view is not None else None
+    if not (
+        node.args[1] == -1
+        or (
+            isinstance(view_shape, (list, tuple))
+            and node.args[1] == len(view_shape) - 1
+        )
+    ):
+        return None
     if view is None or not _quack_output_uses_node(view.base, mm_node):
         return None
-    shape = _normalize_quack_shape(view.shape)
+    shape = _quack_grouped_n_fragment_shape(view_shape)
     if not (
         _is_quack_same_fragment_n_group_shape(shape)
         and 0 <= node.args[2] < shape[-1]
@@ -1182,9 +1190,10 @@ def _match_quack_grouped_n_contract_main(
     output_meta = (
         output_value.meta.get("val") if isinstance(output_value, torch.fx.Node) else None
     )
-    if mm_meta is None or output_meta is None or len(mm_meta.shape) != 2:
+    if mm_meta is None or output_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
-    if tuple(output_meta.shape) != (mm_meta.shape[0], mm_meta.shape[1] // select_group):
+    expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // select_group)
+    if tuple(output_meta.shape) != expected_shape:
         return None
     return QuackMainOutputTransformInfo(
         kind="grouped_n_contract",
@@ -1338,6 +1347,12 @@ def _emit_quack_tensorssa_broadcast_to(
     return _emit_quack_tensorssa_expr(kernel, f"{value}.broadcast_to({shape})", like=value)
 
 
+def _quack_grouped_n_fragment_shape(shape: Any) -> Any:
+    if isinstance(shape, (list, tuple)) and len(shape) == 4:
+        return shape[-3:]
+    return shape
+
+
 def _is_quack_n_group_shape(shape: Any) -> bool:
     return (
         isinstance(shape, (list, tuple))
@@ -1361,14 +1376,15 @@ def _lower_quack_view_or_reshape_node(
 ) -> Any:
     source = _quack_cute_arg(view_match.base, env)
     shape = _normalize_quack_shape(view_match.shape)
-    if _is_quack_n_group_shape(shape):
-        if not _is_quack_same_fragment_n_group_shape(shape):
+    group_shape = _quack_grouped_n_fragment_shape(shape)
+    if _is_quack_n_group_shape(group_shape):
+        if not _is_quack_same_fragment_n_group_shape(group_shape):
             raise NotImplementedError(
                 "QUACK reductions feeding the main output currently require a "
                 "power-of-two group size that divides the same-fragment N width 32; "
                 "aux reductions can use other static groups"
             )
-        group_size = shape[-1]
+        group_size = group_shape[-1]
         return _emit_quack_tensorssa_reshape(
             kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
         )
@@ -1393,11 +1409,20 @@ def _lower_quack_grouped_n_select_node(
         node.op == "call_function"
         and node.target == torch.ops.aten.select.int
         and len(node.args) >= 3
-        and node.args[1] in (-1, 2)
         and isinstance(node.args[2], int)
     ):
         return None
     view_node = node.args[0]
+    view = _match_quack_view_or_reshape(view_node)
+    view_shape = _normalize_quack_shape(view.shape) if view is not None else None
+    if not (
+        node.args[1] == -1
+        or (
+            isinstance(view_shape, (list, tuple))
+            and node.args[1] == len(view_shape) - 1
+        )
+    ):
+        return None
     info = grouped_tensors.get(view_node)
     if info is None or not (0 <= node.args[2] < info.group_size):
         return None
@@ -1505,10 +1530,11 @@ def _compile_quack_pointwise_nodes(
                     env[node] = _lower_quack_view_or_reshape_node(
                         node, view_match, env, kernel, mm_node
                     )
-                    if _is_quack_same_fragment_n_group_shape(shape):
+                    group_shape = _quack_grouped_n_fragment_shape(shape)
+                    if _is_quack_same_fragment_n_group_shape(group_shape):
                         grouped_tensors[node] = QuackGroupedTensorSSAInfo(
-                            group_size=shape[-1],
-                            groups_per_fragment=32 // shape[-1],
+                            group_size=group_shape[-1],
+                            groups_per_fragment=32 // group_shape[-1],
                         )
                     continue
                 select_value = _lower_quack_grouped_n_select_node(

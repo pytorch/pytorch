@@ -1885,6 +1885,72 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check_not("activation='").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_grouped_contract_fuses(self):
+        cases = (
+            (2, 32, 64, 32, 2, "relu"),
+            (2, 16, 64, 16, 4, "sum4"),
+        )
+        for B, M, K, N, group, expr in cases:
+            with self.subTest(shape=(B, M, K, N), group=group, expr=expr):
+
+                def fn(a, b):
+                    def epilogue(acc):
+                        lanes = acc.view(B, M, -1, group)
+                        if expr == "relu":
+                            return torch.relu(lanes[..., 0]) * lanes[..., 1]
+                        return lanes[..., 0] + lanes[..., 1] + lanes[..., 2] + lanes[..., 3]
+
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.bmm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.randn(B, M, K, device="cuda", dtype=torch.float16)
+                weights = [
+                    torch.randn(B, K, N, device="cuda", dtype=torch.float16)
+                    for _ in range(group)
+                ]
+                b = torch.stack(weights, dim=-1).reshape(B, K, group * N).contiguous()
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                self.assertEqual(actual.shape, (B, M, N))
+                torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1e-1)
+                FileCheck().check("main_output_transform='grouped_n_contract'").check(
+                    f"main_output_transform_group={group}"
+                ).check_not("extern_kernels.bmm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_tuple_epilogue_generic_aux_fuses(self):
+        def fn(a, b):
+            def epilogue(acc):
+                return acc.relu(), acc.float().abs()
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.bmm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(2, 32, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 64, 48, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual[1], expected[1], atol=1e-2, rtol=1e-2)
+        FileCheck().check("aux_out=").check_not("extern_kernels.bmm").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_unsupported_shape_changing_main(self):
         M = 32
         K = 64
