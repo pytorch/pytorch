@@ -179,6 +179,13 @@ _TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
     ]
 )
 
+_TRITON_FP8_DTYPE_BY_TORCH_DTYPE: dict[torch.dtype, str] = {
+    torch.float8_e4m3fn: "fp8e4nv",
+    torch.float8_e5m2: "fp8e5",
+    torch.float8_e4m3fnuz: "fp8e4b8",
+    torch.float8_e5m2fnuz: "fp8e5b16",
+}
+
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
 
@@ -3489,6 +3496,34 @@ def is_gpu(device: str | None) -> bool:
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None
+
+
+def is_triton_fp8_dtype_supported(
+    dtype: torch.dtype,
+    device: torch.device | str | None = None,
+    *,
+    cuda_arch: tuple[int, int] | None = None,
+) -> bool:
+    triton_dtype = _TRITON_FP8_DTYPE_BY_TORCH_DTYPE.get(dtype)
+    if triton_dtype is None:
+        return True
+
+    if cuda_arch is None:
+        if device is None:
+            return True
+        device = torch.device(device)
+        if device.type != "cuda" or is_rocm():
+            return True
+        if not torch.cuda.is_available():
+            return True
+        cuda_arch = torch.cuda.get_device_capability(device)
+
+    # Mirrors Triton's NVIDIA backend: fp8e5/fp8e4b15 are baseline,
+    # and fp8e4nv is enabled for SM89+.
+    supported_fp8_dtypes = OrderedSet(["fp8e4b15", "fp8e5"])
+    if cuda_arch >= (8, 9):
+        supported_fp8_dtypes.add("fp8e4nv")
+    return triton_dtype in supported_fp8_dtypes
 
 
 def device_need_guard(device: str) -> bool:

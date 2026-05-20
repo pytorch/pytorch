@@ -20,7 +20,11 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code, run_and_get_kernels
+from torch._inductor.utils import (
+    is_triton_fp8_dtype_supported,
+    run_and_get_code,
+    run_and_get_kernels,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -357,6 +361,23 @@ class TestCodegenTriton(InductorTestCase):
             arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
             sig = triton_utils.signature_of(arg, size_dtype=None)
             self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
+
+    def test_cuda_fp8_dtype_support_matrix(self):
+        self.assertFalse(
+            is_triton_fp8_dtype_supported(torch.float8_e4m3fn, cuda_arch=(8, 0))
+        )
+        self.assertTrue(
+            is_triton_fp8_dtype_supported(torch.float8_e4m3fn, cuda_arch=(8, 9))
+        )
+        self.assertTrue(
+            is_triton_fp8_dtype_supported(torch.float8_e5m2, cuda_arch=(7, 5))
+        )
+        self.assertFalse(
+            is_triton_fp8_dtype_supported(torch.float8_e4m3fnuz, cuda_arch=(10, 0))
+        )
+        self.assertFalse(
+            is_triton_fp8_dtype_supported(torch.float8_e5m2fnuz, cuda_arch=(10, 0))
+        )
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
