@@ -76,6 +76,107 @@ def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     return wrapper
 
 
+def _ctc_loss_backend_available(backend: str) -> bool:
+    if backend == "cudnn":
+        return torch.backends.cudnn.is_available() and torch.backends.cudnn.enabled
+    return torch.version.hip is not None and torch.backends.cudnn.enabled
+
+
+def _ctc_loss_backend_static_checks(
+    log_probs: Tensor,
+    targets: Tensor,
+    blank: int,
+    backend: str,
+    *,
+    require_cpu_targets: bool,
+) -> bool:
+    return (
+        _ctc_loss_backend_available(backend)
+        and blank == 0
+        and targets.dim() == 1
+        and log_probs.dtype == torch.float32
+        and targets.dtype == torch.int32
+        and (not require_cpu_targets or targets.device.type == "cpu")
+        and targets.is_contiguous()
+        and log_probs.device.type == "cuda"
+        and log_probs.dim() == 3
+    )
+
+
+def _ctc_loss_backend_intlist(
+    log_probs: Tensor,
+    targets: Tensor,
+    input_lengths: Sequence[int],
+    target_lengths: Sequence[int],
+    blank: int,
+    backend: str,
+) -> bool:
+    if not _ctc_loss_backend_static_checks(
+        log_probs, targets, blank, backend, require_cpu_targets=True
+    ):
+        return False
+    if len(input_lengths) != len(target_lengths):
+        return False
+    max_input_length = log_probs.size(0)
+    return all(
+        input_length == max_input_length for input_length in input_lengths
+    ) and all(
+        target_length < 256 and target_length <= input_lengths[i]
+        for i, target_length in enumerate(target_lengths)
+    )
+
+
+def _ctc_loss_backend_tensor(
+    log_probs: Tensor,
+    targets: Tensor,
+    input_lengths: Tensor,
+    target_lengths: Tensor,
+    blank: int,
+    backend: str,
+) -> bool:
+    if not _ctc_loss_backend_static_checks(
+        log_probs, targets, blank, backend, require_cpu_targets=False
+    ):
+        return False
+    if input_lengths.dtype != torch.int32 or target_lengths.dtype != torch.int32:
+        return False
+    raise RuntimeError(
+        f"aten._use_{backend}_ctc_loss.Tensor depends on tensor length values"
+    )
+
+
+@register_meta(aten._use_cudnn_ctc_loss.default)
+def meta_use_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, blank):
+    return _ctc_loss_backend_intlist(
+        log_probs, targets, input_lengths, target_lengths, blank, "cudnn"
+    )
+
+
+@register_meta(aten._use_miopen_ctc_loss.default)
+def meta_use_miopen_ctc_loss(log_probs, targets, input_lengths, target_lengths, blank):
+    return _ctc_loss_backend_intlist(
+        log_probs, targets, input_lengths, target_lengths, blank, "miopen"
+    )
+
+
+@register_meta(aten._use_cudnn_ctc_loss.Tensor)
+def meta_use_cudnn_ctc_loss_tensor(
+    log_probs, targets, input_lengths, target_lengths, blank
+):
+    return _ctc_loss_backend_tensor(
+        log_probs, targets, input_lengths, target_lengths, blank, "cudnn"
+    )
+
+
+@register_meta(aten._use_miopen_ctc_loss.Tensor)
+def meta_use_miopen_ctc_loss_tensor(
+    log_probs, targets, input_lengths, target_lengths, blank
+):
+    return _ctc_loss_backend_tensor(
+        log_probs, targets, input_lengths, target_lengths, blank, "miopen"
+    )
+
+
 def elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,

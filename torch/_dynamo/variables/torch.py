@@ -31,6 +31,7 @@ import inspect
 import logging
 import math
 import re
+import warnings
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -1761,6 +1762,116 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ],
                 )
             return None
+
+        @register(torch.ctc_loss, torch.nn.functional.ctc_loss)
+        def handle_ctc_loss(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            required_arg_names = (
+                "log_probs",
+                "targets",
+                "input_lengths",
+                "target_lengths",
+            )
+            arg_names = (
+                *required_arg_names,
+                "blank",
+                "reduction",
+                "zero_infinity",
+            )
+            defaults = {
+                "blank": ConstantVariable.create(0),
+                "reduction": ConstantVariable.create(
+                    1 if self.value is torch.ctc_loss else "mean"
+                ),
+                "zero_infinity": ConstantVariable.create(False),
+            }
+            if len(args) > len(arg_names):
+                return None
+
+            bound_args = dict(zip(arg_names, args))
+            for name, value in kwargs.items():
+                if name not in arg_names or name in bound_args:
+                    return None
+                bound_args[name] = value
+
+            if any(name not in bound_args for name in required_arg_names):
+                return None
+
+            for name, default in defaults.items():
+                bound_args.setdefault(name, default)
+
+            log_probs_arg = bound_args["log_probs"]
+            targets_arg = bound_args["targets"]
+            input_lengths_arg = bound_args["input_lengths"]
+            target_lengths_arg = bound_args["target_lengths"]
+
+            if (
+                not log_probs_arg.is_tensor()
+                or not targets_arg.is_tensor()
+                or not input_lengths_arg.is_tensor()
+                or not target_lengths_arg.is_tensor()
+            ):
+                return None
+
+            log_probs = log_probs_arg.as_proxy().node.meta.get("example_value")
+            if not isinstance(log_probs, torch.Tensor) or log_probs.dim() not in (2, 3):
+                return None
+
+            reduction = bound_args["reduction"]
+            if not reduction.is_python_constant():
+                return None
+            reduction_value = reduction.as_python_constant()
+            if self.value is torch.ctc_loss:
+                if isinstance(reduction_value, bool) or not isinstance(
+                    reduction_value, int
+                ):
+                    return None
+                reduction_enum = reduction_value
+            else:
+                if reduction_value == "none":
+                    reduction_enum = 0
+                elif reduction_value == "mean":
+                    reduction_enum = 1
+                elif reduction_value == "elementwise_mean":
+                    warnings.warn(
+                        "reduction='elementwise_mean' is deprecated. "
+                        "Please use reduction='mean' instead.",
+                        stacklevel=2,
+                    )
+                    reduction_enum = 1
+                elif reduction_value == "sum":
+                    reduction_enum = 2
+                else:
+                    return None
+
+            if reduction_enum not in (1, 2) and log_probs.dim() == 3:
+                example_value = log_probs.new_empty((log_probs.size(1),))
+            else:
+                example_value = log_probs.new_empty(())
+
+            aten_args = (
+                log_probs_arg,
+                targets_arg,
+                input_lengths_arg,
+                target_lengths_arg,
+                bound_args["blank"],
+                ConstantVariable.create(reduction_enum),
+                bound_args["zero_infinity"],
+            )
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten.ctc_loss.Tensor,
+                    *proxy_args_kwargs(aten_args, {}),
+                ),
+                example_value=example_value,
+            )
 
         @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
         def handle_guarding_hint_or_throw(

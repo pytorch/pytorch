@@ -363,6 +363,165 @@ def _sparse_coo_tensor_with_dims_and_tensors(
     return constructors(fake_mode, func, *args, **kwargs)
 
 
+@register_op_impl(
+    [
+        aten._use_cudnn_ctc_loss.default,
+        aten._use_miopen_ctc_loss.default,
+    ]
+)
+def _use_ctc_loss_backend(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: list[int],
+    target_lengths: list[int],
+    blank: int,
+) -> bool:
+    backend = "cudnn" if func is aten._use_cudnn_ctc_loss.default else "miopen"
+    if not _use_ctc_loss_backend_static_checks(
+        log_probs, targets, blank, backend, require_cpu_targets=True
+    ):
+        return False
+
+    if len(input_lengths) != len(target_lengths):
+        return False
+    max_input_length = log_probs.size(0)
+    return all(
+        input_length == max_input_length for input_length in input_lengths
+    ) and all(
+        target_length < 256 and target_length <= input_lengths[i]
+        for i, target_length in enumerate(target_lengths)
+    )
+
+
+@register_op_impl(
+    [
+        aten._use_cudnn_ctc_loss.Tensor,
+        aten._use_miopen_ctc_loss.Tensor,
+    ]
+)
+def _use_ctc_loss_backend_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: FakeTensorLike,
+    target_lengths: FakeTensorLike,
+    blank: int,
+) -> bool:
+    backend = "cudnn" if func is aten._use_cudnn_ctc_loss.Tensor else "miopen"
+    if not _use_ctc_loss_backend_static_checks(
+        log_probs, targets, blank, backend, require_cpu_targets=False
+    ):
+        return False
+    if input_lengths.dtype != torch.int32 or target_lengths.dtype != torch.int32:
+        return False
+    raise DataDependentOutputException(func)
+
+
+def _use_ctc_loss_backend_static_checks(
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    blank: int,
+    backend: str,
+    *,
+    require_cpu_targets: bool,
+) -> bool:
+    if backend == "cudnn":
+        backend_available = (
+            torch.backends.cudnn.is_available() and torch.backends.cudnn.enabled
+        )
+    else:
+        backend_available = (
+            torch.version.hip is not None and torch.backends.cudnn.enabled
+        )
+    return (
+        backend_available
+        and blank == 0
+        and targets.dim() == 1
+        and log_probs.dtype == torch.float32
+        and targets.dtype == torch.int32
+        and (not require_cpu_targets or targets.device.type == "cpu")
+        and targets.is_contiguous()
+        and log_probs.device.type == "cuda"
+        and log_probs.dim() == 3
+    )
+
+
+@register_op_impl(aten._ctc_loss.Tensor)
+def ctc_loss_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: FakeTensorLike,
+    target_lengths: FakeTensorLike,
+    blank: int = 0,
+    zero_infinity: bool = False,
+) -> tuple[FakeTensorLike, FakeTensorLike]:
+    torch._check(
+        is_integer_dtype(input_lengths.dtype)
+        and not is_boolean_dtype(input_lengths.dtype),
+        lambda: "input_lengths must be integral",
+    )
+    torch._check(
+        is_integer_dtype(target_lengths.dtype)
+        and not is_boolean_dtype(target_lengths.dtype),
+        lambda: "target_lengths must be integral",
+    )
+    torch._check(
+        log_probs.dim() == 3,
+        lambda: f"log_probs must be 3-D, got {log_probs.dim()}-D",
+    )
+    torch._check(
+        log_probs.dtype in (torch.float32, torch.float64),
+        lambda: f"log_probs must be float32 or float64, got {log_probs.dtype}",
+    )
+    torch._check(
+        targets.dtype in (torch.int32, torch.int64),
+        lambda: f"targets must be int32 or int64, got {targets.dtype}",
+    )
+    torch._check(
+        targets.dim() in (1, 2),
+        lambda: f"targets must be 1-D or 2-D, got {targets.dim()}-D",
+    )
+    batch_size = log_probs.size(1)
+    num_labels = log_probs.size(2)
+    torch._check(blank >= 0, lambda: "blank must be in label range")
+    torch._check(blank < num_labels, lambda: "blank must be in label range")
+    torch._check(
+        input_lengths.numel() == batch_size,
+        lambda: "input_lengths must be of size batch_size",
+    )
+    torch._check(
+        target_lengths.numel() == batch_size,
+        lambda: "target_lengths must be of size batch_size",
+    )
+    if targets.dim() == 2:
+        torch._check(
+            targets.size(0) == batch_size,
+            lambda: "targets must have batch_size rows",
+        )
+
+    max_input_length = log_probs.size(0)
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    log_alpha_width = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(log_alpha_width, min=1)
+    return (
+        log_probs.new_empty((batch_size,)),
+        log_probs.new_empty((batch_size, max_input_length, log_alpha_width)),
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags

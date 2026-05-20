@@ -33,6 +33,7 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
+    DataDependentOutputException,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -2077,6 +2078,93 @@ class FakeTensorOperatorInvariants(TestCase):
             self.assertEqual(
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
+
+    def test_ctc_loss_backend_selectors_with_fake_cuda(self):
+        with FakeTensorMode() as fake_mode:
+
+            def fake_tensor(shape, dtype, device):
+                meta = torch.empty(shape, dtype=dtype, device="meta")
+                return FakeTensor(fake_mode, meta, torch.device(device))
+
+            log_probs = fake_tensor((2, 2, 3), torch.double, "cuda")
+            targets_cuda = fake_tensor((2,), torch.int32, "cuda")
+            targets_cpu = fake_tensor((2,), torch.int32, "cpu")
+            input_lengths = fake_tensor((2,), torch.int32, "cuda")
+            target_lengths = fake_tensor((2,), torch.int32, "cuda")
+            log_probs_float = fake_tensor((2, 2, 3), torch.float32, "cuda")
+
+            self.assertFalse(
+                torch.ops.aten._use_cudnn_ctc_loss.Tensor(
+                    log_probs, targets_cuda, input_lengths, target_lengths, 0
+                )
+            )
+            self.assertFalse(
+                torch.ops.aten._use_miopen_ctc_loss.Tensor(
+                    log_probs, targets_cuda, input_lengths, target_lengths, 0
+                )
+            )
+            self.assertFalse(
+                torch.ops.aten._use_cudnn_ctc_loss.default(
+                    log_probs, targets_cpu, [2, 2], [2, 0], 0
+                )
+            )
+            with (
+                patch("torch.backends.cudnn.is_available", return_value=True),
+                torch.backends.cudnn.flags(enabled=True),
+            ):
+                self.assertTrue(
+                    torch.ops.aten._use_cudnn_ctc_loss.default(
+                        log_probs_float, targets_cpu, [2, 2], [2, 0], 0
+                    )
+                )
+                self.assertFalse(
+                    torch.ops.aten._use_cudnn_ctc_loss.default(
+                        log_probs_float, targets_cpu, [1, 2], [2, 0], 0
+                    )
+                )
+                with self.assertRaises(DataDependentOutputException):
+                    torch.ops.aten._use_cudnn_ctc_loss.Tensor(
+                        log_probs_float,
+                        targets_cuda,
+                        input_lengths,
+                        target_lengths,
+                        0,
+                    )
+
+    def test_ctc_loss_tensor_fake_validates_static_inputs(self):
+        with FakeTensorMode() as fake_mode:
+
+            def fake_tensor(shape, dtype, device):
+                meta = torch.empty(shape, dtype=dtype, device="meta")
+                return FakeTensor(fake_mode, meta, torch.device(device))
+
+            log_probs = fake_tensor((2, 2, 3), torch.float32, "cuda")
+            log_probs_2d = fake_tensor((2, 3), torch.float32, "cuda")
+            log_probs_half = fake_tensor((2, 2, 3), torch.float16, "cuda")
+            targets = fake_tensor((2,), torch.int64, "cuda")
+            lengths = fake_tensor((2,), torch.int64, "cuda")
+            bool_lengths = fake_tensor((2,), torch.bool, "cuda")
+
+            with self.assertRaisesRegex(RuntimeError, "input_lengths must be integral"):
+                torch.ops.aten._ctc_loss.Tensor(
+                    log_probs, targets, bool_lengths, lengths, 0, False
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "target_lengths must be integral"
+            ):
+                torch.ops.aten._ctc_loss.Tensor(
+                    log_probs, targets, lengths, bool_lengths, 0, False
+                )
+            with self.assertRaisesRegex(RuntimeError, "log_probs must be 3-D"):
+                torch.ops.aten._ctc_loss.Tensor(
+                    log_probs_2d, targets, lengths, lengths, 0, False
+                )
+            with self.assertRaisesRegex(
+                RuntimeError, "log_probs must be float32 or float64"
+            ):
+                torch.ops.aten._ctc_loss.Tensor(
+                    log_probs_half, targets, lengths, lengths, 0, False
+                )
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     def test_move_module_under_fake(self):
