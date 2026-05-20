@@ -1226,9 +1226,7 @@ class BlockMask:
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
-        new_block_mask.dq_kv_order = self._slice_dq_kv_order(
-            self.dq_kv_order, index
-        )
+        new_block_mask.dq_kv_order = self._slice_dq_kv_order(self.dq_kv_order, index)
         new_block_mask.dq_kv_order_spt = self.dq_kv_order_spt
         if self.dq_write_order is not None and new_block_mask.dq_kv_order is None:
             dq_wo, dq_wo_full = _compute_dq_write_order_from_block_mask(
