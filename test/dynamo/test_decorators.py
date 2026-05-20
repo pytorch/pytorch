@@ -44,10 +44,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_disable_for_custom_op(self):
         import torch.library
-        from torch.library import Library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        try:
+        with torch.library._scoped_library("foo", "DEF") as foo:
             foo.define("custom(Tensor self) -> Tensor")
 
             # Dynamic shape data dependent operator. For static shape compilation, Dynamo
@@ -77,8 +75,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 self.assertEqual(ref, res)
             finally:
                 torch.ops.foo.custom = orig_custom
-        finally:
-            foo._destroy()
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():

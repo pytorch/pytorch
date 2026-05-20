@@ -44,8 +44,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
       ctx->decref();
     }
   }
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -298,17 +297,13 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   at::DeviceGuard device_guard(storage.device());
   THPObjectPtr tuple(PyTuple_New(8));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
-  THPObjectPtr _handle(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _handle(Py_NewRef(Py_None));
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
-  THPObjectPtr _ref_counter(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _ref_counter(Py_NewRef(Py_None));
   THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
-  THPObjectPtr _event_handle(Py_None);
-  Py_INCREF(Py_None);
-  THPObjectPtr _event_sync_required(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _event_handle(Py_NewRef(Py_None));
+  THPObjectPtr _event_sync_required(Py_NewRef(Py_None));
   if (storage.data()) {
     auto shandle =
         c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
@@ -627,7 +622,7 @@ static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
-  if (storage.device_type() == at::kCUDA) {
+  if (storage.device_type() != at::kCPU && storage.device_type() != at::kMeta) {
     Py_RETURN_TRUE;
   }
   if (at::MapAllocator::fromDataPtr(storage.data_ptr()) ||
