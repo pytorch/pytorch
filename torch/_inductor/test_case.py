@@ -51,11 +51,17 @@ class TestCase(DynamoTestCase):
                 config.patch({"fx_graph_cache": True})
             )
 
-        if config.test_configs.max_mm_configs is None and self._max_mm_configs is not None:
+        if (
+            config.test_configs.max_mm_configs is None
+            and self._max_mm_configs is not None
+        ):
             self._inductor_test_stack.enter_context(
                 config.patch({"test_configs.max_mm_configs": self._max_mm_configs})
             )
-        if config.test_configs.max_flex_configs is None and self._max_flex_configs is not None:
+        if (
+            config.test_configs.max_flex_configs is None
+            and self._max_flex_configs is not None
+        ):
             self._inductor_test_stack.enter_context(
                 config.patch({"test_configs.max_flex_configs": self._max_flex_configs})
             )
