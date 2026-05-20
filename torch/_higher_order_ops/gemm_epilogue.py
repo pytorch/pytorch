@@ -1592,16 +1592,10 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == torch.ops.flex_gemm.nvfp4_e4m3_scale.default:
-                        source = _quack_cute_arg(node.args[0], env)
-                        raw_scale = f"({source} / 6.0)"
-                        env[node] = _emit_quack_tensorssa_expr(
-                            kernel,
-                            f"cute.where({raw_scale} < 0.015625, 0.015625, "
-                            f"cute.where({raw_scale} > 448.0, 448.0, {raw_scale}))",
-                            like=source,
+                        raise NotImplementedError(
+                            "QUACK nvfp4_e4m3_scale feeding the main output requires "
+                            "E4M3 rounding semantics and is not implemented yet"
                         )
-                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
-                        continue
                     env[node] = _quack_cute_call_function(
                         node.target,
                         tuple(_quack_cute_arg(arg, env) for arg in node.args),

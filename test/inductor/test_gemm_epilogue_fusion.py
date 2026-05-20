@@ -2471,6 +2471,31 @@ class GemmEpilogueFusionTests(TestCase):
             "extern_kernels.mm"
         ).run(code)
 
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_nvfp4_scale_feeding_main(self):
+        M = 64
+        N = 64
+        group = 16
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(M, -1, group)
+                scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
+                q = (x / scale.float()).clamp(min=-6.0, max=6.0).view(M, N)
+                return q, scale.view(M, -1)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "E4M3 rounding semantics"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_addmm_fp8_main_output_fuses(self):
