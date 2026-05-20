@@ -244,9 +244,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
   // gather into dst. This reduces the overhead of doing an additional blit for most cases.
-  // Skip this shortcut when src has an unresolved neg bit, since the gather kernel does
-  // not apply negation (only conjugation) and we need the cast path below to materialize it.
-  bool returnGatherOutput = dst_.is_contiguous() && src_.is_neg() == dst_.is_neg();
+  bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());

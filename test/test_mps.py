@@ -14677,16 +14677,32 @@ class TestComplex(TestCase):
         x = torch.tensor([1 + 2j, 3 - 4j], device="mps")
         self.assertEqual(x.conj().imag.cpu(), x.cpu().conj().imag)
 
-    def test_neg_bit_materialized_by_clone(self):
+    def test_neg_bit(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184379
-        # clone() must materialize the neg bit on MPS so downstream consumers
-        # (the math-bit fallback, .cpu() via _to_copy, etc.) see negated data.
-        y = torch.tensor([1.0, 2.0, 3.0], device="mps")._neg_view()
-        self.assertTrue(y.is_neg())
-        expected = torch.tensor([-1.0, -2.0, -3.0])
-        self.assertEqual(y.clone(), expected)
-        self.assertEqual(y.resolve_neg(), expected)
-        self.assertEqual(y.cpu(), expected)
+        # MPS copy paths (the direct blit, the cast path, and the gather/scatter
+        # kernels) must all materialize the neg bit -- previously only the conj
+        # bit was honored, so `.imag` of a conjugate view, clone, .cpu(), and
+        # copy_ into/out-of non-contiguous tensors silently returned un-negated
+        # data.
+        xforms = [(lambda t: t, "contig"), (lambda t: t.T, "T")]
+        torch.manual_seed(0)
+        v_cpu = torch.randn(4, 4)
+        v = v_cpu.to("mps")
+        for src_xform, src_label in xforms:
+            for dst_xform, dst_label in xforms:
+                src_mps = src_xform(v)._neg_view()
+                src_cpu = src_xform(v_cpu)._neg_view()
+                expected = src_cpu.clone()
+                dst_mps = dst_xform(torch.empty(4, 4, device="mps"))
+                dst_cpu = dst_xform(torch.empty(4, 4))
+                dst_mps.copy_(src_mps)
+                dst_cpu.copy_(src_cpu)
+                with self.subTest(src=src_label, dst=dst_label, op="clone"):
+                    self.assertEqual(src_mps.clone().cpu(), expected)
+                with self.subTest(src=src_label, dst=dst_label, op="cpu"):
+                    self.assertEqual(src_mps.cpu(), expected)
+                with self.subTest(src=src_label, dst=dst_label, op="copy_"):
+                    self.assertEqual(dst_mps.cpu(), dst_cpu)
 
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
