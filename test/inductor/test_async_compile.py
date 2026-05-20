@@ -230,6 +230,31 @@ class TestAsyncCompile(TestCase):
         self.assertNotIn("kernel_name", original_kernel.inductor_meta)
         self.assertEqual(mod.triton_.inductor_meta["kernel_name"], "triton_")
 
+    def test_with_kernel_name_after_launchers(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"kernel_name": "old_name"}
+        autotuner.launchers = [object()]
+        autotuner._debug_call = object()
+        autotuner._profiler_ctx = object()
+        autotuner._cached_launcher = object()
+        autotuner.cuda_kernel_saved = True
+        autotuner.cpu_kernel_saved = True
+        autotuner._plugins = []
+
+        renamed = autotuner.with_kernel_name("new_name")
+
+        self.assertIsNot(renamed, autotuner)
+        self.assertEqual(autotuner.inductor_meta["kernel_name"], "old_name")
+        self.assertEqual(renamed.inductor_meta["kernel_name"], "new_name")
+        self.assertIs(renamed.launchers, autotuner.launchers)
+        self.assertIsNone(renamed._debug_call)
+        self.assertIsNone(renamed._profiler_ctx)
+        self.assertIsNone(renamed._cached_launcher)
+        self.assertFalse(renamed.cuda_kernel_saved)
+        self.assertFalse(renamed.cpu_kernel_saved)
+
     @requires_gpu()
     @requires_triton()
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")

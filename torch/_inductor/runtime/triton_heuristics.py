@@ -603,13 +603,17 @@ class CachingAutotuner(KernelInterface):
         if self.inductor_meta.get("kernel_name") == kernel_name:
             return self
 
-        result = copy.copy(self)
+        # Do not use copy.copy(): it goes through __getstate__, which rejects
+        # autotuners after launchers have been materialized.
+        result = object.__new__(type(self))
+        result.__dict__ = self.__dict__.copy()
         result.inductor_meta = {**self.inductor_meta, "kernel_name": kernel_name}
         result._debug_call = None
         result._profiler_ctx = None
         result._cached_launcher = None
         result.cuda_kernel_saved = False
         result.cpu_kernel_saved = False
+        result._plugins = get_caching_autotuner_plugins(result)
         return result
 
     def precompile(
