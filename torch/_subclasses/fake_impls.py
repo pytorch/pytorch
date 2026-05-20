@@ -1628,7 +1628,11 @@ def bincount(
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-    return inputs.new_empty(new_size)  # type: ignore[return]
+    if weights is None:
+        return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
+
+    dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
+    return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
