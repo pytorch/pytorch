@@ -100,6 +100,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import (
+    _RICHCOMPARE_OPS,
     AttrMutationKind,
     MutationType,
     NO_SUCH_SUBOBJ,
@@ -2345,12 +2346,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip comparison ops: they go through richcompare_impl on the
             # UserDefined*Variable subclass, which handles _base_vt
             # unwrapping and avoids tracing tensor elements via list_cmp.
-            _CMP_OPS = {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
             if (
                 self._base_vt is not None
                 and self._base_methods is not None
                 and method in self._base_methods
-                and name not in _CMP_OPS
+                and name not in _RICHCOMPARE_OPS
             ):
                 return self._base_vt.call_method(tx, name, args, kwargs)
 

@@ -1075,6 +1075,8 @@ def object_richcompare(
         return ConstantVariable.create(NotImplemented)
     elif op == "__ne__":
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
+        # Safe to call as_python_constant(): only identity-based types use
+        # object_richcompare, so eq_result is always True or NotImplemented.
         eq_result = self.richcompare_impl(tx, other, "__eq__")
         if is_richcompare_not_implemented(eq_result):
             return ConstantVariable.create(NotImplemented)
