@@ -1221,6 +1221,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
             return value
         if isinstance(value, (int, float)):
             return value
+        # SymPy numbers expose is_integer as a tri-state property.
         if getattr(value, "is_integer", None) is False:
             return float(value)
         try:
