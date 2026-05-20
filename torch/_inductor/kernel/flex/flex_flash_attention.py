@@ -31,7 +31,22 @@ from .common import (
 # Match one vectorized mask_mod call to one 32-bit R2P keep mask; on Blackwell,
 # vec32 aux loads are close to vec16 and keep the packed-mask ABI simple.
 DEFAULT_MASK_MOD_VEC_SIZE = 32
+# This is a little adhock, we use this as a cap -
+# Intersecting two interval unions distributes over both sides:
+#   (A0 OR A1 OR A2) AND (B0 OR B1 OR B2)
+# becomes up to 9 pairwise intersections. Common masks produce one or two
+# intervals; we can reveisit if a case comes up. This allows thought to produce bitshift code
 MAX_PACKED_MASK_INTERVALS = 8
+LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
+    torch.ops.aten.add.Tensor: "+",
+    torch.ops.aten.add.Scalar: "+",
+    torch.ops.aten.sub.Tensor: "-",
+    torch.ops.aten.sub.Scalar: "-",
+    torch.ops.aten.mul.Tensor: "*",
+    torch.ops.aten.mul.Scalar: "*",
+    torch.ops.aten.remainder.Tensor: "%",
+    torch.ops.aten.remainder.Scalar: "%",
+}
 
 
 def is_mask_mod_vec_supported(cuda_major: int | None) -> bool:
@@ -58,18 +73,42 @@ class FlexFlashConfig:
 
 
 class AuxLoadVecInfo(NamedTuple):
+    """Vectorization result for a captured aux tensor load.
+
+    Args:
+        vec_size: Safe KV-lane vector width, or ``None`` when the load cannot be
+            vectorized.
+        is_direct_contiguous: Whether the load is a contiguous vector load rather
+            than a lane-uniform scalar load.
+    """
+
     vec_size: int | None
     is_direct_contiguous: bool
 
 
 @dataclasses.dataclass(frozen=True)
 class PackedMaskInterval:
+    """Half-open lane interval used to synthesize one packed mask word.
+
+    Args:
+        lower: Rendered CuteDSL expression for the inclusive lower bound.
+        upper: Rendered CuteDSL expression for the exclusive upper bound.
+    """
+
     lower: str
     upper: str
 
 
 @dataclasses.dataclass(frozen=True)
 class LaneIndexAnalysis:
+    """SymPy symbols used to analyze one vectorized group of KV lanes.
+
+    Args:
+        q_idx: Base query index from the mask graph.
+        kv_idx: Base key/value index from the mask graph.
+        lane: Per-lane offset in the packed 32-lane mask.
+    """
+
     q_idx: sympy.Symbol
     kv_idx: sympy.Symbol
     lane: sympy.Symbol
@@ -81,6 +120,13 @@ class LaneIndexAnalysis:
 
 @dataclasses.dataclass(frozen=True)
 class AuxIndexedTensor:
+    """Captured aux tensor together with indices accumulated from partial indexing.
+
+    Args:
+        buffer: The original captured tensor being indexed.
+        indices: Prefix indices already applied by earlier partial index ops.
+    """
+
     buffer: TensorBox
     indices: tuple[object, ...]
 
@@ -165,6 +211,7 @@ def select_mask_mod_vec_size(
     graph_module: GraphModule | None,
     other_buffers: Sequence[TensorBox],
 ) -> int | None:
+    """Use mask_mod's (b, h, q, kv) ABI; vec32 matches the packed R2P mask width."""
     if not has_mask_mod or not supports_mask_mod_vec:
         return None
     if not has_mask_aux_tensors:
@@ -191,6 +238,7 @@ def select_score_mod_vec_size(
     graph_module: GraphModule | None,
     other_buffers: Sequence[TensorBox],
 ) -> int | None:
+    """Use score_mod's (score, b, h, q, kv) ABI; vec8 is the SM100 CuTe kernel cap."""
     if not has_score_mod or not has_aux_tensors:
         return None
     if not is_sm100_or_later:
@@ -694,32 +742,48 @@ class PackedMaskAnalyzer:
     ) -> str | None:
         """Return CuteDSL code for a scalar expression that is uniform across KV lanes."""
         if isinstance(expr, int | sympy.Integer):
-            index = int(expr)
-            if for_index and index < 0:
-                if index_dim_size is None:
-                    return None
-                index = V.graph.sizevars.guard_int(index + index_dim_size)
-            return f"cutlass.Int32({index})"
+            return self._literal_cute_expr(
+                int(expr), for_index=for_index, index_dim_size=index_dim_size
+            )
         if not isinstance(expr, torch.fx.Node):
             return None
+
         if expr is self.q_idx:
             return "q_idx[0]"
         if expr is self.kv_idx:
             return None
-        if len(self.placeholders) >= 2 and expr is self.placeholders[0]:
-            return "b_idx[0]"
-        if len(self.placeholders) >= 2 and expr is self.placeholders[1]:
-            return "h_idx[0]"
+        if len(self.placeholders) >= 2:
+            if expr is self.placeholders[0]:
+                return "b_idx[0]"
+            if expr is self.placeholders[1]:
+                return "h_idx[0]"
         if expr in self.placeholders[4:]:
             return f"aux_tensors[{self.placeholders[4:].index(expr)}]"
-        if expr.op != "call_function":
-            return None
 
         if is_aten_index_node(expr):
             return self._lane_uniform_index_cute_expr(
                 expr, for_index=for_index, index_dim_size=index_dim_size
             )
+        return self._lane_uniform_binary_cute_expr(expr)
 
+    def _literal_cute_expr(
+        self,
+        index: int,
+        *,
+        for_index: bool,
+        index_dim_size: int | sympy.Expr | None,
+    ) -> str | None:
+        """Render an integer literal, wrapping negative literals used as indices."""
+        if for_index and index < 0:
+            if index_dim_size is None:
+                return None
+            index = V.graph.sizevars.guard_int(index + index_dim_size)
+        return f"cutlass.Int32({index})"
+
+    def _lane_uniform_binary_cute_expr(self, expr: torch.fx.Node) -> str | None:
+        """Render simple arithmetic whose operands are both KV-lane-uniform."""
+        if expr.op != "call_function":
+            return None
         args = expr.args
         if len(args) < 2:
             return None
@@ -727,21 +791,14 @@ class PackedMaskAnalyzer:
         rhs = self.lane_uniform_cute_expr(args[1])
         if lhs is None or rhs is None:
             return None
-        match expr.target:
-            case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
-                return f"({lhs} + {rhs})"
-            case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
-                return f"({lhs} - {rhs})"
-            case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
-                return f"({lhs} * {rhs})"
-            case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
-                return f"({lhs} % {rhs})"
-            case torch.ops.aten.div.Tensor_mode if (
-                expr.kwargs.get("rounding_mode") == "floor"
-            ):
+        if expr.target is torch.ops.aten.div.Tensor_mode:
+            if expr.kwargs.get("rounding_mode") == "floor":
                 return f"({lhs} // {rhs})"
-            case _:
-                return None
+            return None
+        op = LANE_UNIFORM_BINARY_OPS.get(expr.target)
+        if op is None:
+            return None
+        return f"({lhs} {op} {rhs})"
 
     def _lane_uniform_index_cute_expr(
         self,
@@ -752,9 +809,10 @@ class PackedMaskAnalyzer:
     ) -> str | None:
         """Render a KV-lane-uniform aux tensor index expression.
 
-        For example, ``offsets[doc_ids[b, q_idx]]`` becomes a nested CuteDSL
-        load from ``aux_tensors``. Dynamic aux-derived indices are wrapped for
-        negative values before indexing to preserve PyTorch index semantics.
+        Packed mask lowering uses these scalar bounds to generate bitshift masks.
+        For example, ``offsets[doc_ids[b, q_idx]]`` becomes a nested CuteDSL load
+        from ``aux_tensors``. Dynamic aux-derived indices are wrapped for negative
+        values before indexing to preserve PyTorch index semantics.
         """
         if fx_node_dtype(expr) not in (
             torch.int8,
