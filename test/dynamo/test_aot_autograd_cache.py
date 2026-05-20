@@ -3346,9 +3346,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         config2 = self.default_config()
-        config2.aot_id = 1
+        config2 = dataclasses.replace(config2, aot_id=1)
         config3 = self.default_config()
-        config3.fw_compiler = lambda gm, inputs: gm
+        config3 = dataclasses.replace(config3, fw_compiler=lambda gm, inputs: gm)
 
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
@@ -3358,13 +3358,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
     def test_to_cacheable_strips_runtime_only_fields(self):
         config = self.default_config()
-        config.fw_compiler = lambda gm, inputs: gm
-        config.bw_compiler = lambda gm, inputs: gm
-        config.partition_fn = lambda *args: args
-        config.decompositions = None
-        config.inference_compiler = lambda gm, inputs: gm
-        config.static_input_indices = [0]
-        config.precompile_backend_id = "backend"
+        config = dataclasses.replace(
+            config,
+            fw_compiler=lambda gm, inputs: gm,
+            bw_compiler=lambda gm, inputs: gm,
+            partition_fn=lambda *args: args,
+            decompositions=None,
+            inference_compiler=lambda gm, inputs: gm,
+            static_input_indices=[0],
+            precompile_backend_id="backend",
+        )
 
         cacheable = config.to_cacheable()
 
@@ -3381,11 +3384,15 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         base = self.gen_cache_key(fn, base_config)
 
         config_with_static_inputs = self.default_config()
-        config_with_static_inputs.static_input_indices = [0]
+        config_with_static_inputs = dataclasses.replace(
+            config_with_static_inputs, static_input_indices=[0]
+        )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_static_inputs))
 
         config_with_backend = self.default_config()
-        config_with_backend.precompile_backend_id = "backend"
+        config_with_backend = dataclasses.replace(
+            config_with_backend, precompile_backend_id="backend"
+        )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
     def test_different_graphs(self):
@@ -3406,7 +3413,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         config2 = self.default_config()
-        config2.dynamic_shapes = False
+        config2 = dataclasses.replace(config2, dynamic_shapes=False)
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
