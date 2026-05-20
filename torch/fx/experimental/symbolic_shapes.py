@@ -7049,6 +7049,23 @@ class ShapeEnv:
             expr = expr.xreplace(self.backed_var_to_val).xreplace(
                 self.real_tensor_prop_unbacked_vals
             )
+        else:
+            # SingletonInt encodes jagged NestedTensor dimensions.  Some
+            # relations are statically decidable and should not become guards
+            # on their unguardable ephemeral sources.
+            singleton_int_replacements = {
+                s: val
+                for s in expr.free_symbols
+                if isinstance((val := self.backed_var_to_val.get(s)), SingletonInt)
+            }
+            if singleton_int_replacements:
+                try:
+                    singleton_int_expr = expr.xreplace(singleton_int_replacements)
+                except (NotImplementedError, ValueError):
+                    pass
+                else:
+                    if not singleton_int_expr.atoms(SingletonInt):
+                        expr = singleton_int_expr
 
         expr = canonicalize_bool_expr(expr)
 

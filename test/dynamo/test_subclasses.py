@@ -3923,6 +3923,15 @@ class GraphModule(torch.nn.Module):
             different_offsets = torch.tensor([0, 1, 5, 10], dtype=torch.int64)
             self._validate_compile(fn, arg_fn=lambda: (values, different_offsets))
 
+    def test_in_graph_construction_layer_norm(self):
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return torch.nn.functional.layer_norm(nt, [12]).values().sum()
+
+        values = torch.randn(20, 12, requires_grad=True)
+        offsets = torch.tensor([0, 6, 11, 14, 20], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
     def test_in_graph_construction_from_input_2(self):
         # Construct two NJTs, both are passed as inputs
         def fn(values, offsets1, offsets2):
@@ -4068,8 +4077,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):
