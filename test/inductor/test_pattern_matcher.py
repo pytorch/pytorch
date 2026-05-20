@@ -25,6 +25,7 @@ from torch._inductor.pattern_matcher import (
     PatternPrettyPrinter,
     register_graph_pattern,
     register_replacement,
+    ReplacementPatternEntry,
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -1267,6 +1268,23 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
         FileCheck().check("extern_kernels.addmm(").run(code[0])
 
+    def test_unfuse_expanded_bias_addmm(self):
+        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
+        args = [
+            bias,
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+        self.assertEqual(bias.stride(0), 0)
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.addmm(*args).relu())
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
     @parametrize("inplace", [False, True])
     def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
         def fn(x, ws):
@@ -1540,7 +1558,8 @@ class TestPatternMatcher(TestCase):
             match.replace_by_example(repl, [inp, mat1, mat2])
 
         with inductor_config.patch(
-            pre_grad_custom_pass=lambda *args: test_pass.apply(*args)
+            pre_grad_custom_pass=lambda *args: test_pass.apply(*args),
+            pre_grad_pass_timing="early",
         ):
             counter = 0
             expected = fn(*copy.deepcopy(args))
@@ -1985,6 +2004,53 @@ class TestPatternMatcher(TestCase):
         # print(my_func_static(*inputs))
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
+
+    def test_nested_replacement_args_do_not_percolate_tags(self):
+        class DummyMatch:
+            def __init__(self, outputs):
+                self._outputs = outputs
+
+            def output_nodes(self):
+                return self._outputs
+
+            def erase_nodes(self):
+                pass
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        sin = graph.call_function(torch.ops.aten.sin.default, (x,))
+        old = graph.call_function(torch.ops.aten.add.Tensor, (sin, y))
+        graph.output(old)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def replacement(args):
+            a, b = args
+            return torch.mul(a, b)
+
+        replacement_gm = torch.fx.symbolic_trace(replacement)
+
+        old.meta["recompute"] = torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+        old.meta["ac_graph_id"] = 1
+
+        ReplacementPatternEntry.replace_with_graph(
+            DummyMatch([old]),
+            gm.graph,
+            replacement_gm,
+            args=[(sin, y)],
+        )
+
+        self.assertFalse(
+            "recompute" in sin.meta,
+            "recompute tag should not percolate past nested replacement inputs",
+        )
+        self.assertFalse(
+            "ac_graph_id" in sin.meta,
+            "ac_graph_id should not percolate past nested replacement inputs",
+        )
+        graph_str = str(gm.graph)
+        self.assertIn("torch.mul", graph_str)
+        self.assertIn("operator.getitem", graph_str)
 
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):
@@ -2739,6 +2805,115 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 count2 = sum(counters.get(counter_key, {}).values())
 
                 self.assertEqual(accumulated_count, count1 + count2)
+
+    def test_list_tensor_pattern_replacement(self):
+        with torch.library._scoped_library("_test_pm_list", "FRAGMENT") as lib:
+            lib.define("list_op(Tensor[] xs) -> Tensor[]")
+            lib.impl(
+                "list_op",
+                lambda xs: [x + 1 for x in xs],
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("_test_pm_list::list_op", lib=lib)
+            def list_op_fake(xs):
+                return xs
+
+            def src_pattern(xs: list[torch.Tensor]):
+                return torch.ops._test_pm_list.list_op.default(xs)
+
+            def target_pattern(xs: list[torch.Tensor]):
+                return xs
+
+            class Backend:
+                def __init__(self, example_inputs) -> None:
+                    self.pm = PatternMatcherPass()
+                    self.count = 0
+                    self.graph = None
+                    register_replacement(
+                        src_pattern,
+                        target_pattern,
+                        [example_inputs],
+                        fwd_only,
+                        self.pm,
+                    )
+
+                def __call__(self, gm, example_inputs):
+                    self.count = self.pm.apply(gm.graph)
+                    gm.graph.lint()
+                    gm.recompile()
+                    self.graph = gm.graph
+                    return gm.forward
+
+            def run_case(length):
+                torch._dynamo.reset()
+                backend = Backend([torch.empty(4, 5) for _ in range(length)])
+
+                def fn(xs):
+                    return torch.ops._test_pm_list.list_op.default(xs)
+
+                xs = [torch.randn(4, 5) for _ in range(length)]
+                result = torch.compile(fn, backend=backend)(xs)
+
+                self.assertEqual(backend.count, 1)
+                self.assertEqual(len(result), length)
+                for actual, expected in zip(result, xs):
+                    self.assertEqual(actual, expected)
+
+                if backend.graph is None:
+                    self.fail("Expected the custom backend to record a graph")
+                op_targets = [
+                    n.target for n in backend.graph.nodes if n.op == "call_function"
+                ]
+                self.assertNotIn(torch.ops._test_pm_list.list_op.default, op_targets)
+
+            run_case(1)
+            run_case(2)
+
+    def test_scalar_workaround_arg_survives_specific_match(self):
+        def src_pattern(x, dim):
+            xmax = x.amax(dim=dim, keepdim=True)
+            xsub = x - xmax
+            xexp = xsub.exp()
+            xsum = xexp.sum(dim=dim, keepdim=True)
+            return xexp / xsum
+
+        def target_pattern(x, dim):
+            return torch.softmax(x, dim=dim)
+
+        def fn(x):
+            xmax = x.amax(dim=1, keepdim=True)
+            xsub = x - xmax
+            xexp = xsub.exp()
+            xsum = xexp.sum(dim=1, keepdim=True)
+            return xexp / xsum
+
+        patterns = PatternMatcherPass()
+        dims = []
+
+        def extra_check(match):
+            dims.append(match.kwargs["dim"])
+            return True
+
+        register_replacement(
+            src_pattern,
+            target_pattern,
+            [torch.empty(4, 8)],
+            fwd_only,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround={"dim": -1},
+        )
+
+        x = torch.randn(4, 8)
+        gm = fwd_only(fn, [x])
+        count = patterns.apply(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(dims, [1])
+        self.assertEqual(gm(x), torch.softmax(x, dim=1))
 
     def test_opaque_obj_custom_op(self):
         with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
