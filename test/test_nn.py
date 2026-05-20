@@ -7438,47 +7438,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
-    @skipIfTorchDynamo(
-        "Under torch.compile, ``functional.linear_cross_entropy`` "
-        "intentionally auto-promotes ``options.allow_retain_graph`` "
-        "to True (Dynamo's autograd tracing doesn't preserve the "
-        "Python-level ``ctx._gi=None`` mutation that signals 'second "
-        "backward not supported'), so the second backward succeeds "
-        "instead of raising the expected error. Correctness under "
-        "compile is exercised through the retain-graph-True path."
-    )
-    def test_linear_cross_entropy_retain_graph_default_raises(self):
-        # Default mode mutates saved buffers; second .backward() must fail loudly.
-        options = nn.LinearCrossEntropyOptions(allow_retain_graph=False)
-        weight = torch.randn(4, 5, requires_grad=True)
-        inp = torch.randn(8, 5, requires_grad=True)
-        target = torch.randint(0, 4, (8,))
-        out = nn.functional.linear_cross_entropy(inp, weight, target, options=options)
-        out.backward(retain_graph=True)
-        self.assertIsNotNone(inp.grad)
-        self.assertEqual(inp.grad.shape, inp.shape)
-        with self.assertRaisesRegex(
-                RuntimeError, "retain_graph=True / double backward are not supported"
-        ):
-            out.backward(retain_graph=True)
-
-    def test_linear_cross_entropy_retain_graph_supported(self):
-        # allow_retain_graph=True clones precomputed gradients, so two
-        # .backward() calls give consistent results.
-        options = nn.LinearCrossEntropyOptions(allow_retain_graph=True)
-        weight = torch.randn(4, 5, requires_grad=True)
-        inp = torch.randn(8, 5, requires_grad=True)
-        target = torch.randint(0, 4, (8,))
-        out = nn.functional.linear_cross_entropy(inp, weight, target, options=options)
-        out.backward(retain_graph=True)
-        g1_inp = inp.grad.clone()
-        g1_w = weight.grad.clone()
-        inp.grad = None
-        weight.grad = None
-        out.backward(retain_graph=True)
-        self.assertEqual(inp.grad, g1_inp)
-        self.assertEqual(weight.grad, g1_w)
-
     def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
         """Pin the aspect_ratio heuristic's chunk size for representative shapes.
 
@@ -14992,6 +14951,46 @@ if __name__ == '__main__':
                 inp, weight, target, reduction="mean", options=None,
             )
         self.assertEqual(chunked, reference)
+
+    @skipIfTorchDynamo(
+        "Under torch.compile, F.linear_cross_entropy intentionally auto-"
+        "promotes options.allow_retain_graph to True (Dynamo's autograd "
+        "tracing doesn't preserve the Python-level ctx._gi=None mutation "
+        "that signals 'second backward not supported'), so the second "
+        "backward succeeds instead of raising. Correctness under compile "
+        "is exercised through the retain-graph-True path."
+    )
+    def test_linear_cross_entropy_retain_graph_default_raises(self, device):
+        # Default mode mutates saved buffers; second .backward() must fail loudly.
+        options = nn.LinearCrossEntropyOptions(allow_retain_graph=False)
+        weight = torch.randn(4, 5, device=device, requires_grad=True)
+        inp = torch.randn(8, 5, device=device, requires_grad=True)
+        target = torch.randint(0, 4, (8,), device=device)
+        out = nn.functional.linear_cross_entropy(inp, weight, target, options=options)
+        out.backward(retain_graph=True)
+        self.assertIsNotNone(inp.grad)
+        self.assertEqual(inp.grad.shape, inp.shape)
+        with self.assertRaisesRegex(
+                RuntimeError, "retain_graph=True / double backward are not supported"
+        ):
+            out.backward(retain_graph=True)
+
+    def test_linear_cross_entropy_retain_graph_supported(self, device):
+        # allow_retain_graph=True clones precomputed gradients, so two
+        # .backward() calls give consistent results.
+        options = nn.LinearCrossEntropyOptions(allow_retain_graph=True)
+        weight = torch.randn(4, 5, device=device, requires_grad=True)
+        inp = torch.randn(8, 5, device=device, requires_grad=True)
+        target = torch.randint(0, 4, (8,), device=device)
+        out = nn.functional.linear_cross_entropy(inp, weight, target, options=options)
+        out.backward(retain_graph=True)
+        g1_inp = inp.grad.clone()
+        g1_w = weight.grad.clone()
+        inp.grad = None
+        weight.grad = None
+        out.backward(retain_graph=True)
+        self.assertEqual(inp.grad, g1_inp)
+        self.assertEqual(weight.grad, g1_w)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
