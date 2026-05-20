@@ -17,7 +17,13 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import common_constant_types, istype, np, raise_args_mismatch
+from ..utils import (
+    common_constant_types,
+    istype,
+    np,
+    raise_args_mismatch,
+    unpack_iterable,
+)
 from .base import ValueMutationNew, VariableTracker
 
 
@@ -274,7 +280,7 @@ class ConstantVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            arg_unpacked = unpack_iterable(tx, args[0])
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
                 return ConstantVariable.create(self.value.join(arg_const))
@@ -594,6 +600,21 @@ class ConstantVariable(VariableTracker):
             return VariableTracker.build(tx, v + w)
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L588-L600
+        #   _Py_c_abs can set errno=ERANGE on overflow, which complex_abs
+        #   converts to OverflowError("absolute value too large").
+        # bool inherits nb_absolute from int via slot inheritance.
+        try:
+            return ConstantVariable.create(abs(self.value))
+        except OverflowError as e:
+            raise_observed_exception(OverflowError, tx, args=list(e.args))
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
