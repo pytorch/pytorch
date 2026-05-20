@@ -31,7 +31,6 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
-from ..utils import unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
@@ -93,7 +92,7 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [unpack_iterable(tx, arg) for arg in args]
+            seqs = [arg.force_unpack_var_sequence(tx) for arg in args]
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
@@ -106,9 +105,10 @@ class ItertoolsVariable(VariableTracker):
             self.value is itertools.combinations
             and not kwargs
             and len(args) == 2
+            and args[0].has_unpack_var_sequence(tx)
             and args[1].is_python_constant()
         ):
-            iterable = unpack_iterable(tx, args[0])
+            iterable = args[0].unpack_var_sequence(tx)
             r = args[1].as_python_constant()
 
             items = []
@@ -147,7 +147,9 @@ class ItertoolsVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-            if len(args) != 1:
+            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+            else:
                 unimplemented(
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
@@ -160,7 +162,6 @@ class ItertoolsVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            seq = unpack_iterable(tx, args[0])
 
             if "key" in kwargs:
 
@@ -236,7 +237,9 @@ class ItertoolsVariable(VariableTracker):
                 r = None
             items = [
                 variables.TupleVariable(list(item))
-                for item in itertools.permutations(unpack_iterable(tx, args[0]), r)
+                for item in itertools.permutations(
+                    args[0].force_unpack_var_sequence(tx), r
+                )
             ]
             return variables.ListIteratorVariable(
                 items,  # type: ignore[arg-type]
