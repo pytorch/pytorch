@@ -20,6 +20,7 @@ from torch._inductor.kernel.flex.flex_flash_attention import (
     direct_aux_load_vec_size_and_kind,
     ensure_flash_available,
     HierarchicalIndex,
+    select_packed_mask_intervals,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
@@ -446,6 +447,335 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 self._select_mask_mod_vec_size_for_test(graph_module, buffers),
                 expected,
             )
+
+    def _expected_packed_mask_interval(self, case_name, q_idx, kv_idx, lane):
+        match case_name:
+            case "causal":
+                return q_idx >= kv_idx + lane
+            case "strict_causal":
+                return q_idx > kv_idx + lane
+            case "sliding_window":
+                return q_idx >= kv_idx + lane and q_idx - (kv_idx + lane) <= 256
+            case "duplicate_sliding_window":
+                return q_idx >= kv_idx + lane and q_idx - (kv_idx + lane) <= 16
+            case "disjoint_or":
+                return kv_idx + lane in (q_idx, q_idx + 2)
+            case "block_equality" | "reversed_block_equality":
+                return q_idx // 16 == (kv_idx + lane) // 16
+            case "always_false":
+                return False
+            case _:
+                raise AssertionError(case_name)
+
+    def _eval_packed_mask_intervals(self, intervals, q_idx, kv_idx):
+        def eval_index(expr):
+            source = (
+                expr.replace("cutlass.Int32", "")
+                .replace("q_idx[0]", "q_idx")
+                .replace("kv_idx[0]", "kv_idx")
+            )
+            return int(
+                eval(
+                    source,
+                    {"__builtins__": {}},
+                    {"max": max, "min": min, "q_idx": q_idx, "kv_idx": kv_idx},
+                )
+            )
+
+        mask = 0
+        for interval in intervals:
+            lower = eval_index(interval.lower)
+            upper = eval_index(interval.upper)
+            for lane in range(32):
+                if lower <= lane < upper:
+                    mask |= 1 << lane
+        return mask
+
+    @parametrize(
+        "case_name",
+        [
+            "causal",
+            "strict_causal",
+            "sliding_window",
+            "duplicate_sliding_window",
+            "disjoint_or",
+            "block_equality",
+            "reversed_block_equality",
+            "always_false",
+            "batch_dependent",
+        ],
+    )
+    def test_packed_mask_interval_selector(self, case_name):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        full = graph.call_function(
+            torch.ops.aten.full.default,
+            ([], True),
+            {"dtype": torch.bool, "layout": torch.strided, "device": "cuda"},
+        )
+        false = graph.call_function(
+            torch.ops.aten.full.default,
+            ([], False),
+            {"dtype": torch.bool, "layout": torch.strided, "device": "cuda"},
+        )
+        causal = graph.call_function(torch.ops.aten.ge.Tensor, (q_idx, kv_idx))
+        distance = graph.call_function(torch.ops.aten.sub.Tensor, (q_idx, kv_idx))
+        match case_name:
+            case "causal":
+                output = causal
+            case "strict_causal":
+                output = graph.call_function(torch.ops.aten.gt.Tensor, (q_idx, kv_idx))
+            case "sliding_window":
+                in_window = graph.call_function(
+                    torch.ops.aten.le.Scalar, (distance, 256)
+                )
+                output = graph.call_function(
+                    torch.ops.aten.bitwise_and.Tensor,
+                    (
+                        graph.call_function(
+                            torch.ops.aten.bitwise_and.Tensor, (full, in_window)
+                        ),
+                        causal,
+                    ),
+                )
+            case "duplicate_sliding_window":
+                wide_window = graph.call_function(
+                    torch.ops.aten.le.Scalar, (distance, 256)
+                )
+                narrow_window = graph.call_function(
+                    torch.ops.aten.le.Scalar, (distance, 16)
+                )
+                output = graph.call_function(
+                    torch.ops.aten.bitwise_and.Tensor,
+                    (
+                        graph.call_function(
+                            torch.ops.aten.bitwise_and.Tensor, (wide_window, causal)
+                        ),
+                        narrow_window,
+                    ),
+                )
+            case "disjoint_or":
+                q_plus_2 = graph.call_function(torch.ops.aten.add.Scalar, (q_idx, 2))
+                eq_q = graph.call_function(torch.ops.aten.eq.Tensor, (kv_idx, q_idx))
+                eq_q_plus_2 = graph.call_function(
+                    torch.ops.aten.eq.Tensor, (kv_idx, q_plus_2)
+                )
+                output = graph.call_function(
+                    torch.ops.aten.bitwise_or.Tensor, (eq_q, eq_q_plus_2)
+                )
+            case "block_equality":
+                q_block = graph.call_function(
+                    torch.ops.aten.div.Tensor_mode,
+                    (q_idx, 16),
+                    {"rounding_mode": "floor"},
+                )
+                kv_block = graph.call_function(
+                    torch.ops.aten.div.Tensor_mode,
+                    (kv_idx, 16),
+                    {"rounding_mode": "floor"},
+                )
+                output = graph.call_function(
+                    torch.ops.aten.eq.Tensor, (q_block, kv_block)
+                )
+            case "reversed_block_equality":
+                q_block = graph.call_function(
+                    torch.ops.aten.div.Tensor_mode,
+                    (q_idx, 16),
+                    {"rounding_mode": "floor"},
+                )
+                kv_block = graph.call_function(
+                    torch.ops.aten.div.Tensor_mode,
+                    (kv_idx, 16),
+                    {"rounding_mode": "floor"},
+                )
+                output = graph.call_function(
+                    torch.ops.aten.eq.Tensor, (kv_block, q_block)
+                )
+            case "always_false":
+                output = false
+            case "batch_dependent":
+                output = graph.call_function(torch.ops.aten.ge.Tensor, (b, kv_idx))
+            case _:
+                raise AssertionError(case_name)
+        graph.output(output)
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+        if case_name == "batch_dependent":
+            self.assertIsNone(intervals)
+            return
+        self.assertIsNotNone(intervals)
+        for q in (0, 15, 16, 31, 32, 127, 256):
+            for kv in (0, 16, 31, 32, 64, 127, 255, 288):
+                expected_mask = sum(
+                    int(self._expected_packed_mask_interval(case_name, q, kv, lane))
+                    << lane
+                    for lane in range(32)
+                )
+                self.assertEqual(
+                    self._eval_packed_mask_intervals(intervals, q, kv), expected_mask
+                )
+
+    def _set_node_dtype(self, node, dtype, shape=()):
+        node.meta["tensor_meta"] = SimpleNamespace(dtype=dtype, shape=shape)
+
+    def test_packed_mask_interval_selector_rejects_non_affine_floor_div_lane(self):
+        graph = torch.fx.Graph()
+        graph.placeholder("b")
+        graph.placeholder("h")
+        graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        lhs = graph.call_function(torch.ops.aten.sub.Scalar, (kv_idx, 17))
+        shifted_kv = graph.call_function(torch.ops.aten.add.Scalar, (kv_idx, 74))
+        rhs = graph.call_function(
+            torch.ops.aten.div.Tensor_mode,
+            (shifted_kv, 2),
+            {"rounding_mode": "floor"},
+        )
+        graph.output(graph.call_function(torch.ops.aten.le.Tensor, (lhs, rhs)))
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNone(intervals)
+
+    def test_packed_mask_interval_selector_rejects_non_integral_aux_bound(self):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        thresholds = graph.placeholder("thresholds")
+        start = graph.call_function(
+            torch.ops.aten.index.Tensor, (thresholds, [b, q_idx])
+        )
+        self._set_node_dtype(start, torch.float32)
+        above_start = graph.call_function(torch.ops.aten.ge.Tensor, (kv_idx, start))
+        causal = graph.call_function(torch.ops.aten.le.Tensor, (kv_idx, q_idx))
+        graph.output(
+            graph.call_function(
+                torch.ops.aten.bitwise_and.Tensor, (above_start, causal)
+            )
+        )
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNone(intervals)
+
+    def test_packed_mask_interval_selector_supports_int64_aux_index_load(self):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        doc_ids = graph.placeholder("doc_ids")
+        offsets = graph.placeholder("offsets")
+        self._set_node_dtype(doc_ids, torch.int64, (1, 128))
+        self._set_node_dtype(offsets, torch.int32, (5,))
+        doc = graph.call_function(torch.ops.aten.index.Tensor, (doc_ids, [b, q_idx]))
+        self._set_node_dtype(doc, torch.int64)
+        start = graph.call_function(torch.ops.aten.index.Tensor, (offsets, [doc]))
+        self._set_node_dtype(start, torch.int32)
+        above_start = graph.call_function(torch.ops.aten.ge.Tensor, (kv_idx, start))
+        causal = graph.call_function(torch.ops.aten.le.Tensor, (kv_idx, q_idx))
+        graph.output(
+            graph.call_function(
+                torch.ops.aten.bitwise_and.Tensor, (above_start, causal)
+            )
+        )
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNotNone(intervals)
+        self.assertEqual(len(intervals), 1)
+        self.assertIn("aux_tensors[0][b_idx[0], q_idx[0]]", intervals[0].lower)
+        self.assertIn("aux_tensors[1]", intervals[0].lower)
+        self.assertIn(" if ", intervals[0].lower)
+
+    def test_packed_mask_interval_selector_rejects_interval_explosion(self):
+        graph = torch.fx.Graph()
+        graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        terms = []
+        for offset in range(9):
+            shifted_q = graph.call_function(torch.ops.aten.add.Scalar, (q_idx, offset))
+            terms.append(
+                graph.call_function(torch.ops.aten.eq.Tensor, (kv_idx, shifted_q))
+            )
+        expr = terms[0]
+        for term in terms[1:]:
+            expr = graph.call_function(torch.ops.aten.bitwise_or.Tensor, (expr, term))
+        graph.output(expr)
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNone(intervals)
+
+    def test_packed_mask_interval_selector_rejects_partial_aux_index_bound(self):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        table = graph.placeholder("table")
+        doc_ids = graph.placeholder("doc_ids")
+        self._set_node_dtype(table, torch.int32, (1, 5))
+        self._set_node_dtype(doc_ids, torch.int32, (1, 128))
+        row = graph.call_function(torch.ops.aten.index.Tensor, (table, [b]))
+        doc = graph.call_function(torch.ops.aten.index.Tensor, (doc_ids, [b, q_idx]))
+        self._set_node_dtype(doc, torch.int32)
+        start = graph.call_function(torch.ops.aten.index.Tensor, (row, [doc]))
+        self._set_node_dtype(start, torch.int32)
+        above_start = graph.call_function(torch.ops.aten.ge.Tensor, (kv_idx, start))
+        causal = graph.call_function(torch.ops.aten.le.Tensor, (kv_idx, q_idx))
+        graph.output(
+            graph.call_function(
+                torch.ops.aten.bitwise_and.Tensor, (above_start, causal)
+            )
+        )
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNone(intervals)
+
+    def test_packed_mask_interval_selector_aux_loaded_lower_bound(self):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        doc_ids = graph.placeholder("doc_ids")
+        offsets = graph.placeholder("offsets")
+        self._set_node_dtype(doc_ids, torch.int32, (1, 128))
+        self._set_node_dtype(offsets, torch.int32, (5,))
+        doc = graph.call_function(torch.ops.aten.index.Tensor, (doc_ids, [b, q_idx]))
+        self._set_node_dtype(doc, torch.int32)
+        start = graph.call_function(torch.ops.aten.index.Tensor, (offsets, [doc]))
+        self._set_node_dtype(start, torch.int32)
+        above_start = graph.call_function(torch.ops.aten.ge.Tensor, (kv_idx, start))
+        causal = graph.call_function(torch.ops.aten.le.Tensor, (kv_idx, q_idx))
+        graph.output(
+            graph.call_function(
+                torch.ops.aten.bitwise_and.Tensor, (above_start, causal)
+            )
+        )
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(torch.fx.GraphModule({}, graph))
+
+        self.assertIsNotNone(intervals)
+        self.assertEqual(len(intervals), 1)
+        self.assertIn("aux_tensors[0]", intervals[0].lower)
+        self.assertIn("aux_tensors[1]", intervals[0].lower)
+        self.assertIn("q_idx[0]", intervals[0].upper)
 
     @parametrize("chained", [False, True], name_fn=lambda chained: str(chained))
     def test_score_mod_vec_size_selector_rejects_score_placeholder_index(self, chained):
@@ -1952,6 +2282,143 @@ class TestFlexFlash(InductorTestCase):
             )
 
         self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, expect_autovec=False)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("utils.shr_u32", src)
+        self.assertIn("utils.shl_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_document_offsets_uses_packed_shift_mask(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        doc_ids = (positions // 32).expand(1, -1).contiguous()
+        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
+
+        def fn(q, k, v, doc_ids, offsets):
+            def mask_mod(b, _h, q_idx, kv_idx):
+                doc = doc_ids[b, q_idx]
+                start = offsets[doc]
+                return (kv_idx >= start) & (kv_idx <= q_idx)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v, doc_ids, offsets)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, doc_ids, offsets
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("utils.shr_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_packed_mask_with_score_capture(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        doc_ids = (positions // 32).expand(1, -1).contiguous()
+        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
+
+        def fn(q, k, v, score_bias, doc_ids, offsets):
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(b, _h, q_idx, kv_idx):
+                doc = doc_ids[b, q_idx]
+                start = offsets[doc]
+                return (kv_idx >= start) & (kv_idx <= q_idx)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, score_bias, doc_ids, offsets)
+        expected = fn(*args)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("score_mod.__vec_size__", src)
+        self.assertIn("utils.shr_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),

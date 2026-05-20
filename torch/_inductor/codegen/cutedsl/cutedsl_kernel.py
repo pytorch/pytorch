@@ -34,6 +34,7 @@ from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
+from .lane_analysis import classify_lane_expr
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -241,6 +242,7 @@ class CuteDSLTemplateKernel(Kernel):
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
+            "add_tensor_inputs": self.add_tensor_inputs,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
             "set_cute_hash": self.set_cute_hash,
@@ -406,6 +408,15 @@ class CuteDSLTemplateKernel(Kernel):
     def get_tensor_buffers(self):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
+
+    def add_tensor_inputs(self, buffers):
+        buffer_names = []
+        for buffer in buffers:
+            remapped_name = self.args.input(buffer.get_name())
+            if remapped_name not in self.collected_tensor_buffers:
+                self.collected_tensor_buffers.append(remapped_name)
+            buffer_names.append(remapped_name)
+        return buffer_names
 
     def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
@@ -886,20 +897,16 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         if self.vector_load_config.vec_size <= 1:
             return True, False, None
 
-        lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
+        lane_info = classify_lane_expr(
             semantic_expr,
             self.vector_load_config.index,
-        )
-        contiguous_width = self._aligned_contiguous_width(
-            semantic_expr,
-            self.vector_load_config.index,
-            lane_contiguity,
-            self.vector_load_config.vec_size,
+            max_width=self.vector_load_config.vec_size,
+            uniform_symbols=self._lane_uniform_symbols(),
         )
         return (
-            self._is_lane_uniform_expr(semantic_expr, self.vector_load_config.index),
-            lane_contiguity.stride == 1 and contiguous_width is not None,
-            contiguous_width,
+            lane_info.is_uniform,
+            lane_info.is_contiguous,
+            lane_info.contiguous_width,
         )
 
     @staticmethod
@@ -932,39 +939,19 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 replacements[sympy_index_symbol(var.name)] = var.index_expr
         return V.graph.sizevars.simplify(expr.xreplace(replacements))
 
-    def _is_lane_uniform_expr(
-        self, expr: sympy.Expr, vector_index: sympy.Symbol
-    ) -> bool:
-        """Return true when expr depends only on non-vectorized indices."""
-        allowed_symbols = OrderedSet(
-            sympy_index_symbol(source_expr)
-            for source_expr in self.kernel.cse._cache
-            if isinstance(source_expr, str) and source_expr != vector_index.name
+    def _lane_uniform_symbols(self) -> OrderedSet[sympy.Symbol]:
+        vector_index_name = (
+            None
+            if self.vector_load_config is None
+            else self.vector_load_config.index.name
         )
-        return bool(expr.free_symbols and expr.free_symbols <= allowed_symbols)
-
-    @staticmethod
-    def _aligned_contiguous_width(
-        expr: sympy.Expr,
-        vector_index: sympy.Symbol,
-        lane_contiguity,
-        max_width: int,
-    ) -> int | None:
-        """Narrow contiguous width until the first lane is statically aligned."""
-        assert max_width >= 2 and max_width.bit_count() == 1
-        start_expr = V.graph.sizevars.simplify(
-            expr.xreplace({vector_index: sympy.Integer(0)})
+        return OrderedSet(
+            [
+                sympy_index_symbol(source_expr)
+                for source_expr in self.kernel.cse._cache
+                if isinstance(source_expr, str) and source_expr != vector_index_name
+            ]
         )
-        width = max_width
-        while width >= 2:
-            if (
-                lane_contiguity.is_contiguous_for(width)
-                and V.graph.sizevars.statically_known_multiple_of(start_expr, width)
-                and V.graph.sizevars.statically_known_geq(start_expr, 0)
-            ):
-                return width
-            width //= 2
-        return None
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

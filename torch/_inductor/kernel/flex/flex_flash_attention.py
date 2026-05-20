@@ -4,7 +4,7 @@
 import dataclasses
 import functools
 import importlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, cast, Literal, NamedTuple
 
@@ -18,7 +18,6 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
-from ...sizevars import stride_at
 from ...virtualized import V
 from .common import (
     create_indices_fake,
@@ -32,6 +31,7 @@ from .common import (
 # Match one vectorized mask_mod call to one 32-bit R2P keep mask; on Blackwell,
 # vec32 aux loads are close to vec16 and keep the packed-mask ABI simple.
 DEFAULT_MASK_MOD_VEC_SIZE = 32
+MAX_PACKED_MASK_INTERVALS = 8
 
 
 @dataclasses.dataclass
@@ -57,9 +57,57 @@ class AuxLoadVecInfo(NamedTuple):
 
 
 @dataclasses.dataclass(frozen=True)
+class PackedMaskInterval:
+    lower: str
+    upper: str
+
+
+@dataclasses.dataclass(frozen=True)
+class LaneIndexAnalysis:
+    q_idx: sympy.Symbol
+    kv_idx: sympy.Symbol
+    lane: sympy.Symbol
+
+    @property
+    def kv_lane(self) -> sympy.Expr:
+        return self.kv_idx + self.lane
+
+
+@dataclasses.dataclass
+class PackedMaskAnalysisContext:
+    placeholders: Sequence[torch.fx.Node]
+    q_idx: torch.fx.Node
+    kv_idx: torch.fx.Node
+    lane_analysis: LaneIndexAnalysis
+    symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
+    aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
+        default_factory=dict
+    )
+    next_symbol_id: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class AuxIndexedTensor:
     buffer: TensorBox
     indices: tuple[object, ...]
+
+
+def _make_fx_index_symbols(
+    q_idx_node: torch.fx.Node,
+    kv_idx_node: torch.fx.Node,
+    non_lane_index_nodes: Sequence[torch.fx.Node] = (),
+    *,
+    kv_expr: sympy.Expr | None = None,
+) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
+    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
+    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
+    index_symbols = {
+        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
+        for node in non_lane_index_nodes
+    }
+    index_symbols[q_idx_node] = q_idx
+    index_symbols[kv_idx_node] = kv_idx if kv_expr is None else kv_expr
+    return q_idx, kv_idx, index_symbols
 
 
 def get_flex_flash_fwd_configs(
@@ -264,14 +312,9 @@ def _is_safe_partial_aux_index(
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node],
 ) -> bool:
-    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
-    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
-    index_symbols = {
-        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
-        for node in non_lane_index_nodes
-    }
-    index_symbols[q_idx_node] = q_idx
-    index_symbols[kv_idx_node] = kv_idx
+    _, kv_idx, index_symbols = _make_fx_index_symbols(
+        q_idx_node, kv_idx_node, non_lane_index_nodes
+    )
     for index in indices:
         expr = _fx_aux_index_to_sympy(index, index_symbols)
         if expr is None or kv_idx in expr.free_symbols:
@@ -302,14 +345,9 @@ def direct_aux_load_vec_size_and_kind(
         return AuxLoadVecInfo(None, False)
     assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
 
-    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
-    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
-    index_symbols = {
-        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
-        for node in non_lane_index_nodes
-    }
-    index_symbols[q_idx_node] = q_idx
-    index_symbols[kv_idx_node] = kv_idx
+    _, kv_idx, index_symbols = _make_fx_index_symbols(
+        q_idx_node, kv_idx_node, non_lane_index_nodes
+    )
     index_exprs = [_fx_aux_index_to_sympy(index, index_symbols) for index in indices]
     if any(expr is None for expr in index_exprs):
         return AuxLoadVecInfo(None, False)
@@ -333,9 +371,9 @@ def direct_aux_load_vec_size_and_kind(
 
     # FlashAttention groups vectorized mod calls across consecutive KV lanes.
     offset = buffer.get_layout().offset
-    lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(last_expr, kv_idx)
     vec_size = max_vec_size
     while vec_size >= 2:
+        lane_info = classify_lane_expr(last_expr, kv_idx, max_width=vec_size)
         if (
             V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
             and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
@@ -343,15 +381,7 @@ def direct_aux_load_vec_size_and_kind(
                 V.graph.sizevars.statically_known_multiple_of(stride, vec_size)
                 for stride in strides[:-1]
             )
-            and (
-                isinstance(last_expr, ModularIndexing)
-                or V.graph.sizevars.statically_known_equals(
-                    stride_at(last_expr, kv_idx), 1
-                )
-            )
-            and lane_contiguity.is_contiguous_for(vec_size)
-            and _lane_group_start_is_aligned(last_expr, kv_idx, vec_size)
-            and _lane_group_start_is_nonnegative(last_expr, kv_idx)
+            and lane_info.is_contiguous
         ):
             return AuxLoadVecInfo(vec_size, True)
         vec_size //= 2
@@ -360,7 +390,8 @@ def direct_aux_load_vec_size_and_kind(
 
 def _fx_aux_index_to_sympy(
     index: object,
-    index_symbols: dict[torch.fx.Node, sympy.Symbol],
+    index_symbols: Mapping[torch.fx.Node, sympy.Expr],
+    node_to_sympy: Callable[[torch.fx.Node], sympy.Expr | None] | None = None,
 ) -> sympy.Expr | None:
     if isinstance(index, int | sympy.Integer):
         return sympy.Integer(index)
@@ -368,6 +399,10 @@ def _fx_aux_index_to_sympy(
         return None
     if index in index_symbols:
         return index_symbols[index]
+    if node_to_sympy is not None:
+        expr = node_to_sympy(index)
+        if expr is not None:
+            return expr
     if index.op != "call_function":
         return None
 
@@ -375,36 +410,25 @@ def _fx_aux_index_to_sympy(
     target = index.target
     if len(args) < 2:
         return None
-    lhs = _fx_aux_index_to_sympy(args[0], index_symbols)
-    rhs = _fx_aux_index_to_sympy(args[1], index_symbols)
+    lhs = _fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+    rhs = _fx_aux_index_to_sympy(args[1], index_symbols, node_to_sympy)
     if lhs is None or rhs is None:
         return None
-    if target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar):
-        return V.graph.sizevars.simplify(lhs + rhs)
-    if target in (torch.ops.aten.sub.Tensor, torch.ops.aten.sub.Scalar):
-        return V.graph.sizevars.simplify(lhs - rhs)
-    if target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar):
-        return V.graph.sizevars.simplify(lhs * rhs)
-    if target in (torch.ops.aten.remainder.Tensor, torch.ops.aten.remainder.Scalar):
-        return ModularIndexing(lhs, 1, rhs)
-    if (
-        target == torch.ops.aten.div.Tensor_mode
-        and index.kwargs.get("rounding_mode") == "floor"
-    ):
-        return FloorDiv(lhs, rhs)
-    return None
-
-
-def _lane_group_start_is_aligned(
-    expr: sympy.Expr, lane_var: sympy.Symbol, vec_size: int
-) -> bool:
-    start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
-    return V.graph.sizevars.statically_known_multiple_of(start_expr, vec_size)
-
-
-def _lane_group_start_is_nonnegative(expr: sympy.Expr, lane_var: sympy.Symbol) -> bool:
-    start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
-    return V.graph.sizevars.statically_known_geq(start_expr, 0)
+    match target:
+        case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
+            return V.graph.sizevars.simplify(lhs + rhs)
+        case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
+            return V.graph.sizevars.simplify(lhs - rhs)
+        case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
+            return V.graph.sizevars.simplify(lhs * rhs)
+        case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
+            return ModularIndexing(lhs, 1, rhs)
+        case torch.ops.aten.div.Tensor_mode if (
+            index.kwargs.get("rounding_mode") == "floor"
+        ):
+            return FloorDiv(lhs, rhs)
+        case _:
+            return None
 
 
 def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:
@@ -429,6 +453,10 @@ def ensure_flash_available() -> bool:
 
 
 from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+from ...codegen.cutedsl.lane_analysis import (
+    classify_lane_expr,
+    decompose_affine_lane_expr,
+)
 
 
 flash_attention_cutedsl_template = CuteDSLTemplate(
@@ -567,6 +595,415 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target is torch.ops.aten.full.default
+
+
+def is_bool_full_node(node: torch.fx.Node, value: bool) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target is torch.ops.aten.full.default
+        and len(node.args) >= 2
+        and node.args[0] == []
+        and node.args[1] is value
+    )
+
+
+def sympy_to_cute_index(
+    expr: sympy.Expr, symbol_codes: Mapping[sympy.Symbol, str] | None = None
+) -> str | None:
+    expr = V.graph.sizevars.simplify(expr)
+    if isinstance(expr, sympy.Integer):
+        return f"cutlass.Int32({int(expr)})"
+    if isinstance(expr, sympy.Symbol):
+        if symbol_codes is not None and expr in symbol_codes:
+            return symbol_codes[expr]
+        if expr.name == "q_idx":
+            return "q_idx[0]"
+        if expr.name == "kv_idx":
+            return "kv_idx[0]"
+    if isinstance(expr, FloorDiv):
+        lhs, rhs = (sympy_to_cute_index(arg, symbol_codes) for arg in expr.args)
+        if lhs is not None and rhs is not None:
+            return f"({lhs} // {rhs})"
+        return None
+    if isinstance(expr, sympy.Add):
+        args = []
+        for arg in expr.args:
+            cute_arg = sympy_to_cute_index(arg, symbol_codes)
+            if cute_arg is None:
+                return None
+            args.append(cute_arg)
+        return "(" + " + ".join(args) + ")"
+    if isinstance(expr, sympy.Mul):
+        args = []
+        for arg in expr.args:
+            cute_arg = sympy_to_cute_index(arg, symbol_codes)
+            if cute_arg is None:
+                return None
+            args.append(cute_arg)
+        return "(" + " * ".join(args) + ")"
+    return None
+
+
+def is_aten_index_node(node: torch.fx.Node) -> bool:
+    return node.op == "call_function" and node.target is torch.ops.aten.index.Tensor
+
+
+def fx_node_dtype(expr: torch.fx.Node) -> torch.dtype | None:
+    tensor_meta = expr.meta.get("tensor_meta")
+    if tensor_meta is not None:
+        return tensor_meta.dtype
+    val = expr.meta.get("val")
+    if isinstance(val, torch.Tensor):
+        return val.dtype
+    if is_aten_index_node(expr):
+        base = expr.args[0]
+        if isinstance(base, torch.fx.Node):
+            return fx_node_dtype(base)
+    return None
+
+
+def fx_node_shape(expr: torch.fx.Node) -> tuple[int, ...] | None:
+    tensor_meta = expr.meta.get("tensor_meta")
+    if tensor_meta is not None:
+        return tuple(tensor_meta.shape)
+    val = expr.meta.get("val")
+    if isinstance(val, torch.Tensor):
+        return tuple(val.shape)
+    return None
+
+
+def q_uniform_cute_expr(
+    expr: object,
+    ctx: PackedMaskAnalysisContext,
+    *,
+    for_index: bool = False,
+    index_dim_size: int | sympy.Expr | None = None,
+) -> str | None:
+    """Return CuteDSL code for a scalar expression that is uniform across q lanes."""
+    if isinstance(expr, int | sympy.Integer):
+        index = int(expr)
+        if for_index and index < 0:
+            if index_dim_size is None:
+                return None
+            index = V.graph.sizevars.guard_int(index + index_dim_size)
+        return f"cutlass.Int32({index})"
+    if not isinstance(expr, torch.fx.Node):
+        return None
+    if expr is ctx.q_idx:
+        return "q_idx[0]"
+    if expr is ctx.kv_idx:
+        return None
+    if len(ctx.placeholders) >= 2 and expr is ctx.placeholders[0]:
+        return "b_idx[0]"
+    if len(ctx.placeholders) >= 2 and expr is ctx.placeholders[1]:
+        return "h_idx[0]"
+    if expr in ctx.placeholders[4:]:
+        return f"aux_tensors[{ctx.placeholders[4:].index(expr)}]"
+    if expr.op != "call_function":
+        return None
+
+    if is_aten_index_node(expr):
+        if fx_node_dtype(expr) not in (
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ):
+            return None
+        result_shape = fx_node_shape(expr)
+        if result_shape is not None and len(result_shape) != 0:
+            return None
+        base, indices = expr.args
+        base_code = q_uniform_cute_expr(base, ctx)
+        base_shape = fx_node_shape(base) if isinstance(base, torch.fx.Node) else None
+        if base_code is None or not isinstance(indices, (list, tuple)):
+            return None
+        if base_shape is None or len(indices) != len(base_shape):
+            return None
+        index_codes = []
+        for dim, index in enumerate(indices):
+            dim_size = base_shape[dim]
+            index_code = q_uniform_cute_expr(
+                index, ctx, for_index=True, index_dim_size=dim_size
+            )
+            if index_code is None:
+                return None
+            if (
+                dim_size is not None
+                and isinstance(index, torch.fx.Node)
+                and index not in (ctx.q_idx, ctx.placeholders[0], ctx.placeholders[1])
+            ):
+                dtype = fx_node_dtype(index)
+                integer_type = "Int64" if dtype == torch.int64 else "Int32"
+                size_code = f"cutlass.{integer_type}({dim_size})"
+                zero_code = f"cutlass.{integer_type}(0)"
+                index_code = (
+                    f"({index_code} + {size_code} "
+                    f"if {index_code} < {zero_code} else {index_code})"
+                )
+            index_codes.append(index_code)
+        load = f"{base_code}[{', '.join(index_codes)}]"
+        if for_index and fx_node_dtype(expr) == torch.int64:
+            return load
+        return f"cutlass.Int32({load})"
+
+    args = expr.args
+    if len(args) < 2:
+        return None
+    lhs = q_uniform_cute_expr(args[0], ctx)
+    rhs = q_uniform_cute_expr(args[1], ctx)
+    if lhs is None or rhs is None:
+        return None
+    match expr.target:
+        case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
+            return f"({lhs} + {rhs})"
+        case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
+            return f"({lhs} - {rhs})"
+        case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
+            return f"({lhs} * {rhs})"
+        case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
+            return f"({lhs} % {rhs})"
+        case torch.ops.aten.div.Tensor_mode if (
+            expr.kwargs.get("rounding_mode") == "floor"
+        ):
+            return f"({lhs} // {rhs})"
+        case _:
+            return None
+
+
+def fx_mask_expr_to_sympy(
+    expr: object, ctx: PackedMaskAnalysisContext
+) -> sympy.Expr | None:
+    _, _, index_symbols = _make_fx_index_symbols(
+        ctx.q_idx, ctx.kv_idx, kv_expr=ctx.lane_analysis.kv_lane
+    )
+
+    def mask_aux_load_to_symbol(node: torch.fx.Node) -> sympy.Expr | None:
+        if not is_aten_index_node(node):
+            return None
+        if node in ctx.aux_load_symbols:
+            return ctx.aux_load_symbols[node]
+        q_uniform_code = q_uniform_cute_expr(node, ctx)
+        if q_uniform_code is None:
+            return None
+        symbol = sympy.Symbol(f"mask_bound_{ctx.next_symbol_id}", integer=True)
+        ctx.next_symbol_id += 1
+        ctx.symbol_codes[symbol] = q_uniform_code
+        ctx.aux_load_symbols[node] = symbol
+        return symbol
+
+    return _fx_aux_index_to_sympy(expr, index_symbols, mask_aux_load_to_symbol)
+
+
+def merge_intersection(
+    intervals: tuple[PackedMaskInterval, ...],
+    new_intervals: tuple[PackedMaskInterval, ...],
+) -> tuple[PackedMaskInterval, ...] | None:
+    if len(intervals) * len(new_intervals) > MAX_PACKED_MASK_INTERVALS:
+        return None
+    merged = []
+    for lhs in intervals:
+        for rhs in new_intervals:
+            merged.append(
+                PackedMaskInterval(
+                    f"max({lhs.lower}, {rhs.lower})",
+                    f"min({lhs.upper}, {rhs.upper})",
+                )
+            )
+    return tuple(merged)
+
+
+def lane_comparison_to_intervals(
+    lhs_expr: sympy.Expr,
+    rhs_expr: sympy.Expr,
+    *,
+    strict: bool,
+    lane_analysis: LaneIndexAnalysis,
+    symbol_codes: Mapping[sympy.Symbol, str],
+) -> tuple[PackedMaskInterval, ...] | None:
+    diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+    affine = decompose_affine_lane_expr(diff, lane_analysis.lane)
+    if affine is None:
+        return None
+    lane_coeff, rest = affine
+    if lane_coeff == 1:
+        upper = sympy_to_cute_index(-rest if strict else -rest + 1, symbol_codes)
+        if upper is not None:
+            return (PackedMaskInterval("cutlass.Int32(0)", upper),)
+        return None
+    if lane_coeff == -1:
+        lower = sympy_to_cute_index(rest + 1 if strict else rest, symbol_codes)
+        if lower is not None:
+            return (PackedMaskInterval(lower, "cutlass.Int32(32)"),)
+        return None
+    return None
+
+
+def lane_equality_to_intervals(
+    lhs_expr: sympy.Expr,
+    rhs_expr: sympy.Expr,
+    *,
+    lane_analysis: LaneIndexAnalysis,
+    symbol_codes: Mapping[sympy.Symbol, str],
+) -> tuple[PackedMaskInterval, ...] | None:
+    if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
+        lhs_base, lhs_divisor = lhs_expr.args
+        rhs_base, rhs_divisor = rhs_expr.args
+        if lhs_divisor != rhs_divisor:
+            return None
+        block_start = None
+        if lhs_base == lane_analysis.q_idx and rhs_base == lane_analysis.kv_lane:
+            block_start = V.graph.sizevars.simplify(
+                lhs_expr * lhs_divisor - lane_analysis.kv_idx
+            )
+        elif rhs_base == lane_analysis.q_idx and lhs_base == lane_analysis.kv_lane:
+            block_start = V.graph.sizevars.simplify(
+                rhs_expr * rhs_divisor - lane_analysis.kv_idx
+            )
+        if block_start is not None:
+            lower = sympy_to_cute_index(block_start, symbol_codes)
+            upper = sympy_to_cute_index(block_start + lhs_divisor, symbol_codes)
+            if lower is not None and upper is not None:
+                return (PackedMaskInterval(lower, upper),)
+            return None
+    diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+    affine = decompose_affine_lane_expr(diff, lane_analysis.lane)
+    if affine is None:
+        return None
+    lane_coeff, rest = affine
+    if lane_coeff in (1, -1):
+        lane_value = -rest if lane_coeff == 1 else rest
+        lower = sympy_to_cute_index(lane_value, symbol_codes)
+        upper = sympy_to_cute_index(lane_value + 1, symbol_codes)
+        if lower is not None and upper is not None:
+            return (PackedMaskInterval(lower, upper),)
+        return None
+    return None
+
+
+def comparison_to_intervals(
+    lhs: object,
+    rhs: object,
+    *,
+    strict: bool,
+    ctx: PackedMaskAnalysisContext,
+) -> tuple[PackedMaskInterval, ...] | None:
+    lhs_expr = fx_mask_expr_to_sympy(lhs, ctx)
+    rhs_expr = fx_mask_expr_to_sympy(rhs, ctx)
+    if lhs_expr is None or rhs_expr is None:
+        return None
+    return lane_comparison_to_intervals(
+        lhs_expr,
+        rhs_expr,
+        strict=strict,
+        lane_analysis=ctx.lane_analysis,
+        symbol_codes=ctx.symbol_codes,
+    )
+
+
+def equality_to_intervals(
+    lhs: object,
+    rhs: object,
+    *,
+    ctx: PackedMaskAnalysisContext,
+) -> tuple[PackedMaskInterval, ...] | None:
+    lhs_expr = fx_mask_expr_to_sympy(lhs, ctx)
+    rhs_expr = fx_mask_expr_to_sympy(rhs, ctx)
+    if lhs_expr is None or rhs_expr is None:
+        return None
+    return lane_equality_to_intervals(
+        lhs_expr,
+        rhs_expr,
+        lane_analysis=ctx.lane_analysis,
+        symbol_codes=ctx.symbol_codes,
+    )
+
+
+def node_to_packed_mask_intervals(
+    node: torch.fx.Node, ctx: PackedMaskAnalysisContext
+) -> tuple[PackedMaskInterval, ...] | None:
+    if is_bool_full_node(node, True):
+        return (PackedMaskInterval("cutlass.Int32(0)", "cutlass.Int32(32)"),)
+    if is_bool_full_node(node, False):
+        return ()
+    if node.op != "call_function":
+        return None
+    match node.target:
+        case torch.ops.aten.bitwise_and.Tensor | torch.ops.aten.logical_and.default:
+            lhs, rhs = node.args
+            if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+                return None
+            lhs_intervals = node_to_packed_mask_intervals(lhs, ctx)
+            rhs_intervals = node_to_packed_mask_intervals(rhs, ctx)
+            if lhs_intervals is None or rhs_intervals is None:
+                return None
+            return merge_intersection(lhs_intervals, rhs_intervals)
+        case torch.ops.aten.bitwise_or.Tensor | torch.ops.aten.logical_or.default:
+            lhs, rhs = node.args
+            if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+                return None
+            lhs_intervals = node_to_packed_mask_intervals(lhs, ctx)
+            rhs_intervals = node_to_packed_mask_intervals(rhs, ctx)
+            if lhs_intervals is None or rhs_intervals is None:
+                return None
+            if len(lhs_intervals) + len(rhs_intervals) > MAX_PACKED_MASK_INTERVALS:
+                return None
+            return lhs_intervals + rhs_intervals
+        case torch.ops.aten.le.Tensor | torch.ops.aten.le.Scalar:
+            return comparison_to_intervals(
+                node.args[0], node.args[1], strict=False, ctx=ctx
+            )
+        case torch.ops.aten.lt.Tensor | torch.ops.aten.lt.Scalar:
+            return comparison_to_intervals(
+                node.args[0], node.args[1], strict=True, ctx=ctx
+            )
+        case torch.ops.aten.ge.Tensor | torch.ops.aten.ge.Scalar:
+            return comparison_to_intervals(
+                node.args[1], node.args[0], strict=False, ctx=ctx
+            )
+        case torch.ops.aten.gt.Tensor | torch.ops.aten.gt.Scalar:
+            return comparison_to_intervals(
+                node.args[1], node.args[0], strict=True, ctx=ctx
+            )
+        case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
+            return equality_to_intervals(node.args[0], node.args[1], ctx=ctx)
+        case _:
+            return None
+
+
+def select_packed_mask_intervals(
+    graph_module: GraphModule,
+) -> tuple[PackedMaskInterval, ...] | None:
+    graph = graph_module.graph
+    nodes = list(graph.nodes)
+    placeholders = [node for node in nodes if node.op == "placeholder"]
+    output = [node for node in nodes if node.op == "output"]
+    if len(placeholders) < 4 or len(output) != 1:
+        return None
+
+    q_idx, kv_idx = placeholders[2], placeholders[3]
+    output_val = output[0].args[0]
+    if not isinstance(output_val, torch.fx.Node):
+        return None
+
+    lane_analysis = LaneIndexAnalysis(
+        q_idx=sympy.Symbol("q_idx", integer=True, nonnegative=True),
+        kv_idx=sympy.Symbol("kv_idx", integer=True, nonnegative=True),
+        lane=sympy.Symbol("mask_lane", integer=True, nonnegative=True),
+    )
+    ctx = PackedMaskAnalysisContext(
+        placeholders=placeholders,
+        q_idx=q_idx,
+        kv_idx=kv_idx,
+        lane_analysis=lane_analysis,
+    )
+    intervals = node_to_packed_mask_intervals(output_val, ctx)
+    if intervals is None:
+        return None
+    if intervals == (PackedMaskInterval("cutlass.Int32(0)", "cutlass.Int32(32)"),):
+        return None
+    return intervals
 
 
 @functools.lru_cache(maxsize=1)
@@ -764,6 +1201,22 @@ def create_flex_flash_attention_kernel(
         mask_mod_graph_module=mask_graph.graph_module,
         mask_mod_other_buffers=mask_mod_other_buffers,
     )
+    packed_mask_intervals = None
+    if needs_block_mask and torch.cuda.is_available():
+        device_index = None if device is None else device.index
+        cuda_major = torch.cuda.get_device_capability(device_index)[0]
+        if cuda_major in (10, 11):
+            packed_mask_intervals = select_packed_mask_intervals(
+                mask_graph.graph_module
+            )
+    if packed_mask_intervals is not None:
+        configs = [
+            FlexFlashConfig(conf.score_mod_vec_size, DEFAULT_MASK_MOD_VEC_SIZE)
+            for conf in configs
+        ]
+        max_configs = torch._inductor.config.test_configs.max_flex_configs
+        if max_configs is not None and len(configs) > max_configs:
+            configs = configs[:max_configs]
 
     error: NotImplementedError | None = None
     for conf in configs:
@@ -778,6 +1231,10 @@ def create_flex_flash_attention_kernel(
                 HAS_SCORE_MOD=has_score_mod,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 MASK_MOD_VEC_SIZE=conf.mask_mod_vec_size,
+                MASK_MOD_PACKED_INTERVALS=(
+                    packed_mask_intervals if conf.mask_mod_vec_size == 32 else None
+                ),
+                MASK_MOD_OTHER_BUFFERS=mask_mod_other_buffers,
                 NEEDS_BLOCK_MASK=needs_block_mask,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
