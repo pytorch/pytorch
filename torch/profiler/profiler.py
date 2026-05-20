@@ -237,6 +237,7 @@ class _KinetoProfile:
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
+        self._trace_metadata: dict[str, str] = {}
 
     def start(self) -> None:
         self.prepare_trace()
@@ -330,7 +331,7 @@ class _KinetoProfile:
             raise AssertionError("Profiler must be initialized before stopping trace")
         self.profiler.__exit__(None, None, None)
 
-    def export_chrome_trace(self, path: str):
+    def export_chrome_trace(self, path: str, use_python_export: bool = False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
@@ -339,14 +340,17 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
-        if path.endswith(".gz"):
+        if use_python_export:
+            self.profiler.export_chrome_trace(
+                path, self._trace_metadata, use_python_export=True
+            )
+        elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                retvalue = self.profiler.export_chrome_trace(fp.name)
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
                 with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            return retvalue
         else:
-            return self.profiler.export_chrome_trace(path)
+            self.profiler.export_chrome_trace(path, self._trace_metadata)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
@@ -430,6 +434,7 @@ class _KinetoProfile:
         into the trace file
         """
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
+        self._trace_metadata[key] = wrapped_value
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str) -> None:
@@ -437,6 +442,7 @@ class _KinetoProfile:
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
+        self._trace_metadata[key] = value
         torch.autograd._add_metadata_json(key, value)
 
     def preset_metadata_json(self, key: str, value: str) -> None:
@@ -631,7 +637,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: str | None = None, use_gzip: bool = False
+    dir_name: str,
+    worker_name: str | None = None,
+    use_gzip: bool = False,
+    use_python_export: bool = False,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -655,7 +664,10 @@ def tensorboard_trace_handler(
         file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + ".gz"
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        prof.export_chrome_trace(
+            os.path.join(dir_name, file_name),
+            use_python_export=use_python_export,
+        )
 
     return handler_fn
 
