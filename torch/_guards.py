@@ -488,6 +488,36 @@ class StorageOverlap(GuardEnvExpr):
 
 
 """
+A class representing exact same-storage input groups.
+
+AOTAutograd's synthetic-base calling convention creates one synthetic base for
+each same-storage input group that needs alias-preserving mutation handling.
+If the group partition changes, the graph must be recompiled even when the
+flattened overlap classification is unchanged.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageAliasing(GuardEnvExpr):
+    source_groups: list[list[Source]]
+
+
+"""
+A class representing static storage offsets for aliased inputs.
+
+AOTAutograd's synthetic-base calling convention reconstructs aliased inputs
+from their base storage with the storage offsets observed at trace time.  If
+those offsets change, the graph must be recompiled.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageOffset(GuardEnvExpr):
+    input_source: Source
+    storage_offset: int
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that

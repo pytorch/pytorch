@@ -64,6 +64,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_storage_aliasing_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2329,6 +2330,8 @@ def merge_view_inputs(
         # If no synthetic bases are necessary, just return the original inputs.
         return fwd_inputs, fwd_inputs_descs, None
     else:
+        add_storage_aliasing_guard(aot_config, list(storage_ref_to_idx.values()))
+
         from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
 
         def make_hashable(arg: Any) -> Any:

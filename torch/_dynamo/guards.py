@@ -97,6 +97,8 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageAliasing,
+    StorageOffset,
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
@@ -759,6 +761,25 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
+def check_same_storage_groups(groups: list[list[torch.Tensor]]) -> bool:
+    storage_ids: list[int] = []
+    try:
+        for group in groups:
+            if not group:
+                continue
+            group_storage_id = group[0].untyped_storage()._cdata
+            if any(
+                tensor.untyped_storage()._cdata != group_storage_id
+                for tensor in group[1:]
+            ):
+                return False
+            storage_ids.append(group_storage_id)
+    except (AttributeError, RuntimeError, TypeError):
+        return False
+
+    return len(storage_ids) == len(set(storage_ids))
+
+
 def _get_closure_vars() -> dict[str, object]:
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
@@ -785,6 +806,7 @@ def _get_closure_vars() -> dict[str, object]:
             "device": torch.device,
             "___from_numpy": from_numpy,
             "___as_tensor": torch._as_tensor_fullprec,
+            "___check_same_storage_groups": check_same_storage_groups,
             "torch": torch,
             "inspect": inspect,
         }
@@ -4924,6 +4946,21 @@ class CheckFunctionManager:
                     [code_part],
                     None,
                 )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageAliasing):
+                groups = [
+                    "[" + ", ".join(source.name for source in group) + "]"
+                    for group in guard.source_groups
+                ]
+                code_part = f"___check_same_storage_groups([{', '.join(groups)}])"
+                builder.add_python_lambda_leaf_guard_to_root([code_part], [code_part])
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOffset):
+                code_part = (
+                    f"{guard.input_source.name}.storage_offset() == "
+                    f"{guard.storage_offset}"
+                )
+                builder.add_python_lambda_leaf_guard_to_root([code_part], [code_part])
                 add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")

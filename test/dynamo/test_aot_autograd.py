@@ -11,14 +11,26 @@ import torch._dynamo.test_case
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
     rand_strided,
 )
+from torch._functorch._aot_autograd.input_output_analysis import (
+    add_storage_aliasing_guard,
+    compute_overlapping_inputs,
+)
+from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
-from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._guards import (
+    CompileContext,
+    StorageAliasing,
+    StorageOffset,
+    StorageOverlap,
+    TracingContext,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
@@ -1596,10 +1608,127 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
         )
 
+    def test_inputs_overlapping_with_mutation_recompile_on_storage_offset_change(self):
+        # Check that synthetic-base graphs are guarded on the input view offsets
+        # used to reconstruct aliased inputs.
+
+        def f(a, b):
+            a.add_(1)
+            return b.clone()
+
+        def args_with_offset_1(x):
+            return x[:5], x[1:6]
+
+        def args_with_offset_2(x):
+            return x[:5], x[2:7]
+
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, args_with_offset_1, args_with_offset_2
+        )
+        self.assertExpectedInline(
+            guard_failure,
+            """0/0: b.storage_offset() == 1""",
+        )
+
+    def test_inputs_overlapping_with_mutation_recompile_on_non_overlap_offset_change(
+        self,
+    ):
+        # A synthetic base reconstructs every input in the same-storage group,
+        # including group members that do not overlap any other member.
+
+        base = torch.arange(20)
+        fwd_inputs = [base[0:4], base[10:14], base[12:16]]
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a"),
+                LocalSource("b"),
+                LocalSource("c"),
+            ],
+        )
+        ctx = TracingContext(FakeTensorMode())
+
+        with torch._guards.tracing(ctx):
+            actual_aliased_indices = compute_overlapping_inputs(
+                aot_config, fwd_inputs, [0, 1, 2]
+            )
+
+        self.assertEqual(actual_aliased_indices, {1, 2})
+        storage_offsets = {
+            g.input_source.name: g.storage_offset
+            for g in ctx.guards_context.aotautograd_guards
+            if isinstance(g, StorageOffset)
+        }
+        self.assertEqual(
+            storage_offsets,
+            {"L['a']": 0, "L['b']": 10, "L['c']": 12},
+        )
+
+    def test_inputs_overlapping_with_mutation_recompile_on_storage_group_change(self):
+        # A flattened overlap classification cannot distinguish one storage
+        # containing two disjoint overlapping pairs from two independent
+        # storages each containing one overlapping pair.
+
+        def f(a, b, c, d):
+            a.add_(1)
+            return b.clone() + c.clone() + d.clone()
+
+        def one_storage(x):
+            return x[0:4], x[2:6], x[10:14], x[12:16]
+
+        def two_storages(x):
+            y = x + 100
+            return x[0:4], x[2:6], y[10:14], y[12:16]
+
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, one_storage, two_storages
+        )
+        self.assertIn("___check_same_storage_groups([[a, b, c, d]])", guard_failure)
+
+    def test_storage_aliasing_guard_skips_source_less_groups(self):
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a"),
+                LocalSource("b"),
+                None,
+            ],
+        )
+        ctx = TracingContext(FakeTensorMode())
+
+        with torch._guards.tracing(ctx):
+            add_storage_aliasing_guard(aot_config, [[0, 1], [2]])
+
+        storage_aliasing_guards = [
+            g
+            for g in ctx.guards_context.aotautograd_guards
+            if isinstance(g, StorageAliasing)
+        ]
+        self.assertEqual(len(storage_aliasing_guards), 1)
+        self.assertEqual(
+            [
+                [source.name for source in group]
+                for group in storage_aliasing_guards[0].source_groups
+            ],
+            [["L['a']", "L['b']"]],
+        )
+
     def _test_no_storage_overlap_guards(self, f, argsfn):
         # Compile f with aot_eager backend, and run it with the argument set returned by
         # argsfn function. Meanwhile, keep track of the aotautograd_gurads, so as to make
-        # sure no StorageOverlap guard was added.
+        # sure no AOTAutograd aliasing guard was added.
 
         class Compiler:
             def __init__(self):
@@ -1607,7 +1736,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             def __call__(self, *args, **kwargs):
                 # Instead of checking here, we need to check afterwards, since the
-                # StorageOverlap guard is only added later.
+                # AOTAutograd aliasing guards are only added later.
                 self.guards = TracingContext.get().guards_context.aotautograd_guards
                 return self.counter(*args, **kwargs)
 
@@ -1622,9 +1751,11 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self.assertEqual(compiler.counter.frame_count, 1)
 
-        # Check none of the AOTAutograd guards are StorageOverlap guards.
+        # Check none of the AOTAutograd guards are aliasing guards.
         for g in compiler.guards:
             self.assertNotIsInstance(g, StorageOverlap)
+            self.assertNotIsInstance(g, StorageOffset)
+            self.assertNotIsInstance(g, StorageAliasing)
 
     def test_no_storage_overlap_guards_no_mutation(self):
         def f(a, b):

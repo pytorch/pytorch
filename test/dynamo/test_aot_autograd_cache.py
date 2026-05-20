@@ -3340,6 +3340,23 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
 
+    def test_shared_storage_input_groups_preserve_topology(self):
+        base = torch.arange(20)
+        y = base + 100
+
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups(
+                [base[0:4], base[2:6], base[10:14], base[12:16]]
+            ),
+            (((0, 0), (1, 2), (2, 10), (3, 12)),),
+        )
+        self.assertEqual(
+            autograd_cache._shared_storage_input_groups(
+                [base[0:4], base[2:6], y[10:14], y[12:16]]
+            ),
+            (((0, 0), (1, 2)), ((2, 10), (3, 12))),
+        )
+
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
             return x.sin().cos()
