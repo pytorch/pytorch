@@ -515,10 +515,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode:
             self._write_aoti_interface_header()
 
-        if (
-            config.cpp.enable_kernel_profile
-            and config.cpp.enable_kernel_context_guard
-        ):
+        if config.cpp.enable_kernel_profile and config.cpp.enable_kernel_context_guard:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
             )

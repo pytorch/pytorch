@@ -6041,9 +6041,7 @@ class AOTInductorTestsTemplate:
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     @common_utils.parametrize("enable_kernel_context_guard", (True, False))
-    def test_aoti_profiler(
-        self, enable_kernel_context_guard, enable_kernel_profile
-    ):
+    def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
