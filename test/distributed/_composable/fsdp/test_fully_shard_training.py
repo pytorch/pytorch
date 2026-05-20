@@ -140,6 +140,23 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
 
+    def test_root_no_forward_inputs(self):
+        device = torch.device(device_type.type, 0)
+
+        class ParameterOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4, device=device))
+
+            def forward(self):
+                return self.weight @ self.weight
+
+        model = ParameterOnlyModule()
+        fully_shard(model)
+        out = model()
+        self.assertEqual(out.shape, (4, 4))
+        out.sum().backward()
+
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
