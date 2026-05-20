@@ -18,6 +18,7 @@ import collections
 from pathlib import Path
 import errno
 import logging
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '13.0': ((7, 0), (21, 0)),
 }
 
-__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",  # noqa: F822
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
            "CppExtension", "CUDAExtension", "SyclExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 
@@ -106,6 +107,23 @@ __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_comp
 # cpp_extension import path until BuildExtension is explicitly requested.
 _BUILD_EXTENSION_CLASS = None
 _BUILD_EXTENSION_LOCK = threading.Lock()
+
+if TYPE_CHECKING:
+    from setuptools.command.build_ext import build_ext as _build_ext
+
+    class BuildExtension(_build_ext):
+        @classmethod
+        def with_options(cls, **options): ...
+
+        def __init__(self, *args, **kwargs) -> None: ...
+
+        def finalize_options(self) -> None: ...
+
+        def build_extensions(self) -> None: ...
+
+        def get_ext_filename(self, ext_name): ...
+
+        def get_export_symbols(self, ext): ...
 
 
 def _get_build_extension():
