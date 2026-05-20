@@ -117,6 +117,8 @@ class TestBenchmarker(TestCase):
         ).L2_cache_size
 
         with (
+            # Triton's fixed-size cache comes from this factory; patch it as a
+            # trip-wire so the test fails if the L2-cache path stops bypassing it.
             patch.object(
                 active_driver,
                 "get_empty_cache_for_benchmark",
@@ -132,6 +134,66 @@ class TestBenchmarker(TestCase):
         self.assertGreater(timing, 0)
         self.assertGreater(len(captured_buffer_sizes), 0)
         self.assertEqual(captured_buffer_sizes[0], expected_l2_size)
+
+    def test_triton_benchmarker_l2_cache_handles_zero_estimate(self):
+        try:
+            from triton import runtime
+        except ImportError:
+            self.skipTest("requires Triton")
+
+        class FakeEvent:
+            def __init__(self, index):
+                self.index = index
+
+            def record(self):
+                pass
+
+            def elapsed_time(self, end_event):
+                return 0.0 if self.index == 0 else 3.0
+
+        class FakeDeviceInterface:
+            def __init__(self):
+                self.events = []
+
+            def Event(self, enable_timing=True):
+                event = FakeEvent(len(self.events))
+                self.events.append(event)
+                return event
+
+            def synchronize(self):
+                pass
+
+        class FakeDriver:
+            def __init__(self):
+                self.device_interface = FakeDeviceInterface()
+                self.clear_cache_calls = 0
+
+            def get_device_interface(self):
+                return self.device_interface
+
+            def clear_cache(self, cache):
+                self.clear_cache_calls += 1
+
+        benchmarker = TritonBenchmarker()
+        fake_driver = FakeDriver()
+        fn_calls = 0
+
+        def fn():
+            nonlocal fn_calls
+            fn_calls += 1
+
+        with (
+            patch.object(
+                type(runtime.driver), "active", new=property(lambda _: fake_driver)
+            ),
+            patch.object(benchmarker, "_make_l2_cache", return_value=object()),
+        ):
+            result = benchmarker._do_bench_with_l2_cache(fn)
+
+        self.assertEqual(result, 3.0)
+        self.assertEqual(fn_calls, 8)
+        self.assertEqual(fake_driver.clear_cache_calls, 6)
+        self.assertEqual(len(fake_driver.device_interface.events), 4)
 
     def test_l2_cache_uses_active_device(self):
         class FakeDriver:

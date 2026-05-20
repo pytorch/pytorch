@@ -27,6 +27,9 @@ use_torch_profiler_benchmarker = (
 
 
 MILLISECONDS_PER_SECOND = 1000
+_L2_CACHE_BENCHMARK_KWARGS = OrderedSet(
+    ["warmup", "rep", "grad_to_none", "quantiles", "return_mode"]
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -411,9 +414,7 @@ class TritonBenchmarker(Benchmarker):
             return False
         if torch.version.hip or not torch.cuda.is_available():
             return False
-        if not OrderedSet(kwargs).issubset(
-            OrderedSet(["warmup", "rep", "grad_to_none", "quantiles", "return_mode"])
-        ):
+        if not OrderedSet(kwargs).issubset(_L2_CACHE_BENCHMARK_KWARGS):
             return False
 
         from triton import runtime
@@ -451,8 +452,12 @@ class TritonBenchmarker(Benchmarker):
         device_interface.synchronize()
         estimate_ms = start_event.elapsed_time(end_event) / 5
 
-        n_warmup = max(1, int(warmup / estimate_ms))
-        n_repeat = max(1, int(rep / estimate_ms))
+        if estimate_ms > 0:
+            n_warmup = max(1, int(warmup / estimate_ms))
+            n_repeat = max(1, int(rep / estimate_ms))
+        else:
+            n_warmup = 1
+            n_repeat = 1
         start_events = [
             device_interface.Event(enable_timing=True) for _ in range(n_repeat)
         ]
