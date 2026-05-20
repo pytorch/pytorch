@@ -69,7 +69,14 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, Max, Min, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    CleanDiv,
+    FloorDiv,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies

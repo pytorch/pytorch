@@ -7,8 +7,6 @@ import itertools
 import pprint
 from typing import Any, Protocol, TYPE_CHECKING
 
-import sympy
-
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -29,6 +27,8 @@ from .wrapper import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    import sympy
 
 
 @dataclasses.dataclass
