@@ -5182,6 +5182,8 @@ class CppScheduling(BaseScheduling):
                 (new_index_vars, reduce_vars),
             )
 
+        snapshots = [(node, node.snapshot_loop_state()) for node in nodes]
+
         # Here decide the final loop order
         for node in nodes:
             if node == matched_node:
@@ -5192,6 +5194,13 @@ class CppScheduling(BaseScheduling):
                     extra_indexing_constraints=extra_indexing_constraints,
                     recompute_sizes_body_func=loop_split,
                 )
+
+        # codegen_functions() requires same-sized pointwise fused nodes to use
+        # identical loop groups. If splitting cannot preserve that invariant,
+        # keep the original fused loops instead of generating an invalid kernel.
+        if any(node.group[1] != nodes[0].group[1] for node in nodes[1:]):
+            for node, state in reversed(snapshots):
+                node.restore_loop_state(state)
 
         return nodes
 
