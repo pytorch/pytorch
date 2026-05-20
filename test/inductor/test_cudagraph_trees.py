@@ -1253,6 +1253,12 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
         def test_topk_skips_cudagraph_on_hip(self):
             # rocm workaround: topk kernels fault under cudagraph trees
             # on the 2nd replay of a recorded graph.
