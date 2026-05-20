@@ -3971,30 +3971,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return tree.mask_shape(self.triton_tensor_ndim())
         return None
 
-    def _mask_shape(
-        self,
-        mask: str | TritonCSEVariable,
-        seen: set[int] | None = None,
-    ) -> BlockShapeType:
+    def _mask_shape(self, mask: str | TritonCSEVariable) -> BlockShapeType:
         if isinstance(mask, TritonCSEVariable):
-            if seen is None:
-                seen = set()
-            if id(mask) in seen:
-                return mask.shape
-
-            seen.add(id(mask))
-            result_shape = mask.shape
-            for mask_var in mask.mask_vars:
-                mask_var_shape = self._mask_shape(mask_var, seen)
-                if mask_var_shape is None:
-                    return None
-                if result_shape is None:
-                    result_shape = tuple(mask_var_shape)
-                else:
-                    result_shape = get_broadcasted_shape(
-                        tuple(result_shape), tuple(mask_var_shape)
-                    )
-            return result_shape
+            return mask.shape
         return self._range_tree_mask_shape(mask)
 
     def _broadcast_shape_with_masks(
@@ -4667,9 +4646,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         result_dtype = index_dtype if index_dtype is not None else torch_acc_type
         result_shape = list(self.dense_size_list())
         result_shape[dim] = "1"
-        result_var: Any = self.cse.newvar(
-            dtype=result_dtype, shape=tuple(result_shape)
-        )
+        result_var: Any = self.cse.newvar(dtype=result_dtype, shape=tuple(result_shape))
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
@@ -4732,7 +4709,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert isinstance(masked_value, CSEVariable)
                 assert index_dtype is not None
                 if logical_index:
-                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    accumulator_index = (
+                        f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    )
                 else:
                     accumulator_index = str(
                         self.cse.generate(
