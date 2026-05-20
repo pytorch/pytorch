@@ -73,19 +73,6 @@ class LaneIndexAnalysis:
         return self.kv_idx + self.lane
 
 
-@dataclasses.dataclass
-class PackedMaskAnalysisContext:
-    placeholders: Sequence[torch.fx.Node]
-    q_idx: torch.fx.Node
-    kv_idx: torch.fx.Node
-    lane_analysis: LaneIndexAnalysis
-    symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
-    aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
-        default_factory=dict
-    )
-    next_symbol_id: int = 0
-
-
 @dataclasses.dataclass(frozen=True)
 class AuxIndexedTensor:
     buffer: TensorBox
@@ -672,37 +659,97 @@ def fx_node_shape(expr: torch.fx.Node) -> tuple[int, ...] | None:
     return None
 
 
-def q_uniform_cute_expr(
-    expr: object,
-    ctx: PackedMaskAnalysisContext,
-    *,
-    for_index: bool = False,
-    index_dim_size: int | sympy.Expr | None = None,
-) -> str | None:
-    """Return CuteDSL code for a scalar expression that is uniform across q lanes."""
-    if isinstance(expr, int | sympy.Integer):
-        index = int(expr)
-        if for_index and index < 0:
-            if index_dim_size is None:
-                return None
-            index = V.graph.sizevars.guard_int(index + index_dim_size)
-        return f"cutlass.Int32({index})"
-    if not isinstance(expr, torch.fx.Node):
-        return None
-    if expr is ctx.q_idx:
-        return "q_idx[0]"
-    if expr is ctx.kv_idx:
-        return None
-    if len(ctx.placeholders) >= 2 and expr is ctx.placeholders[0]:
-        return "b_idx[0]"
-    if len(ctx.placeholders) >= 2 and expr is ctx.placeholders[1]:
-        return "h_idx[0]"
-    if expr in ctx.placeholders[4:]:
-        return f"aux_tensors[{ctx.placeholders[4:].index(expr)}]"
-    if expr.op != "call_function":
-        return None
+@dataclasses.dataclass
+class PackedMaskAnalyzer:
+    """Lower one Flex mask_mod FX graph to packed 32-lane mask intervals.
 
-    if is_aten_index_node(expr):
+    The analyzer owns the mask graph signature, symbolic q/kv/lane variables,
+    and any rendered CuteDSL code for q-uniform aux tensor bounds. Call
+    ``node_to_intervals`` on the mask graph output; unsupported expressions
+    return ``None`` so the caller can use the generic mask lowering path.
+    """
+
+    placeholders: Sequence[torch.fx.Node]
+    q_idx: torch.fx.Node
+    kv_idx: torch.fx.Node
+    lane_analysis: LaneIndexAnalysis
+    symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
+    aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
+        default_factory=dict
+    )
+    next_symbol_id: int = 0
+
+    def q_uniform_cute_expr(
+        self,
+        expr: object,
+        *,
+        for_index: bool = False,
+        index_dim_size: int | sympy.Expr | None = None,
+    ) -> str | None:
+        """Return CuteDSL code for a scalar expression that is uniform across q lanes."""
+        if isinstance(expr, int | sympy.Integer):
+            index = int(expr)
+            if for_index and index < 0:
+                if index_dim_size is None:
+                    return None
+                index = V.graph.sizevars.guard_int(index + index_dim_size)
+            return f"cutlass.Int32({index})"
+        if not isinstance(expr, torch.fx.Node):
+            return None
+        if expr is self.q_idx:
+            return "q_idx[0]"
+        if expr is self.kv_idx:
+            return None
+        if len(self.placeholders) >= 2 and expr is self.placeholders[0]:
+            return "b_idx[0]"
+        if len(self.placeholders) >= 2 and expr is self.placeholders[1]:
+            return "h_idx[0]"
+        if expr in self.placeholders[4:]:
+            return f"aux_tensors[{self.placeholders[4:].index(expr)}]"
+        if expr.op != "call_function":
+            return None
+
+        if is_aten_index_node(expr):
+            return self._q_uniform_index_cute_expr(
+                expr, for_index=for_index, index_dim_size=index_dim_size
+            )
+
+        args = expr.args
+        if len(args) < 2:
+            return None
+        lhs = self.q_uniform_cute_expr(args[0])
+        rhs = self.q_uniform_cute_expr(args[1])
+        if lhs is None or rhs is None:
+            return None
+        match expr.target:
+            case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
+                return f"({lhs} + {rhs})"
+            case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
+                return f"({lhs} - {rhs})"
+            case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
+                return f"({lhs} * {rhs})"
+            case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
+                return f"({lhs} % {rhs})"
+            case torch.ops.aten.div.Tensor_mode if (
+                expr.kwargs.get("rounding_mode") == "floor"
+            ):
+                return f"({lhs} // {rhs})"
+            case _:
+                return None
+
+    def _q_uniform_index_cute_expr(
+        self,
+        expr: torch.fx.Node,
+        *,
+        for_index: bool,
+        index_dim_size: int | sympy.Expr | None,
+    ) -> str | None:
+        """Render a q-uniform aux tensor index expression.
+
+        For example, ``offsets[doc_ids[b, q_idx]]`` becomes a nested CuteDSL
+        load from ``aux_tensors``. Dynamic aux-derived indices are wrapped for
+        negative values before indexing to preserve PyTorch index semantics.
+        """
         if fx_node_dtype(expr) not in (
             torch.int8,
             torch.int16,
@@ -715,7 +762,7 @@ def q_uniform_cute_expr(
         if result_shape is not None and len(result_shape) != 0:
             return None
         base, indices = expr.args
-        base_code = q_uniform_cute_expr(base, ctx)
+        base_code = self.q_uniform_cute_expr(base)
         base_shape = fx_node_shape(base) if isinstance(base, torch.fx.Node) else None
         if base_code is None or not isinstance(indices, (list, tuple)):
             return None
@@ -724,15 +771,16 @@ def q_uniform_cute_expr(
         index_codes = []
         for dim, index in enumerate(indices):
             dim_size = base_shape[dim]
-            index_code = q_uniform_cute_expr(
-                index, ctx, for_index=True, index_dim_size=dim_size
+            index_code = self.q_uniform_cute_expr(
+                index, for_index=True, index_dim_size=dim_size
             )
             if index_code is None:
                 return None
             if (
                 dim_size is not None
                 and isinstance(index, torch.fx.Node)
-                and index not in (ctx.q_idx, ctx.placeholders[0], ctx.placeholders[1])
+                and index
+                not in (self.q_idx, self.placeholders[0], self.placeholders[1])
             ):
                 dtype = fx_node_dtype(index)
                 integer_type = "Int64" if dtype == torch.int64 else "Int32"
@@ -748,228 +796,203 @@ def q_uniform_cute_expr(
             return load
         return f"cutlass.Int32({load})"
 
-    args = expr.args
-    if len(args) < 2:
-        return None
-    lhs = q_uniform_cute_expr(args[0], ctx)
-    rhs = q_uniform_cute_expr(args[1], ctx)
-    if lhs is None or rhs is None:
-        return None
-    match expr.target:
-        case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
-            return f"({lhs} + {rhs})"
-        case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
-            return f"({lhs} - {rhs})"
-        case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
-            return f"({lhs} * {rhs})"
-        case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
-            return f"({lhs} % {rhs})"
-        case torch.ops.aten.div.Tensor_mode if (
-            expr.kwargs.get("rounding_mode") == "floor"
-        ):
-            return f"({lhs} // {rhs})"
-        case _:
-            return None
+    def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
+        """Convert mask arithmetic to SymPy, replacing aux loads with symbols."""
+        _, _, index_symbols = _make_fx_index_symbols(
+            self.q_idx, self.kv_idx, kv_expr=self.lane_analysis.kv_lane
+        )
+        return _fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
-
-def fx_mask_expr_to_sympy(
-    expr: object, ctx: PackedMaskAnalysisContext
-) -> sympy.Expr | None:
-    _, _, index_symbols = _make_fx_index_symbols(
-        ctx.q_idx, ctx.kv_idx, kv_expr=ctx.lane_analysis.kv_lane
-    )
-
-    def mask_aux_load_to_symbol(node: torch.fx.Node) -> sympy.Expr | None:
+    def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
+        """Assign a stable symbolic bound name to a q-uniform aux load."""
         if not is_aten_index_node(node):
             return None
-        if node in ctx.aux_load_symbols:
-            return ctx.aux_load_symbols[node]
-        q_uniform_code = q_uniform_cute_expr(node, ctx)
+        if node in self.aux_load_symbols:
+            return self.aux_load_symbols[node]
+        q_uniform_code = self.q_uniform_cute_expr(node)
         if q_uniform_code is None:
             return None
-        symbol = sympy.Symbol(f"mask_bound_{ctx.next_symbol_id}", integer=True)
-        ctx.next_symbol_id += 1
-        ctx.symbol_codes[symbol] = q_uniform_code
-        ctx.aux_load_symbols[node] = symbol
+        symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
+        self.next_symbol_id += 1
+        self.symbol_codes[symbol] = q_uniform_code
+        self.aux_load_symbols[node] = symbol
         return symbol
 
-    return _fx_aux_index_to_sympy(expr, index_symbols, mask_aux_load_to_symbol)
-
-
-def merge_intersection(
-    intervals: tuple[PackedMaskInterval, ...],
-    new_intervals: tuple[PackedMaskInterval, ...],
-) -> tuple[PackedMaskInterval, ...] | None:
-    if len(intervals) * len(new_intervals) > MAX_PACKED_MASK_INTERVALS:
-        return None
-    merged = []
-    for lhs in intervals:
-        for rhs in new_intervals:
-            merged.append(
-                PackedMaskInterval(
-                    f"max({lhs.lower}, {rhs.lower})",
-                    f"min({lhs.upper}, {rhs.upper})",
+    def merge_intersection(
+        self,
+        intervals: tuple[PackedMaskInterval, ...],
+        new_intervals: tuple[PackedMaskInterval, ...],
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Intersect interval unions, falling back if the cross-product grows too large."""
+        if len(intervals) * len(new_intervals) > MAX_PACKED_MASK_INTERVALS:
+            return None
+        merged = []
+        for lhs in intervals:
+            for rhs in new_intervals:
+                merged.append(
+                    PackedMaskInterval(
+                        f"max({lhs.lower}, {rhs.lower})",
+                        f"min({lhs.upper}, {rhs.upper})",
+                    )
                 )
+        return tuple(merged)
+
+    def lane_comparison_to_intervals(
+        self,
+        lhs_expr: sympy.Expr,
+        rhs_expr: sympy.Expr,
+        *,
+        strict: bool,
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Lower an affine lane comparison into one packed mask interval."""
+        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+        affine = decompose_affine_lane_expr(diff, self.lane_analysis.lane)
+        if affine is None:
+            return None
+        lane_coeff, rest = affine
+        if lane_coeff == 1:
+            upper = sympy_to_cute_index(
+                -rest if strict else -rest + 1, self.symbol_codes
             )
-    return tuple(merged)
-
-
-def lane_comparison_to_intervals(
-    lhs_expr: sympy.Expr,
-    rhs_expr: sympy.Expr,
-    *,
-    strict: bool,
-    lane_analysis: LaneIndexAnalysis,
-    symbol_codes: Mapping[sympy.Symbol, str],
-) -> tuple[PackedMaskInterval, ...] | None:
-    diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-    affine = decompose_affine_lane_expr(diff, lane_analysis.lane)
-    if affine is None:
+            if upper is not None:
+                return (PackedMaskInterval("cutlass.Int32(0)", upper),)
+            return None
+        if lane_coeff == -1:
+            lower = sympy_to_cute_index(rest + 1 if strict else rest, self.symbol_codes)
+            if lower is not None:
+                return (PackedMaskInterval(lower, "cutlass.Int32(32)"),)
+            return None
         return None
-    lane_coeff, rest = affine
-    if lane_coeff == 1:
-        upper = sympy_to_cute_index(-rest if strict else -rest + 1, symbol_codes)
-        if upper is not None:
-            return (PackedMaskInterval("cutlass.Int32(0)", upper),)
-        return None
-    if lane_coeff == -1:
-        lower = sympy_to_cute_index(rest + 1 if strict else rest, symbol_codes)
-        if lower is not None:
-            return (PackedMaskInterval(lower, "cutlass.Int32(32)"),)
-        return None
-    return None
 
+    def lane_equality_to_intervals(
+        self, lhs_expr: sympy.Expr, rhs_expr: sympy.Expr
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Lower lane equality into a singleton or block-aligned interval."""
+        if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
+            intervals = self._floor_div_equality_to_intervals(lhs_expr, rhs_expr)
+            if intervals is not None:
+                return intervals
+        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+        affine = decompose_affine_lane_expr(diff, self.lane_analysis.lane)
+        if affine is None:
+            return None
+        lane_coeff, rest = affine
+        if lane_coeff in (1, -1):
+            lane_value = -rest if lane_coeff == 1 else rest
+            lower = sympy_to_cute_index(lane_value, self.symbol_codes)
+            upper = sympy_to_cute_index(lane_value + 1, self.symbol_codes)
+            if lower is not None and upper is not None:
+                return (PackedMaskInterval(lower, upper),)
+            return None
+        return None
 
-def lane_equality_to_intervals(
-    lhs_expr: sympy.Expr,
-    rhs_expr: sympy.Expr,
-    *,
-    lane_analysis: LaneIndexAnalysis,
-    symbol_codes: Mapping[sympy.Symbol, str],
-) -> tuple[PackedMaskInterval, ...] | None:
-    if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
+    def _floor_div_equality_to_intervals(
+        self, lhs_expr: FloorDiv, rhs_expr: FloorDiv
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Lower block equality like ``q_idx // B == kv_idx // B`` to ``[block_start, block_start + B)``."""
         lhs_base, lhs_divisor = lhs_expr.args
         rhs_base, rhs_divisor = rhs_expr.args
         if lhs_divisor != rhs_divisor:
             return None
         block_start = None
-        if lhs_base == lane_analysis.q_idx and rhs_base == lane_analysis.kv_lane:
+        if (
+            lhs_base == self.lane_analysis.q_idx
+            and rhs_base == self.lane_analysis.kv_lane
+        ):
             block_start = V.graph.sizevars.simplify(
-                lhs_expr * lhs_divisor - lane_analysis.kv_idx
+                lhs_expr * lhs_divisor - self.lane_analysis.kv_idx
             )
-        elif rhs_base == lane_analysis.q_idx and lhs_base == lane_analysis.kv_lane:
+        elif (
+            rhs_base == self.lane_analysis.q_idx
+            and lhs_base == self.lane_analysis.kv_lane
+        ):
             block_start = V.graph.sizevars.simplify(
-                rhs_expr * rhs_divisor - lane_analysis.kv_idx
+                rhs_expr * rhs_divisor - self.lane_analysis.kv_idx
             )
-        if block_start is not None:
-            lower = sympy_to_cute_index(block_start, symbol_codes)
-            upper = sympy_to_cute_index(block_start + lhs_divisor, symbol_codes)
-            if lower is not None and upper is not None:
-                return (PackedMaskInterval(lower, upper),)
+        if block_start is None:
             return None
-    diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-    affine = decompose_affine_lane_expr(diff, lane_analysis.lane)
-    if affine is None:
-        return None
-    lane_coeff, rest = affine
-    if lane_coeff in (1, -1):
-        lane_value = -rest if lane_coeff == 1 else rest
-        lower = sympy_to_cute_index(lane_value, symbol_codes)
-        upper = sympy_to_cute_index(lane_value + 1, symbol_codes)
+        lower = sympy_to_cute_index(block_start, self.symbol_codes)
+        upper = sympy_to_cute_index(block_start + lhs_divisor, self.symbol_codes)
         if lower is not None and upper is not None:
             return (PackedMaskInterval(lower, upper),)
         return None
-    return None
 
-
-def comparison_to_intervals(
-    lhs: object,
-    rhs: object,
-    *,
-    strict: bool,
-    ctx: PackedMaskAnalysisContext,
-) -> tuple[PackedMaskInterval, ...] | None:
-    lhs_expr = fx_mask_expr_to_sympy(lhs, ctx)
-    rhs_expr = fx_mask_expr_to_sympy(rhs, ctx)
-    if lhs_expr is None or rhs_expr is None:
-        return None
-    return lane_comparison_to_intervals(
-        lhs_expr,
-        rhs_expr,
-        strict=strict,
-        lane_analysis=ctx.lane_analysis,
-        symbol_codes=ctx.symbol_codes,
-    )
-
-
-def equality_to_intervals(
-    lhs: object,
-    rhs: object,
-    *,
-    ctx: PackedMaskAnalysisContext,
-) -> tuple[PackedMaskInterval, ...] | None:
-    lhs_expr = fx_mask_expr_to_sympy(lhs, ctx)
-    rhs_expr = fx_mask_expr_to_sympy(rhs, ctx)
-    if lhs_expr is None or rhs_expr is None:
-        return None
-    return lane_equality_to_intervals(
-        lhs_expr,
-        rhs_expr,
-        lane_analysis=ctx.lane_analysis,
-        symbol_codes=ctx.symbol_codes,
-    )
-
-
-def node_to_packed_mask_intervals(
-    node: torch.fx.Node, ctx: PackedMaskAnalysisContext
-) -> tuple[PackedMaskInterval, ...] | None:
-    if is_bool_full_node(node, True):
-        return (PackedMaskInterval("cutlass.Int32(0)", "cutlass.Int32(32)"),)
-    if is_bool_full_node(node, False):
-        return ()
-    if node.op != "call_function":
-        return None
-    match node.target:
-        case torch.ops.aten.bitwise_and.Tensor | torch.ops.aten.logical_and.default:
-            lhs, rhs = node.args
-            if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
-                return None
-            lhs_intervals = node_to_packed_mask_intervals(lhs, ctx)
-            rhs_intervals = node_to_packed_mask_intervals(rhs, ctx)
-            if lhs_intervals is None or rhs_intervals is None:
-                return None
-            return merge_intersection(lhs_intervals, rhs_intervals)
-        case torch.ops.aten.bitwise_or.Tensor | torch.ops.aten.logical_or.default:
-            lhs, rhs = node.args
-            if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
-                return None
-            lhs_intervals = node_to_packed_mask_intervals(lhs, ctx)
-            rhs_intervals = node_to_packed_mask_intervals(rhs, ctx)
-            if lhs_intervals is None or rhs_intervals is None:
-                return None
-            if len(lhs_intervals) + len(rhs_intervals) > MAX_PACKED_MASK_INTERVALS:
-                return None
-            return lhs_intervals + rhs_intervals
-        case torch.ops.aten.le.Tensor | torch.ops.aten.le.Scalar:
-            return comparison_to_intervals(
-                node.args[0], node.args[1], strict=False, ctx=ctx
-            )
-        case torch.ops.aten.lt.Tensor | torch.ops.aten.lt.Scalar:
-            return comparison_to_intervals(
-                node.args[0], node.args[1], strict=True, ctx=ctx
-            )
-        case torch.ops.aten.ge.Tensor | torch.ops.aten.ge.Scalar:
-            return comparison_to_intervals(
-                node.args[1], node.args[0], strict=False, ctx=ctx
-            )
-        case torch.ops.aten.gt.Tensor | torch.ops.aten.gt.Scalar:
-            return comparison_to_intervals(
-                node.args[1], node.args[0], strict=True, ctx=ctx
-            )
-        case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
-            return equality_to_intervals(node.args[0], node.args[1], ctx=ctx)
-        case _:
+    def comparison_to_intervals(
+        self,
+        lhs: object,
+        rhs: object,
+        *,
+        strict: bool,
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Convert FX comparison operands to SymPy before interval lowering."""
+        lhs_expr = self.fx_mask_expr_to_sympy(lhs)
+        rhs_expr = self.fx_mask_expr_to_sympy(rhs)
+        if lhs_expr is None or rhs_expr is None:
             return None
+        return self.lane_comparison_to_intervals(lhs_expr, rhs_expr, strict=strict)
+
+    def equality_to_intervals(
+        self, lhs: object, rhs: object
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Convert FX equality operands to SymPy before interval lowering."""
+        lhs_expr = self.fx_mask_expr_to_sympy(lhs)
+        rhs_expr = self.fx_mask_expr_to_sympy(rhs)
+        if lhs_expr is None or rhs_expr is None:
+            return None
+        return self.lane_equality_to_intervals(lhs_expr, rhs_expr)
+
+    def node_to_intervals(
+        self, node: torch.fx.Node
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Recursively lower a boolean mask node into a union of intervals."""
+        if is_bool_full_node(node, True):
+            return (PackedMaskInterval("cutlass.Int32(0)", "cutlass.Int32(32)"),)
+        if is_bool_full_node(node, False):
+            return ()
+        if node.op != "call_function":
+            return None
+        match node.target:
+            case torch.ops.aten.bitwise_and.Tensor | torch.ops.aten.logical_and.default:
+                return self.combine_binary_intervals(node, intersect=True)
+            case torch.ops.aten.bitwise_or.Tensor | torch.ops.aten.logical_or.default:
+                return self.combine_binary_intervals(node, intersect=False)
+            case torch.ops.aten.le.Tensor | torch.ops.aten.le.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[0], node.args[1], strict=False
+                )
+            case torch.ops.aten.lt.Tensor | torch.ops.aten.lt.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[0], node.args[1], strict=True
+                )
+            case torch.ops.aten.ge.Tensor | torch.ops.aten.ge.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[1], node.args[0], strict=False
+                )
+            case torch.ops.aten.gt.Tensor | torch.ops.aten.gt.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[1], node.args[0], strict=True
+                )
+            case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
+                return self.equality_to_intervals(node.args[0], node.args[1])
+            case _:
+                return None
+
+    def combine_binary_intervals(
+        self, node: torch.fx.Node, *, intersect: bool
+    ) -> tuple[PackedMaskInterval, ...] | None:
+        """Lower AND/OR by combining the recursively lowered child interval unions."""
+        lhs, rhs = node.args
+        if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+            return None
+        lhs_intervals = self.node_to_intervals(lhs)
+        rhs_intervals = self.node_to_intervals(rhs)
+        if lhs_intervals is None or rhs_intervals is None:
+            return None
+        if intersect:
+            return self.merge_intersection(lhs_intervals, rhs_intervals)
+        if len(lhs_intervals) + len(rhs_intervals) > MAX_PACKED_MASK_INTERVALS:
+            return None
+        return lhs_intervals + rhs_intervals
 
 
 def select_packed_mask_intervals(
@@ -992,13 +1015,13 @@ def select_packed_mask_intervals(
         kv_idx=sympy.Symbol("kv_idx", integer=True, nonnegative=True),
         lane=sympy.Symbol("mask_lane", integer=True, nonnegative=True),
     )
-    ctx = PackedMaskAnalysisContext(
+    analyzer = PackedMaskAnalyzer(
         placeholders=placeholders,
         q_idx=q_idx,
         kv_idx=kv_idx,
         lane_analysis=lane_analysis,
     )
-    intervals = node_to_packed_mask_intervals(output_val, ctx)
+    intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:
         return None
     if intervals == (PackedMaskInterval("cutlass.Int32(0)", "cutlass.Int32(32)"),):
