@@ -1227,8 +1227,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        if isinstance(index, sympy.Expr):
-            index = index.expand(identity=True)
         index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
@@ -2177,9 +2175,11 @@ class SIMDScheduling(BaseScheduling):
         if node1.is_split_scan() and not node2.is_split_scan():
             if node2.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
         elif node2.is_split_scan() and not node1.is_split_scan():
             if node1.is_reduction():
                 why("Split scan cannot fuse with reductions")
+                return False
 
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
@@ -3773,9 +3773,14 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     # Generate regular kernel
+                    kernel_kwargs: dict[str, Any] = {}
+                    self.kernel_type.apply_feature_required_overrides(
+                        node_info.features, kernel_kwargs
+                    )
                     kernel = self.kernel_type(
                         node_info.tiling,
                         features=node_info.features,
+                        **kernel_kwargs,
                     )
                     self.process_kernel(
                         kernel, node_info.node_schedule, only_gen_src_code

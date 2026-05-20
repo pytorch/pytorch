@@ -1486,6 +1486,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_integral_inplace_div_aot_eager_raises(self):
+        def fn(x, y):
+            x.div_(y)
+            return x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError, "can't be cast to the desired output type"
+        ):
+            opt_fn(torch.tensor([1]), torch.tensor([0]))
+
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
@@ -1651,6 +1662,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out = f(inp)
         opt_out = opt_f(inp)
         self.assertEqual(opt_out, out)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_threading_local_dunder_dict_mutation(self):
+        import threading
+
+        foo = threading.local()
+
+        def f(x):
+            del foo.__dict__["old"]
+            foo.__dict__["new"] = x + 2
+            return foo.new * 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+
+        inp = torch.ones(1)
+        foo.old = torch.zeros(1)
+        expected = f(inp)
+        expected_new = foo.new
+        self.assertFalse(hasattr(foo, "old"))
+
+        foo.old = torch.zeros(1)
+        del foo.new
+        actual = opt_f(inp)
+        self.assertEqual(actual, expected)
+        self.assertFalse(hasattr(foo, "old"))
+        self.assertEqual(foo.new, expected_new)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_seq_append_list(self):
@@ -2003,6 +2041,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y, z = opt_fn(x)
         self.assertFalse(y.requires_grad)
         self.assertFalse(z.requires_grad)
+
+    def test_basic_tensor_subclass_constructor(self):
+        # Tests that basic Tensor subclass construction works with torch.compile
+        # Regression test for LazyVariableTracker not being realized before
+        # accessing __dict__ in TensorWithTFOverrideVariable.from_tensor_var
+        class MyTensor(torch.Tensor):
+            pass
+
+        def f(x):
+            y = MyTensor(x)
+            return torch.abs(y)
+
+        x = torch.randn(4)
+        eager_out = f(x)
+        compiled_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        compiled_out = compiled_f(x)
+
+        torch.testing.assert_close(
+            torch.as_tensor(eager_out),
+            torch.as_tensor(compiled_out),
+        )
+        self.assertIsInstance(compiled_out, MyTensor)
 
     def test_locals_traced_correctly_under_compile(self):
         def fn(x):
