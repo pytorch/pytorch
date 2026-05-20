@@ -23,7 +23,13 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    Mod,
+    ModularIndexing,
+    safe_gcd,
+    simple_floordiv_gcd,
+)
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -608,8 +614,6 @@ class SizeVarAllocator:
                 return True
 
         # Rule 6 — cheap gcd check before expensive sympy fallback.
-        from torch.utils._sympy.functions import simple_floordiv_gcd
-
         gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
         if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
             return True
@@ -635,9 +639,30 @@ class SizeVarAllocator:
         if isinstance(denominator, (int, sympy.Integer)):
             return self._is_multiple_of(numerator, int(denominator))
 
-        # Symbolic denominator: only the sympy fallback can prove this.
-        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+        if numerator == 0:
+            return True
+
+        # Symbolic denominator: try gcd-based cancellation under the same
+        # small-expression limit used for the sympy fallback below.
+        if (
+            len(free_symbols([numerator, denominator]))
+            > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS
+        ):
             return False
+
+        def gcd_covers_denominator(gcd: sympy.Basic) -> bool:
+            return gcd != 1 and (
+                gcd == denominator or self.simplify(gcd - denominator) == 0
+            )
+
+        try:
+            if gcd_covers_denominator(simple_floordiv_gcd(numerator, denominator)):
+                return True
+            if gcd_covers_denominator(safe_gcd(numerator, denominator)):
+                return True
+        except sympy.PolynomialError:
+            pass
+
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
