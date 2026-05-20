@@ -171,7 +171,7 @@ def _make_kernel(
         sBuf = smem.allocate_tensor(
             dtype,
             cute.make_layout((chunk_elems, 2), stride=(1, stage_stride_elems)),
-            128,
+            _SMEM_ALIGN_BYTES,
         )
         mbar_storage = smem.allocate_array(cutlass.Uint64, num_elems=2 * 2)
 
@@ -244,9 +244,7 @@ def _make_kernel(
 
                     if pair_count > Int32(0):
                         pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
-                            stage_stride_elems
-                        )
+                        cbuf_ptr = sBuf[None, consumer_state.index].iterator
 
                         # Partial-chunk handling: actual valid element
                         # count is min(chunk_elems, N - off). TMA
@@ -278,9 +276,7 @@ def _make_kernel(
         if tidx == Int32(0):
             if pair_count > Int32(0):
                 pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
-                    stage_stride_elems
-                )
+                cbuf_ptr = sBuf[None, consumer_state.index].iterator
 
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
