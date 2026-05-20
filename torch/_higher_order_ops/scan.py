@@ -814,13 +814,25 @@ class ScanAutogradImpl:
         )
 
 
+def _make_scan_carry_differentiable_for_tracing(carry: torch.Tensor) -> torch.Tensor:
+    sample_carry = carry.detach().clone()
+    if carry.dtype.is_floating_point or carry.dtype.is_complex:
+        sample_carry.requires_grad_(True)
+    return sample_carry
+
+
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
+    partitioner_args = (
+        *[_make_scan_carry_differentiable_for_tracing(t) for t in init],
+        *[x[0] for x in xs],
+        *additional_inputs,
+    )
     with disable_proxy_modes_tracing():
         hop_partitioned_graph: HopPartitionedGraph = (
             HopGraphMinCutPartitioner.create_partitioned_graph(
                 combine_fn,
-                (*init, *[x[0] for x in xs], *additional_inputs),
+                partitioner_args,
                 always_recompute_complex_exprs=True,
             )
         )
