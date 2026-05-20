@@ -117,7 +117,6 @@ for simple_op in SIMPLE_OPS_LIST:
 
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [
-    aten.copy,
     aten.col2im,
     aten.alias,
     aten.lift_fresh,
@@ -163,6 +162,7 @@ add_impl = register_binary_linear(aten.add)
 add__impl = register_binary_linear_inplace(aten.add_, add_impl)
 sub_impl = register_binary_linear(aten.sub)
 sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
+copy_impl = register_binary_linear(aten.copy)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
 fill_impl = register_binary_linear(aten.fill)
 fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)

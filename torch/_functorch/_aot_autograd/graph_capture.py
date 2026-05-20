@@ -13,7 +13,6 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
-from torch._functorch._aot_autograd.runtime_wrappers import ComplexWrapper
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -224,10 +223,6 @@ def _prepare_graph_capture_tracing(
 ) -> _GraphCaptureTracingResult:
     if aot_config.disable_functionalization:
         updated_flat_args, updated_flat_args_descs = flat_args, flat_args_descs
-        if config.enable_complex_wrapper:
-            raise RuntimeError(
-                "ComplexTensor wrapper is enabled but cannot be applied, as it requires functionalization."
-            )
     else:
         fn_to_trace, updated_flat_args, updated_flat_args_descs = (
             create_functionalized_fn(
@@ -238,17 +233,6 @@ def _prepare_graph_capture_tracing(
                 aot_config=aot_config,
                 trace_joint=trace_joint,
                 joint_fn_handle=joint_fn_handle,
-            )
-        )
-
-        complex_wrapper = ComplexWrapper()
-        flat_fn, updated_flat_args, updated_flat_args_descs, fw_metadata = (
-            complex_wrapper.pre_compile(
-                flat_fn,
-                updated_flat_args,
-                updated_flat_args_descs,
-                aot_config=aot_config,
-                fw_metadata=fw_metadata,
             )
         )
 
