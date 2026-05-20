@@ -515,7 +515,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode:
             self._write_aoti_interface_header()
 
-        if config.cpp.enable_kernel_profile:
+        if (
+            config.cpp.enable_kernel_profile
+            and config.cpp.enable_kernel_context_guard
+        ):
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
             )
@@ -1724,27 +1727,35 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "linux",
             "win32",
         ]
+        enable_kernel_context_guard = (
+            enable_kernel_profile and config.cpp.enable_kernel_context_guard
+        )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
             shim_fn_codes = [
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             ]
             if enable_kernel_profile:
-                stack_trace_str = 'R"('
-                if stack_traces:
-                    for stack_trace in stack_traces:
-                        for line in stack_trace.split("\n"):
-                            stack_trace_str += f"\n{line}"
-                        stack_trace_str += "\n"
-                stack_trace_str += ')"'
-
-                shim_fn_codes = [
-                    "{",
-                    f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
-                    f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
-                    shim_fn_codes[0],
-                    "}",
-                ]
+                call_code = shim_fn_codes[0]
+                shim_fn_codes = ["{"]
+                if enable_kernel_context_guard:
+                    stack_trace_str = 'R"('
+                    if stack_traces:
+                        for stack_trace in stack_traces:
+                            for line in stack_trace.split("\n"):
+                                stack_trace_str += f"\n{line}"
+                            stack_trace_str += "\n"
+                    stack_trace_str += ')"'
+                    shim_fn_codes.append(
+                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                    )
+                shim_fn_codes.extend(
+                    [
+                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                        call_code,
+                        "}",
+                    ]
+                )
             self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(

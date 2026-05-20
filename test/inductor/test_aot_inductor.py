@@ -6040,7 +6040,10 @@ class AOTInductorTestsTemplate:
         config.triton.native_matmul, "different kernel name when native matmul"
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
-    def test_aoti_profiler(self, enable_kernel_profile):
+    @common_utils.parametrize("enable_kernel_context_guard", (True, False))
+    def test_aoti_profiler(
+        self, enable_kernel_context_guard, enable_kernel_profile
+    ):
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6068,15 +6071,27 @@ class AOTInductorTestsTemplate:
             if self.device == GPU_TYPE
             else "aoti_torch_cpu_addmm_out"
         )
-        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": enable_kernel_profile,
+                "cpp.enable_kernel_context_guard": enable_kernel_context_guard,
+            }
+        ):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = f'RAIIAtenRecordFunctionHandle .*\\("{kernel_calls}"'
             if enable_kernel_profile:
-                FileCheck().check_regex(shim_fn_codes).run(code)
+                file_check = FileCheck().check_regex(shim_fn_codes)
+                if enable_kernel_context_guard:
+                    file_check.check("KernelContextGuard")
+                else:
+                    file_check.check_not("KernelContextGuard")
+                file_check.run(code)
             else:
-                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").check_not(
+                    "KernelContextGuard"
+                ).run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
