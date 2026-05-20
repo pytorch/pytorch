@@ -142,19 +142,28 @@ inline void pop(Stack* stack, Types&... args) {
 }
 // tuple-returning pop:
 // auto [a, b] = pop<int64_t, at::Tensor>(stack);
-template <typename... Types>
-  requires(sizeof...(Types) > 0)
-inline std::tuple<Types...> pop(Stack& stack) {
+namespace detail {
+template <typename... Types, size_t... Is>
+inline std::tuple<Types...> pop_impl(
+    Stack& stack,
+    std::index_sequence<Is...>) {
   constexpr size_t N = sizeof...(Types);
-  auto result = [&]<size_t... Is>(std::index_sequence<Is...>) {
-    return std::tuple<Types...>{
-        std::move(peek(stack, Is, N)).template to<Types>()...};
-  }(std::index_sequence_for<Types...>{});
+  std::tuple<Types...> result{
+      std::move(peek(stack, Is, N)).template to<Types>()...};
   drop(stack, N);
   return result;
 }
-template <typename... Types>
-  requires(sizeof...(Types) > 0)
+} // namespace detail
+template <
+    typename... Types,
+    std::enable_if_t<(sizeof...(Types) > 0), int> = 0>
+inline std::tuple<Types...> pop(Stack& stack) {
+  return detail::pop_impl<Types...>(
+      stack, std::make_index_sequence<sizeof...(Types)>{});
+}
+template <
+    typename... Types,
+    std::enable_if_t<(sizeof...(Types) > 0), int> = 0>
 inline std::tuple<Types...> pop(Stack* stack) {
   return pop<Types...>(*stack);
 }
