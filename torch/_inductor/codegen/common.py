@@ -2458,6 +2458,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             return None
         return self.args.arg_name(node.get_name())
 
+    def record_op_trace(
+        self,
+        name: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        result: Any = None,
+    ) -> None:
+        pass
+
 
 @dataclasses.dataclass
 class OptimizationContext:
@@ -2727,7 +2736,9 @@ class CSEProxy(DefaultHandler):
 
             return csevar
 
-        return pytree.tree_map(do_cse, value)
+        result = pytree.tree_map(do_cse, value)
+        self.kernel.record_op_trace(name, args, kwargs, result)
+        return result
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
@@ -2799,9 +2810,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond
@@ -2852,6 +2869,7 @@ class CSEProxy(DefaultHandler):
         # cse cache.
         if out.use_count == 1:
             self.kernel.num_load += 1
+        self.kernel.record_op_trace("load", (name, index), {}, out)
         return out
 
     def _update_store_cache(self, name: str, value: CSEVariable) -> None:
@@ -2871,9 +2889,11 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
+        self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
+        self.kernel.record_op_trace("device_assert_async", (cond, msg), {})
 
     # pyrefly: ignore [bad-override]
     def partial_accumulate(self, *args: Any) -> None:
@@ -2885,7 +2905,10 @@ class CSEProxy(DefaultHandler):
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
-            return self.kernel.store_reduction(name, index, value)
+            result = self.kernel.store_reduction(name, index, value)
+            self.kernel.record_op_trace("store_reduction", (name, index, value), {})
+            return result
+        self.kernel.record_op_trace("store_reduction", (name, index, value), {})
 
     def reduction(
         self,
@@ -2895,7 +2918,11 @@ class CSEProxy(DefaultHandler):
         value: CSEVariable | tuple[CSEVariable, ...],
     ) -> CSEVariable | tuple[CSEVariable, ...]:
         self.kernel.num_reduction += 1
-        return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+        result = self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+        self.kernel.record_op_trace(
+            "reduction", (dtype, src_dtype, reduction_type, value), {}, result
+        )
+        return result
 
     def scan(
         self,

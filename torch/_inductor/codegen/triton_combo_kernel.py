@@ -1,7 +1,8 @@
+import io
 import itertools
 import logging
-import re
 import textwrap
+import tokenize
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -181,9 +182,16 @@ class PartitionState:
 
 
 @dataclass
+class SubKernelSetup:
+    uniquify_block_sizes: list[str]
+    lhs_names: list[str]
+
+
+@dataclass
 class SubKernelCode:
     setup: IndentedBuffer
     body: IndentedBuffer
+    setup_lhs_names: list[str]
 
 
 @dataclass
@@ -198,16 +206,6 @@ class ComboKernel(Kernel):
     """
     A kernel that combines multiple sub-kernels into a single fused kernel.
     """
-
-    _ARG_NAME_RE = re.compile(r"\b[A-Za-z_]\w*\b")
-    _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_]\w*)\s*(?::[^=]+)?=")
-    _NUMBERED_SYMBOL_PATTERNS = (
-        (re.compile(r"\btmp\d+\b"), "tmp"),
-        (re.compile(r"\br\d+_\d+\b"), "r"),
-        (re.compile(r"\bx\d+\b"), "x"),
-        (re.compile(r"\by\d+\b"), "y"),
-        (re.compile(r"\bz\d+\b"), "z"),
-    )
 
     @staticmethod
     def _update_partition(
@@ -529,9 +527,7 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        return triton_kernel_cls(
-            tiling,
-            features=features,
+        kwargs: dict[str, Any] = dict(
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
@@ -539,10 +535,13 @@ class ComboKernel(Kernel):
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
         )
+        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
+
+        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
-    ) -> list[str]:
+    ) -> SubKernelSetup:
         """
         We get a small speedup from hard coding numels if they are static.
 
@@ -560,11 +559,14 @@ class ComboKernel(Kernel):
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
         grid = []
+        lhs_names: list[str] = []
         uniquify_block_sizes = []
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if isinstance(simplified_tree_numel, (Integer, int)):
-                code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
+                lhs_name = f"{tree.prefix}numel"
+                code.writeline(f"{lhs_name} = {int(simplified_tree_numel)}")
+                lhs_names.append(lhs_name)
             else:
                 assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
@@ -584,11 +586,13 @@ class ComboKernel(Kernel):
                         "Dynamic shape on reduction dimension is not supported"
                     )
                 val = next_power_of_2(val)
+                lhs_names.append(f"{tree.prefix.upper()}BLOCK_{num}")
                 code.writeline(
                     f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
                 )
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
+                lhs_names.append(f"XBLOCK_{num}")
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
             elif tree.prefix in ("x", "y") and config.combo_kernel_per_subkernel_blocks:
@@ -600,7 +604,10 @@ class ComboKernel(Kernel):
                 ):
                     uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
         self.grids.append(grid)
-        return uniquify_block_sizes
+        return SubKernelSetup(
+            uniquify_block_sizes=uniquify_block_sizes,
+            lhs_names=lhs_names,
+        )
 
     def min_x_blocks_sub_kernel(self, sub_kernel: TritonKernel, num: int) -> None:
         """
@@ -984,46 +991,105 @@ class ComboKernel(Kernel):
                 return None
         return lines
 
-    @classmethod
-    def _canonicalize_numbered_symbols(cls, lines: list[str]) -> list[str]:
-        replacements: list[dict[str, str]] = [{} for _ in cls._NUMBERED_SYMBOL_PATTERNS]
-        canonicalized: list[str] = []
+    @staticmethod
+    def _replace_names_in_line(line: str, replacements: dict[str, str]) -> str | None:
+        if not replacements:
+            return line
+        try:
+            tokens = []
+            for token in tokenize.generate_tokens(io.StringIO(line).readline):
+                if token.type == tokenize.NAME and token.string in replacements:
+                    token = token._replace(string=replacements[token.string])
+                tokens.append(token)
+            return tokenize.untokenize(tokens).rstrip("\n")
+        except tokenize.TokenError:
+            return None
 
+    @classmethod
+    def _replace_names(
+        cls, lines: list[str], replacements: dict[str, str]
+    ) -> list[str] | None:
+        replaced: list[str] = []
         for line in lines:
-            new_line = line
-            for i, (pattern, prefix) in enumerate(cls._NUMBERED_SYMBOL_PATTERNS):
-                mapping = replacements[i]
+            new_line = cls._replace_names_in_line(line, replacements)
+            if new_line is None:
+                return None
+            replaced.append(new_line)
+        return replaced
 
-                def replace(match: re.Match[str]) -> str:
-                    name = match.group(0)
-                    if name not in mapping:
-                        mapping[name] = f"{prefix}{len(mapping)}"
-                    return mapping[name]
+    @staticmethod
+    def _names_in_lines(lines: list[str]) -> OrderedSet[str] | None:
+        names: OrderedSet[str] = OrderedSet()
+        try:
+            for line in lines:
+                for token in tokenize.generate_tokens(io.StringIO(line).readline):
+                    if token.type == tokenize.NAME:
+                        names.add(token.string)
+        except tokenize.TokenError:
+            return None
+        return names
 
-                new_line = pattern.sub(replace, new_line)
-            canonicalized.append(new_line)
-
-        return canonicalized
+    @staticmethod
+    def _range_tree_names(sub_kernel: TritonKernel) -> list[str]:
+        names: list[str] = []
+        for tree in sub_kernel.range_trees:
+            names.append(tree.name)
+            names.extend(entry.name for entry in tree.nodes.values())
+        return names
 
     @classmethod
-    def _replace_args_with_placeholders(
+    def _range_tree_name_replacements(
+        cls, first: TritonKernel, sub_kernel: TritonKernel
+    ) -> dict[str, str] | None:
+        if len(first.range_trees) != len(sub_kernel.range_trees):
+            return None
+
+        for first_tree, tree in zip(
+            first.range_trees, sub_kernel.range_trees, strict=True
+        ):
+            if (
+                first_tree.prefix != tree.prefix
+                or first_tree.tensor_dim != tree.tensor_dim
+                or first_tree.is_reduction != tree.is_reduction
+            ):
+                return None
+
+        first_names = cls._range_tree_names(first)
+        names = cls._range_tree_names(sub_kernel)
+        if len(first_names) != len(names):
+            return None
+        return {
+            name: first_name
+            for first_name, name in zip(first_names, names, strict=True)
+            if name != first_name
+        }
+
+    @classmethod
+    def _body_name_replacements(
         cls,
-        lines: list[str],
-        arg_names: OrderedSet[str],
-    ) -> tuple[list[str], list[str]]:
-        used_args: list[str] = []
+        first: TritonKernel,
+        sub_kernel: TritonKernel,
+        args: list[str],
+    ) -> dict[str, str] | None:
+        first_cse_names = {
+            canonical: name for name, canonical in first._op_trace_cse_names.items()
+        }
         replacements: dict[str, str] = {}
+        for name, canonical in sub_kernel._op_trace_cse_names.items():
+            first_name = first_cse_names.get(canonical)
+            if first_name is None:
+                return None
+            if name != first_name:
+                replacements[name] = first_name
 
-        def replace(match: re.Match[str]) -> str:
-            name = match.group(0)
-            if name not in arg_names:
-                return name
-            if name not in replacements:
-                replacements[name] = f"foreach_arg{len(used_args)}"
-                used_args.append(name)
-            return replacements[name]
+        range_replacements = cls._range_tree_name_replacements(first, sub_kernel)
+        if range_replacements is None:
+            return None
+        replacements.update(range_replacements)
 
-        return [cls._ARG_NAME_RE.sub(replace, line) for line in lines], used_args
+        for i, arg in enumerate(args):
+            replacements[arg] = f"foreach_arg{i}"
+        return replacements
 
     @staticmethod
     def _compatible_shared_arg_properties(
@@ -1036,6 +1102,8 @@ class ComboKernel(Kernel):
         if num_args == 0:
             return False
         if any(len(args) != num_args for args in args_by_subkernel):
+            return False
+        if any(arg not in tensor_args for args in args_by_subkernel for arg in args):
             return False
 
         for arg_index in range(num_args):
@@ -1054,24 +1122,14 @@ class ComboKernel(Kernel):
         return True
 
     @classmethod
-    def _setup_lhs_names(
-        cls, sub_kernel_codes: list[SubKernelCode]
-    ) -> list[str] | None:
+    def _setup_lhs_names(cls, sub_kernel_codes: list[SubKernelCode]) -> list[str]:
         names: list[str] = []
         seen: OrderedSet[str] = OrderedSet()
         for sub_kernel_code in sub_kernel_codes:
-            for line in sub_kernel_code.setup._lines:
-                if not isinstance(line, str):
-                    return None
-                stripped = line.strip()
-                if ": tl.constexpr" in stripped:
-                    return None
-                match = cls._ASSIGNMENT_RE.match(stripped)
-                if match:
-                    name = match.group(1)
-                    if name not in seen:
-                        seen.add(name)
-                        names.append(name)
+            for name in sub_kernel_code.setup_lhs_names:
+                if name not in seen:
+                    seen.add(name)
+                    names.append(name)
         return names
 
     def _try_get_shared_body(
@@ -1084,38 +1142,58 @@ class ComboKernel(Kernel):
             return None
 
         tensor_args = {arg.name: arg for arg in signature if isinstance(arg, TensorArg)}
-        arg_names = OrderedSet(tensor_args)
-        if not arg_names:
+        if not tensor_args:
+            return None
+        first_sub_kernel = self.sub_kernels[0]
+        first_trace = first_sub_kernel.op_trace
+        if not first_trace:
+            return None
+        if any(
+            sub_kernel.op_trace != first_trace for sub_kernel in self.sub_kernels[1:]
+        ):
             return None
 
         transformed_bodies: list[list[str]] = []
-        normalized_bodies: list[list[str]] = []
         args_by_subkernel: list[list[str]] = []
 
-        for sub_kernel_code in sub_kernel_codes:
+        for sub_kernel, sub_kernel_code in zip(
+            self.sub_kernels, sub_kernel_codes, strict=True
+        ):
             lines = self._plain_lines(sub_kernel_code.body)
-            if lines is None or any("'" in line or '"' in line for line in lines):
+            if lines is None:
                 return None
+            body_names = self._names_in_lines(lines)
+            if body_names is None:
+                return None
+            if any(
+                arg in body_names and arg not in tensor_args
+                for arg in sub_kernel.op_trace_buffer_arg_names
+            ):
+                return None
+            args = [
+                arg
+                for arg in sub_kernel.op_trace_buffer_arg_names
+                if arg in tensor_args and arg in body_names
+            ]
+            args_by_subkernel.append(args)
 
-            transformed, used_args = self._replace_args_with_placeholders(
-                lines, arg_names
+            replacements = self._body_name_replacements(
+                first_sub_kernel, sub_kernel, args
             )
-            if any(arg not in tensor_args for arg in used_args):
+            if replacements is None:
+                return None
+            transformed = self._replace_names(lines, replacements)
+            if transformed is None:
                 return None
 
             transformed_bodies.append(transformed)
-            args_by_subkernel.append(used_args)
-            normalized_bodies.append(self._canonicalize_numbered_symbols(transformed))
 
-        if any(body != normalized_bodies[0] for body in normalized_bodies[1:]):
+        if any(body != transformed_bodies[0] for body in transformed_bodies[1:]):
             return None
-
         if not self._compatible_shared_arg_properties(args_by_subkernel, tensor_args):
             return None
 
         setup_lhs_names = self._setup_lhs_names(sub_kernel_codes)
-        if setup_lhs_names is None:
-            return None
 
         body = IndentedBuffer()
         body.writelines(transformed_bodies[0])
@@ -1134,11 +1212,21 @@ class ComboKernel(Kernel):
         sub_kernel_codes: list[SubKernelCode] = []
         for num, sub_kernel in enumerate(self.sub_kernels):
             setup = IndentedBuffer()
-            uniquify = self.codegen_static_numels_sub_kernel(setup, sub_kernel, num)
+            sub_kernel_setup = self.codegen_static_numels_sub_kernel(
+                setup, sub_kernel, num
+            )
             sub_kernel.codegen_body()
             sub_kernel._filter_pdl(sub_kernel.body)
-            body = self.uniquify_block_sizes(sub_kernel.body, num, uniquify)
-            sub_kernel_codes.append(SubKernelCode(setup=setup, body=body))
+            body = self.uniquify_block_sizes(
+                sub_kernel.body, num, sub_kernel_setup.uniquify_block_sizes
+            )
+            sub_kernel_codes.append(
+                SubKernelCode(
+                    setup=setup,
+                    body=body,
+                    setup_lhs_names=sub_kernel_setup.lhs_names,
+                )
+            )
         return sub_kernel_codes
 
     def _codegen_branch(
@@ -1167,6 +1255,7 @@ class ComboKernel(Kernel):
                 for placeholder, arg in zip(
                     shared_body.placeholder_names,
                     shared_body.args_by_subkernel[num],
+                    strict=True,
                 ):
                     code.writeline(f"{placeholder} = {arg}")
 
@@ -1178,6 +1267,7 @@ class ComboKernel(Kernel):
             for placeholder, arg in zip(
                 shared_body.placeholder_names,
                 shared_body.args_by_subkernel[0],
+                strict=True,
             ):
                 code.writeline(f"{placeholder} = {arg}")
 
