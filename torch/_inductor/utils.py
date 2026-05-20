@@ -111,6 +111,48 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
+def has_free_threaded_python() -> bool:
+    """
+    Detect if Python is running in free-threaded mode (without GIL).
+
+    Uses the sys._is_gil_enabled() API available in Python 3.13+ with
+    the --disable-gil flag or PEP 703 implementation.
+
+    Returns:
+        bool: True if running free-threaded Python, False otherwise
+    """
+    # Python 3.13+ with free-threading support
+    if hasattr(sys, "_is_gil_enabled"):
+        return not sys._is_gil_enabled()
+    # Standard Python (always has GIL)
+    return False
+
+
+def should_use_thread_workers() -> bool:
+    """
+    Determine if compilation workers should use threads instead of processes.
+
+    Checks the compile_worker_mode config and nogil availability.
+
+    Returns:
+        bool: True if thread workers should be used, False for process workers
+    """
+    from torch._inductor import config
+
+    mode = config.compile_worker_mode
+
+    if mode == "thread":
+        return True
+    elif mode == "process":
+        return False
+    else:  # "auto"
+        if mode != "auto":
+            raise ValueError(
+                f"Invalid compile_worker_mode: {mode!r}. Expected one of 'thread', 'process', or 'auto'."
+            )
+        return has_free_threaded_python()
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType

@@ -184,6 +184,7 @@ def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
     AsyncCompile.process_pool.cache_clear()
+    AsyncCompile.thread_pool.cache_clear()
 
 
 try:
@@ -314,6 +315,51 @@ class AsyncCompile:
 
         _pool_set.add(pool)
         return pool
+
+    @staticmethod
+    @functools.lru_cache(1)
+    def thread_pool() -> ThreadPoolExecutor:
+        """
+        Thread pool for Triton compilation in nogil mode.
+
+        Separate from pool() to allow different sizing/configuration
+        for CPU-intensive Triton compilation workloads.
+        """
+        assert get_compile_threads() > 1
+        log.info(
+            "Creating thread pool with %d workers for nogil Triton compilation",
+            get_compile_threads(),
+        )
+        pool = ThreadPoolExecutor(
+            get_compile_threads(),
+            thread_name_prefix="triton_compile_",
+        )
+        _pool_set.add(pool)
+        return pool
+
+    @classmethod
+    def should_use_thread_workers(cls) -> bool:
+        """
+        Determine if thread workers should be used instead of process workers.
+
+        Returns True when running free-threaded Python or when explicitly
+        configured via compile_worker_mode.
+        """
+        from torch._inductor.utils import should_use_thread_workers
+
+        return should_use_thread_workers()
+
+    @classmethod
+    def get_worker_pool(cls) -> ThreadPoolExecutor | AnyPool:
+        """
+        Get the appropriate worker pool based on configuration.
+
+        Returns thread pool for nogil mode, process pool otherwise.
+        """
+        if cls.should_use_thread_workers():
+            return cls.thread_pool()
+        else:
+            return cls.process_pool()
 
     @classmethod
     def warm_pool(cls) -> None:
