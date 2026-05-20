@@ -734,6 +734,9 @@ class ConstDictVariable(VariableTracker):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict_ass_sub)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+
         # value=None signals delete (CPython NULL sentinel).
         if not is_hashable(key):
             raise_unhashable(key, tx)

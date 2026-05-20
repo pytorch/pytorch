@@ -1089,6 +1089,8 @@ class ListVariable(CommonListMethodsVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L865-L890 (list_ass_item)
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
         # value=None signals delete (CPython NULL sentinel).
         idx = key.nb_index_impl(tx).as_python_constant()
         if not (0 <= idx < len(self.items)):
@@ -1112,6 +1114,8 @@ class ListVariable(CommonListMethodsVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3119-L3150 (list_ass_subscript)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(key.python_type()):
             i = key.nb_index_impl(tx).as_python_constant()
@@ -1252,6 +1256,8 @@ class DequeVariable(CommonListMethodsVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_ass_item)
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
         # value=None signals delete (CPython NULL sentinel).
         idx = key.nb_index_impl(tx).as_python_constant()
         length = len(self.items)
