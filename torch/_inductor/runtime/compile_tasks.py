@@ -126,6 +126,7 @@ def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
     extra_env: dict[str, str],
     extra_config: dict[str, Any],
+    kernel_name: str | None = None,
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
@@ -145,6 +146,8 @@ def _worker_compile_triton(
         try:
             start_ns = time.time_ns()
             kernel = load_kernel()
+            if kernel_name is not None:
+                kernel = kernel.with_kernel_name(kernel_name)
             kernel.precompile(warm_cache_only=True)
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()

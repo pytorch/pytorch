@@ -5196,6 +5196,8 @@ class Scheduler:
             nodes, benchmark_kernel=True, hint_override=hint_override
         )
         mod = PyCodeCache.load(src_code)
+        # pyrefly: ignore [missing-attribute]
+        mod.triton_ = mod.triton_.with_kernel_name("triton_")
         async_compile = torch._inductor.async_compile.AsyncCompile()
         if not async_compile.use_process_pool():
             fut = None

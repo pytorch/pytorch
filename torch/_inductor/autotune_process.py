@@ -661,7 +661,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_path,
         )
 
-        run_method = getattr(mod, self.kernel_name).run
+        kernel = getattr(mod, self.kernel_name).with_kernel_name(self.kernel_name)
+        run_method = kernel.run
         extra_args = list(self.extra_args)
 
         # Recreate workspace tensor if needed (for TMA templates)
@@ -699,10 +700,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 self.output_tensor_meta.device.index
             )
 
-        if isinstance(
-            getattr(mod, self.kernel_name),
-            torch._inductor.runtime.triton_heuristics.DebugAutotuner,
-        ):
+        if isinstance(kernel, torch._inductor.runtime.triton_heuristics.DebugAutotuner):
             return functools.partial(
                 run_method,
                 *input_tensors,
@@ -724,7 +722,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        kernel = getattr(mod, self.kernel_name)
+        kernel = getattr(mod, self.kernel_name).with_kernel_name(self.kernel_name)
         kernel.precompile()
 
         self.n_regs = kernel.launchers[0].n_regs

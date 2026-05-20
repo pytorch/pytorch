@@ -768,7 +768,6 @@ class ComboKernel(Kernel):
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
-            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             # Matches triton.py:codegen_kernel(): inference/backward graphs skip
             # CPU-copy of mutated args during autotune retries; training-forward
