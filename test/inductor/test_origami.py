@@ -440,11 +440,17 @@ class TestOrigami(TestCase):
                 # Configuration with origami enabled, but we'll mock it to fail
                 patch_config = self._origami_default_config(ORIGAMI_COMPILE_TOPK)
 
-                # Mock origami module to be None (simulating import failure)
+                # Patch the cached origami binding directly. Avoid mock.patch.dict
+                # on sys.modules: its snapshot/restore evicts modules lazily imported
+                # inside the `with` (e.g. torch._dynamo.repro.after_dynamo), causing
+                # duplicate backend registration on the next subtest iteration.
                 with (
                     fresh_cache(),
                     config.patch(patch_config),
-                    mock.patch.dict("sys.modules", {"origami": None}),
+                    mock.patch(
+                        "torch._inductor.template_heuristics.triton.origami",
+                        None,
+                    ),
                 ):
                     compiled = torch.compile(fn, dynamic=False)
                     result = compiled(*args)
