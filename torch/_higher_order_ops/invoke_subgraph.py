@@ -390,7 +390,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
 
-    if torch.compiler.is_compiling():
+    if torch.compiler.is_exporting():
         # For non-strict export tracing, we still want to go through Dynamo
 
         def _invoke_subgraph_placeholder_wrapper(func, args, kwargs):
