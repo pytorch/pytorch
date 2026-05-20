@@ -3343,6 +3343,20 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(14),))
 
+    @skip_if_triton_cpu
+    @skip_if_cpu
+    def test_arange_int64_mul_overflow(self):
+        def fn(x):
+            return torch.arange(
+                0, 9, device=x.device, dtype=torch.int64
+            ) * torch.tensor(
+                [1500000000],
+                dtype=torch.int64,
+                device=x.device,
+            )
+
+        self.common(fn, (torch.zeros(1),))
+
     def test_arange4(self):
         def fn(x):
             return x - torch.arange(512, -512, -1.0, device=x.device)

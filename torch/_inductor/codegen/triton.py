@@ -1118,6 +1118,18 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
 texpr = TritonPrinter().doprint
 
 
+class TritonIndexExprPrinter(TritonPrinter):
+    def __init__(self, integer_dtype: str) -> None:
+        super().__init__()
+        self.integer_dtype = integer_dtype
+
+    def _print_Symbol(self, expr: sympy.Expr) -> str:
+        result = super()._print_Symbol(expr)  # pyrefly: ignore [missing-attribute]
+        if expr.is_integer:
+            return f"({result}).to({self.integer_dtype})"
+        return result
+
+
 def triton_compute_type(dtype: torch.dtype) -> str:
     """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
     return triton_type(upcast_compute_type(dtype))
@@ -2342,7 +2354,10 @@ class TritonKernelOverrides(TritonOverrides):
     def index_expr(cls, expr, dtype):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
-            expr, block_ptr=False, tma_compatibility_checker=None
+            expr,
+            expr_dtype=dtype,
+            block_ptr=False,
+            tma_compatibility_checker=None,
         )
         assert isinstance(indexing, IndexingOptions)
 
@@ -2351,11 +2366,6 @@ class TritonKernelOverrides(TritonOverrides):
             shape = indexing.expand_shape
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
-
-        # Our sympy expr printing casts to the current kernel index dtype.
-        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
-        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
 
         # after we emit this var we cast it to the correct dtype
         orig = config.test_configs.runtime_triton_dtype_assert
@@ -2371,6 +2381,7 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
 
+        # Use the requested dtype for value-producing index expressions.
         if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2380,23 +2391,32 @@ class TritonKernelOverrides(TritonOverrides):
             )
         else:
             # TODO: we are not always consistent in enforcing that the output of the index expr printing
-            # results in the indexing dtype. So if we detect that we have an input which might type promote
-            # to a dtype other than indexing dtype, add a cast.
-            # Trying to avoid
-            dtype = index_dtype
+            # results in the requested dtype. So if we detect that we have an input which might type promote
+            # to a dtype other than requested dtype, add a cast.
+            actual_dtype = dtype
             for index_var in expr.free_symbols:
                 if symbol_is_type(index_var, SymT.TMP):
-                    dtype = torch.promote_types(
-                        dtype, V.kernel.cse.varname_map[index_var.name].dtype
+                    actual_dtype = torch.promote_types(
+                        actual_dtype, V.kernel.cse.varname_map[index_var.name].dtype
                     )
 
-            if dtype != index_dtype:
+            if actual_dtype != dtype:
                 var = V.kernel.cse.generate(
                     V.kernel.compute,
-                    cls.to_dtype(var, index_dtype),
-                    dtype=index_dtype,
+                    cls.to_dtype(var, dtype),
+                    dtype=dtype,
                     shape=var.shape,
                 )
+
+        if dtype in (torch.int32, torch.int64) and var.dtype != dtype:
+            # CSE keys do not include dtype, so the same printed expression can
+            # reuse an earlier variable recorded with the kernel index dtype.
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                cls.to_dtype(var, dtype),
+                dtype=dtype,
+                shape=var.shape,
+            )
 
         var.mask_vars = indexing.mask_vars
         return var
@@ -3026,6 +3046,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
 
+    def index_to_str(self, index: sympy.Expr, dtype: torch.dtype | None = None) -> str:
+        if isinstance(index, list):
+            return f"[{', '.join(self.index_to_str(i, dtype=dtype) for i in index)}]"
+
+        renamed = self.rename_indexing(index)
+        if dtype is not None and (
+            dtype in (torch.int32, torch.int64)
+            and dtype != self.get_index_dtype_as_torch_dtype()
+        ):
+            return TritonIndexExprPrinter(triton_type(dtype)).doprint(renamed)
+        return self.kexpr(renamed)  # type: ignore[arg-type]
+
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
@@ -3270,6 +3302,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         copy_shape: str | tuple[str] | None = None,
         dense_indexing=False,
         override_mask=None,
+        expr_dtype: torch.dtype | None = None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
@@ -3613,7 +3646,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return options
         expand_str = None
         expand_shape: BlockShapeType = None
-        index_str = self.index_to_str(index)
+        index_str = self.index_to_str(index, dtype=expr_dtype)
+        if expr_dtype is not None and expr_dtype in (torch.int32, torch.int64):
+            index_str_dtype = triton_type(expr_dtype)
+        else:
+            index_str_dtype = "tl.int32"
 
         def _get_expand_str():
             if copy_shape:
@@ -3642,7 +3679,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_str = str([1] * len(self.dense_size_list()))
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
-            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
+            index_str = f"tl.full({expand_str}, {index_str}, {index_str_dtype})"
             if self.fixed_config or self.is_combo_kernel or mask_constant_index:
                 mask_vars = OrderedSet(
                     tree.mask_name()
