@@ -2,6 +2,7 @@
 
 import random
 import unittest
+from typing import NamedTuple
 
 import torch
 
@@ -15,7 +16,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater
+from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -589,6 +590,92 @@ def _override_tol(dtype):
     return 1e-4 if dtype == torch.float32 else 0.5
 
 
+def _misaligned_view(rows, cols, dtype):
+    """Allocate (rows*cols + 1) elements and slice from index 1, producing
+    a contiguous (rows, cols) view whose data_ptr is one element past a
+    16B-aligned base."""
+    t = torch.empty(rows * cols + 1, device="cuda", dtype=dtype)[1:].view(rows, cols)
+    # Sanity check: if the allocator ever hands us a base such that the
+    # +1-element slice is still 16B-aligned, the test silently passes
+    # without exercising the misalignment path.
+    assert t.data_ptr() % 16 != 0, (  # noqa: S101
+        f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
+    )
+    return t
+
+
+def _outer_padded_view(rows, cols, dtype):
+    """Allocate (rows, cols + 1) zeros and slice the first `cols` columns,
+    producing a view with stride(0) == cols + 1 (not cols)."""
+    return torch.zeros(rows, cols + 1, device="cuda", dtype=dtype)[:, :cols]
+
+
+# Joint matrix for the data_ptr / row-stride alignment cond checks. Each
+# case names a misalignment site and what the cond should return. M_out /
+# M_src / D are fixed; D=128 -> row_bytes = 128 * elem_size, which is
+# 16B-aligned for fp32 and bf16, so any cond rejection here comes from
+# the new data_ptr / row-stride checks (not the row_bytes check).
+_M_OUT, _M_SRC, _D = 100, 50, 128
+
+
+class _AlignmentCase(NamedTuple):
+    name: str
+    # which buffer is misaligned: "self_dp", "src_dp", "both_dp",
+    # "self_rs", "src_rs"
+    site: str
+    dtype: torch.dtype
+    expected_tma: bool
+    expected_vec: bool
+
+    @property
+    def M_out(self):
+        return _M_OUT
+
+    @property
+    def M_src(self):
+        return _M_SRC
+
+    @property
+    def D(self):
+        return _D
+
+
+_ALIGNMENT_CASES = [
+    # data_ptr misalignment via storage_offset=1.
+    _AlignmentCase("fp32_self_dp", "self_dp", torch.float32, False, True),
+    _AlignmentCase("fp32_src_dp", "src_dp", torch.float32, False, False),
+    _AlignmentCase("fp32_both_dp", "both_dp", torch.float32, False, False),
+    _AlignmentCase("bf16_self_dp", "self_dp", torch.bfloat16, False, False),
+    # Outer row-stride misalignment via shape (D+1) slice.
+    _AlignmentCase("fp32_self_rs", "self_rs", torch.float32, False, True),
+    _AlignmentCase("fp32_src_rs", "src_rs", torch.float32, False, False),
+    _AlignmentCase("bf16_self_rs", "self_rs", torch.bfloat16, False, False),
+]
+
+
+def _build_alignment_case(case):
+    """Return (self, src) tensors for an alignment case."""
+    dtype = case.dtype
+    if case.site == "self_dp":
+        self_t = _misaligned_view(case.M_out, case.D, dtype).zero_()
+        src = torch.randn(case.M_src, case.D, device="cuda", dtype=dtype)
+    elif case.site == "src_dp":
+        self_t = torch.zeros(case.M_out, case.D, device="cuda", dtype=dtype)
+        src = _misaligned_view(case.M_src, case.D, dtype).normal_()
+    elif case.site == "both_dp":
+        self_t = _misaligned_view(case.M_out, case.D, dtype).zero_()
+        src = _misaligned_view(case.M_src, case.D, dtype).normal_()
+    elif case.site == "self_rs":
+        self_t = _outer_padded_view(case.M_out, case.D, dtype)
+        src = torch.randn(case.M_src, case.D, device="cuda", dtype=dtype)
+    elif case.site == "src_rs":
+        self_t = torch.zeros(case.M_out, case.D, device="cuda", dtype=dtype)
+        src = _outer_padded_view(case.M_src, case.D, dtype).normal_()
+    else:
+        raise ValueError(f"unknown site: {case.site}")
+    return self_t, src
+
+
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
 @skipIfNoCuteDSL
 class TestScatterAddOverrideConds(TestCase):
@@ -622,6 +709,67 @@ class TestScatterAddOverrideConds(TestCase):
         # 129 % 4 != 0 -> vec also rejects.
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
+    def test_alignment_cond_matrix(self, case):
+        # Joint coverage of the data_ptr / row-stride alignment checks
+        # in `_alignment_contract_ok`. src always needs 16B alignment
+        # (LDG.128 / TMA load); self/dst needs 16B for TMA but only 4B
+        # for vec-scatter, so dtype changes the vec-scatter expectation
+        # whenever the dst misalignment is sub-4B (bf16 storage_offset=1
+        # is 2B-aligned; bf16 row-stride pad of 1 elem leaves a 2B
+        # remainder).
+        #
+        # bf16 cases require sm_90+: pre-sm_90 vec-scatter and TMA both
+        # gate bf16 unconditionally, which would mask the alignment cond
+        # under test (False return value would come from the SM gate,
+        # not _alignment_contract_ok).
+        if case.dtype is torch.bfloat16 and not SM90OrLater:
+            self.skipTest("bf16 alignment cond requires sm_90+")
+        torch.manual_seed(0)
+        self_t, src = _build_alignment_case(case)
+        idx = _expanded_idx(
+            torch.randint(0, case.M_out, (case.M_src,), device="cuda", dtype=torch.int64),
+            (case.D,),
+        )
+        self.assertEqual(
+            self._conds(self_t, idx, src), (case.expected_tma, case.expected_vec),
+            msg=f"{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
+        )
+
+    def test_out_cond_rejects_misaligned_out(self):
+        # The .out impl runs the kernel on ``out``, not ``self`` (see
+        # _make_impls.out_impl). A misaligned ``out`` with aligned
+        # ``self`` must be rejected -- otherwise the kernel runs on
+        # ``out``'s misaligned data_ptr and faults with
+        # cudaErrorMisalignedAddress (the exact bug this diff prevents,
+        # just on the .out variant).
+        M_out, M_src, D = 100, 50, 128
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.bfloat16)
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.bfloat16)
+        # Misaligned out: one-element (2B) offset from a 16B boundary.
+        # bf16 -> 2B-aligned, which fails both the TMA 16B and the
+        # vec-scatter 4B destination alignment checks.
+        out_mis = (
+            torch.empty(M_out * D + 1, device="cuda", dtype=torch.bfloat16)[1:]
+            .view(M_out, D)
+        )
+        self.assertNotEqual(
+            out_mis.data_ptr() % 16, 0,
+            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+        )
+        idx = _expanded_idx(
+            torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
+            (D,),
+        )
+        self.assertFalse(
+            self.impl._tma_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out TMA cond accepted misaligned `out`",
+        )
+        self.assertFalse(
+            self.impl._vs_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out vec-scatter cond accepted misaligned `out`",
+        )
 
     def test_tma_accepts_row_not_chunk_multiple(self):
         # bf16 D=264 -> row_bytes=528, 16-aligned but not a multiple of
@@ -774,6 +922,105 @@ class TestScatterAddOverrideCorrectness(TestCase):
         with DeterministicGuard(True):
             got = torch.scatter_add(self_t, 0, idx, src)
         self.assertEqual(got, ref)
+
+    @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
+    def test_alignment_correctness(self, case):
+        # End-to-end regression for the SEV-class crash where a
+        # misaligned data_ptr / row stride bypassed the cond and faulted
+        # in the TMA / vec-scatter kernel (cudaErrorMisalignedAddress
+        # from cp.reduce.async.bulk or LDG.128). With the alignment cond
+        # in place, every case here either runs via vec-scatter (when
+        # the relaxed dst-only 4B contract is met -- expected_vec=True)
+        # or falls through to aten; both must produce correct numerics.
+        from torch._native.ops.scatter_add import cutedsl_impl
+
+        # See test_alignment_cond_matrix.
+        if case.dtype is torch.bfloat16 and not SM90OrLater:
+            self.skipTest("bf16 alignment cond requires sm_90+")
+        torch.manual_seed(0)
+        self_t, src = _build_alignment_case(case)
+        idx_1d = torch.randint(0, case.M_out, (case.M_src,), device="cuda", dtype=torch.int64)
+        idx = _expanded_idx(idx_1d, (case.D,))
+
+        # Confirm the cond observed in the unit test matches what the
+        # dispatch-layer cond returns end-to-end (no skew between
+        # eligibility check and kernel execution).
+        self.assertEqual(
+            cutedsl_impl._is_tma_supported(self_t, 0, idx, src), case.expected_tma,
+        )
+        self.assertEqual(
+            cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src), case.expected_vec,
+        )
+
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        tol = _override_tol(case.dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol, msg=case.name)
+
+    def test_misaligned_out_correctness(self):
+        # End-to-end regression for the .out variant: when ``out`` is
+        # misaligned the .out cond must reject so the call falls through
+        # to aten (the kernel runs on ``out``, so a misaligned ``out``
+        # would otherwise fault with cudaErrorMisalignedAddress -- same
+        # SEV-class bug as the functional path, just on .out).
+        torch.manual_seed(0)
+        M_out, M_src, D = 200, 100, 128
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.bfloat16)
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.bfloat16)
+        # bf16 -> 2B-aligned data_ptr; fails both 16B (TMA) and 4B
+        # (vec-scatter) destination alignment.
+        out_mis = _misaligned_view(M_out, D, torch.bfloat16)
+        self.assertNotEqual(out_mis.data_ptr() % 16, 0)
+        idx_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64)
+        idx = _expanded_idx(idx_1d, (D,))
+
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        ret = torch.scatter_add(self_t, 0, idx, src, out=out_mis)
+        self.assertIs(ret, out_mis)
+        tol = _override_tol(torch.bfloat16)
+        self.assertEqual(out_mis, ref, atol=tol, rtol=tol)
+
+    @parametrize("dtype,N", [
+        # chunk_bytes < 128 (small D)
+        subtest((torch.float32, 8), name="fp32_N8_cb32"),
+        subtest((torch.float32, 16), name="fp32_N16_cb64"),
+        subtest((torch.bfloat16, 8), name="bf16_N8_cb16"),
+        subtest((torch.bfloat16, 16), name="bf16_N16_cb32"),
+        # 128 < chunk_bytes < 512 but not a multiple of 128 -- stage 1
+        # also misaligns here without the stage-stride padding.
+        subtest((torch.float32, 36), name="fp32_N36_cb144"),
+        subtest((torch.bfloat16, 72), name="bf16_N72_cb144"),
+    ])
+    @unittest.skipUnless(SM90OrLater, "TMA path requires sm_90+")
+    def test_smem_stage_alignment_multi_iter(self, dtype, N):
+        # Regression for TMA stage-1 smem misalignment: stage 1 of the
+        # 2-stage pipeline buffer lands at offset chunk_bytes, so any
+        # chunk_bytes that isn't 128B-aligned (small D < 128, or D's
+        # row_bytes not a multiple of 128) makes cp.async.bulk fault
+        # with cudaErrorMisalignedAddress the first time a CTA writes
+        # stage 1. Stage 1 is only reached when a CTA does >= 2
+        # iterations, i.e. M_src > grid_x. _plan_grid caps grid_x at
+        # sm*64, so M_src must exceed that to expose the bug.
+        from torch._native.ops.scatter_add import cutedsl_impl
+
+        torch.manual_seed(0)
+        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        M_out, M_src = 1024, sm * 64 + 256
+        self_t, idx, src, idx_1d = _make_override_triple(
+            M_out, M_src, (N,), dtype=dtype
+        )
+        # Assert the TMA path is the one that actually runs -- otherwise
+        # the test would silently regress to vec-scatter (which has no
+        # smem stage stride and can't reproduce this bug).
+        self.assertTrue(
+            cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
+            msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
+        )
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        torch.cuda.synchronize()
+        tol = _override_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
 
 
 
