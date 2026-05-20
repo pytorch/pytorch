@@ -253,6 +253,8 @@ void nll_loss2d_forward_out_cuda_template(
   total_weight.resize_({});
 
   if (reduction == at::Reduction::None) {
+    total_weight.zero_();
+
     int64_t batch_size = input.size(0);
     int64_t H = input.size(2);
     int64_t W = input.size(3);

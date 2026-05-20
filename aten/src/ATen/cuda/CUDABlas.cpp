@@ -175,6 +175,43 @@ void _cublasAdjustLdLevel3(
   }
 }
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+class CuBlasSMCarveoutGuard {
+ public:
+  explicit CuBlasSMCarveoutGuard(cublasHandle_t handle) : handle_(handle) {
+    const auto smCarveout = at::globalContext()._SMCarveout_EXPERIMENTAL();
+    if (smCarveout.has_value()) {
+      const int smCount =
+          at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+      const int carveout = smCarveout.value();
+      TORCH_CHECK(
+          carveout >= 0 && carveout < smCount,
+          "SM carveout must be between 0 and ",
+          smCount - 1,
+          " (num_sms-1), got ",
+          carveout);
+      TORCH_CUDABLAS_CHECK(
+          cublasSetSmCountTarget(handle_, smCount - carveout));
+      enabled_ = true;
+    }
+  }
+  ~CuBlasSMCarveoutGuard() {
+    if (enabled_) {
+      cublasSetSmCountTarget(handle_, 0);
+    }
+  }
+  CuBlasSMCarveoutGuard(const CuBlasSMCarveoutGuard&) = delete;
+  CuBlasSMCarveoutGuard& operator=(const CuBlasSMCarveoutGuard&) = delete;
+
+ private:
+  cublasHandle_t handle_;
+  bool enabled_ = false;
+};
+#define CUBLAS_SM_CARVEOUT_GUARD(handle) CuBlasSMCarveoutGuard smCarveoutGuard(handle)
+#else
+#define CUBLAS_SM_CARVEOUT_GUARD(handle)
+#endif
+
 #ifndef USE_ROCM
 uint32_t _getAlignment(uintptr_t address) {
   // alignment are in bytes
@@ -613,6 +650,7 @@ inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_D
 template <>
 void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -624,6 +662,7 @@ void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 template <>
 void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -635,6 +674,7 @@ void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 template <>
 void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -648,6 +688,7 @@ void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::co
 template <>
 void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -661,6 +702,7 @@ void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::com
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -733,6 +775,7 @@ template <typename C_Dtype>
 inline void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
   BGEMM_CHECK_ARGVALUES(at::BFloat16);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   const float falpha = alpha;
@@ -846,7 +889,19 @@ void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<fl
 template <>
 void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
+  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
+  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
     }
@@ -882,13 +937,23 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
     TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // See bgemm_internal<at::Half>: reroute fp16 backward GEMMs off hipBLASLt on
+  // gfx90a to preserve subnormals (issue #182952).
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
     }
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
@@ -1055,6 +1120,7 @@ inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dty
 template <>
 void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -1066,6 +1132,7 @@ void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 template <>
 void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -1077,6 +1144,7 @@ void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 template <>
 void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -1090,6 +1158,7 @@ void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::comp
 template <>
 void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
@@ -1103,6 +1172,7 @@ void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::compl
 template <typename C_Dtype>
 inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   float falpha = alpha;
@@ -1218,6 +1288,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
 template <typename C_Dtype>
 inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   float falpha = alpha;
@@ -1370,11 +1441,23 @@ void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<floa
 template <>
 void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
+  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
+  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #endif
@@ -1407,11 +1490,21 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // See gemm_internal<at::Half>: reroute fp16 backward GEMMs off hipBLASLt on
+  // gfx90a to preserve subnormals (issue #182952).
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
@@ -1898,11 +1991,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
     case ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
-#ifdef USE_ROCM
-      return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-#else
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-#endif // USE_ROCM
 #else
       TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
