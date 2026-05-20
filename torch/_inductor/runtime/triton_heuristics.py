@@ -1157,6 +1157,79 @@ class CachingAutotuner(KernelInterface):
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
+    def _check_launcher_call_args(
+        self,
+        launcher: LauncherType,
+        args: tuple[Any, ...],
+        kwarg_names: tuple[str, ...],
+        *,
+        kernel_name: str,
+    ) -> None:
+        """
+        Emit a clearer error when too many positional args would bind to a kwarg.
+
+        If a generated Triton launcher has a fixed Python signature (e.g.
+        `def launcher(arg0, arg1, ..., stream):`), passing too many positional
+        args will start binding them to later parameters (like `stream`, or `grid`
+        in older launcher variants). If we also pass that parameter by keyword,
+        the runtime error becomes "got multiple values for argument ...", which
+        is hard to diagnose. Detect that scenario and raise a direct message.
+        """
+        cache_key = "_inductor_launcher_positional_limits"
+        cached = getattr(launcher, cache_key, None)
+        if cached is None:
+            try:
+                sig = inspect.signature(launcher)
+            except (TypeError, ValueError):
+                return
+
+            params = list(sig.parameters.values())
+            if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+                # Can't reason about positional binding if *args is present.
+                return
+
+            positional_params = [
+                p
+                for p in params
+                if p.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
+            name_to_pos_index = {p.name: i for i, p in enumerate(positional_params)}
+            cached = name_to_pos_index
+            try:
+                setattr(launcher, cache_key, cached)
+            except Exception:
+                pass
+
+        if not isinstance(cached, dict):
+            return
+
+        positional_limit = None
+        conflict_param = None
+        for kw_name in kwarg_names:
+            idx = cached.get(kw_name)
+            if idx is None:
+                continue
+            if positional_limit is None or idx < positional_limit:
+                positional_limit = idx
+                conflict_param = kw_name
+
+        if positional_limit is None:
+            return
+
+        if len(args) > positional_limit:
+            raise TypeError(
+                f"{kernel_name} launcher expected at most {positional_limit} positional "
+                f"arguments (got {len(args)}); extra positional arguments would bind to "
+                f"'{conflict_param}', which is also passed by keyword. This usually "
+                "means the Triton kernel has fewer parameters than the call site is "
+                "passing (e.g. signature changed or constexpr/None-arg filtering "
+                "mismatched)."
+            )
+
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher."""
         # we don't skip configs with spilled registers when auto-tuning custom
@@ -1192,6 +1265,12 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            self._check_launcher_call_args(
+                launcher,
+                cloned_args,
+                ("stream",),
+                kernel_name=kernel_name,
+            )
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -2043,6 +2122,13 @@ class CachingAutotuner(KernelInterface):
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            self._check_launcher_call_args(
+                launcher,
+                args,
+                ("stream",),
+                kernel_name=kernel_name,
+            )
             result = launcher(*args, **kwargs, stream=stream)
         finally:
             self._post_launch()
