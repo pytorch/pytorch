@@ -1486,6 +1486,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_integral_inplace_div_aot_eager_raises(self):
+        def fn(x, y):
+            x.div_(y)
+            return x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError, "can't be cast to the desired output type"
+        ):
+            opt_fn(torch.tensor([1]), torch.tensor([0]))
+
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
@@ -7514,6 +7525,32 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         compiled_model = torch.compile(model, backend="eager")
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    # https://github.com/pytorch/pytorch/issues/144080
+    def test_pad_sequence_mixed_dtype_padding_value(self):
+        class RNNPadSequence(torch.nn.Module):
+            def forward(self, sequences, padding_value):
+                return torch.nn.utils.rnn.pad_sequence(
+                    sequences, padding_value=padding_value
+                )
+
+        for first_sequence in (
+            torch.tensor([0, 0.4]),
+            torch.tensor([0, 0.4 + 0j]),
+        ):
+            model = RNNPadSequence()
+            compiled_model = torch.compile(model, backend="inductor", fullgraph=True)
+            inputs = ([first_sequence, torch.tensor([0], dtype=torch.int32)], -0.7)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    "Torchinductor does not support code generation for complex operators.",
+                    UserWarning,
+                )
+                compiled_result = compiled_model(*inputs)
+
+            self.assertEqual(model(*inputs), compiled_result)
 
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
