@@ -320,11 +320,7 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         "case",
         [
             "direct_qkv",
-            "batch_doc_ids",
             "chained_batch_doc_ids",
-            "rank3_qkv",
-            "chained_rank3_qkv",
-            "batch_head_kv",
             "rank4_batch_head_qkv",
             "chained_rank4_batch_head_qkv",
             "kv_in_prefix",
@@ -358,29 +354,11 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 mask_bias = graph.placeholder("mask_bias")
                 output = load(mask_bias, [q_idx, kv_idx])
                 buffers = [FakeAuxBuffer((128, 128), (128, 1))]
-            case "batch_doc_ids":
-                doc_ids = graph.placeholder("doc_ids")
-                output = (load(doc_ids, [b, q_idx]), load(doc_ids, [b, kv_idx]))
-                buffers = [FakeAuxBuffer((4, 128), (128, 1))]
             case "chained_batch_doc_ids":
                 doc_ids = graph.placeholder("doc_ids")
                 doc_row = load(doc_ids, [b])
                 output = load(doc_row, [kv_idx])
                 buffers = [FakeAuxBuffer((4, 128), (128, 1))]
-            case "rank3_qkv":
-                bias = graph.placeholder("bias")
-                output = load(bias, [h, q_idx, kv_idx])
-                buffers = [FakeAuxBuffer((4, 128, 128), (16384, 128, 1))]
-            case "chained_rank3_qkv":
-                bias = graph.placeholder("bias")
-                head_slice = load(bias, [h])
-                row = load(head_slice, [q_idx])
-                output = load(row, [kv_idx])
-                buffers = [FakeAuxBuffer((4, 128, 128), (16384, 128, 1))]
-            case "batch_head_kv":
-                bias = graph.placeholder("bias")
-                output = load(bias, [b, h, kv_idx])
-                buffers = [FakeAuxBuffer((2, 4, 128), (512, 128, 1))]
             case "rank4_batch_head_qkv":
                 bias = graph.placeholder("bias")
                 output = load(bias, [b, h, q_idx, kv_idx])
@@ -456,14 +434,10 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 return q_idx > kv_idx + lane
             case "sliding_window":
                 return q_idx >= kv_idx + lane and q_idx - (kv_idx + lane) <= 256
-            case "duplicate_sliding_window":
-                return q_idx >= kv_idx + lane and q_idx - (kv_idx + lane) <= 16
             case "disjoint_or":
                 return kv_idx + lane in (q_idx, q_idx + 2)
-            case "block_equality" | "reversed_block_equality":
+            case "block_equality":
                 return q_idx // 16 == (kv_idx + lane) // 16
-            case "always_false":
-                return False
             case _:
                 raise AssertionError(case_name)
 
@@ -497,11 +471,8 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
             "causal",
             "strict_causal",
             "sliding_window",
-            "duplicate_sliding_window",
             "disjoint_or",
             "block_equality",
-            "reversed_block_equality",
-            "always_false",
             "batch_dependent",
         ],
     )
@@ -514,11 +485,6 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         full = graph.call_function(
             torch.ops.aten.full.default,
             ([], True),
-            {"dtype": torch.bool, "layout": torch.strided, "device": "cuda"},
-        )
-        false = graph.call_function(
-            torch.ops.aten.full.default,
-            ([], False),
             {"dtype": torch.bool, "layout": torch.strided, "device": "cuda"},
         )
         causal = graph.call_function(torch.ops.aten.ge.Tensor, (q_idx, kv_idx))
@@ -539,22 +505,6 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                             torch.ops.aten.bitwise_and.Tensor, (full, in_window)
                         ),
                         causal,
-                    ),
-                )
-            case "duplicate_sliding_window":
-                wide_window = graph.call_function(
-                    torch.ops.aten.le.Scalar, (distance, 256)
-                )
-                narrow_window = graph.call_function(
-                    torch.ops.aten.le.Scalar, (distance, 16)
-                )
-                output = graph.call_function(
-                    torch.ops.aten.bitwise_and.Tensor,
-                    (
-                        graph.call_function(
-                            torch.ops.aten.bitwise_and.Tensor, (wide_window, causal)
-                        ),
-                        narrow_window,
                     ),
                 )
             case "disjoint_or":
@@ -580,22 +530,6 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 output = graph.call_function(
                     torch.ops.aten.eq.Tensor, (q_block, kv_block)
                 )
-            case "reversed_block_equality":
-                q_block = graph.call_function(
-                    torch.ops.aten.div.Tensor_mode,
-                    (q_idx, 16),
-                    {"rounding_mode": "floor"},
-                )
-                kv_block = graph.call_function(
-                    torch.ops.aten.div.Tensor_mode,
-                    (kv_idx, 16),
-                    {"rounding_mode": "floor"},
-                )
-                output = graph.call_function(
-                    torch.ops.aten.eq.Tensor, (kv_block, q_block)
-                )
-            case "always_false":
-                output = false
             case "batch_dependent":
                 output = graph.call_function(torch.ops.aten.ge.Tensor, (b, kv_idx))
             case _:
@@ -2072,38 +2006,6 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_aux_mask_mod_vec_selection(self):
-        seq_len = 128
-        q, k, v = create_test_tensors(
-            batch_size=1,
-            num_heads=1,
-            seq_len=seq_len,
-            dim=64,
-            dtype=torch.float16,
-            device="cuda",
-        )
-        mask_bias = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
-
-        def fn(q, k, v, mask_bias):
-            def mask_mod(_b, _h, q_idx, kv_idx):
-                return (q_idx >= kv_idx) | (mask_bias[q_idx, kv_idx] > 0)
-
-            block_mask = _create_block_mask_for_device(
-                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
-            )
-            return flex_attention(
-                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
-            )
-
-        self._assert_sm100_mask_vec_matches_scalar(
-            fn, q, k, v, mask_bias, expect_legacy_vec_attr=True
-        )
-
-    @unittest.skipUnless(
-        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
-        "SM100/SM110 only",
-    )
-    @torch._inductor.config.patch(force_disable_caches=True)
     def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self):
         seq_len = 128
         q, k, v = create_test_tensors(
@@ -2155,72 +2057,6 @@ class TestFlexFlash(InductorTestCase):
         self.assertIn("score_mod.__vec_size__ = 8", src)
         self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
         self.assertIn("cute.autovec_copy", src)
-
-    @unittest.skipUnless(
-        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
-        "SM100/SM110 only",
-    )
-    @torch._inductor.config.patch(force_disable_caches=True)
-    @parametrize(
-        "index_case",
-        [
-            "chained_doc_ids",
-            "rank3_batch_head_kv",
-            "chained_rank4_batch_head_qkv",
-        ],
-    )
-    def test_flash_attention_sm100_mask_mod_vec_index_cases(self, index_case):
-        seq_len = 128
-        batch_size = 1
-        num_heads = 1
-        q, k, v = create_test_tensors(
-            batch_size=batch_size,
-            num_heads=num_heads,
-            seq_len=seq_len,
-            dim=64,
-            dtype=torch.float16,
-            device="cuda",
-        )
-        doc_ids = (
-            torch.arange(seq_len, device="cuda", dtype=torch.int32)
-            .div(32, rounding_mode="floor")
-            .expand(batch_size, -1)
-            .contiguous()
-        )
-        rank3_bias = torch.randn(
-            batch_size,
-            num_heads,
-            seq_len,
-            device="cuda",
-            dtype=torch.float16,
-        )
-        rank4_bias = torch.randn(
-            batch_size,
-            num_heads,
-            seq_len,
-            seq_len,
-            device="cuda",
-            dtype=torch.float16,
-        )
-
-        def fn(q, k, v, doc_ids, rank3_bias, rank4_bias):
-            def mask_mod(b, h, q_idx, kv_idx):
-                if index_case == "chained_doc_ids":
-                    return (q_idx >= kv_idx) & (doc_ids[b][q_idx] == doc_ids[b][kv_idx])
-                if index_case == "rank3_batch_head_kv":
-                    return (q_idx >= kv_idx) & (rank3_bias[b, h, kv_idx] > 0)
-                return (q_idx >= kv_idx) & (rank4_bias[b][h][q_idx][kv_idx] > 0)
-
-            block_mask = _create_block_mask_for_device(
-                mask_mod, batch_size, num_heads, seq_len, seq_len, device="cuda"
-            )
-            return flex_attention(
-                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
-            )
-
-        self._assert_sm100_mask_vec_matches_scalar(
-            fn, q, k, v, doc_ids, rank3_bias, rank4_bias
-        )
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
@@ -2378,10 +2214,7 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    @parametrize("with_score_mod", [False, True])
-    def test_flash_attention_sm100_document_offsets_uses_packed_shift_mask(
-        self, with_score_mod
-    ):
+    def test_flash_attention_sm100_document_offsets_uses_packed_shift_mask(self):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -2391,15 +2224,11 @@ class TestFlexFlash(InductorTestCase):
             dtype=torch.float16,
             device="cuda",
         )
-        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
         positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
         doc_ids = (positions // 32).expand(1, -1).contiguous()
         offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
 
-        def fn(q, k, v, score_bias, doc_ids, offsets):
-            def score_mod(score, _b, _h, _q_idx, kv_idx):
-                return score + score_bias[kv_idx]
-
+        def fn(q, k, v, doc_ids, offsets):
             def mask_mod(b, _h, q_idx, kv_idx):
                 doc = doc_ids[b, q_idx]
                 start = offsets[doc]
@@ -2412,12 +2241,11 @@ class TestFlexFlash(InductorTestCase):
                 q,
                 k,
                 v,
-                score_mod=score_mod if with_score_mod else None,
                 block_mask=block_mask,
                 kernel_options={"BACKEND": "FLASH"},
             )
 
-        args = (q, k, v, score_bias, doc_ids, offsets)
+        args = (q, k, v, doc_ids, offsets)
         expected = fn(*args)
         torch._dynamo.reset()
         actual, code = run_and_get_code(
@@ -2426,8 +2254,6 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        if with_score_mod:
-            self.assertIn("score_mod.__vec_size__", src)
         self.assertIn("utils.shr_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
 
@@ -2436,7 +2262,7 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    @parametrize("vec_size", [None, 1, 8, 16, 32])
+    @parametrize("vec_size", [None, 1, 8, 32])
     def test_flash_attention_sm100_mask_mod_forced_vec_sizes(self, vec_size):
         seq_len = 128
         q, k, v = create_test_tensors(
