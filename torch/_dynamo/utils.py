@@ -4590,7 +4590,7 @@ def is_utils_checkpoint_wrapped(obj: Any) -> bool:
     )
 
 
-def is_checkpoint_factory(obj: Any) -> bool:
+def is_checkpoint_factory(obj: Any) -> TypeGuard[functools.partial[Any]]:
     missing = object()
     return (
         isinstance(obj, functools.partial)
