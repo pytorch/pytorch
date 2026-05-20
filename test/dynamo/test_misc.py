@@ -15910,6 +15910,34 @@ def forward(self, L_x_ : torch.Tensor):
             compiled = torch.compile(scope["op"], fullgraph=True)
             self.assertEqual(compiled(x), torch.tensor(0.0))
 
+    def test_str_join_with_list(self):
+        def fn():
+            return ", ".join(["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "a, b, c")
+
+    def test_str_join_with_tuple(self):
+        def fn():
+            return "-".join(("x", "y", "z"))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "x-y-z")
+
+    def test_str_join_with_generator(self):
+        def fn():
+            return ", ".join(s.upper() for s in ["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "A, B, C")
+
+    def test_str_join_with_map(self):
+        def fn():
+            return ":".join(map(str, [1, 2, 3]))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "1:2:3")
+
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module
