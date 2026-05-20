@@ -4199,7 +4199,7 @@ def gather(x, dim, index, sparse_grad=False):
 
     def fn(idx):
         idx = list(idx)
-        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim], wrap_neg=False)
         if len(idx) == 0:
             idx = [gather_idx]
         else:
@@ -6729,10 +6729,13 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
     if (
         reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
-        and is_triton(x)
+        and supports_logical_index_argreduce
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
@@ -8002,8 +8005,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
