@@ -178,51 +178,6 @@ def maybe_handle_backward_generation(
         compiled_graph.current_callable = compiled_artifact
 
 
-def clone_cudagraph_managed_grad_inputs(
-    compiled_graph: CompiledFxGraph,
-    boxed_forward_device_index: BoxedDeviceIndex | None,
-) -> None:
-    if not config.triton.cudagraph_trees or compiled_graph.fx_kwargs["is_inference"]:
-        return
-
-    if boxed_forward_device_index is not None:
-        device_index = boxed_forward_device_index.value
-    else:
-        device_index = next(iter(compiled_graph.device_idxs), None)
-    if device_index is None:
-        return
-
-    assert compiled_graph.current_callable is not None
-    compiled_graph_callable = compiled_graph.current_callable
-
-    def compiled_artifact(new_inputs: list[Any]) -> Any:
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            device_index, create_if_none_exists=False
-        )
-        current_node = None if manager is None else manager.current_node
-        if current_node is not None:
-            live_storage_data_ptrs = OrderedSet(
-                storage_ref.data_ptr()
-                for storage_ref in current_node.path_live_weakrefs()
-            )
-            if live_storage_data_ptrs:
-                for inp in new_inputs:
-                    if not isinstance(inp, torch.Tensor) or not inp.is_leaf:
-                        continue
-
-                    grad = inp.grad
-                    if not isinstance(grad, torch.Tensor) or not grad.is_cuda:
-                        continue
-
-                    if grad.untyped_storage().data_ptr() in live_storage_data_ptrs:
-                        with torch.no_grad():
-                            inp.grad = grad.clone(memory_format=torch.preserve_format)
-
-        return compiled_graph_callable(new_inputs)
-
-    compiled_graph.current_callable = compiled_artifact
-
-
 def prepare_cudagraph_post_compile(
     compiled_graph: CompiledFxGraph,
     example_inputs: Sequence[InputType],
@@ -846,9 +801,6 @@ class CompiledFxGraph(OutputCode):
         assert graph_kwargs["is_backward"] is not None
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
-        boxed_forward_device_index = graph_kwargs.get(
-            "boxed_forward_device_index", None
-        )
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -874,7 +826,16 @@ class CompiledFxGraph(OutputCode):
                 BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
-                    assert boxed_forward_device_index is not None
+                    assert "boxed_forward_device_index" in graph_kwargs
+                    boxed_forward_device_index = graph_kwargs[
+                        "boxed_forward_device_index"
+                    ]
+                else:
+                    # On the forward we don't know whether or not
+                    # boxed_forward_device_index is set yet
+                    boxed_forward_device_index = graph_kwargs.get(
+                        "boxed_forward_device_index", None
+                    )
 
                 if config.graph_partition and policy is None:
                     # With graph_partition=True, we skip some cudagraph checks
@@ -897,10 +858,6 @@ class CompiledFxGraph(OutputCode):
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
-
-        if cudagraphs and not graph_kwargs["is_inference"]:
-            clone_cudagraph_managed_grad_inputs(self, boxed_forward_device_index)
-
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
