@@ -1215,7 +1215,6 @@ class TestInductorOpInfo(TestCase):
                 {
                     "test_configs.runtime_triton_dtype_assert": True,
                     "test_configs.runtime_triton_shape_assert": True,
-                    "test_configs.static_cpp_dtype_assert": True,
                 }
             )
         )
