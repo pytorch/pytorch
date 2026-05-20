@@ -3465,6 +3465,12 @@ class SIMDScheduling(BaseScheduling):
             features=node_info.features,
             tiling_scores=node_info.tiling_scores,
         )
+        # Combo-seed kernels are only used to read .config off their launcher;
+        # the compiled binary is never launched. codegen_kernel() picks this
+        # up and bakes "combo_seed_use_config_only" into the source so the
+        # runtime autotuner can skip the wasted compile when the heuristic
+        # produces a single config.
+        kernel._is_combo_seed = True
         metrics.generated_kernel_count -= 1  # pyrefly: ignore [bad-assignment]
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
