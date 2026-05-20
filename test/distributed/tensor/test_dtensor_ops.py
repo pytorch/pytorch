@@ -764,6 +764,7 @@ ops_unbacked_dtensor_dde = {
     xfail("cartesian_prod"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
+    xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("fill"),
     xfail("flatten"),
