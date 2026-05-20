@@ -256,6 +256,59 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(actual.dtype, torch.bool)
 
     @skipIfCrossRef
+    def test_add_inplace_with_tensor_alpha_decomposition_disabled(self):
+        def fn(x, other, alpha):
+            return x.clone().add_(other, alpha=alpha)
+
+        with torch._dynamo.config.patch(enable_dynamo_decompositions=False):
+            x = torch.randn(3, 2)
+            other = torch.ones(3, 2)
+            alpha = torch.tensor(2.0)
+
+            expected = fn(x, other, alpha)
+            actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(
+                x, other, alpha
+            )
+
+            self.assertEqual(actual, expected)
+
+    @skipIfCrossRef
+    def test_sub_with_tensor_alpha(self):
+        def method_fn(x, other, alpha):
+            return x.sub(other, alpha=alpha)
+
+        def method_kwargs_fn(x, other, alpha):
+            return x.sub(other=other, alpha=alpha)
+
+        def method_inplace_fn(x, other, alpha):
+            return x.clone().sub_(other, alpha=alpha)
+
+        def function_fn(x, other, alpha):
+            return torch.sub(x, other, alpha=alpha)
+
+        def function_kwargs_fn(x, other, alpha):
+            return torch.sub(input=x, other=other, alpha=alpha)
+
+        for fn in (
+            method_fn,
+            method_kwargs_fn,
+            method_inplace_fn,
+            function_fn,
+            function_kwargs_fn,
+        ):
+            with self.subTest(fn=fn.__name__):
+                x = torch.randn(3, 2)
+                other = torch.ones(3, 2)
+                alpha = torch.tensor(2.0)
+
+                expected = fn(x, other, alpha)
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=True
+                )(x, other, alpha)
+
+                self.assertEqual(actual, expected)
+
+    @skipIfCrossRef
     def test_add_inplace_with_alpha_decomposition_disabled(self):
         """With decompositions disabled, add_ with alpha should remain as the original op.
 

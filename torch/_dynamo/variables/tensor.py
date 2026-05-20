@@ -954,7 +954,7 @@ class TensorVariable(VariableTracker):
         ctx = nullcontext
         alpha_kwarg_vt = kwargs.get("alpha")
         if (
-            name == "add"
+            name in ("add", "add_", "sub", "sub_")
             and alpha_kwarg_vt is not None
             and alpha_kwarg_vt.is_tensor()
             and tx.fake_mode
@@ -1635,6 +1635,25 @@ class TensorVariable(VariableTracker):
 
     def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.abs,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___abs__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def method___getitem__(
         self,
@@ -2549,6 +2568,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___abs__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True

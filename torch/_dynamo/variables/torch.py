@@ -74,6 +74,7 @@ from ..source import (
     SyntheticLocalSource,
 )
 from ..utils import (
+    _is_tensorify_enabled,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -2992,11 +2993,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         all_ints_or_floats = all(
             isinstance(x, SymNodeVariable) or x.is_python_constant() for x in args
         )
+        # Intentional abstraction violation: when tensorify is enabled,
+        # skip this graph break. Scalar-only bin_ops on SymInt/SymFloat
+        # args are valid symbolic arithmetic that Dynamo can trace.
+        # The tensorify pass (in AOTAutograd) will convert SymFloat
+        # scalar ops to tensor ops downstream; SymInt ops flow through
+        # as symbolic expressions.
         if (
             getattr(self.value, "__module__", "") == "torch"
             and self.value.__name__ in bin_ops
             and any_symints_or_symfloats
             and all_ints_or_floats
+            and not _is_tensorify_enabled()
         ):
             msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
@@ -3093,8 +3101,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         }
         ctx = nullcontext
         alpha_kwarg_vt = kwargs.get("alpha")
+        ops_consuming_tensor_alpha = {torch.add, torch.sub}
         if fn_ in ops_consuming_unbacked_scalars or (
-            fn_ is torch.add
+            fn_ in ops_consuming_tensor_alpha
             and alpha_kwarg_vt is not None
             and alpha_kwarg_vt.is_tensor()
         ):
