@@ -6836,37 +6836,42 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(input, target, **kwargs)
 
-def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs_unused):
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *, _chunked=False, **kwargs_unused):
+    # ``_chunked=True`` filters to chunked-path samples (surfaced by the
+    # ``variant_test_name="chunked"`` OpInfo); default emits only the
+    # unchunked (``options=None``) samples.
     if not dtype.is_floating_point:
         raise ValueError(f"linear_cross_entropy requires floating point type inputs, got {dtype}")
     reductions = ("mean", "sum", "none")
     chunked_reductions = ("mean", "sum")
 
-    LinearCrossEntropyOptions = torch.nn.LinearCrossEntropyOptions
+    LCEO = torch.nn.LinearCrossEntropyOptions
     # Samples with non-zero label_smoothing are not generated because
     # linear_cross_entropy relies on cross_entropy that fails on
     # composite-compliance tests (cross_entropy calls `masked_fill_`
     # internally).
-    kwargs_list: list[dict[str, Any]] = [
-        {},
-        *[dict(reduction=reduction) for reduction in reductions if reduction != "mean"],
-        *[dict(weight="<to be initialized>", reduction=reduction) for reduction in reductions],
-        dict(ignore_index=1),
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=2,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=3,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(weight="<to be initialized>", reduction=reduction,
-               options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True))
-          for reduction in chunked_reductions],
-        dict(ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
-        dict(weight="<to be initialized>", ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
-    ]
-    if dtype in {torch.float16, torch.bfloat16}:
-        kwargs_list.extend([
-            dict(reduction=reduction, options=LinearCrossEntropyOptions(acc_dtype=torch.float32,
-                                                                        allow_retain_graph=True)) for reduction in chunked_reductions
-        ])
+    if _chunked:
+        kwargs_list: list[dict[str, Any]] = [
+            *[dict(reduction=r, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)) for r in chunked_reductions],
+            *[dict(reduction=r, options=LCEO(batch_chunk_size=3, allow_retain_graph=True)) for r in chunked_reductions],
+            *[dict(weight="<to be initialized>", reduction=r,
+                   options=LCEO(batch_chunk_size=2, allow_retain_graph=True)) for r in chunked_reductions],
+            dict(ignore_index=1, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            dict(weight="<to be initialized>", ignore_index=1,
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+        ]
+        if dtype in {torch.float16, torch.bfloat16}:
+            kwargs_list.extend([
+                dict(reduction=r, options=LCEO(acc_dtype=torch.float32, allow_retain_graph=True))
+                for r in chunked_reductions
+            ])
+    else:
+        kwargs_list = [
+            {},
+            *[dict(reduction=r) for r in reductions if r != "mean"],
+            *[dict(weight="<to be initialized>", reduction=r) for r in reductions],
+            dict(ignore_index=1),
+        ]
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
         for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad):
@@ -6939,6 +6944,11 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
                 target[0 if target.shape else ()] = t
 
             yield SampleInput(linear_input, linear_weight, target, **kwargs)
+
+
+def sample_inputs_linear_cross_entropy_chunked(op_info, device, dtype, requires_grad, **kw):
+    yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, _chunked=True, **kw)
+
 
 def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float)
@@ -15663,8 +15673,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linear_cross_entropy,
         error_inputs_func=error_inputs_linear_cross_entropy,
         supports_out=False,
-        # Flags are True for the unchunked fallback path (options=None);
-        # chunked-op samples expectedFailure on Forward AD tests below.
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -15741,38 +15749,31 @@ op_db: list[OpInfo] = [
                 "TestInductorOpInfo", "test_comprehensive",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-
-            # No Inductor lowering for the chunked op. Unchunked samples
-            # (options=None) would lower, but OpInfo can't gate per-sample.
-            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         'TestInductorOpInfo', 'test_comprehensive'),
-            # Chunked op: no jvp registered, no second derivatives.
-            # Mirrors the limitations notes on F.linear_cross_entropy
-            # / LinearCrossEntropyLoss; keep those in sync if any
-            # turns into unexpectedSuccess.
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvmap'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            # Exception: Jacobian mismatch for output 0 with respect to input 0
-            # numerical:0.21544406078673195 analytical:0.0
-            # Jacobian mismatch — analytical=0 because the chunked op precomputes
-            # only first derivatives.
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad',),
-            # No jvp; see header comment for the path forward.
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',),
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',),
-            # JIT type inference doesn't recognise the LinearCrossEntropyOptions
-            # dataclass; any sample with options=... fails inferred_arg_type.
-            # Benign — the wrapper unpacks options before any JIT-visible op.
-            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
         )
+    ),
+    # Chunked variant: no jvp / vmap / second derivatives, no Inductor.
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        variant_test_name="chunked",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy_chunked,
+        supports_out=False, supports_forward_ad=False, supports_fwgrad_bwgrad=False,
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        skips=tuple(
+            DecorateInfo(unittest.expectedFailure, cls, name)
+            for cls, name in (
+                *(("TestOperators", n) for n in (
+                    "test_grad", "test_vjp", "test_jvp", "test_jvpvjp", "test_vjpvjp",
+                    "test_vjpvmap", "test_vmapvjp", "test_vmapjvpvjp", "test_vmapvjpvjp",
+                    "test_vmapvjp_has_batch_rule",
+                )),
+                ("TestBwdGradients", "test_fn_gradgrad"),
+                ("TestFwdGradients", "test_forward_mode_AD"),
+                ("TestFwdGradients", "test_fn_fwgrad_bwgrad"),
+                ("TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            )
+        ) + (DecorateInfo(unittest.skip("no Inductor lowering"),
+                          "TestInductorOpInfo", "test_comprehensive"),),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
