@@ -251,16 +251,20 @@ class SubprocMain:
             self.pool = None
 
     def _shutdown(self) -> None:
-        with self.write_lock:
-            self.running = False
-            try:
-                _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
-            except BrokenPipeError:
-                pass  # parent process already shutdown
-            finally:
-                self.write_pipe.close()
-            self.read_pipe.close()
-        self._quiesce()
+        try:
+            with self.write_lock:
+                self.running = False
+                try:
+                    try:
+                        _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
+                    except BrokenPipeError:
+                        pass  # parent process already shutdown
+                    finally:
+                        self.write_pipe.close()
+                finally:
+                    self.read_pipe.close()
+        finally:
+            self._quiesce()
 
     def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
@@ -300,9 +304,10 @@ class SubprocMain:
         if self.pool is not None:
             return
 
-        # Do not import tracked_process_pool here: it imports torch._thread_safe_fork
-        # for parents that have already imported torch. The sidecar deliberately
-        # has not, so that import would recreate the fork-after-thread-start issue.
+        # Use the local tracked executor here. The wrapper module imports
+        # torch._thread_safe_fork for parents that have already imported torch,
+        # but doing that in the sidecar would recreate the fork-after-thread-start
+        # issue.
         self.pool = TrackedProcessPoolExecutor(
             self.nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
