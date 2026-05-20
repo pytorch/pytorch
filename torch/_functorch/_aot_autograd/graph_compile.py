@@ -67,7 +67,6 @@ from .runtime_wrappers import (
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
-    ComplexWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
     FakifiedOutWrapper,
@@ -2789,6 +2788,13 @@ def _aot_stage2b_compile_forward_or_inference(
                 maybe_subclass_meta, fw_metadata
             )
 
+        if config.enable_complex_wrapper:
+            from .complex_decomposition import decompose_complex_in_graph
+
+            fw_module = decompose_complex_in_graph(
+                fw_module, adjusted_flat_args, aot_config.decompositions
+            )
+
         with TracingContext.report_output_strides() as fwd_output_strides:
             # pyrefly: ignore[not-callable]
             compiled_fw_func = compiler(fw_module, adjusted_flat_args)
@@ -2814,13 +2820,6 @@ def _aot_stage2b_compile_forward_or_inference(
             maybe_subclass_meta=maybe_subclass_meta,
             num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
         ).post_compile(
-            compiled_fw_func,
-            aot_config,
-            runtime_metadata=fw_metadata,
-        )
-
-        complex_wrapper = ComplexWrapper()
-        compiled_fw_func = complex_wrapper.post_compile(
             compiled_fw_func,
             aot_config,
             runtime_metadata=fw_metadata,

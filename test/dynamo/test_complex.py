@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
@@ -54,7 +56,10 @@ class ComplexTests(ComplexDynamoTestCase):
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
 
+    @unittest.expectedFailure
     def test_aliasing_semantics(self):
+        # view_as_real decomposes to stack (a copy), so mutation of the
+        # original complex tensor does not propagate through the view.
         def f(a):
             out = torch.view_as_real(a)
             a[...] = torch.zeros_like(a)

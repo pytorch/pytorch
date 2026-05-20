@@ -12,7 +12,6 @@ import copy
 import functools
 import itertools
 import pprint
-import textwrap
 import typing
 import warnings
 from collections.abc import Callable, Generator, Sequence
@@ -42,7 +41,6 @@ from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
-from torch._subclasses.complex_tensor import ComplexTensor, WrapComplexMode
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -57,7 +55,6 @@ from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadat
 from .descriptors import (
     AOTInput,
     AOTOutput,
-    ComplexWrappedAOTInput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
     SyntheticBaseAOTInput,
@@ -1420,118 +1417,6 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             act_input_indices=runtime_metadata.act_input_indices,
         )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
-        return inner_fn
-
-
-@dataclass
-class ComplexWrapper(CompilerWrapper):
-    """First pass naive approach:
-
-    1) This gets applied first
-    2) just wrap and let everything else do its thing
-    3) Don't do anything with metadata or descriptors and pray for the best
-    """
-
-    complex_wrap_mode: TorchDispatchMode = field(default_factory=WrapComplexMode)
-    wrapped_arg_indices: list[int] = field(default_factory=list)
-
-    @staticmethod
-    def is_leaf(arg: Any) -> bool:
-        return isinstance(arg, torch.Tensor) and arg.dtype.is_complex
-
-    @staticmethod
-    def wrap(arg: Any) -> Any:
-        return (
-            ComplexTensor.from_interleaved(arg) if ComplexWrapper.is_leaf(arg) else arg
-        )
-
-    @staticmethod
-    def unwrap(arg: Any) -> Any:
-        return arg.as_interleaved() if isinstance(arg, ComplexTensor) else arg
-
-    def wrap_args(self, args):
-        new_args = []
-        for i, arg in enumerate(args):
-            if not arg.dtype.is_complex:
-                new_args.append(arg)
-            else:
-                self.wrapped_arg_indices.append(i)
-                new_args.append(ComplexTensor.from_interleaved(arg))
-        return new_args
-
-    def pre_compile(
-        self,
-        flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
-        if not config.enable_complex_wrapper:
-            return flat_fn, flat_args, flat_args_descs, fw_metadata
-
-        @simple_wraps(flat_fn)
-        def wrapped_flat_fn(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
-            with self.complex_wrap_mode:
-                outs, out_descs = call_and_expect_output_descs(flat_fn, args)
-            return outs, out_descs
-
-        wrapped_args = self.wrap_args(flat_args)
-        wrapped_args_descs = [
-            ComplexWrappedAOTInput(inp_desc)
-            if i in self.wrapped_arg_indices
-            else inp_desc
-            for i, inp_desc in enumerate(flat_args_descs)
-        ]
-        updated_metadata = run_functionalized_fw_and_collect_metadata(
-            without_output_descs(wrapped_flat_fn),
-            flat_args_descs=wrapped_args_descs,
-            static_input_indices=aot_config.static_input_indices,
-            keep_input_mutations=fw_metadata.keep_input_mutations,
-        )(*wrapped_args)
-        return wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata
-
-    def post_compile(
-        self,
-        compiled_fn: Callable[..., Any],
-        aot_config: AOTConfig,
-        *,
-        runtime_metadata: ViewAndMutationMeta,
-    ) -> Callable[..., Any]:
-        if (
-            not config.enable_complex_wrapper
-            or runtime_metadata.complex_tensor_indices is None
-        ):
-            return compiled_fn
-
-        from .subclass_codegen import _compile_and_exec_source
-
-        source = textwrap.dedent(
-            r"""
-            def _complex_tensor_wrapper(args):
-                new_args = [_wrap_arg(arg) for arg in args]
-                args.clear()
-                outs = _compiled_fn_(new_args)
-                if outs is None:
-                    return None
-                return type(outs)(_unwrap_out(out) for out in outs)
-            """.strip()
-        )
-
-        inner_fn = _compile_and_exec_source(
-            source,
-            {
-                "_compiled_fn_": compiled_fn,
-                "_wrap_arg": self.wrap,
-                "_unwrap_out": self.unwrap,
-            },
-            "_complex_tensor_wrapper",
-            "complex_tensor_wrapper",
-            wrapped_fn=compiled_fn,
-        )
-        inner_fn._boxed_call = True  # type: ignore[attr-defined]
-
         return inner_fn
 
 
