@@ -28,9 +28,26 @@ cmake.build-type = "Debug"
 if.env.REL_WITH_DEB_INFO = true
 cmake.build-type = "RelWithDebInfo"
 
-# cmake.define is intentionally absent -- all BUILD_*/USE_* env vars and
-# additional passthrough variables are forwarded by cmake/EnvVarForwarding.cmake
-# so there is a single source of truth.
+[[tool.scikit-build.overrides]]
+# PyTorch CI uses a /opt/conda-installed Python whose sysconfig CC includes
+# "-B <prefix>/compiler_compat" (a too-narrow sysroot). When CC is unset in
+# the parent shell, scikit-build-core's set_environment_for_gen() picks that
+# value up and sets it in the cmake subprocess env, breaking CMake try_compile
+# probes (FindBLAS check_function_exists(sgemm_), FindOpenMP, ...). Passing
+# CMAKE_C/CXX_COMPILER via -D takes precedence over the env-side CC, so cmake
+# uses the bare-named compiler from PATH instead. Defaulting to gcc/g++ when
+# the parent shell didn't pre-set CC/CXX matches what .ci/pytorch/common.sh
+# already does for *gcc* build environments; if a *clang* build environment
+# pre-sets CC=clang/CXX=clang++, the env-backed lookup respects that.
+if.platform-system = "linux"
+if.env.ANACONDA_PYTHON_VERSION = true
+cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "gcc" }
+cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "g++" }
+
+# Other than CMAKE_C/CXX_COMPILER above, cmake.define is intentionally absent
+# -- all BUILD_*/USE_* env vars and additional passthrough variables are
+# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of
+# truth.
 
 [tool.scikit-build.metadata.version]
 # Delegates to tools/generate_torch_version.py which resolves the version from
