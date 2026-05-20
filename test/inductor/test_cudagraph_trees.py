@@ -8,6 +8,8 @@ import itertools
 import os
 import re
 import sys
+import threading
+import traceback
 import unittest
 import warnings
 from collections import defaultdict
@@ -240,6 +242,79 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, ones)
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        @config.patch("triton.force_cudagraphs_warmup", True)
+        def test_concurrent_cudagraph_tree_runs_are_serialized(self):
+            import torch._inductor.cudagraph_trees as cudagraph_trees
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return [x + 1]
+
+            inp = torch.rand([4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], ())
+            initial_out = foo_cg([inp])
+            del initial_out
+            gc.collect()
+            torch.cuda.synchronize()
+
+            thread_inputs = [[torch.rand_like(inp)] for _ in range(2)]
+            first_entered = threading.Event()
+            release_first = threading.Event()
+            second_started = threading.Event()
+            errors = []
+            original_use_cuda_memory_pool_manager = (
+                cudagraph_trees._use_cuda_memory_pool_manager
+            )
+
+            @contextlib.contextmanager
+            def blocking_use_cuda_memory_pool_manager(*args, **kwargs):
+                with original_use_cuda_memory_pool_manager(*args, **kwargs):
+                    if not first_entered.is_set():
+                        first_entered.set()
+                        if not release_first.wait(timeout=10):
+                            raise RuntimeError("timed out waiting to release warmup")
+                    yield
+
+            def run_cudagraph_tree(inputs, started=None):
+                try:
+                    if started is not None:
+                        started.set()
+                    out = foo_cg(inputs)
+                    torch.cuda.synchronize()
+                    del out
+                except Exception:
+                    errors.append(traceback.format_exc())
+
+            with unittest.mock.patch.object(
+                cudagraph_trees,
+                "_use_cuda_memory_pool_manager",
+                blocking_use_cuda_memory_pool_manager,
+            ):
+                thread0 = threading.Thread(
+                    target=run_cudagraph_tree, args=(thread_inputs[0],)
+                )
+                thread1 = threading.Thread(
+                    target=run_cudagraph_tree,
+                    args=(thread_inputs[1], second_started),
+                )
+                try:
+                    thread0.start()
+                    self.assertTrue(first_entered.wait(timeout=10))
+                    thread1.start()
+                    self.assertTrue(second_started.wait(timeout=10))
+                    thread1.join(timeout=1)
+                    self.assertTrue(thread1.is_alive())
+                finally:
+                    release_first.set()
+                    thread0.join(timeout=10)
+                    thread1.join(timeout=10)
+
+            self.assertFalse(thread0.is_alive())
+            self.assertFalse(thread1.is_alive())
+            if errors:
+                self.fail("\n".join(errors))
 
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
