@@ -7290,7 +7290,7 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node1.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 

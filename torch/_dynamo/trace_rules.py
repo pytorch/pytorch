@@ -401,6 +401,7 @@ manual_torch_name_rule_map: dict[
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
+    "torch._library.capture_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -575,6 +576,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_getCheckpointState",
         "torch._C._cuda_getCompiledVersion",
         "torch._C._cuda_getCurrentBlasHandle",
+        "torch._C._cuda_getCurrentSolverHandle",
         "torch._C._cuda_getCurrentRawStream",
         "torch._C._cuda_getCurrentStream",
         "torch._C._cuda_getDefaultStream",
@@ -2654,6 +2656,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
+        "torch.cuda.current_solver_handle",
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",

@@ -195,6 +195,44 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta(
+    [
+        aten._transformer_encoder_layer_fwd.default,
+        aten._transformer_encoder_layer_fwd.out,
+    ]
+)
+@out_wrapper()
+def meta__transformer_encoder_layer_fwd(
+    src: Tensor,
+    embed_dim: int,
+    num_heads: int,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    use_gelu: bool,
+    norm_first: bool,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
+    ffn_weight_1: Tensor,
+    ffn_bias_1: Tensor,
+    ffn_weight_2: Tensor,
+    ffn_bias_2: Tensor,
+    mask: torch.Tensor | None = None,
+    mask_type: int | None = None,
+) -> Tensor:
+    if src.is_nested:
+        raise NotImplementedError(
+            "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
+        )
+    if src.numel() == 0:
+        return src.clone()
+    return torch.empty_like(src)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
@@ -2465,11 +2503,6 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
-    if not exp_config.skip_dtype_check_in_meta_registrations:
-        torch._check(
-            a.dtype == b.dtype,
-            lambda: f"expected mat1 and mat2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
-        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -2598,6 +2631,30 @@ def calc_conv_nd_return_shape(
             output_padding_list = [output_padding[0]] * len(dims)
         else:
             output_padding_list = output_padding
+
+    # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
+    # in aten/src/ATen/native/Convolution.cpp).
+    if not is_transposed:
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        # pyrefly: ignore [bad-index, index-error]
+        padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
+        effective_kernel = [
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
+        ]
+        torch._check(
+            sym_and(
+                *[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]
+            ),
+            lambda: (
+                f"Calculated padded input size per channel: "
+                f"({' x '.join(str(x) for x in padded_input)}). "
+                f"Kernel size: ({' x '.join(str(x) for x in effective_kernel)}). "
+                f"Kernel size can't be greater than actual input size"
+            ),
+        )
 
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
@@ -4486,15 +4543,33 @@ def meta_zero_(self):
 @register_meta(
     [
         aten.mul_.Scalar,
-        aten.div_.Scalar,
         aten.mul_.Tensor,
-        aten.div_.Tensor,
         aten.logical_and_.default,
         aten.logical_or_.default,
         aten.logical_xor_.default,
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
+    return self
+
+
+@register_meta([aten.div_.Scalar, aten.div_.Tensor])
+def meta_div_inplace(self, other):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    torch._check(
+        utils.can_safe_cast_to(cast_from=result_dtype, cast_to=self.dtype),
+        lambda: (
+            f"result type {result_dtype} can't be cast to the desired "
+            f"output type {self.dtype}"
+        ),
+    )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
@@ -6079,11 +6154,14 @@ def alloc_with_matching_layout(
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
         )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+        strides = [0] * len(dim_order)
+        stride = 1
+        for idx in reversed(dim_order):
+            strides[idx] = stride
+            stride *= res_shape[idx]
+        res = torch.empty_strided(
+            res_shape, strides, dtype=query.dtype, device=query.device
+        )
 
     return res
 
