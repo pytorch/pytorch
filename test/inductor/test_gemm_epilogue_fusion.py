@@ -1962,6 +1962,56 @@ class GemmEpilogueFusionTests(TestCase):
                 ).check_not("activation='").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_reads_full_tile_closure_tensor(self):
+        def fn(a, b, scale):
+            return bmm_epilogue(
+                a,
+                b,
+                lambda acc: acc * scale,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(2, 16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 32, 16, device="cuda", dtype=torch.float16)
+        scale = torch.randn(2, 16, 16, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
+        )
+        expected = fn(a, b, scale)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("@cute.jit").check("aux0").check("epilogue_args=(").check_not(
+            "extern_kernels.bmm"
+        ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_fp8_main_output_fuses(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.bmm.default,
+                (a, b),
+                lambda acc: acc.clamp(min=-448.0, max=448.0).to(torch.float8_e4m3fn),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(2, 32, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 64, 48, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        torch.testing.assert_close(
+            actual.float(), expected.float(), atol=32.0, rtol=1.25e-1
+        )
+        FileCheck().check("out_dtype=torch.float8_e4m3fn").check_not(
+            "extern_kernels.bmm"
+        ).run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_grouped_contract_fuses(self):
         cases = (
             (2, 32, 64, 32, 2, "relu"),
@@ -2141,6 +2191,55 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("local_reduce_out=").check("local_reduce_op='mx_e8m0_scale'").check_not(
             "extern_kernels.bmm"
         ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_bmm_local_n_feeds_main_fuses(self):
+        B = 2
+        M = 32
+        K = 64
+        N = 64
+        group = 16
+
+        cases = (
+            (
+                "sum",
+                lambda x: x.sum(-1, keepdim=True),
+                "cute.ReductionOp.ADD",
+            ),
+            (
+                "amax_abs",
+                lambda x: x.abs().amax(-1, keepdim=True),
+                "cute.ReductionOp.MAX",
+            ),
+        )
+        for name, reduce_fn, check_op in cases:
+            with self.subTest(name=name):
+
+                def fn(a, b):
+                    def epilogue(acc):
+                        x = acc.float().view(B, M, -1, group)
+                        denom = reduce_fn(x)
+                        return (x / denom).view(B, M, N)
+
+                    return gemm_epilogue_fusion(
+                        torch.ops.aten.bmm.default,
+                        (a, b),
+                        epilogue,
+                        kernel_options={"backend": "QUACK"},
+                    )
+
+                a = torch.randn(B, M, K, device="cuda", dtype=torch.float16)
+                b = torch.randn(B, K, N, device="cuda", dtype=torch.float16)
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+                expected = fn(a, b)
+
+                torch.testing.assert_close(actual, expected, atol=1e-1, rtol=1.25e-1)
+                FileCheck().check(check_op).check("broadcast_to").check_not(
+                    "extern_kernels.bmm"
+                ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_tuple_epilogue_generic_aux_fuses(self):

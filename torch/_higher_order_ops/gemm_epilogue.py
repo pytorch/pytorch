@@ -978,7 +978,7 @@ def _match_quack_local_m_reduce(
     sum_match = _match_quack_sum(node, allow_method_sum=False)
     if sum_match is None:
         return None
-    if sum_match.dims != (1,) or sum_match.dtype is not None:
+    if sum_match.dims not in ((1,), (2,)) or sum_match.dtype is not None:
         return None
     view_match = _match_quack_view_or_reshape(sum_match.view_node)
     if view_match is None:
@@ -987,21 +987,25 @@ def _match_quack_local_m_reduce(
     if source_node is None:
         return None
     shape = _normalize_quack_shape(view_match.shape)
-    if not isinstance(shape, (list, tuple)) or len(shape) != 3:
+    if not isinstance(shape, (list, tuple)) or len(shape) not in (3, 4):
         return None
-    if shape[0] != -1 or not isinstance(shape[1], int) or shape[1] <= 0:
+    group_dim = 1 if len(shape) == 3 else 2
+    if sum_match.dims != (group_dim,):
+        return None
+    if shape[-3] != -1 or not isinstance(shape[-2], int) or shape[-2] <= 0:
         return None
     mm_val = mm_node.meta.get("val")
     reduce_val = sum_match.node.meta.get("val")
     if mm_val is None or reduce_val is None:
         return None
     mm_shape = tuple(mm_val.shape)
-    if len(mm_shape) != 2 or shape[2] != mm_shape[1]:
+    if len(mm_shape) not in (2, 3) or shape[-1] != mm_shape[-1]:
         return None
+    group_size = shape[-2]
     expected_shape = (
-        (mm_shape[0] // shape[1], 1, mm_shape[1])
+        (*mm_shape[:-2], mm_shape[-2] // group_size, 1, mm_shape[-1])
         if sum_match.keepdim
-        else (mm_shape[0] // shape[1], mm_shape[1])
+        else (*mm_shape[:-2], mm_shape[-2] // group_size, mm_shape[-1])
     )
     if tuple(reduce_val.shape) != expected_shape:
         return None
@@ -1010,7 +1014,7 @@ def _match_quack_local_m_reduce(
         reduce_node=sum_match.node,
         source_node=source_node,
         keepdim=bool(sum_match.keepdim),
-        group_size=shape[1],
+        group_size=group_size,
         dim=0,
     )
 
