@@ -135,12 +135,6 @@ def _keep_float(
     return inner
 
 
-def fuzzy_eq(x: bool | None, y: bool | None) -> bool | None:
-    if None in (x, y):
-        return None
-    return x == y
-
-
 def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     """
     Fast path for sympy.gcd, using a simple factoring strategy.
@@ -329,7 +323,8 @@ class FloorDiv(sympy.Function):
 
 class ModularIndexing(sympy.Function):
     """
-    ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
+    ModularIndexing(a, b, c) => (a // b) % c with Python floor division
+    and Python modulo semantics.
     """
 
     nargs: tuple[int, ...] = (3,)
@@ -392,8 +387,10 @@ class ModularIndexing(sympy.Function):
         return None
 
     def _eval_is_nonnegative(self) -> bool | None:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+        return True if self.args[2].is_positive else None  # type: ignore[attr-defined]
+
+    def _eval_is_nonpositive(self) -> bool | None:
+        return True if self.args[2].is_negative else None  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):

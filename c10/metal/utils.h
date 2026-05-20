@@ -342,6 +342,18 @@ inline common_dtype<T, U> remainder(const T x, const U y) {
   return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
 }
 
+// Python-style remainder using safe_mod for Metal compiler div/mod wrong-code.
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> safe_remainder(const T x, const U y) {
+  auto rc = safe_mod(x, y);
+  return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
+}
+
 // Based on aten/src/ATen/native/Pow.h
 template <
     typename T,

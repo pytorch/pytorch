@@ -76,22 +76,27 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
 
-    def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
-        x, div, mod = expr.args
-        # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
-        use_safe_mod = div == 65536 and (mod & (mod - 1)) != 0
+    def _print_PythonMod(self, expr: sympy.Expr) -> str:
+        from torch.utils._sympy.functions import FloorDiv
 
+        x, div = expr.args
+        # Preserve the safe_mod workaround for Metal compiler wrong-code on
+        # (idx / 65536) % non_power_of_two.
+        use_safe_mod = (
+            isinstance(x, FloorDiv)
+            and x.args[1] == 65536
+            and isinstance(div, sympy.Integer)
+            and int(div) > 0
+            and (int(div) & (int(div) - 1)) != 0
+        )
         x = self.doprint(x)
-        if div != 1:
-            div = self.doprint(div)
-            if expr.is_integer:
-                x = f"({x}) / ({div})"
-            else:
-                x = f"metal::floor({x}) / ({div})"
-        mod = self.doprint(mod)
+        div = self.doprint(div)
         if use_safe_mod:
-            return f"c10::metal::safe_mod({x}, {mod})"
-        return f"({x}) % ({mod})"
+            return f"c10::metal::safe_remainder({x}, {div})"
+        return f"c10::metal::remainder({x}, {div})"
+
+    def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
+        return super()._print_ModularIndexing(expr)
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
