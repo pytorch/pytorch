@@ -5977,6 +5977,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
+        # Combo-seed marker: when a kernel is generated solely to seed combo
+        # standalone autotune, the runtime only reads .config off its single
+        # launcher and never launches the compiled binary. Skip compile if
+        # the heuristic also lands on a single config.
+        if getattr(self, "_is_combo_seed", False):
+            inductor_meta["combo_seed_use_config_only"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
