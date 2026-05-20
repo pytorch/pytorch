@@ -901,6 +901,23 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
+    @torch._inductor.config.patch(force_layout_optimization=True)
+    def test_as_strided_input_layout_with_symbolic_strides(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x.transpose(1, 2)
+                return torch.as_strided(y, y.size(), y.stride())
+
+        mod = Model().eval().to(self.device)
+        inp = torch.randn(2, 3, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp, 2)
+
+        with torch.no_grad():
+            expected = mod(inp)
+            actual = torch.compile(mod, dynamic=True)(inp)
+            self.assertEqual(expected, actual)
+
     @tf32_on_and_off(0.001)
     @torch._inductor.config.patch(layout_optimization=True)
     def test_redundant_clone_for_layout_convert(self):

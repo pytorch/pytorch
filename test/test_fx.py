@@ -4706,6 +4706,34 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
             and isinstance(n.meta.get("example_value"), example_value_type)
         )
 
+    def test_create_tensor_metadata_nodes(self):
+        def check(meta_key):
+            graph = torch.fx.Graph()
+            tensor_node = graph.placeholder("x")
+            fake = torch.empty_strided((2, 3), (5, 2), device="meta")
+            tensor_node.meta[meta_key] = fake
+
+            size_node = graph.create_size_node(tensor_node, 1)
+            stride_node = graph.create_stride_node(tensor_node, 0)
+            storage_offset_node = graph.create_storage_offset_node(tensor_node)
+
+            self.assertEqual(size_node.target, torch.ops.aten.sym_size.int)
+            self.assertEqual(size_node.args, (tensor_node, 1))
+            self.assertEqual(size_node.meta[meta_key], fake.size(1))
+
+            self.assertEqual(stride_node.target, torch.ops.aten.sym_stride.int)
+            self.assertEqual(stride_node.args, (tensor_node, 0))
+            self.assertEqual(stride_node.meta[meta_key], fake.stride(0))
+
+            self.assertEqual(
+                storage_offset_node.target, torch.ops.aten.sym_storage_offset.default
+            )
+            self.assertEqual(storage_offset_node.args, (tensor_node,))
+            self.assertEqual(storage_offset_node.meta[meta_key], fake.storage_offset())
+
+        check("val")
+        check("example_value")
+
     def test_materialize_symints_basic(self):
         """``Graph.materialize_symints`` lowers each SymInt input into an FX
         subgraph rooted at existing symbol producers."""

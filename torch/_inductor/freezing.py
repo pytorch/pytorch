@@ -225,17 +225,7 @@ def enforce_output_layout(gm: torch.fx.GraphModule):
             ):
                 continue
 
-            # add a node to enforce eager layout
-            # The stride values are frozen snapshots of the eager (pre-freezing)
-            # strides: we materialize each SymInt as a subgraph rooted at the
-            # existing symbol producers (typically input placeholders), so the
-            # value does NOT track any later layout change to ``n`` (e.g. NCHW
-            # -> NHWC by mkldnn fusion). This preserves the documented contract
-            # of `enforce_output_layout`: insulate the user-visible output from
-            # freezing's internal layout transforms.
-            #
-            # `materialize_symints` shares common sub-expressions across the
-            # stride dims via hash-consing.
+            # Use materialize_symints intentionally; see its docstring for why.
             ft = n.meta["val"]
             stride_args = tuple(gm.graph.materialize_symints(ft.stride()))
             new_node = gm.graph.call_function(
@@ -265,10 +255,11 @@ def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     strided_nodes = [n for n in gm.graph.nodes if n.target in as_strided_ops]
     for n in strided_nodes:
         with gm.graph.inserting_before(n):
-            # add a node to enforce eager layout
+            # Use materialize_symints intentionally; see its docstring for why.
             ft = n.args[0].meta["val"]
+            stride_args = tuple(gm.graph.materialize_symints(ft.stride()))
             new_node = gm.graph.call_function(
-                prims.inductor_force_stride_order.default, (n.args[0], ft.stride())
+                prims.inductor_force_stride_order.default, (n.args[0], stride_args)
             )
             n.replace_input_with(n.args[0], new_node)
 

@@ -1543,13 +1543,16 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
-        if args or kwargs:
+        # TODO: Generalize this invariant to all FX node args once the broader
+        # FX argument contract no longer permits raw symbolic leaves.
+        if op in ("call_function", "call_method", "call_module") and (args or kwargs):
             for val in pytree.tree_iter((args, kwargs)):
                 if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                     raise RuntimeError(
                         f"Raw {type(val).__name__} value ({val}) passed as argument to "
                         f"Graph.create_node(op='{op}', target={target}). "
-                        f"Use create_*_node() helpers (e.g. create_size_node, create_stride_node, create_storage_offset_node) instead."
+                        f"Use create_*_node() helpers for tensor metadata queries "
+                        f"or materialize_symints() for general symbolic expressions."
                     )
 
         candidate = name if name is not None else self._target_to_str(target)
@@ -1963,18 +1966,9 @@ class Graph:
         at existing nodes in this graph whose meta produces the referenced
         symbols (typically SymInt placeholders or other sym ops).
 
-        For each input:
-          - plain ``int`` (or other constant) → returned as-is
-          - constant SymInt (e.g. ``SymInt(Integer(3))``) → returned as ``int(s)``
-          - non-constant SymInt → materialized as an FX subgraph; the returned
-            ``Node``'s ``meta["val"]`` equals the input SymInt
-
-        Sub-expressions shared across inputs are emitted exactly once with
-        hash-consing on the underlying ``expr_to_proxy`` map.
-
-        Concrete example -- consider a graph with a tensor placeholder
+        consider a graph with a tensor placeholder
         ``%x`` of shape ``(s32, s32)`` and we want to record this stride
-        as an FX value to pass to a later op:
+        as an FX value to pass to a later op, two ways to do it.
 
         * ``g.create_stride_node(%x, 0)`` emits ``%t = aten.sym_stride.int(%x, 0)``.
           The semantics of this op are "ask ``%x`` for its current stride at
@@ -2001,6 +1995,7 @@ class Graph:
         # sub-expressions across symints get hash-consed into single subgraphs.
         tracer = torch.fx.proxy.GraphAppendingTracer(self)
         expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
+        expr_to_meta_key: dict[sympy.Expr, str] = {}
         # Lazy registry: symbol -> (tensor_placeholder, dim). Used when a
         # symbol only appears in a tensor placeholder's *shape* and there's
         # no existing dedicated SymInt-valued node for it. We'll emit a
@@ -2009,13 +2004,14 @@ class Graph:
         sym_size_sources: dict[sympy.Symbol, tuple[Node, int]] = {}
 
         for node in self.nodes:
-            val, _ = self._get_tensor_meta_val(node)
+            val, key = self._get_tensor_meta_val(node)
             # SymInt-valued node (placeholder or other sym op): the node
             # itself is the symbol's producer.
             if isinstance(val, py_sym_types):
                 expr = val.node.expr
                 if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
                     expr_to_proxy[expr] = torch.fx.Proxy(node, tracer=tracer)
+                    expr_to_meta_key[expr] = key
                 continue
             # Tensor placeholder: shape symbols don't yet have a dedicated
             # SymInt-valued node; we'll lazily emit `sym_size.int(ph, dim)`
@@ -2043,6 +2039,7 @@ class Graph:
             if isinstance(tensor, torch.Tensor):
                 sym_node.meta[key] = tensor.shape[dim]
             expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
+            expr_to_meta_key[sym] = key
 
         out: list[Node | int] = []
         for s in values:
@@ -2068,7 +2065,15 @@ class Graph:
                     f"expr {target_expr!r}, got {result!r}"
                 )
             out_node = result.node
-            out_node.meta["val"] = s
+            meta_key = (
+                "example_value"
+                if any(
+                    expr_to_meta_key.get(sym) == "example_value"
+                    for sym in target_expr.free_symbols
+                )
+                else "val"
+            )
+            out_node.meta[meta_key] = s
             out.append(out_node)
         return out
 
