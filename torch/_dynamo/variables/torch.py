@@ -3096,15 +3096,32 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        with ctx():
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+        patched_fake_mode = (
+            tx.fake_mode
+            if fn_ is torch._functorch.eager_transforms._autograd_grad
+            else None
+        )
+        old_allow_non_fake_inputs = False
+        if patched_fake_mode is not None:
+            # Functorch wrappers can contain FakeTensors without being FakeTensors
+            # themselves.  CUDA autograd may run this fake propagation in engine
+            # worker threads, so patch the mode object instead of Python TLS.
+            old_allow_non_fake_inputs = patched_fake_mode.allow_non_fake_inputs
+            patched_fake_mode.allow_non_fake_inputs = True
+
+        try:
+            with ctx():
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+        finally:
+            if patched_fake_mode is not None:
+                patched_fake_mode.allow_non_fake_inputs = old_allow_non_fake_inputs
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
