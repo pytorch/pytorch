@@ -10012,6 +10012,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @skip_if_triton_cpu
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -18347,7 +18348,17 @@ if RUN_GPU:
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
-            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+            fns = (
+                "first_arg",
+                "store",
+                "second_arg",
+                "same_pm_one",
+                "same_pp_one",
+                "gather",
+                "gather_generated_index",
+                "cross_entropy_loss",
+                "cross_entropy_loss_generated_target",
+            )
 
             def test(fn, ndims, dyn_shape, one_size=False):
                 proc = subprocess.Popen(

@@ -88,9 +88,10 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
-    CustomGraphPassType,
+    CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -1064,17 +1065,21 @@ class CacheabilityValidator:
         # When timing is EARLY, pre-grad passes already ran before the cache
         # lookup so there's nothing to validate here.
         if resolve_pre_grad_pass_timing() != "early":
-            if config.pre_grad_custom_pass and (
-                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                or not config.pre_grad_custom_pass.uuid()
-            ):
-                self.bypass("Unsupported pre grad custom pass")
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+            for p in get_custom_graph_passes(config.pre_grad_custom_pass):
+                if not isinstance(p, CustomGraphPass) or not p.uuid():
+                    self.bypass("Unsupported pre grad custom pass")
+        for p in itertools.chain(
+            get_custom_graph_passes(config.post_grad_custom_pre_pass),
+            get_custom_graph_passes(config.post_grad_custom_post_pass),
+        ):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported post grad custom pass")
         # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+        for p in itertools.chain(
+            get_custom_graph_passes(config.joint_custom_pre_pass),
+            get_custom_graph_passes(config.joint_custom_post_pass),
+        ):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 self.bypass("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
@@ -1143,6 +1148,14 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
+def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+    return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
+
+
+def _custom_pass_name(custom_pass: Any) -> str:
+    return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+
+
 def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """Resolve the effective pre-grad pass timing from the config.
 
@@ -1154,39 +1167,39 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     run "late", since the cache key cannot account for it.
     """
     timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
-    custom_pass = config.pre_grad_custom_pass
-    has_uuid = (
+    custom_passes = get_custom_graph_passes(config.pre_grad_custom_pass)
+    passes_missing_uuid = [
         custom_pass
-        and isinstance(custom_pass, CustomGraphPass)
-        and custom_pass.uuid() is not None
-    )
-    pass_name = (
-        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
-        if custom_pass is not None
+        for custom_pass in custom_passes
+        if not _custom_pass_has_uuid(custom_pass)
+    ]
+    missing_uuid_pass_names = (
+        ", ".join(_custom_pass_name(custom_pass) for custom_pass in passes_missing_uuid)
+        if passes_missing_uuid
         else "<none>"
     )
 
     if timing == "default":
-        supports_late = custom_pass is None or has_uuid
+        supports_late = not passes_missing_uuid
         timing = "late" if supports_late else "early"
-        if timing == "early" and custom_pass:
-            if pass_name not in _warned_pre_grad_pass_missing_uuid:
-                _warned_pre_grad_pass_missing_uuid.add(pass_name)
+        if timing == "early" and custom_passes:
+            if missing_uuid_pass_names not in _warned_pre_grad_pass_missing_uuid:
+                _warned_pre_grad_pass_missing_uuid.add(missing_uuid_pass_names)
                 log.warning(
                     "pre_grad_custom_pass %s does not implement uuid(); "
                     "falling back to early timing (pre-grad pass cache will be bypassed). "
                     "Implement uuid() on your CustomGraphPass to enable caching.",
-                    pass_name,
+                    missing_uuid_pass_names,
                 )
                 CompileEventLogger.try_add_pt2_compile(
                     "backend_compile",
                     pre_grad_pass_missing_uuid=True,
-                    pre_grad_pass_name=pass_name,
+                    pre_grad_pass_name=missing_uuid_pass_names,
                 )
 
-    if timing == "late" and custom_pass and not has_uuid:
+    if timing == "late" and passes_missing_uuid:
         raise RuntimeError(
-            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
+            f"pre_grad_custom_pass {missing_uuid_pass_names} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
@@ -1557,6 +1570,8 @@ class FxGraphHashDetails:
             return None
         if isinstance(custom_pass, list):
             return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
+        if isinstance(custom_pass, tuple):
+            return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
         if isinstance(custom_pass, CustomGraphPass):
@@ -1568,11 +1583,22 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType | CustomGraphModulePass
+        self,
+        custom_pass: (
+            CustomGraphPassCallable
+            | list[CustomGraphPassCallable]
+            | tuple[CustomGraphPassCallable, ...]
+            | CustomGraphModulePass
+            | None
+        ),
     ) -> Any | None:
         if not custom_pass:
+            # Empty custom-pass lists mean no passes, matching None.
             return None
-        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
+        if isinstance(custom_pass, (list, tuple)):
+            return tuple(self._get_custom_pass_detail(x) for x in custom_pass)
+        if not isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass)):
+            raise AssertionError(f"unknown custom pass type: {str(type(custom_pass))}")
         return custom_pass.uuid()
 
     def _get_custom_partitioner_fn_detail(
@@ -2328,6 +2354,8 @@ class CudaKernelParamCache:
             )[0],
             key=basename,
         )
+        # Multi-arch mode rewrites cubin_path to an artifact built later.
+        runtime_bin_path = bin_path
         # Retrieve the basename again in case it is a generated hashcode
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
@@ -2374,6 +2402,7 @@ class CudaKernelParamCache:
                 )
 
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
+        params["runtime_bin_path"] = runtime_bin_path
         params["asm"] = asm_path
         cls.cache[key] = params
 
@@ -3110,7 +3139,7 @@ end
 
             cubins_o = []
             asm_files = []
-            fatbin_cmds: list[tuple[str, str]] = []
+            fatbin_cmds: list[tuple[str, str, str | None]] = []
             if not _IS_WINDOWS:
                 cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
@@ -3130,7 +3159,9 @@ end
                         and device_type == "cuda"
                     ):
                         if torch.version.hip is None:
-                            fatbin_cmds.append((asm_file, cubin_file))
+                            fatbin_cmds.append(
+                                (asm_file, cubin_file, value.get("runtime_bin_path"))
+                            )
 
                         else:
                             # ROCm multi-arch: compile LLVM IR to multi-arch bundle
@@ -3166,28 +3197,57 @@ end
                     if config.aot_inductor.embed_kernel_binary:
                         cubins_to_embed.append((cubin_file, kernel_name))
 
-                # Compile PTX → fatbin in parallel (each nvcc call is independent).
-                # Must complete before cubin embedding below.
+                # Build CUDA fatbins in parallel before cubin embedding below.
                 if fatbin_cmds:
                     from concurrent.futures import ThreadPoolExecutor
 
                     current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
                     nvcc = cuda_compile_utils._cuda_compiler()
+                    fatbinary = shutil.which("fatbinary")
+                    if nvcc is not None and (nvcc_dir := os.path.dirname(nvcc)):
+                        candidate = os.path.join(nvcc_dir, "fatbinary")
+                        if os.path.exists(candidate):
+                            fatbinary = candidate
 
-                    def _compile_fatbin(asm_and_cubin: tuple[str, str]) -> None:
-                        asm_f, cubin_f = asm_and_cubin
-                        cmd = (
-                            f"{nvcc} -fatbin {asm_f} -o {cubin_f} "
-                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                        )
+                    def _compile_fatbin(
+                        asm_cubin_and_raw: tuple[str, str, str | None],
+                    ) -> None:
+                        asm_f, cubin_f, raw_cubin_f = asm_cubin_and_raw
+                        if (
+                            fatbinary is not None
+                            and raw_cubin_f is not None
+                            and os.path.exists(raw_cubin_f)
+                        ):
+                            # Avoid re-running ptxas; the CUDA toolkit can lag
+                            # the PTX version emitted by Triton.
+                            cmd = [
+                                fatbinary,
+                                f"--create={cubin_f}",
+                                "-64",
+                                f"--image3=kind=elf,sm={current_arch},file={raw_cubin_f}",
+                                f"--image3=kind=ptx,sm={current_arch},file={asm_f}",
+                            ]
+                        else:
+                            if nvcc is None:
+                                raise RuntimeError("nvcc is required to build fatbin")
+                            cmd = [
+                                *shlex.split(nvcc),
+                                "-fatbin",
+                                asm_f,
+                                "-o",
+                                cubin_f,
+                                "-gencode",
+                                f"arch=compute_{current_arch},code=compute_{current_arch}",
+                                "-gencode",
+                                f"arch=compute_{current_arch},code=sm_{current_arch}",
+                            ]
                         try:
                             subprocess.run(
-                                cmd.split(), capture_output=True, text=True, check=True
+                                cmd, capture_output=True, text=True, check=True
                             )
                         except subprocess.CalledProcessError as e:
                             print(
-                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                f"{shlex.join(cmd)} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
                                 file=sys.stderr,
                             )
                             raise

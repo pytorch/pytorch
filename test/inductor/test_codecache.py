@@ -341,8 +341,6 @@ _custom_empty.__name__ = "empty"
 
 
 class TestPyCodeCache(TestCase):
-    _share_triton_cache = False
-
     def test_linemaps_empty(self):
         src = """import torch"""
         (key, path) = PyCodeCache.write(src, "")
@@ -450,7 +448,6 @@ class TestPyCodeCache(TestCase):
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
     device_type = GPU_TYPE
-    _share_triton_cache = False
 
     def setUp(self):
         super().setUp()
@@ -2187,8 +2184,6 @@ class TestFxGraphCache(TestCase):
 
 @instantiate_parametrized_tests
 class TestStandaloneCompile(TestCase):
-    _share_triton_cache = False
-
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -2825,6 +2820,32 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+        # Lists of properly-registered custom hooks should also allow caching.
+        custom_passes = [TestCustomGraphPass(), TestCustomGraphPass()]
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_passes,
+                "post_grad_custom_post_pass": custom_passes,
+                "joint_custom_pre_pass": custom_passes,
+                "joint_custom_post_pass": custom_passes,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
@@ -2840,8 +2861,6 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
-    _share_triton_cache = False
-
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
@@ -3491,6 +3510,39 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details3),
             )
 
+        custom_pass_1 = TestCustomGraphPass()
+        custom_pass_2 = TestCustomGraphPass()
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_1, custom_pass_2]}
+        ):
+            custom_pass_1._uuid = "1"
+            custom_pass_2._uuid = "2"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass_2._uuid = "3"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_2, custom_pass_1]}
+        ):
+            details4 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details3),
+            pickler.dumps(details4),
+        )
+
     def test_hash_custom_backend_pass(self):
         """
         Test CustomGraphModulePass usage.
@@ -3900,8 +3952,6 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
-    _share_triton_cache = False
-
     @requires_cuda_and_triton
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
@@ -3944,8 +3994,6 @@ class TestCudaCompileCommand(TestCase):
 
 @instantiate_parametrized_tests
 class TestAutotuneCache(TestCase):
-    _share_triton_cache = False
-
     device_type = GPU_TYPE
 
     def setUp(self):
@@ -4345,8 +4393,6 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    _share_triton_cache = False
-
     @requires_gpu()
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
@@ -4437,8 +4483,6 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 
 class TestUtils(TestCase):
-    _share_triton_cache = False
-
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
         def fn(x, y):
@@ -4481,8 +4525,6 @@ class TestUtils(TestCase):
 
 
 class TestCompilationEventLogging(TestCase):
-    _share_triton_cache = False
-
     def reset(self):
         DynamoCache.clear()
         PrecompileContext.clear()
@@ -4673,8 +4715,6 @@ class TestCompilationEventLogging(TestCase):
 
 
 class TestAutotuneCacheExtraOptions(TestCase):
-    _share_triton_cache = False
-
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
 
