@@ -14,17 +14,12 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
+from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
-
-
-def _is_gpu_benchmark_device_available() -> bool:
-    return any(
-        getattr(torch, device_type).is_available()
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-    )
+_CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
 MILLISECONDS_PER_SECOND = 1000
@@ -358,6 +353,60 @@ def _default_xpu_bench(self, f, *, warmup, rep, **kw):
 register_benchmarker("cpu", _default_cpu_bench, override=True)
 register_benchmarker("cuda", _default_cuda_bench, override=True)
 register_benchmarker("xpu", _default_xpu_bench, override=True)
+
+
+def _get_callable_device_kernel_time_us(
+    kineto_events: Any,
+    profiler_events: Any,
+    rep: int,
+    profiler_device_type: Any,
+) -> float:
+    from torch.autograd import DeviceType
+
+    benchmark_event_ids: OrderedSet[int] = OrderedSet()
+
+    def collect_cpu_event_ids(event: Any) -> None:
+        if event.device_type != DeviceType.CPU:
+            return
+
+        benchmark_event_ids.add(event.id)
+        for child in event.cpu_children:
+            collect_cpu_event_ids(child)
+
+    benchmark_events = [
+        event
+        for event in profiler_events
+        if event.name == _CALLABLE_PROFILE_EVENT_NAME
+        and event.device_type == DeviceType.CPU
+    ]
+    if len(benchmark_events) != rep:
+        raise RuntimeError(
+            f"Expected {rep} {_CALLABLE_PROFILE_EVENT_NAME} profiling events. "
+            f"Found {len(benchmark_events)} events."
+        )
+
+    for event in benchmark_events:
+        collect_cpu_event_ids(event)
+
+    device_time_us = 0.0
+    for event in kineto_events:
+        linked_correlation_id = event.linked_correlation_id()
+        correlation_id = event.correlation_id()
+        activity_type = event.activity_type()
+        if (
+            event.device_type() == profiler_device_type
+            and activity_type != "gpu_user_annotation"
+            and (
+                linked_correlation_id in benchmark_event_ids
+                or (
+                    linked_correlation_id == 0 and correlation_id in benchmark_event_ids
+                )
+            )
+            and event.name() != "Context Sync"
+        ):
+            device_time_us += (event.end_ns() - event.start_ns()) / 1000.0
+
+    return device_time_us
 
 
 class TritonBenchmarker(Benchmarker):
@@ -717,7 +766,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         callable_gpu_time_us = 0.0
         for kineto_event in prof.profiler.kineto_results.events():
             if (
-                kineto_event.name() == "_CALLABLE"
+                kineto_event.name() == _CALLABLE_PROFILE_EVENT_NAME
                 and kineto_event.device_type() == profiler_device_type
             ):
                 callable_gpu_time_us += (
@@ -725,10 +774,17 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
                 ) / 1000.0
 
         if callable_gpu_time_us <= 0:
+            callable_gpu_time_us = _get_callable_device_kernel_time_us(
+                prof.profiler.kineto_results.events(),
+                prof.events(),
+                rep,
+                profiler_device_type,
+            )
+
+        if callable_gpu_time_us <= 0:
             raise AssertionError(
                 f"TorchProfilerBenchmarker: '_CALLABLE' {device_type_upper} event not found in "
-                "raw kineto results. This indicates record_function('_CALLABLE') did "
-                "not produce a GPU_USER_ANNOTATION profiler event."
+                "raw kineto results, and no correlated device events were found."
             )
 
         # TODO: Revisit incorporating launch overhead effects.
@@ -751,15 +807,9 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
 
 
 def _make_default_benchmarker() -> Benchmarker:
-    if (
-        inductor_config.use_torch_profiler_benchmarker
-        and _is_gpu_benchmark_device_available()
-    ):
+    if inductor_config.use_torch_profiler_benchmarker:
         return TorchProfilerBenchmarker()
-    if (
-        inductor_config.use_experimental_benchmarker
-        and _is_gpu_benchmark_device_available()
-    ):
+    if inductor_config.use_experimental_benchmarker:
         return InductorBenchmarker()
     return TritonBenchmarker()
 
