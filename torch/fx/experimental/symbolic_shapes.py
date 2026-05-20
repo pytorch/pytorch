@@ -7790,7 +7790,7 @@ class ShapeEnv:
 
     # We're about to add a guard/runtime assert, check if the ShapeEnv is frozen
     # and if so issue a warning (or raise if error_on_new_guards is set)
-    def _check_frozen(self, expr: sympy.Basic, concrete_val: sympy.Basic) -> None:
+    def _check_frozen(self, expr: sympy.Basic, concrete_val: sympy.Basic) -> bool:
         if self._error_on_new_guards:
             raise _ShapeEnvGuardError(
                 f"Guard attempted while ShapeEnv guards are frozen: {expr} == {concrete_val}"
@@ -7815,6 +7815,8 @@ class ShapeEnv:
                 # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
                 stack_info=log.getEffectiveLevel() < logging.WARNING,
             )
+            return True
+        return False
 
     def _get_user_frame(self) -> types.FrameType | None:
         frame = inspect.currentframe()
@@ -8116,6 +8118,8 @@ class ShapeEnv:
 
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        error_on_new_guards = self._error_on_new_guards
+        frozen = self.frozen
         return self._inner_evaluate_expr(
             orig_expr,
             hint,
@@ -8123,6 +8127,8 @@ class ShapeEnv:
             size_oblivious,
             forcing_spec,
             suppress_guards_tls,
+            error_on_new_guards,
+            frozen,
             fallback_value,
         )
 
@@ -8136,6 +8142,8 @@ class ShapeEnv:
         size_oblivious: bool,
         forcing_spec: bool,
         _suppress_guards_tls: bool,
+        _error_on_new_guards: bool,
+        _frozen: bool,
         fallback_value: bool | None = None,
     ) -> sympy.Basic:
         try:
@@ -8228,6 +8236,7 @@ class ShapeEnv:
             self._translation_validation_enabled
             and fx_node is not None
             and not self._suppress_guards_tls()
+            and not self.frozen
             and not size_oblivious
             and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
             and fallback_value is None
@@ -8382,7 +8391,8 @@ class ShapeEnv:
 
             if concrete_val is None:
                 concrete_val = compute_concrete_val()
-            self._check_frozen(expr, concrete_val)
+            if self._check_frozen(expr, concrete_val):
+                return concrete_val
 
             if (
                 config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
@@ -8500,10 +8510,34 @@ class ShapeEnv:
                 return True
         return False
 
-    @lru_cache(256)
-    @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: torch.fx.Node | None = None
+        self, orig_expr: SympyBoolean, msg: str, fx_node: object = None
+    ) -> bool:
+        fx_node = cast(torch.fx.Node | None, fx_node)
+        suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        error_on_new_guards = self._error_on_new_guards
+        frozen = self.frozen
+        return self._guard_or_defer_runtime_assert(
+            orig_expr,
+            msg,
+            fx_node,
+            suppress_guards_tls,
+            error_on_new_guards,
+            frozen,
+        )
+
+    @lru_cache(256)
+    @record_shapeenv_event(
+        save_tracked_fakes=True, name="guard_or_defer_runtime_assert"
+    )
+    def _guard_or_defer_runtime_assert(
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None,
+        _suppress_guards_tls: bool,
+        _error_on_new_guards: bool,
+        _frozen: bool,
     ) -> bool:
         """
         Adds a guard that orig_expr is True if we can or fall back to adding an assert
@@ -8552,6 +8586,7 @@ class ShapeEnv:
             self._translation_validation_enabled
             and fx_node is not None
             and not self._suppress_guards_tls()
+            and not self.frozen
         ):
             node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
             if node is None:
@@ -8565,7 +8600,8 @@ class ShapeEnv:
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
-            self._check_frozen(expr, sympy.true)
+            if self._check_frozen(expr, sympy.true):
+                return True
             # eliminate symbols on equality tests / refine ranges
             self._maybe_guard_rel(expr)
 
