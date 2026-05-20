@@ -38,6 +38,7 @@ from torch._export.non_strict_utils import (
     make_fake_inputs,
     produce_guards_and_solve_constraints,
 )
+from torch._export.passes._node_metadata_hook import _EMPTY_NN_MODULE_STACK_KEY
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
     _materialize_and_lift_constants,
@@ -55,6 +56,7 @@ from torch._export.utils import (
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.descriptors import SubclassGetAttrAOTInput
 from torch._functorch._aot_autograd.graph_capture_wrappers import create_functional_call
 from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
@@ -588,6 +590,59 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
+def _remove_unused_subclass_param_buffer_placeholders(
+    gm: torch.fx.GraphModule,
+) -> None:
+    removed_placeholder = False
+    for node in list(gm.graph.nodes):
+        if node.op != "placeholder" or len(node.users) != 0:
+            continue
+
+        desc = node.meta.get("desc")
+        if (
+            isinstance(desc, SubclassGetAttrAOTInput)
+            and (desc.is_param() or desc.is_buffer())
+            and not isinstance(node.meta.get("val"), torch.Tensor)
+        ):
+            gm.graph.erase_node(node)
+            removed_placeholder = True
+
+    if removed_placeholder:
+        gm.graph.lint()
+        gm.recompile()
+
+
+def _populate_missing_nn_module_stack(gm: torch.fx.GraphModule) -> None:
+    empty_nn_module_stack = {
+        _EMPTY_NN_MODULE_STACK_KEY: (
+            _EMPTY_NN_MODULE_STACK_KEY,
+            _EMPTY_NN_MODULE_STACK_KEY,
+        )
+    }
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if (
+                node.op not in ("call_function", "get_attr")
+                or node.meta.get("nn_module_stack") is not None
+            ):
+                continue
+
+            nn_module_stack = None
+            for arg in pytree.tree_leaves((node.args, node.kwargs)):
+                if isinstance(arg, torch.fx.Node):
+                    nn_module_stack = arg.meta.get("nn_module_stack")
+                    if nn_module_stack is not None:
+                        break
+
+            node.meta["nn_module_stack"] = dict(
+                nn_module_stack
+                if nn_module_stack is not None
+                else empty_nn_module_stack
+            )
+
+
 def _produce_aten_artifact(
     *,
     gm: torch.fx.GraphModule,
@@ -622,6 +677,7 @@ def _produce_aten_artifact(
     # Useful for any pass that's interpreter-based and might call rebind_unbacked(),
     # e.g. AOTAutograd in this case.
     _replace_unbacked_bindings(gm)
+    _remove_unused_subclass_param_buffer_placeholders(gm)
 
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -661,6 +717,8 @@ def _produce_aten_artifact(
         gm, export_graph_signature = replace_autocast_with_hop_pass(
             gm, export_graph_signature
         )
+
+    _populate_missing_nn_module_stack(gm)
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():
