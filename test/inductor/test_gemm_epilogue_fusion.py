@@ -2087,6 +2087,33 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.bmm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_bmm_local_m_reduce_feeding_main(self):
+        B = 2
+        M = 128
+        K = 64
+        N = 64
+        group = 2
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(B, -1, group, N)
+                denom = x.sum(2, keepdim=True)
+                return (x / denom).view(B, M, N)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten.bmm.default,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(B, M, K, device="cuda", dtype=torch.float16)
+        b = torch.rand(B, K, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "bmm row/M reductions feeding"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_local_m_sum_aux_fuses(self):
         B = 2
         M = 128
