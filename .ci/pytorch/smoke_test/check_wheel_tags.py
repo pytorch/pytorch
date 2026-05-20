@@ -163,6 +163,7 @@ def _check_dylibs_minos(dylibs: list, expected_minos: str, source: str) -> None:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=True,
             )
         except Exception:
             continue

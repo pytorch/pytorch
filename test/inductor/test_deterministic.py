@@ -195,7 +195,7 @@ class DeterministicTest(TestCase):
             print("Command", cmd)
             env = os.environ.copy()
             _setup_env(env)
-            out = subprocess.run(cmd.split(), capture_output=True, env=env)
+            out = subprocess.run(cmd.split(), capture_output=True, env=env, check=False)
 
             # We don't check the accuracy against eager here because some
             # of the combination between model and precision can not
@@ -212,7 +212,7 @@ class DeterministicTest(TestCase):
 
             # distort benchmarking results
             env["TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT"] = "inverse"
-            out = subprocess.run(cmd.split(), capture_output=True, env=env)
+            out = subprocess.run(cmd.split(), capture_output=True, env=env, check=False)
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),

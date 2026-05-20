@@ -1484,6 +1484,7 @@ for t in threads:
             [sys.executable, "-c", script],
             capture_output=True,
             timeout=60,
+            check=False,
         )
         self.assertEqual(
             result.returncode,

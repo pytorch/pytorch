@@ -71,6 +71,7 @@ def get_added_lines(filename: str) -> set[int]:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             added_lines.update(parse_diff(result.stdout))
@@ -81,6 +82,7 @@ def get_added_lines(filename: str) -> set[int]:
             capture_output=True,
             text=True,
             timeout=600,
+            check=False,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -92,6 +94,7 @@ def get_added_lines(filename: str) -> set[int]:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -106,6 +109,7 @@ def get_added_lines(filename: str) -> set[int]:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode != 0:
             raise RuntimeError(

@@ -134,6 +134,7 @@ def _compile_and_extract_symbols(
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
 
         if result.returncode != 0:
@@ -215,6 +216,7 @@ int main() { return 0; }
                 capture_output=True,
                 text=True,
                 timeout=60,
+                check=False,
             )
 
             if result.returncode == 0:

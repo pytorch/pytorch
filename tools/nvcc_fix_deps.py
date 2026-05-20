@@ -97,7 +97,11 @@ def extract_include_arg(include_dirs: list[Path], i: int, args: list[str]) -> No
 
 if __name__ == "__main__":
     ret = subprocess.run(
-        sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr
+        sys.argv[1:],
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        check=False,
     )
 
     depfile_path = None

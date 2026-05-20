@@ -5351,6 +5351,7 @@ except RuntimeError as e:
             [sys.executable, "-c", script],
             capture_output=True,
             text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         # The error message should reference <string>:2, since

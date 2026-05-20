@@ -333,7 +333,8 @@ if __name__ == "__main__":
             [
                 "wget",
                 "https://download.pytorch.org/models/resnet18-f37072fd.pth",
-            ]
+            ],
+            check=False,
         )
         if p.returncode == 0:
             downloaded_checkpoint = True

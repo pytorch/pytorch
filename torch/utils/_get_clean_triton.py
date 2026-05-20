@@ -113,6 +113,7 @@ def process_file(
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(input_filename) or ".",
+                check=False,
             )
 
             if result.returncode != 0:

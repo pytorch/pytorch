@@ -119,6 +119,7 @@ def run_fuzzer_with_seed(
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout per seed
+            check=False,
         )
 
         duration = time.time() - start_time

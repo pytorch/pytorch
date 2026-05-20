@@ -25,7 +25,7 @@ def run(
     else:
         env.pop("GITHUB_OUTPUT", None)
 
-    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
 
 
 def parse_output(stdout: str) -> dict:

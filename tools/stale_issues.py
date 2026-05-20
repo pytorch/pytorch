@@ -50,7 +50,7 @@ def gh_issue_list(search, label, limit):
     ]
     if label:
         cmd += ["-l", label]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         sys.exit(1)
@@ -75,6 +75,7 @@ def gh_issue_count(search_query):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     return result.stdout.strip() if result.returncode == 0 else "?"
 
@@ -151,6 +152,7 @@ def cmd_labels(args):
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             print(result.stderr, file=sys.stderr)
@@ -179,6 +181,7 @@ def gh_graphql(query):
         ["gh", "api", "graphql", "-f", f"query={query}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
@@ -195,6 +198,7 @@ def cmd_subscription_save(args):
         ["gh", "api", f"repos/pytorch/pytorch/issues/{args.issue}", "--jq", ".node_id"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
@@ -254,6 +258,7 @@ def cmd_collaborator_check(args):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         print(f"{args.username} is a collaborator")

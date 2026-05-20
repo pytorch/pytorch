@@ -17,7 +17,7 @@ def run_fuzzer_with_seed(seed):
             f.unlink()
 
     result = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=Path(__file__).parent
+        cmd, capture_output=True, text=True, cwd=Path(__file__).parent, check=False
     )
 
     # Always attempt to read the generated file even if execution failed.

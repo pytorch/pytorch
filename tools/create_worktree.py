@@ -75,6 +75,7 @@ def get_submodule_commit(parent_repo: Path, submodule_path: str) -> str | None:
         capture_output=True,
         text=True,
         cwd=parent_repo,
+        check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
@@ -168,6 +169,7 @@ def clone_submodule_recursive(
         cwd=worktree_sub,
         capture_output=True,
         text=True,
+        check=True,
     )
 
     # Recurse into nested submodules

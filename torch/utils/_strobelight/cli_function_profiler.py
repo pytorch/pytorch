@@ -117,7 +117,7 @@ class StrobelightCLIFunctionProfiler:
             command.append(",".join(self.sample_tags))
 
         logger.debug("running command: %s", _command_to_string(command))
-        result = subprocess.run(command, capture_output=True)
+        result = subprocess.run(command, capture_output=True, check=False)
         output = result.stderr.decode("utf-8")
         logger.debug("output:\n{%s}", output)
 
@@ -142,7 +142,7 @@ class StrobelightCLIFunctionProfiler:
 
         command = ["strobeclient", "getRunStatus", "--run-id", f"{self.current_run_id}"]
         logger.debug("running command: %s", _command_to_string(command))
-        result = subprocess.run(command, capture_output=True)
+        result = subprocess.run(command, capture_output=True, check=False)
         output = result.stderr.decode("utf-8")
         logger.debug("output:\n{%s}", output)
 
@@ -167,7 +167,7 @@ class StrobelightCLIFunctionProfiler:
     def _stop_run(self) -> None:
         command = ["strobeclient", "stopRun", "--run-id", str(self.current_run_id)]
         logger.debug("running command: %s", _command_to_string(command))
-        result = subprocess.run(command, capture_output=True)
+        result = subprocess.run(command, capture_output=True, check=False)
         output = result.stderr.decode("utf-8")
         logger.debug("output:\n{%s}", output)
 
@@ -190,7 +190,7 @@ class StrobelightCLIFunctionProfiler:
     def _get_results(self) -> None:
         command = ["strobeclient", "getRunStatus", "--run-id", str(self.current_run_id)]
         logger.debug("running command: %s", _command_to_string(command))
-        result = subprocess.run(command, capture_output=True)
+        result = subprocess.run(command, capture_output=True, check=False)
         output = result.stderr.decode("utf-8")
         logger.debug("output:\n{%s}", output)
 

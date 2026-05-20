@@ -25,7 +25,7 @@ from pathlib import Path
 
 def run_git(args: list[str]) -> str:
     """Run a git command and return stdout."""
-    result = subprocess.run(["git"] + args, capture_output=True, text=True)
+    result = subprocess.run(["git"] + args, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 

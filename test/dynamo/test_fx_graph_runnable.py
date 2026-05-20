@@ -185,7 +185,11 @@ class FxGraphRunnableTest(TestCase):
             tmp.write(payload)
             tmp.flush()
             res = subprocess.run(
-                [sys.executable, tmp.name], capture_output=True, text=True, timeout=45
+                [sys.executable, tmp.name],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
             )
 
             self.assertEqual(
@@ -637,6 +641,7 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
                     capture_output=True,
                     text=True,
                     timeout=60,
+                    check=False,
                 )
 
             self.assertEqual(

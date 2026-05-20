@@ -59,6 +59,7 @@ def run_command(
         return subprocess.run(
             args,
             capture_output=True,
+            check=False,
         )
     finally:
         end_time = time.monotonic()

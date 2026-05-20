@@ -387,6 +387,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 cwd=cache_dir,
                 text=True,
                 env=env,
+                check=False,
             )
             self.assertEqual(r1.returncode, 0, f"Cold run failed:\n{r1.stderr[-2000:]}")
             # Second run: warm caches trigger the collision without the fix.
@@ -396,6 +397,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 cwd=cache_dir,
                 text=True,
                 env=env,
+                check=False,
             )
             self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
 

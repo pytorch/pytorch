@@ -830,6 +830,7 @@ torch.cuda.synchronize()
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 capture_output=True,
                 text=True,
+                check=False,
             )
 
             output = p.stdout + "\n" + p.stderr

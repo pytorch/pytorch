@@ -30,7 +30,7 @@ def get_fburl(url: str) -> str:
     # Attempt to shorten the URL
     try:
         result = subprocess.run(
-            ["fburl", url], capture_output=True, stdin=subprocess.DEVNULL
+            ["fburl", url], capture_output=True, stdin=subprocess.DEVNULL, check=False
         )
         if result.returncode == 0:
             short_url = result.stdout.decode("utf-8")

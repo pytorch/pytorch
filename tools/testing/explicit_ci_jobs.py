@@ -17,7 +17,7 @@ def commit_ci(files: list[str], message: str) -> None:
     # Check that there are no other modified files than the ones edited by this
     # tool
     stdout = subprocess.run(
-        ["git", "status", "--porcelain"], stdout=subprocess.PIPE
+        ["git", "status", "--porcelain"], stdout=subprocess.PIPE, check=False
     ).stdout.decode()
     for line in stdout.split("\n"):
         if line == "":
@@ -28,8 +28,8 @@ def commit_ci(files: list[str], message: str) -> None:
             )
 
     # Make the commit
-    subprocess.run(["git", "add"] + files)
-    subprocess.run(["git", "commit", "-m", message])
+    subprocess.run(["git", "add"] + files, check=True)
+    subprocess.run(["git", "commit", "-m", message], check=True)
 
 
 if __name__ == "__main__":

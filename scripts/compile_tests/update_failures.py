@@ -78,14 +78,14 @@ def patch_file(
     def remove_file(path, name):
         file = os.path.join(path, name)
         cmd = ["git", "rm", file]
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=True)
 
     def add_file(path, name):
         file = os.path.join(path, name)
         with open(file, "w") as fp:
             pass
         cmd = ["git", "add", file]
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=True)
 
     covered_unexpected_successes = set()
 

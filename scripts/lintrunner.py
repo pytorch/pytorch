@@ -91,6 +91,7 @@ def check_lintrunner_installed(venv_dir: Path) -> None:
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        check=False,
     )
     if result.returncode != 0:
         sys.exit(

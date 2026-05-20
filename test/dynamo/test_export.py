@@ -4602,6 +4602,7 @@ torch.testing.assert_close(out_export, out_orig)
             env=env,
             capture_output=True,
             text=True,
+            check=False,
         )
         self.assertEqual(
             result.returncode,
