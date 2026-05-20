@@ -7967,6 +7967,24 @@ class TestTorch(TestCase):
             torch.randn(10).storage()
             self.assertEqual(len(w), 0, msg=str([str(a) for a in w]))
 
+    def test_untyped_storage_new_with_null_allocator_errors(self):
+        msg = re.escape("Cannot call .new() on a storage whose allocator is unset")
+
+        with TemporaryFileName() as fname:
+            with open(fname, "wb") as f:
+                f.write(b"\0" * 64)
+            storage = torch.UntypedStorage.from_file(fname, shared=False, nbytes=64)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                storage.new()
+
+        tensor = torch.randn(2, 3)
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            loaded = torch.load(f, weights_only=True)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            loaded.untyped_storage().new()
+
     def test_from_file(self):
         def assert_with_filename(filename):
             size = 10000

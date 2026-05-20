@@ -53,6 +53,20 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   struct use_byte_size_t {};
 
+ private:
+  static at::DataPtr allocate_data_ptr(
+      const SymInt& size_bytes,
+      at::Allocator* allocator) {
+    TORCH_INTERNAL_ASSERT(
+        allocator,
+        "StorageImpl with allocator-based allocation requires a non-null allocator");
+    return size_bytes.is_heap_allocated()
+        ? allocator->allocate(0)
+        : allocator->allocate(size_bytes.as_int_unchecked());
+  }
+
+ public:
+
   StorageImpl(
       use_byte_size_t /*use_byte_size*/,
       SymInt size_bytes,
@@ -80,9 +94,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            size_bytes.is_heap_allocated()
-                ? allocator->allocate(0)
-                : allocator->allocate(size_bytes.as_int_unchecked()),
+            allocate_data_ptr(size_bytes, allocator),
             allocator,
             resizable) {}
 

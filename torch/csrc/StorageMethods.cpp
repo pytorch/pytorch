@@ -119,6 +119,9 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
+  TORCH_CHECK(
+      allocator != nullptr,
+      "Cannot call .new() on a storage whose allocator is unset");
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       0,
