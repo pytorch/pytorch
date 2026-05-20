@@ -8,6 +8,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 
 namespace at {
 
@@ -61,10 +62,11 @@ namespace {
 inline c10::ScalarType toOpMathType(const c10::ScalarType type) {
   switch (type) {
 #define DEFINE_CASE(scalar_t, TypeNum) \
-  case ScalarType::TypeNum:            \
+  case TypeNum:                        \
     return CppTypeToScalarType<at::opmath_type<scalar_t>>::value;
 
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_V2(
+        AT_WRAP(DEFINE_CASE), AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX))
 #undef DEFINE_CASE
 
     default:

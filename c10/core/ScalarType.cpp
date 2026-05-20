@@ -261,6 +261,8 @@ std::string_view getScalarTypeAbbr(ScalarType scalarType) {
       return "f4e2m1fnx2";
     case ScalarType::ComplexHalf:
       return "c32";
+    case ScalarType::BComplex32:
+      return "bc32";
     case ScalarType::ComplexFloat:
       return "c64";
     case ScalarType::ComplexDouble:
