@@ -74,22 +74,3 @@ jobs:
          inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
          inductor/test_flex_attention inductor/test_max_autotune
     secrets: inherit
-
-  # temporary for testing
-  linux-jammy-rocm-py3_10-test-2:
-    name: linux-jammy-rocm-py3.10-navi31-2
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-jammy-rocm-py3_10-build
-      - linux-jammy-rocm-py3_10-test
-      - target-determination
-    with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
-      tests-to-include: >-
-         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
-         inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
-         inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
-         inductor/test_flex_attention inductor/test_max_autotune
-    secrets: inherit
