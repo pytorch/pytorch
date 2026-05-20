@@ -27,7 +27,13 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
+from ..utils import (
+    cmp_name_to_op_mapping,
+    istype,
+    raise_args_mismatch,
+    set_methods,
+    unpack_iterable,
+)
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
@@ -300,7 +306,7 @@ class SetVariable(VariableTracker):
                 )
             # Choose an item at random and pop it
             try:
-                result: VariableTracker = self.set_items.pop().vt
+                result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
             except KeyError as e:
                 raise_observed_exception(KeyError, tx, args=list(e.args))
             self.should_reconstruct_all = True
@@ -537,7 +543,7 @@ class SetVariable(VariableTracker):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         elif name == "__len__":
             if args or kwargs:
@@ -571,14 +577,6 @@ class SetVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            if self.source and not is_constant_source(self.source):
-                tx.output.guard_on_key_order.add(self.source)
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
         return super().call_method(tx, name, args, kwargs)
 
     def python_type_var(self) -> "BuiltinVariable":
@@ -715,7 +713,7 @@ class OrderedSetClassVariable(VariableTracker):
             # pyrefly: ignore [implicit-any]
             items = []
         else:
-            items = args[0].force_unpack_var_sequence(tx)
+            items = unpack_iterable(tx, args[0])
         return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
 
 
