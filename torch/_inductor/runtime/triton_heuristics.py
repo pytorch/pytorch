@@ -412,6 +412,27 @@ def get_caching_autotuner_plugins(
     return plugins
 
 
+class _ComboSeedConfigOnlyLauncher:
+    """Launcher stub for combo seeds whose binary is never launched.
+
+    start_combo_kernel_standalone_autotune only reads ``launcher.config``
+    off a seed kernel. When a seed's heuristic produces a single config we
+    skip compiling its binary and install this stub instead; invoking it
+    indicates a bug.
+    """
+
+    __slots__ = ("config",)
+
+    def __init__(self, config) -> None:
+        self.config = config
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(
+            "_ComboSeedConfigOnlyLauncher is config-only and must never be "
+            "invoked; only .config should be read from it"
+        )
+
+
 def _has_combo_standalone_autotune_seed_config(combo_kernel) -> bool:
     """Check if this combo already has a seed-tuned config (cache hit)."""
     for source in (
@@ -614,6 +635,11 @@ class CachingAutotuner(KernelInterface):
         # Stored by start_combo_kernel_standalone_autotune() after benching
         # each seed. Read by _apply_combo_standalone_autotune_seed() to stitch.
         self.combo_standalone_autotune_seed_configs = None
+        # Set by combo_kernel() factory: when True, precompile() defers the
+        # placeholder compile until seed configs are stashed, then precompiles
+        # the seed-stitched config directly. Avoids throwing away a placeholder
+        # binary that would never run.
+        self.defer_combo_precompile: bool = False
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -681,16 +707,91 @@ class CachingAutotuner(KernelInterface):
         reload_kernel: Callable[[], CachingAutotuner] | None = None,
         static_triton_bundle_key: str | None = None,
     ):
+        """Compile each config's Triton binary and install launchers.
+
+        Fast paths handled here before the normal worker compile:
+          - Combo-seed config-only stub: install ``_ComboSeedConfigOnlyLauncher``
+            when this autotuner exists only to read ``.config`` off its launcher.
+          - Shape B deferred-stitch: when ``defer_combo_precompile`` is set,
+            either stitch the populated seed configs into a single combo Config
+            and compile that, or return early until the runtime ``.run()`` retry
+            re-enters with seeds available.
+        """
+        # Stash any reload callback up front so the deferred resume path
+        # below can use it without waiting for the lock branch to set it.
+        if reload_kernel is not None:
+            self._reload_kernel = reload_kernel
+        # Combo-seed single-config skip: when a kernel was generated only to
+        # seed combo standalone autotune AND its heuristic produced a single
+        # config, the bench step has nothing to choose and the binary is
+        # never launched. Install a config-only stub launcher instead of
+        # compiling. Guards on empty launchers/results so any path that
+        # already populated state falls through to normal compile.
+        if (
+            self.inductor_meta.get("combo_seed_use_config_only")
+            and self.configs is not None
+            and len(self.configs) == 1
+            and not self.launchers
+            and not self.compile_results
+        ):
+            self.launchers = [_ComboSeedConfigOnlyLauncher(self.configs[0])]
+            return
+        # Defer combo placeholder compile until seeds have been benched.
+        # The first precompile (warm_cache_only=True in the worker, or
+        # post-unpickle in the parent) happens before start_combo_kernel_
+        # standalone_autotune has populated seed configs -- skip entirely.
+        # ``.run()`` will re-enter precompile() after seed bench, at which
+        # point we swap in the stitched config and compile only that one
+        # binary (instead of a throwaway placeholder followed by a
+        # recompile in the apply phase).
+        if self.defer_combo_precompile and self.configs is not None:
+            seed_configs = self.combo_standalone_autotune_seed_configs
+            if seed_configs is not None:
+                combo_grid_meta = self.inductor_meta.get("combo_grid_meta", {})
+                signature_keys = OrderedSet(self.triton_meta["signature"])
+                log.debug(
+                    "Combo standalone autotune seed: applying %d standalone configs to %s",
+                    len(seed_configs),
+                    self.fn.__name__,
+                )
+                stitched, changed = self._stitched_seed_config(
+                    self.configs[0], signature_keys, combo_grid_meta
+                )
+                if changed:
+                    log.debug(
+                        "Combo standalone autotune seed: selected stitched combo config %s",
+                        stitched,
+                    )
+                else:
+                    log.debug(
+                        "Combo standalone autotune seed: no combo field changes for %s",
+                        self.fn.__name__,
+                    )
+                counters["inductor"]["combo_autotune_seed_applied"] += 1
+                stitched.found_by_combo_autotune = True
+                self.configs = [stitched]
+                self.defer_combo_precompile = False
+                # Worker-side prepare_for_pickle wiped self.fn.fn; reload
+                # before _precompile_worker tries to JIT.
+                self._ensure_kernel_loaded()
+            elif warm_cache_only or static_triton_bundle_key is not None:
+                # Compile-time entry (worker warm or parent post-unpickle /
+                # serial precompile). Defer until runtime when the codegen's
+                # start_combo_kernel_standalone_autotune call has populated
+                # seed_configs. ``.run()`` calls precompile() with no
+                # static_triton_bundle_key, so we can identify the runtime
+                # retry by its absence.
+                return
+            else:
+                # Runtime .run() retry with no seeds. Codegen didn't emit a
+                # standalone autotune call for this combo (cpp_wrapper, no
+                # seed infos, dynamic-shape recompile, ...). Disable Shape B
+                # and compile the placeholder config so .run() can launch.
+                self.defer_combo_precompile = False
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
-            # Helper function for reloading a kernel generated in a worker
-            # in the parent class. Normally we don't need to reload the kernel
-            # in the parent process, but in certain cases (coordesc tuning, dynamic_scale_rblock),
-            # we need to actually run compilation on the parent process
-            if reload_kernel is not None:
-                self._reload_kernel = reload_kernel
             # Plugin opt-out: ``pre_compile`` returning anything other
             # than ``DEFER`` means the plugin owns compile + launcher
             # creation entirely. We return without running
@@ -1595,27 +1696,27 @@ class CachingAutotuner(KernelInterface):
             assert len(self.launchers) == 1
             return self.launchers[0].config
 
-    def _apply_combo_standalone_autotune_seed(
+    def _stitched_seed_config(
         self,
-        launcher,
+        current_config: Config,
         signature_keys: OrderedSet[str],
         combo_grid_meta: dict[str, Any],
-        *args,
-        **kwargs,
-    ):
+    ) -> tuple[Config, bool]:
+        """Stitch per-subkernel seed Configs into a single combo Config.
+
+        Starts from `current_config.kwargs`, overlays each seed's per-subkernel
+        BLOCK slot, and majority-votes num_warps / num_stages and any shared
+        backend kwargs across seeds. Returns (stitched, changed) -- if
+        `changed` is False the result is structurally identical to
+        `current_config` and the caller can keep the existing launcher.
+        """
         seed_configs = self.combo_standalone_autotune_seed_configs
         assert seed_configs, (
-            "combo seed apply requires combo_standalone_autotune_seed_configs to "
-            "be a non-empty list of bench-validated seed configs"
+            "combo seed stitching requires combo_standalone_autotune_seed_configs "
+            "to be a non-empty list of bench-validated seed configs"
         )
         assert all(cfg is not None for cfg in seed_configs), (
-            "combo seed apply requires every seed to have produced a config; "
-            "seed failures propagate, they are not represented as None"
-        )
-        log.debug(
-            "Combo standalone autotune seed: applying %d standalone configs to %s",
-            len(seed_configs),
-            self.fn.__name__,
+            "combo seed stitching requires every seed to have produced a config"
         )
 
         num_kernels = combo_grid_meta.get("num_kernels", 0)
@@ -1624,11 +1725,7 @@ class CachingAutotuner(KernelInterface):
             for i in range(num_kernels)
         }
 
-        current_config = launcher.config
         seeded_kwargs = dict(current_config.kwargs)
-
-        # Per-subkernel block sizes: stitch each seed's choice into its own
-        # constexpr slot (XBLOCK_i, R0_BLOCK_i, ...).
         applied_seed = False
         for idx, cfg in enumerate(seed_configs):
             before = dict(seeded_kwargs)
@@ -1641,20 +1738,12 @@ class CachingAutotuner(KernelInterface):
             )
             applied_seed = applied_seed or seeded_kwargs != before
 
-        # Bench-validated kernel-level attributes: vote across seeds. A combo
-        # kernel has a single num_warps/num_stages for the whole launch, so
-        # when subkernels disagree we pick the most-common pair (every vote
-        # came from a real per-seed benchmark).
         warp_stage_votes = [(cfg.num_warps, cfg.num_stages) for cfg in seed_configs]
         chosen_warps, chosen_stages = Counter(warp_stage_votes).most_common(1)[0][0]
 
-        # Shared backend kwargs (e.g. HIP waves_per_eu): same voting policy.
-        # These appear in cfg.kwargs but are not in the combo's per-subkernel
-        # signature (no XBLOCK_i-style suffix), so they're kernel-level.
-        # Skip block-like keys (XBLOCK/YBLOCK/ZBLOCK/R*BLOCK) explicitly --
-        # they are per-subkernel-positionable even when a particular subkernel
-        # skips them (e.g. persistent reductions skip R*BLOCK), so they must
-        # never be voted as a shared kernel-level value.
+        # Shared backend kwargs (e.g. HIP waves_per_eu): vote across seeds.
+        # Skip block-like keys (XBLOCK/YBLOCK/ZBLOCK/R*BLOCK) -- they are
+        # per-subkernel and must never be promoted to a shared value.
         def _is_block_like(name: str) -> bool:
             return name.endswith("BLOCK")
 
@@ -1674,27 +1763,42 @@ class CachingAutotuner(KernelInterface):
                     applied_seed or current_config.kwargs.get(k) != seeded_kwargs[k]
                 )
 
-        if (
-            not applied_seed
-            and chosen_warps == current_config.num_warps
-            and chosen_stages == current_config.num_stages
-        ):
-            log.debug(
-                "Combo standalone autotune seed: no combo field changes for %s",
-                self.fn.__name__,
-            )
-            return launcher
-
-        seed_config = triton.Config(
+        stitched = triton.Config(
             dict(seeded_kwargs),
             num_warps=chosen_warps,
             num_stages=chosen_stages,
         )
-        if (
-            seed_config.kwargs == current_config.kwargs
-            and chosen_warps == current_config.num_warps
-            and chosen_stages == current_config.num_stages
-        ):
+        changed = (
+            applied_seed
+            or stitched.kwargs != current_config.kwargs
+            or chosen_warps != current_config.num_warps
+            or chosen_stages != current_config.num_stages
+        )
+        return stitched, changed
+
+    def _apply_combo_standalone_autotune_seed(
+        self,
+        launcher,
+        signature_keys: OrderedSet[str],
+        combo_grid_meta: dict[str, Any],
+        *args,
+        **kwargs,
+    ):
+        seed_configs = self.combo_standalone_autotune_seed_configs
+        log.debug(
+            "Combo standalone autotune seed: applying %d standalone configs to %s",
+            len(seed_configs) if seed_configs else 0,
+            self.fn.__name__,
+        )
+
+        seed_config, changed = self._stitched_seed_config(
+            launcher.config, signature_keys, combo_grid_meta
+        )
+        if not changed:
+            log.debug(
+                "Combo standalone autotune seed: no combo field changes for %s",
+                self.fn.__name__,
+            )
             return launcher
 
         self._ensure_kernel_loaded()
@@ -3552,7 +3656,7 @@ def combo_kernel(
         inductor_meta["combo_coordesc_field_limits"] = field_limits
         inductor_meta["combo_coordesc_field_minimums"] = field_minimums
 
-    return cached_autotune(
+    inner = cached_autotune(
         size_hints=None,
         configs=configs,
         triton_meta=triton_meta,
@@ -3560,6 +3664,26 @@ def combo_kernel(
         heuristic_type=HeuristicType.COMBO_KERNEL,
         filename=filename,
     )
+
+    has_subkernels = (inductor_meta.get("combo_grid_meta") or {}).get(
+        "num_kernels", 0
+    ) > 0
+
+    def decorator(fn):
+        autotuner = inner(fn)
+        # Defer the placeholder compile when this combo has subkernels and no
+        # autotune-cache hit. Cache hits arrive with found_by_combo_autotune=True
+        # on configs[0] -- compile those normally so the cached config takes
+        # effect immediately.
+        if has_subkernels and autotuner.configs:
+            cache_hit = any(
+                getattr(c, "found_by_combo_autotune", False) for c in autotuner.configs
+            )
+            if not cache_hit:
+                autotuner.defer_combo_precompile = True
+        return autotuner
+
+    return decorator
 
 
 def triton_config_tiled_reduction(
