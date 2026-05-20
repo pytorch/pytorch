@@ -120,6 +120,30 @@ class _Replicate:
     pass
 
 
+def _split_block_mask_tensor(
+    tensor: torch.Tensor,
+    num_chunks: int,
+    dim: int,
+) -> list[torch.Tensor]:
+    if dist._is_spmd_types_available():
+        import spmd_types as spmd  # pyrefly: ignore
+
+        local_type = (
+            spmd.get_local_type(tensor) if spmd.runtime.has_local_type(tensor) else None
+        )
+    else:
+        local_type = None
+    with dist._spmd_no_typecheck():
+        chunks = list(torch.tensor_split(tensor, num_chunks, dim))
+    if local_type is not None:
+        import spmd_types as spmd  # pyrefly: ignore
+
+        partition_spec = spmd._checker.get_partition_spec(tensor)
+        for chunk in chunks:
+            spmd.assert_type(chunk, local_type, partition_spec)
+    return chunks
+
+
 def _split_block_mask(
     block_mask: BlockMask,
     num_chunks: int,
@@ -144,17 +168,19 @@ def _split_block_mask(
         )
 
     batch_dim = 0
-    kv_num_blocks_chunks = torch.tensor_split(
+    kv_num_blocks_chunks = _split_block_mask_tensor(
         block_mask.kv_num_blocks, num_chunks, batch_dim
     )
-    kv_indices_chunks = torch.tensor_split(block_mask.kv_indices, num_chunks, batch_dim)
+    kv_indices_chunks = _split_block_mask_tensor(
+        block_mask.kv_indices, num_chunks, batch_dim
+    )
     full_kv_num_blocks_chunks = (
-        torch.tensor_split(block_mask.full_kv_num_blocks, num_chunks, batch_dim)
+        _split_block_mask_tensor(block_mask.full_kv_num_blocks, num_chunks, batch_dim)
         if block_mask.full_kv_num_blocks is not None
         else [None] * num_chunks
     )
     full_kv_indices_chunks = (
-        torch.tensor_split(block_mask.full_kv_indices, num_chunks, batch_dim)
+        _split_block_mask_tensor(block_mask.full_kv_indices, num_chunks, batch_dim)
         if block_mask.full_kv_indices is not None
         else [None] * num_chunks
     )
@@ -170,8 +196,8 @@ def _split_block_mask(
 
             return batch_offset_mask_mod
 
-        chunk_block_masks.append(
-            BlockMask.from_kv_blocks(
+        with dist._spmd_no_typecheck():
+            chunk_block_mask = BlockMask.from_kv_blocks(
                 kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
                 kv_indices=kv_indices_chunks[chunk_idx],
                 full_kv_num_blocks=full_kv_num_blocks_chunks[chunk_idx],
@@ -180,7 +206,7 @@ def _split_block_mask(
                 mask_mod=create_mask_mod(batch_offset),
                 seq_lengths=block_mask.seq_lengths,
             )
-        )
+        chunk_block_masks.append(chunk_block_mask)
         batch_offset += kv_num_blocks_chunks[chunk_idx].size(0)
     return chunk_block_masks
 

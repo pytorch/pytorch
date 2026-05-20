@@ -1,14 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import unittest
+
 from model_registry import ModelWithKwargs
 
 import torch
+import torch.distributed as dist
 from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
+from torch.distributed.tensor import init_device_mesh
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -16,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 d_hid = 512
@@ -274,6 +279,78 @@ class MicrobatchTests(TestCase):
 
         concat_out = torch.cat(out_total_chunks, dim=0)
         self.assertEqual(concat_out, out)
+
+    @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
+    def test_split_block_mask_preserves_spmd_types(self):
+        import spmd_types as spmd
+
+        B = 4
+        H = 1
+        SEQ_LEN = 128
+        DIM = 16
+
+        def causal_mask(
+            b: torch.Tensor,
+            h: torch.Tensor,
+            q_idx: torch.Tensor,
+            kv_idx: torch.Tensor,
+        ):
+            return q_idx >= kv_idx
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        spmd._mesh_axis._reset()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        try:
+            mesh = init_device_mesh("cpu", (2,), mesh_dim_names=("dp",))
+            dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
+            q, k, v = (
+                torch.randn(B, H, SEQ_LEN, DIM, requires_grad=True) for _ in range(3)
+            )
+            for tensor in (q, k, v):
+                spmd.assert_type(tensor, {dp_axis: spmd.S(0)})
+            block_mask = create_block_mask(
+                causal_mask,
+                B=B,
+                H=H,
+                Q_LEN=SEQ_LEN,
+                KV_LEN=SEQ_LEN,
+                device="cpu",
+            )
+            for tensor in (
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                block_mask.full_kv_num_blocks,
+                block_mask.full_kv_indices,
+            ):
+                spmd.assert_type(tensor, {dp_axis: spmd.S(0)})
+
+            with spmd.set_current_mesh(mesh), spmd._checker.typecheck(local=False):
+                arg_split, _ = split_args_kwargs_into_chunks(
+                    (q, k, v, {"block_mask": block_mask}),
+                    {},
+                    chunks=2,
+                    args_chunk_spec=None,
+                    kwargs_chunk_spec=None,
+                )
+
+            for _, _, _, block_mask_chunk in arg_split:
+                chunk = block_mask_chunk["block_mask"]
+                for tensor in (
+                    chunk.kv_num_blocks,
+                    chunk.kv_indices,
+                    chunk.full_kv_num_blocks,
+                    chunk.full_kv_indices,
+                ):
+                    self.assertTrue(spmd.runtime.has_local_type(tensor))
+                    self.assertIs(spmd.get_local_type(tensor)[dp_axis], spmd.V)
+                    self.assertEqual(
+                        spmd._checker.get_partition_spec(tensor),
+                        spmd.PartitionSpec(dp_axis, *([None] * (tensor.ndim - 1))),
+                    )
+        finally:
+            dist.destroy_process_group()
+            spmd._mesh_axis._reset()
 
     def test_split_block_mask_none(self, device):
         B = 6
