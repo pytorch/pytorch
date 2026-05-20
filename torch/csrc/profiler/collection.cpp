@@ -912,10 +912,10 @@ void passEventsToKineto(
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
 
-      // In the normal path, kineto_activity_ is set later by
-      // TransferEvents::reassociate(). For global and trace_only modes
-      // TransferEvents is skipped, so we set it here while the raw
-      // pointer from addCPUActivity is still valid.
+      // In the normal (synchronous) path, kineto_activity_ is set later
+      // by TransferEvents::reassociate(). For global (async) profiling
+      // and trace_only mode the reassociation path diverges, so we also
+      // set it here while the raw pointer from addCPUActivity is valid.
       if (config.global() || config.experimental_config.trace_only) {
         e->kineto_activity_ = activity;
       }

@@ -210,6 +210,23 @@ class _KinetoProfile:
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        if (
+            experimental_config is not None
+            and experimental_config.trace_only
+            and with_stack
+        ):
+            import copy
+
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config_copy: _ExperimentalConfig = copy.copy(
+                experimental_config
+            )
+            experimental_config_copy.trace_only = False
+            experimental_config = experimental_config_copy
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events

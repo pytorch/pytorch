@@ -1253,27 +1253,30 @@ class TestProfiler(TestCase):
             self.assertIsInstance(copied, _ExperimentalConfig)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(
-        torch.profiler.ProfilerActivity.CUDA not in supported_activities(),
-        "CUDA is required",
-    )
-    def test_trace_only_export_matches_default(self):
+    @parametrize("use_cuda", [False, True])
+    def test_trace_only_export_matches_default(self, use_cuda):
         """trace_only=True must produce the same chrome trace metadata as the default path."""
+        if use_cuda and ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA is required")
+
+        activities = [ProfilerActivity.CPU]
+        if use_cuda:
+            activities.append(ProfilerActivity.CUDA)
 
         def profile_and_export(trace_only):
             with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                activities=activities,
                 record_shapes=True,
                 experimental_config=_ExperimentalConfig(trace_only=trace_only),
             ) as prof:
-                self.payload(use_cuda=True)
+                self.payload(use_cuda=use_cuda)
             with TemporaryFileName(mode="w+") as fname:
                 prof.export_chrome_trace(fname)
                 with open(fname) as f:
                     return json.load(f)
 
-        # Warmup run so CUDA init events don't skew counts
-        profile_and_export(trace_only=False)
+        if use_cuda:
+            profile_and_export(trace_only=False)
 
         default_trace = profile_and_export(trace_only=False)
         trace_only_trace = profile_and_export(trace_only=True)
@@ -1298,8 +1301,6 @@ class TestProfiler(TestCase):
             sorted(trace_only_meta.keys()),
             "cpu_op event names should match",
         )
-        # trace_only may be missing "Call stack" (requires parent chain)
-        # but all other metadata keys must be present
         for op in default_meta:
             missing = default_meta[op] - trace_only_meta.get(op, set()) - {"Call stack"}
             self.assertEqual(
@@ -1308,23 +1309,23 @@ class TestProfiler(TestCase):
                 f"{op}: metadata keys missing in trace_only: {missing}",
             )
 
-        def count_by_cat(trace_data):
-            counts = collections.Counter(
-                ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
-            )
-            return counts
+        if use_cuda:
+            def count_by_cat(trace_data):
+                return collections.Counter(
+                    ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
+                )
 
-        default_counts = count_by_cat(default_trace)
-        trace_only_counts = count_by_cat(trace_only_trace)
-        for cat in ("kernel", "ac2g"):
-            self.assertGreater(
-                default_counts[cat], 0, f"expected {cat} events in default trace"
-            )
-            self.assertEqual(
-                default_counts[cat],
-                trace_only_counts[cat],
-                f"{cat} event count mismatch",
-            )
+            default_counts = count_by_cat(default_trace)
+            trace_only_counts = count_by_cat(trace_only_trace)
+            for cat in ("kernel", "ac2g"):
+                self.assertGreater(
+                    default_counts[cat], 0, f"expected {cat} events in default trace"
+                )
+                self.assertEqual(
+                    default_counts[cat],
+                    trace_only_counts[cat],
+                    f"{cat} event count mismatch",
+                )
 
         # events() must raise in trace_only mode
         with profile(

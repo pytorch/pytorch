@@ -381,8 +381,18 @@ struct AddGenericMetadata : public MetadataBase {
 // KinetoEvent wrappers or building eventTree.
 void addTraceMetadata(
     std::vector<std::shared_ptr<Result>>& events,
-    const torch::profiler::impl::ProfilerConfig& config) {
+    const torch::profiler::impl::ProfilerConfig& config,
+    int64_t trace_end_ns) {
   for (auto& e : events) {
+    // Unfinished events automatically have end time set to trace end time
+    if (!e->finished_) {
+      e->visit(c10::overloaded(
+          [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ = trace_end_ns;
+          },
+          [](auto&) {}));
+    }
+
     if (!e->kineto_activity_) {
       continue;
     }
@@ -505,7 +515,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
     if (config_.experimental_config.trace_only) {
-      addTraceMetadata(records_and_trace.first, config_);
+      addTraceMetadata(records_and_trace.first, config_, end_time);
     } else {
       materializeOpEvents(records_and_trace.first, end_time);
     }

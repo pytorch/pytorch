@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import logging
 import uuid
 from collections import defaultdict
@@ -264,6 +265,7 @@ class profile:
                 "(stack traces require event post-processing). "
                 "Disabling trace_only."
             )
+            experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
