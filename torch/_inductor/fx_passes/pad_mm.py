@@ -22,6 +22,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
+from torch._prims_common import is_contiguous_or_false
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -206,8 +207,6 @@ def _padding_would_materialize_non_contiguous_tf32_input(
         or torch.backends.cuda.matmul.fp32_precision != "tf32"
     ):
         return False
-
-    from torch._prims_common import is_contiguous_or_false
 
     if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
         mat1_would_be_padded = m_padded_length != 0 or k_padded_length != 0
