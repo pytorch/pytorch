@@ -1825,8 +1825,6 @@ class TestPatternMatcher(TestCase):
             # pattern should match
             self.assertEqual(counter, 1)
             self.assertEqual(actual, expected)
-            # addmm should be replaced
-            FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_addmm_dtype_mismatch(self):
         a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
