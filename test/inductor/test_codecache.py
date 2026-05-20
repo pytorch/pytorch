@@ -692,6 +692,41 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(stats.hit, 1)
         cache_stats._stats.clear()
 
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_default_dtype_affects_factory_cache_key(self):
+        old_dtype = torch.get_default_dtype()
+        FxGraphCache.clear()
+
+        def fn():
+            return (
+                torch.ones(2),
+                torch.zeros(2),
+                torch.tensor([1.0, 2.0]),
+                torch.arange(2.0),
+                torch.empty(2),
+            )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        try:
+            torch.set_default_dtype(torch.float32)
+            first = compiled_fn()
+            self.assertEqual([x.dtype for x in first], [torch.float32] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            torch.set_default_dtype(torch.float64)
+            expected = fn()
+            actual = compiled_fn()
+            self.assertEqual([x.dtype for x in actual], [x.dtype for x in expected])
+            self.assertEqual([x.dtype for x in actual], [torch.float64] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        finally:
+            torch.set_default_dtype(old_dtype)
+            FxGraphCache.clear()
+
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
