@@ -15723,7 +15723,8 @@ op_db: list[OpInfo] = [
                # Not close
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
-               )),
+            )
+           ),
     OpInfo('as_strided',
            variant_test_name='partial_views',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -17751,12 +17752,9 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_out=False,
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
-        decorators=[
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
-        skips=[
-            # still want to test that first derivative works though second derivative isn't supported
-            ]
+        decorators=(DecorateInfo(
+            toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',)
+        )
     ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
@@ -18949,7 +18947,7 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                         # TODO: FIXME tolerance is too high
-                        ),
+                    ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
     BinaryUfuncInfo('__rsub__',
@@ -20907,7 +20905,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                # see https://github.com/pytorch/pytorch/issues/99806
                # RuntimeError: The size of tensor a (25) must match the size of tensor b (0) at non-singleton dimension 0.
-               )),
+            )
+           ),
     OpInfo('unbind',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            ref=reference_unbind,
