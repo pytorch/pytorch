@@ -3759,6 +3759,19 @@ class TestDistributions(DistributionsTestCase):
                 f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
+    def test_kumaraswamy_mode(self):
+        # a=concentration1, b=concentration0
+        # Mode = ((a-1)/(ab-1))^(1/a), nan when a<1 or b<1 or (a==b==1)
+        torch.set_default_dtype(torch.float64)
+        a = torch.tensor([0.5, 1.0, 0.5, 1.0, 3.0, 1.0, 3.0, 2.0])
+        b = torch.tensor([0.5, 0.5, 1.0, 1.0, 1.0, 3.0, 5.0, 1e19])
+        expected = torch.tensor(
+            [nan, nan, nan, nan, 1.0, 0.0, 0.52275795857471, 2.2360679774997896e-10]
+        )
+        actual = Kumaraswamy(a, b).mode
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.set_default_dtype(torch.float32)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
         df1 = torch.randn(2, 3).abs().requires_grad_()
