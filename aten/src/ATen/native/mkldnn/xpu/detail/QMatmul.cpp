@@ -471,11 +471,9 @@ sycl::event scaled_matmul(
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
       at::globalContext().deterministicMkldnn())
     op_attr.set_deterministic(true);
-#endif
 
   std::vector<int64_t> default_groups;
   op_attr.set_scales(

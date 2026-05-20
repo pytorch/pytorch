@@ -15,9 +15,6 @@
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
-#define ONEDNN_SUPPORT_DETERMINISTIC \
-  (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
-
 namespace at::native::onednn {
 
 dnnl::memory::format_tag get_dnnl_default_format(

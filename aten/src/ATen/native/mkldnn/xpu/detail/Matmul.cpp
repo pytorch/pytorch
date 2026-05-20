@@ -188,11 +188,9 @@ sycl::event matmul(
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
       at::globalContext().deterministicMkldnn())
     pattr.set_deterministic(true);
-#endif
 
   // scratchpad
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);

@@ -121,12 +121,10 @@ void woq_matmul_int4_impl(
 
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-#if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
       at::globalContext().deterministicMkldnn()) {
     pattr.set_deterministic(true);
   }
-#endif
 
   // Set scales with multiple scales along K dimension and with groups along  K.
   pattr.set_scales(
@@ -230,12 +228,10 @@ void woq_matmul_int4_impl_cache(
 
     set_quant_primitive_attr(pattr, scale, zp, group_size);
 
-#if ONEDNN_SUPPORT_DETERMINISTIC
     if (at::globalContext().deterministicAlgorithms() ||
         at::globalContext().deterministicMkldnn()) {
       pattr.set_deterministic(true);
     }
-#endif
   };
 
   int64_t zp_group_size = group_size;
