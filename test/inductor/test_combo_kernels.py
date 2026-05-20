@@ -615,7 +615,7 @@ class ComboKernelTests(TestCase):
                     for e in trace_json["traceEvents"]
                     if "triton_poi_fused" in e["name"]
                 ]
-                return triton_events[-1]["args"]["grid"], out
+                return triton_events[0]["args"]["grid"], out
 
         x1 = torch.randn(1024, 512, device=GPU_TYPE)
         y1 = torch.randn(2048, 256, device=GPU_TYPE)
