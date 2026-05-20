@@ -127,8 +127,8 @@ class TinyLinear(torch.nn.Module):
         super().__init__()
         self.lin = torch.nn.Linear(64, 64, bias=False, device=device)
 
-    def forward(self, x):
-        return self.lin(x)
+    def forward(self, x, scale: int):
+        return self.lin(x) * scale
 
 
 def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
@@ -523,11 +523,12 @@ class DTensorExportTest(TestCase):
                 mesh_dim_names=("tp",),
             )
             x = torch.randn(1, 7, 64, device=self.device_type)
-            dynamic_shapes = ({1: torch.export.Dim("seq_len", min=1, max=128)},)
+            scale = 2
+            dynamic_shapes = ({1: torch.export.Dim("seq_len", min=1, max=128)}, None)
 
             torch.export._trace._export(
                 TinyLinear(self.device_type),
-                args=(x,),
+                args=(x, scale),
                 dynamic_shapes=dynamic_shapes,
                 strict=False,
                 prefer_deferred_runtime_asserts_over_guards=True,
@@ -538,7 +539,7 @@ class DTensorExportTest(TestCase):
             )
             ep = torch.export._trace._export(
                 dtensor_model,
-                args=(x,),
+                args=(x, scale),
                 dynamic_shapes=dynamic_shapes,
                 strict=False,
                 prefer_deferred_runtime_asserts_over_guards=True,
@@ -548,7 +549,7 @@ class DTensorExportTest(TestCase):
                 torch.utils._pytree._deregister_pytree_node(DTensorSpec)
 
         self.assertEqual(tuple(ep.graph_signature.parameters), ("lin.weight",))
-        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x", scale))
 
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):

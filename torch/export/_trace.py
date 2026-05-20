@@ -679,12 +679,7 @@ def _produce_aten_artifact(
     _replace_unbacked_bindings(gm)
     _remove_unused_subclass_param_buffer_placeholders(gm)
 
-    total_non_user_inputs = (
-        len(graph_signature.parameters)
-        + len(graph_signature.buffers)
-        + len(graph_signature.input_tokens)
-    )
-    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
+    set_missing_meta_vals(gm, flat_fake_args, graph_signature.user_inputs)
 
     export_graph_signature: ExportGraphSignature | None
     export_graph_signature = _convert_to_export_graph_signature(
@@ -2106,21 +2101,30 @@ def _export_to_aten_ir_make_fx(
     )
 
 
-def set_missing_meta_vals(gm, flat_args, num_params_buffers):
+def set_missing_meta_vals(gm, flat_args, user_inputs):
     # Sets missing metadata to address two problems:
     # 1. aot_export adds symint metadata for placeholders with int values; since
     #    these become specialized, we replace such metadata with the original values.
     # 2. any tensor attributes that are not params / buffers, i.e., are constants
     #    need to have their metadata set before lifting them because it is needed
     #    for computing the exported program's signature.
-    index = 0
+    placeholder_names = {
+        node.name for node in gm.graph.nodes if node.op == "placeholder"
+    }
+    # AOTAutograd's signature can still list unused subclass attr placeholders
+    # that were dropped from the graph above.
+    remaining_user_inputs = [name for name in user_inputs if name in placeholder_names]
+    if len(remaining_user_inputs) != len(flat_args):
+        raise AssertionError(
+            f"expected {len(remaining_user_inputs)} user inputs, "
+            f"but got {len(flat_args)} args"
+        )
+    user_input_to_arg = dict(zip(remaining_user_inputs, flat_args))
     for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= num_params_buffers:
-                user_arg = flat_args[index - num_params_buffers]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+        if node.op == "placeholder" and node.name in user_input_to_arg:
+            user_arg = user_input_to_arg[node.name]
+            if not isinstance(user_arg, torch.Tensor):
+                node.meta["val"] = user_arg
 
 
 def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
