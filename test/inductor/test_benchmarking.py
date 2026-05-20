@@ -225,6 +225,22 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
+    def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with (
+            patch.object(
+                _bench.inductor_config, "use_torch_profiler_benchmarker", True
+            ),
+            patch.object(_bench.inductor_config, "use_experimental_benchmarker", False),
+            patch.object(_bench.torch.cuda, "is_available", return_value=False),
+            patch.object(_bench.torch.xpu, "is_available", return_value=True),
+            patch.object(_bench.torch.mtia, "is_available", return_value=False),
+        ):
+            self.assertIsInstance(
+                _bench._make_default_benchmarker(), TorchProfilerBenchmarker
+            )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",
@@ -238,10 +254,12 @@ class TestBenchmarker(TestCase):
         _, _callable = self.make_params(device, size=16)
 
         captured_buffer_lengths = []
+        captured_buffer_devices = []
         original_empty = torch.empty
 
         def empty_spy(*args, **kwargs):
             captured_buffer_lengths.append(args[0])
+            captured_buffer_devices.append(kwargs["device"])
             return original_empty(*args, **kwargs)
 
         with patch.object(
@@ -262,9 +280,10 @@ class TestBenchmarker(TestCase):
                     )
 
         self.assertGreater(timing, 0)
-        mock_get_event_pairs.assert_called_once_with(1)
+        mock_get_event_pairs.assert_called_once_with(1, device_type=device)
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
+        self.assertEqual(captured_buffer_devices[0], device)
 
 
 if __name__ == "__main__":
