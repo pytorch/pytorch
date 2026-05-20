@@ -1958,19 +1958,21 @@ def _sink_waits_iterative_internal(
                     c_runtime = runtimes[candidate]
 
                     if c_runtime > 0 and len(group_colls) > 0:
-                        # Advantage for current Wait to do the Swap
                         # pyrefly: ignore[no-matching-overload]
-                        exposed_delta = max(
-                            0,
-                            info.comm_time - info.comp_time,
+                        exposed_before = max(0, info.comm_time - info.comp_time)
+                        # pyrefly: ignore[no-matching-overload]
+                        exposed_after = max(
+                            0, info.comm_time - info.comp_time - c_runtime
                         )
-                        # pyrefly: ignore[no-matching-overload]
-                        -max(0, info.comm_time - info.comp_time - c_runtime)
+                        exposed_delta = exposed_after - exposed_before
                         for gc_comm_time, gc_comp_time in group_colls.values():
                             # pyrefly: ignore [no-matching-overload]
-                            exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
+                            gc_exposed_before = max(0, gc_comm_time - gc_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
+                            gc_exposed_after = max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
+                            exposed_delta += gc_exposed_after - gc_exposed_before
                         if exposed_delta > 0:
                             info.limiting_factor = (
                                 f"candidate has compute {c_runtime}, group contains collectives,"
