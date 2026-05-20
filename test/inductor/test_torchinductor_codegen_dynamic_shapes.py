@@ -481,7 +481,7 @@ class DynamicShapesCodegenTestCase(TestCase):
 
 if HAS_CPU:
 
-    class DynamicShapesCodegenCpuTests(DynamicShapesCodegenTestCase):
+    class DynamicShapesCodegenCpuTests(TestCase):
         maxDiff = None
         device = "cpu"
 
