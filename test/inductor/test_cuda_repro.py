@@ -2864,6 +2864,43 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfXpu(msg="CUDA wrapper codegen check")
+    def test_zero_view_return_uses_zero_fill(self):
+        def fn():
+            return torch.zeros((2, 3, 6), device=device_type).view(-1, 2, 3)
+
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+
+        self.assertEqual(tuple(out.shape), (6, 2, 3))
+        self.assertEqual(out, torch.zeros((6, 2, 3), device=device_type))
+        self.assertIn(".zero_()", code)
+        self.assertNotIn("async_compile.triton", code)
+        self.assertNotIn("tl.store", code)
+
+    @skipIfXpu(msg="CUDA wrapper codegen check")
+    def test_positive_zero_full_uses_zero_fill(self):
+        def fn():
+            return torch.full((8,), 0.0, device=device_type)
+
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+
+        self.assertEqual(out, torch.zeros((8,), device=device_type))
+        self.assertIn(".zero_()", code)
+        self.assertNotIn("async_compile.triton", code)
+
+    @skipIfXpu(msg="CUDA wrapper codegen check")
+    def test_negative_zero_full_not_zero_fill(self):
+        def fn():
+            return torch.full((8,), -0.0, device=device_type)
+
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+        expected = torch.full((8,), -0.0, device=device_type)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(torch.signbit(out), torch.signbit(expected))
+        self.assertTrue(torch.signbit(out).all().item())
+        self.assertNotIn(".zero_()", code)
+
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )

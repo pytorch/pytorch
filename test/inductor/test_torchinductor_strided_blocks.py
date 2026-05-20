@@ -1394,7 +1394,9 @@ class CommonTemplate:
                 "triton.persistent_reductions": False,
                 "triton.max_tiles": 2,
             },
-            expected_num_triton_kernels=2,
+            # The zero dst initialization is emitted as a wrapper zero_(), so
+            # only the fused computation remains as a Triton kernel.
+            expected_num_triton_kernels=1,
         )
 
     def test_mul_broadcast_multi_output(self):
