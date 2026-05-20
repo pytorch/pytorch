@@ -889,6 +889,87 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(captured_results["example_shape"], (m, k))
 
 
+class TestGetInputsStorageSizeCheck(TestCase):
+    def test_get_inputs_realloc_with_undersized_base(self):
+        """
+        Regression test: get_inputs compared storage size in bytes against
+        needed size in elements.  For multi-byte dtypes the byte count
+        exceeds the element count, so the check could miss cases where
+        reallocation is required and torch.as_strided would crash.
+
+        We mock benchmark_example_value to return a bf16 tensor whose
+        storage is too small (in elements) for the IR node's padded
+        strides, then call get_inputs with a mocked V.graph context.
+        Without the fix the as_strided inside get_inputs raises
+        RuntimeError; with the fix the reallocation branch fires.
+        """
+        from torch._inductor import ir
+
+        device = torch.device("cpu")
+        dtype = torch.bfloat16
+        # Padded strides [100, 8, 1] with size [4, 5, 8] need 340
+        # elements.  We give the base tensor only 200 elements (400
+        # bytes), so 200 < 340 <= 400.
+        node_size = [4, 5, 8]
+        padded_strides = [100, 8, 1]
+        base_elements = 200
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars.optimization_hints_with_override = (
+            lambda exprs, hint_override=None: tuple(int(e) for e in exprs)
+        )
+        mock_graph.sizevars.optimization_hint_with_override = (
+            lambda expr, hint_override=None: int(expr)
+        )
+        mock_graph.sizevars.optimization_hint = (
+            lambda expr, fallback=None: int(expr) if expr is not None else fallback
+        )
+        mock_graph.buffer_layout_constraints = {}
+        mock_graph.get_allocation_size = lambda node: node.get_size()
+
+        with V.set_graph_handler(mock_graph):
+            layout = ir.FixedLayout(
+                device=device,
+                dtype=dtype,
+                size=node_size,
+                stride=padded_strides,
+            )
+            buf = ir.Buffer(name="test_padded_buf", layout=layout)
+            out_layout = ir.FixedLayout(
+                device=device,
+                dtype=dtype,
+                size=node_size,
+                stride=padded_strides,
+            )
+
+            def undersized_example(node, hint_override=None):
+                if isinstance(node, ir.Layout):
+                    sizes = tuple(int(s) for s in node.size)
+                    strides = tuple(int(s) for s in node.stride)
+                    needed = torch._prims_common.compute_required_storage_length(
+                        sizes, strides, 0
+                    )
+                    t = torch.randn(needed, device=device, dtype=dtype)
+                    return t.as_strided(sizes, strides, 0)
+                return torch.randn(base_elements, device=device, dtype=dtype)
+
+            with unittest.mock.patch.object(
+                select_algorithm.AlgorithmSelectorCache,
+                "benchmark_example_value",
+                staticmethod(undersized_example),
+            ):
+                autotune_args = select_algorithm.AlgorithmSelectorCache.get_inputs(
+                    choices=[],
+                    input_nodes=[buf],
+                    layout=out_layout,
+                    input_gen_fns=None,
+                )
+
+            extern_inputs = autotune_args.extern.input_tensors
+            self.assertEqual(len(extern_inputs), 1)
+            self.assertEqual(extern_inputs[0].shape, torch.Size(node_size))
+
+
 class TestTemplateRender(TestCase):
     @requires_gpu()
     @requires_triton()
