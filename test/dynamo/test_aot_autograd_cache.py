@@ -3601,6 +3601,23 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             check_cacheable(gm)
 
+    def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
+        torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
+
+        def not_torch_numpy(x):
+            return x
+
+        self.assertIsNone(
+            torch._dynamo.utils._torch_numpy_callable_cache_key(not_torch_numpy)
+        )
+        cache_info = (
+            torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
+        )
+        self.assertEqual(
+            cache_info.currsize,
+            0,
+        )
+
     def test_numpy_wrapper_rejects_spoofed_torch_numpy_target(self):
         def spoofed_round(x):
             return x.sin()

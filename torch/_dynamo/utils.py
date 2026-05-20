@@ -4577,11 +4577,7 @@ def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any]]:
 def _torch_numpy_callable_cache_key_by_id(
     obj_id: int,
 ) -> tuple[Callable[..., Any], str] | None:
-    entry = _torch_numpy_callable_id_map().get(obj_id)
-    if entry is None:
-        return None
-
-    tnp_callable, np_callable = entry
+    tnp_callable, np_callable = _torch_numpy_callable_id_map()[obj_id]
     if np_callable is None:
         return None
 
@@ -4605,7 +4601,13 @@ def _torch_numpy_callable_cache_key_by_id(
 
 
 def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
-    entry = _torch_numpy_callable_cache_key_by_id(id(obj))
+    obj_id = id(obj)
+    # Arbitrary Python callables can be short-lived, so do not cache misses by
+    # id; a later object may reuse the same id.
+    if obj_id not in _torch_numpy_callable_id_map():
+        return None
+
+    entry = _torch_numpy_callable_cache_key_by_id(obj_id)
     if entry is None:
         return None
 
