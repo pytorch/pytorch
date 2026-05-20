@@ -3686,6 +3686,16 @@ class _IssubclassClassWithMeta(metaclass=_IssubclassMetaWithCheck):
     pass
 
 
+class _IssubclassMetaNonBool(type):
+    def __subclasscheck__(cls, subclass):
+        # Non-bool return; CPython coerces via PyObject_IsTrue.
+        return 42
+
+
+class _IssubclassClassWithNonBoolMeta(metaclass=_IssubclassMetaNonBool):
+    pass
+
+
 class _IssubclassMyABC(metaclass=abc.ABCMeta):  # noqa: B024
     pass
 
@@ -3782,15 +3792,26 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
 
     # --- Metaclass with __subclasscheck__ ---
 
-    @make_dynamo_test
     def test_custom_metaclass_subclasscheck(self):
-        # _IssubclassClassWithMeta's metaclass returns True for anything,
-        # and records each call so we can verify __subclasscheck__ was
-        # actually traced.
         _issubclass_metacheck_calls.clear()
-        self.assertTrue(issubclass(int, _IssubclassClassWithMeta))
-        self.assertTrue(issubclass(str, _IssubclassClassWithMeta))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                issubclass(int, _IssubclassClassWithMeta),
+                issubclass(str, _IssubclassClassWithMeta),
+            )
+
+        self.assertEqual(fn(), (True, True))
         self.assertEqual(_issubclass_metacheck_calls, [int, str])
+
+    @make_dynamo_test
+    def test_custom_metaclass_subclasscheck_non_bool(self):
+        # __subclasscheck__ returning a non-bool should be coerced via
+        # PyObject_IsTrue (abstract.c L2812) — exercises the generic_bool
+        # branch at the bottom of generic_issubclass.
+        result = issubclass(int, _IssubclassClassWithNonBoolMeta)
+        self.assertIs(result, True)
 
     # --- abc.ABCMeta ---
     # ABCMeta.__subclasscheck__ lives in <frozen abc> which Dynamo skips; we
@@ -3805,6 +3826,10 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
         self.assertFalse(issubclass(_IssubclassOther, _IssubclassMyABC))
 
     # --- TypeError cases ---
+
+    @make_dynamo_test
+    def test_non_class_arg2_doesnt_raise(self):
+        self.assertTrue(issubclass(int, (int, 1)))
 
     @make_dynamo_test
     def test_non_class_arg1_raises(self):
@@ -3830,6 +3855,23 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_class_is_subclass_of_itself(self):
         self.assertTrue(issubclass(_IssubclassSub, _IssubclassSub))
+
+    # --- Graph break path ---
+
+    def test_non_constant_args_graph_break(self):
+        # A tensor isn't a Python constant for Dynamo, so it triggers the
+        # NotImplementedError → unimplemented() path at the top of
+        # generic_issubclass.  Run outside make_dynamo_test so the
+        # exception escapes the compiled region.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return issubclass(t, int)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "issubclass.*non-constant",
+        ):
+            fn(torch.randn(3))
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):

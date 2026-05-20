@@ -9,7 +9,6 @@ live in their respective VT files.
 
 import abc
 import enum
-import inspect
 import types
 import typing
 from functools import lru_cache, partial
@@ -854,13 +853,8 @@ def generic_issubclass(
         )
     cls_type = maybe_get_python_type(cls)
 
-    # Step 1: PyType_CheckExact fast path — abstract.c L2772.  Also checks __subclasscheck__ specifically, which doesn't
-    # match cpython but is needed for custom metaclasses that don't override __subclasscheck__
-    if (
-        cls_type is type
-        or inspect.getattr_static(cls_py, "__subclasscheck__", None)
-        is type.__subclasscheck__
-    ):
+    # Step 1: PyType_CheckExact fast path — abstract.c L2772
+    if cls_type is type:
         try:
             return ConstantVariable.create(issubclass(derived_py, cls_py))
         except TypeError as e:
@@ -874,25 +868,23 @@ def generic_issubclass(
         # TODO can trace this once TypingVariable is removed
         args = typing.get_args(cls_py)
         cls = VariableTracker.build(tx, args)
-        cls_type = maybe_get_python_type(cls)
 
-    # Step 3: tuple of classes — abstract.c L2783-2799.  Check for TupleVariable instead of tuple to make the type
-    # checker happy
+    # Step 3: tuple of classes — abstract.c L2783-2799.  Check for
+    # TupleVariable instead of tuple to make the type checker happy.
     from .lists import TupleVariable
 
     if isinstance(cls, TupleVariable):
-        res_vts = [
-            generic_issubclass(tx, derived, VariableTracker.build(tx, item))
-            for item in cls.items
-        ]
-        res = any(
-            bool(isinstance(var, ConstantVariable) and var.value) for var in res_vts
-        )
-        return VariableTracker.build(tx, res)
+        for item in cls.items:
+            r = generic_issubclass(tx, derived, item)
+            if isinstance(r, ConstantVariable) and r.value:
+                return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     # Allowlist short-circuit for Step 4: constant-fold via Python's
     # issubclass for metaclasses whose ``__subclasscheck__`` Dynamo can't
-    # trace (see _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES).
+    # trace (see _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES).  Note that ABCMeta
+    # is problematic in particular since it caches registered subclasses.
+    # Ideally this should be traced or guarded
     if isinstance(cls_py, type) and issubclass(
         type(cls_py), _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES
     ):
@@ -918,6 +910,4 @@ def generic_issubclass(
     result = cls.call_method(tx, "__subclasscheck__", [derived], {})
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
-    if isinstance(result, ConstantVariable) and isinstance(result.value, bool):
-        return result
     return generic_bool(tx, result)
