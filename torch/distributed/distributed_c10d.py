@@ -5875,6 +5875,34 @@ def _new_group_with_tag(
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
+    # If the default PG implements new_group, delegate to it. This allows
+    # custom Python PG subclasses to handle subgroup creation in a single
+    # call, avoiding the per-device creator iteration in
+    # _new_process_group_helper.
+    if hasattr(default_pg, "new_group") and callable(default_pg.new_group):
+        pg_or_none = default_pg.new_group(
+            ranks,
+            timeout=timeout,
+            pg_options=backend_options,
+            group_name=group_name,
+            group_desc=group_desc,
+        )
+        if pg_or_none is None:
+            return GroupMember.NON_GROUP_MEMBER
+
+        pg: ProcessGroup = pg_or_none  # pyrefly: ignore[bad-assignment]
+        _world.pg_group_ranks[pg] = {
+            global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
+        }
+        _world.pg_map[pg] = (backend, PrefixStore(f"{group_name}/", default_store))
+        _world.pg_names[pg] = group_name
+        _register_process_group(group_name, pg)
+        pg_tag = f"ptd:{group_name}"
+        _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
+        _world.pg_to_tag[pg] = pg_tag
+        _world.pg_backend_config[pg] = str(BackendConfig(backend))
+        return pg
+
     pg, pg_store = _new_process_group_helper(
         group_world_size,
         group_rank,
