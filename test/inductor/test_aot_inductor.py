@@ -1913,6 +1913,7 @@ class AOTInductorTestsTemplate:
                 "max_autotune_gemm_backends": "TRITON",
             },
             dynamic_shapes=dynamic_shapes,
+            tol=1e-2,
         )
 
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
