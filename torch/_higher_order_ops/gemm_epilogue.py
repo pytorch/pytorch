@@ -1041,11 +1041,9 @@ def _match_quack_local_norm(
         return None
     output_meta = node.meta.get("val")
     mm_meta = mm_node.meta.get("val")
-    if dim == 0 and mm_meta is not None and len(mm_meta.shape) == 3:
-        raise NotImplementedError(
-            "QUACK bmm row/M reductions feeding the main output are not supported yet"
-        )
-    if not isinstance(output_shape, (list, tuple)) or len(output_shape) != 2:
+    if not isinstance(output_shape, (list, tuple)):
+        return None
+    if mm_meta is not None and tuple(output_shape) != tuple(mm_meta.shape):
         return None
     if output_meta is not None and mm_meta is not None:
         if tuple(output_meta.shape) != tuple(mm_meta.shape):

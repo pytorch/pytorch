@@ -2087,7 +2087,7 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.bmm").run(code)
 
     @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_rejects_bmm_local_m_reduce_feeding_main(self):
+    def test_cuda_inductor_quack_backend_bmm_local_m_reduce_feeding_main_fuses(self):
         B = 2
         M = 128
         K = 64
@@ -2110,8 +2110,15 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.rand(B, M, K, device="cuda", dtype=torch.float16)
         b = torch.rand(B, K, N, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(Exception, "bmm row/M reductions feeding"):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = fn(a, b)
+
+        torch.testing.assert_close(actual.float(), expected.float(), atol=5e-2, rtol=5e-2)
+        FileCheck().check(f"local_reduce_group={group}").check(
+            "local_reduce_dim=0"
+        ).check("local_reduce_feeds_main=True").check_not("extern_kernels.bmm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_bmm_local_m_sum_aux_fuses(self):
