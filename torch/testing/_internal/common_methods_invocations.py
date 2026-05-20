@@ -15796,12 +15796,9 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_grad_match",
                          dtypes=(torch.float16, torch.bfloat16, torch.float32),
                          device_type="mps"),
-            # ROCm: unspecified launch failure / link failure (same as unchunked).
+            # ROCm: unspecified launch failure on test_cow_input.
             DecorateInfo(unittest.skip("unspecified launch failure"),
                          "TestCompositeCompliance", "test_cow_input",
-                         device_type="cuda", active_if=TEST_WITH_ROCM),
-            DecorateInfo(unittest.skip("link failure"),
-                         "TestInductorOpInfo", "test_comprehensive",
                          device_type="cuda", active_if=TEST_WITH_ROCM),
             # Chunked op: no jvp / vmap / second derivatives.
             DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
