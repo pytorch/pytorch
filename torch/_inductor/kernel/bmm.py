@@ -96,14 +96,20 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     sizevars = V.graph.sizevars
     dtype = mat1.get_dtype()
     device_type = mat1.get_device().type
+
+    def dim_is_one_or_hint(dim):
+        # The mul+sum decomposition is valid for any M/N. The size-1 hint is
+        # only a profitability signal, so avoid specializing dynamic dims here.
+        return sizevars.optimization_hint(dim, fallback=2) == 1
+
     if (
         out_dtype is None
         and device_type in ("cuda", "xpu")
         and device_type == mat2.get_device().type
         and dtype == mat2.get_dtype()
         and dtype in _BMM_DOT_DECOMPOSE_DTYPES
-        and sizevars.statically_known_equals(mat1.get_size()[1], 1)
-        and sizevars.statically_known_equals(mat2.get_size()[2], 1)
+        and dim_is_one_or_hint(mat1.get_size()[1])
+        and dim_is_one_or_hint(mat2.get_size()[2])
         and (
             sizevars.statically_known_leq(
                 mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD
