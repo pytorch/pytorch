@@ -3965,6 +3965,38 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
+    def _range_tree_mask_shape(self, mask: str) -> BlockShapeType:
+        for tree in self.active_range_trees():
+            if tree.owns_mask(mask):
+                return tree.mask_shape(self.triton_tensor_ndim())
+        return None
+
+    def _mask_shape(
+        self,
+        mask: str | TritonCSEVariable,
+        seen: set[int] | None = None,
+    ) -> BlockShapeType:
+        if isinstance(mask, TritonCSEVariable):
+            if seen is None:
+                seen = set()
+            if id(mask) in seen:
+                return mask.shape
+
+            seen.add(id(mask))
+            result_shape = mask.shape
+            for mask_var in mask.mask_vars:
+                mask_var_shape = self._mask_shape(mask_var, seen)
+                if mask_var_shape is None:
+                    return None
+                if result_shape is None:
+                    result_shape = tuple(mask_var_shape)
+                else:
+                    result_shape = get_broadcasted_shape(
+                        tuple(result_shape), tuple(mask_var_shape)
+                    )
+            return result_shape
+        return self._range_tree_mask_shape(mask)
+
     def _broadcast_shape_with_masks(
         self,
         shape: BlockShapeType,
@@ -3975,21 +4007,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         result_shape = tuple(shape)
         for mask in mask_vars:
-            mask_shape = getattr(mask, "shape", None)
-            if mask_shape is None and isinstance(mask, str):
-                for tree in self.active_range_trees():
-                    if mask == f"{tree.prefix}mask":
-                        if tree.tensor_dim is None:
-                            mask_shape = ()
-                        else:
-                            mask_shape_list: list[int | str] = [
-                                1
-                            ] * self.triton_tensor_ndim()
-                            mask_shape_list[tree.tensor_dim] = self.dense_size_list()[
-                                tree.tensor_dim
-                            ]
-                            mask_shape = tuple(mask_shape_list)
-                        break
+            mask_shape = self._mask_shape(mask)
             if mask_shape is None:
                 return None
             result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
@@ -4641,10 +4659,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
+        index_dtype = (
+            self.features.select_index_dtype()
+            if reduction_type in ("argmax", "argmin")
+            else None
+        )
+        result_dtype = index_dtype if index_dtype is not None else torch_acc_type
         result_shape = list(self.dense_size_list())
         result_shape[dim] = "1"
         result_var: Any = self.cse.newvar(
-            dtype=torch_acc_type, shape=tuple(result_shape)
+            dtype=result_dtype, shape=tuple(result_shape)
         )
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
@@ -4706,15 +4730,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
-                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+                assert index_dtype is not None
                 if logical_index:
-                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
+                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
                 else:
                     accumulator_index = str(
                         self.cse.generate(
                             self.compute,
                             f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                            dtype=accumulator_dtype,
+                            dtype=index_dtype,
                             shape=masked_value.shape,
                         )
                     )
@@ -4722,7 +4746,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
-                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4782,7 +4805,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
-                index_dtype = self.features.select_index_dtype()
+                assert index_dtype is not None
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, "
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
@@ -4806,7 +4829,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
-                result_var.dtype = index_dtype
             elif is_welford_reduction(reduction_type):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
