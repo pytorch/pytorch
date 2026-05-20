@@ -1615,25 +1615,16 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
-                            if t.size is None:
-                                raise AssertionError(
-                                    "t.size must not be None when copy_data is True"
-                                )
-                            if t.stride is None:
-                                raise AssertionError(
-                                    "t.stride must not be None when copy_data is True"
-                                )
                             if not _is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[bad-assignment]
-                            r.real_tensor = torch.empty_strided(
-                                t.size, t.stride, dtype=t.dtype, device=t.device
-                            )
                             if t.data is None:
                                 raise AssertionError(
                                     "t.data must not be None when copy_data is True"
                                 )
-                            _safe_copy(r.real_tensor, t.data)
+                            # MKLDNN tensors cannot be copied into dense strided
+                            # tensors, but propagate_real_tensors should keep the
+                            # real MKLDNN input available for real-kernel execution.
+                            r.real_tensor = _safe_clone(t.data)
                     if not safe_is_leaf(r):
                         raise AssertionError(
                             "the callback you passed in doesn't detach"

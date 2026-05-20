@@ -144,6 +144,25 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    def test_mkldnn_to_dense_cache_key(self):
+        FakeTensorMode.cache_clear()
+        mkldnn = (
+            torch.arange(3, dtype=torch.float32).reshape(3, 1).expand(3, 3).to_mkldnn()
+        )
+        strided = torch.arange(3, dtype=torch.float32).as_strided((3, 3), (1, 0))
+
+        with FakeTensorMode() as mode:
+            fake_mkldnn = mode.from_tensor(mkldnn)
+            self.assertTrue(fake_mkldnn.is_mkldnn)
+            dense = aten._to_dense.default(fake_mkldnn)
+            self.assertFalse(dense.is_mkldnn)
+
+            fake_strided = mode.from_tensor(strided)
+            self.assertFalse(fake_strided.is_mkldnn)
+            with self.assertRaises(NotImplementedError):
+                aten._to_dense.default(fake_strided)
+
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 

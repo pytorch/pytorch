@@ -63,6 +63,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+_MKLDNN_LAYOUT = cast(torch.layout, torch.__dict__["_mkldnn"])
+
+
+def set_fake_mkldnn(t: object, is_mkldnn: bool) -> None:
+    if isinstance(t, FakeTensor):
+        t._fake_layout = _MKLDNN_LAYOUT if is_mkldnn else None
+
 
 # TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
 # Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
@@ -458,7 +465,7 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
-
+        set_fake_mkldnn(out, t.is_mkldnn)
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
         # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
@@ -735,6 +742,11 @@ class FakeTensor(Tensor):
     # separately.
     pytype: type[Tensor] | None
     dispatch_keys: torch.DispatchKeySet | None
+    # Logical layout for layouts that cannot be represented directly by the
+    # meta tensor stored inside FakeTensor. This must be represented in
+    # TensorMetadata so fake dispatch cache keys distinguish it from otherwise
+    # identical strided fake tensors.
+    _fake_layout: torch.layout | None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -759,6 +771,11 @@ class FakeTensor(Tensor):
     @fake_device.setter
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def is_mkldnn(self) -> bool:
+        return self._fake_layout == _MKLDNN_LAYOUT
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -847,6 +864,7 @@ class FakeTensor(Tensor):
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
+        self._fake_layout = None
         if isinstance(real_tensor, FakeTensor):
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
@@ -1140,6 +1158,7 @@ class TensorMetadata:
     is_coalesced: bool | None
     dense_dim: int | None
     sparse_dim: int | None
+    fake_layout: torch.layout | None
 
     def _flatten_into(
         self,
@@ -1198,6 +1217,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_coalesced() if t.is_sparse else None,
         t.dense_dim() if is_sparse_any(t) else None,
         t.sparse_dim() if is_sparse_any(t) else None,
+        t._fake_layout if isinstance(t, FakeTensor) else None,
     )
 
 
@@ -1885,6 +1905,9 @@ class FakeTensorMode(TorchDispatchMode):
         if is_sparse_compressed(output):
             raise _BypassDispatchCache("sparse compressed output")
 
+        if output.is_mkldnn:
+            raise _BypassDispatchCache("mkldnn output")
+
         # Can an in-place op really reference a kwarg? If so, then we need
         # to extend the implementation to handle it.
         for kval in kwargs.values():
@@ -2149,7 +2172,9 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
 
-        return FakeTensor(self, empty, metadata.device)
+        out = FakeTensor(self, empty, metadata.device)
+        out._fake_layout = metadata.fake_layout
+        return out
 
     def _output_from_cache_entry(
         self,

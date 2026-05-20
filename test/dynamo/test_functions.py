@@ -27,6 +27,7 @@ import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     normalize_gm,
@@ -4078,6 +4079,30 @@ class GraphModule(torch.nn.Module):
         compiled_fn = torch.compile(fn, fullgraph=True)
         compiled_result = compiled_fn(t, scale, zero_point)
         self.assertEqual(compiled_result, result)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    def test_mkldnn_to_dense_compile(self):
+        def fn(x):
+            return x.to_dense() * 2 - 1
+
+        x = (torch.arange(9, dtype=torch.float32).reshape(3, 3) / 3).to_mkldnn()
+        expected = fn(x)
+
+        aot_backend = AotEagerAndRecordGraphs()
+        aot_result = torch.compile(
+            fn, backend=aot_backend, fullgraph=True, dynamic=True
+        )(x)
+        torch.testing.assert_close(aot_result, expected)
+        self.assertIn(
+            torch.ops.aten._to_dense.default,
+            [node.target for node in aot_backend.fw_graphs[0].graph.nodes],
+        )
+
+        inductor_result = torch.compile(
+            fn, backend="inductor", fullgraph=True, dynamic=True
+        )(x)
+        self.assertEqual(inductor_result.layout, torch.strided)
+        torch.testing.assert_close(inductor_result, expected)
 
     def test_map_return(self):
         def fn(a, b):
