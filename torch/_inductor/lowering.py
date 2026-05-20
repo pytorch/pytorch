@@ -358,6 +358,57 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     return x
 
 
+def _get_current_node_arg_source_node(index: int) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+
+    if index < len(current_node.args):
+        source_node = current_node.args[index]
+        if isinstance(source_node, torch.fx.Node):
+            return source_node
+
+    if len(current_node.args) != 1 or not isinstance(current_node.args[0], Sequence):
+        return None
+    source_node = current_node.args[0]
+    if index >= len(source_node):
+        return None
+    source_node = source_node[index]
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
+def _get_current_node_sequence_arg_source_node(
+    arg_index: int, sequence_index: int
+) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+    if arg_index >= len(current_node.args):
+        return None
+
+    source_node = current_node.args[arg_index]
+    if not isinstance(source_node, Sequence):
+        return None
+    if sequence_index >= len(source_node):
+        return None
+    source_node = source_node[sequence_index]
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
+def _get_current_node_kwarg_source_node(name: str) -> torch.fx.Node | None:
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
+    if not isinstance(current_node, torch.fx.Node):
+        return None
+    source_node = current_node.kwargs.get(name)
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -403,16 +454,23 @@ def transform_args(
             kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
-        def promote(arg: Any) -> Any:
+        def promote(arg: Any, source_node: torch.fx.Node | None) -> Any:
             if isinstance(arg, TensorBox):
-                return to_dtype(arg, dtype)
+                return _to_dtype_preserving_explicit_lowp_source(
+                    arg, dtype, source_node
+                )
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(value=arg.value, dtype=dtype, device=device)
             else:
                 return arg
 
-        args = [promote(a) for a in args]
-        kwargs = {k: promote(v) for k, v in kwargs.items()}
+        args = [
+            promote(a, _get_current_node_arg_source_node(i)) for i, a in enumerate(args)
+        ]
+        kwargs = {
+            k: promote(v, _get_current_node_kwarg_source_node(k))
+            for k, v in kwargs.items()
+        }
 
     if broadcast:
         broadcasted = broadcast_tensors(
@@ -896,6 +954,171 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+def _is_user_visible_dtype_cast(node: torch.fx.Node) -> bool:
+    # Internal converts inserted to express an op's low-precision result are not
+    # user-visible precision barriers.
+    if node.meta.get("original_aten") is aten._to_copy.default:
+        return True
+
+    dtype_cast_fns = (
+        "to",
+        "type",
+        "type_as",
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "bool",
+        "byte",
+        "char",
+        "short",
+        "int",
+        "long",
+        "as_tensor",
+        "asarray",
+    )
+
+    def is_dtype_cast_target(target: Any) -> bool:
+        if target in dtype_cast_fns:
+            return True
+        name = getattr(target, "__name__", None)
+        return name in dtype_cast_fns
+
+    source_fn_stack = node.meta.get("source_fn_stack") or ()
+    return any(
+        isinstance(entry, tuple) and len(entry) >= 2 and is_dtype_cast_target(entry[1])
+        for entry in source_fn_stack
+    )
+
+
+def _is_explicit_dtype_cast(
+    node: torch.fx.Node | None, dtype: torch.dtype
+) -> TypeGuard[torch.fx.Node]:
+    if not isinstance(node, torch.fx.Node):
+        return False
+    if node.target is not prims.convert_element_type.default:
+        return False
+    if not _is_user_visible_dtype_cast(node):
+        return False
+
+    target_dtype = node.args[1] if len(node.args) > 1 else node.kwargs.get("dtype")
+    if target_dtype != dtype:
+        return False
+
+    src_node = node.args[0] if node.args else None
+    if not isinstance(src_node, torch.fx.Node):
+        return True
+
+    src_val = src_node.meta.get("val")
+    return not (isinstance(src_val, torch.Tensor) and src_val.dtype == dtype)
+
+
+_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY = "_inductor_explicit_lowp_cast_source"
+
+
+def _has_explicit_lowp_cast_source(
+    node: torch.fx.Node | None, source_dtype: torch.dtype
+) -> bool:
+    def produces_source_dtype(node: torch.fx.Node) -> bool:
+        if _is_explicit_dtype_cast(node, source_dtype):
+            return True
+
+        val = node.meta.get("val")
+        return isinstance(val, torch.Tensor) and val.dtype == source_dtype
+
+    if not isinstance(node, torch.fx.Node):
+        return False
+
+    def cached_result(node: torch.fx.Node) -> bool | None:
+        cache = node.meta.get(_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY)
+        if not isinstance(cache, dict) or source_dtype not in cache:
+            return None
+        return cache[source_dtype]
+
+    def cache_result(node: torch.fx.Node, result: bool) -> None:
+        cache = node.meta.setdefault(_EXPLICIT_LOWP_CAST_SOURCE_CACHE_KEY, {})
+        if isinstance(cache, dict):
+            cache[source_dtype] = result
+
+    # Explicit casts can remain semantically visible across long fused lowp
+    # expressions, so keep the search exact and cache per-node results to avoid
+    # repeated ancestry walks at promotion/widening sites.
+    stack = [(node, False)]
+    while stack:
+        cur, expanded = stack.pop()
+        if cached_result(cur) is not None:
+            continue
+        if not produces_source_dtype(cur):
+            cache_result(cur, False)
+            continue
+        if _is_explicit_dtype_cast(cur, source_dtype):
+            cache_result(cur, True)
+            continue
+
+        input_nodes = [
+            input_node
+            for input_node in cur.all_input_nodes
+            if produces_source_dtype(input_node)
+        ]
+        if expanded:
+            has_explicit_cast_source = any(
+                cached_result(input_node) is True for input_node in input_nodes
+            )
+            cache_result(cur, has_explicit_cast_source)
+            continue
+
+        stack.append((cur, True))
+        stack.extend(
+            (input_node, False)
+            for input_node in input_nodes
+            if cached_result(input_node) is None
+        )
+
+    return cached_result(node) is True
+
+
+def _to_dtype_preserving_explicit_lowp_source(
+    x: TensorBox,
+    dtype: torch.dtype,
+    source_node: torch.fx.Node | None,
+    *,
+    copy: bool = False,
+    use_compute_types: bool = True,
+) -> TensorBox:
+    src_dtype = x.get_dtype()
+    low_pr_fp = (torch.bfloat16, torch.float16)
+    if (
+        config.emulate_precision_casts
+        and src_dtype != dtype
+        and src_dtype in low_pr_fp
+        and not ir.is_storage_and_layout(x)
+        and _has_explicit_lowp_cast_source(source_node, src_dtype)
+    ):
+
+        def _to_dtype_preserve_explicit_lowp_source(x):
+            rounded = ops.to_dtype(
+                x,
+                src_dtype,
+                src_dtype=src_dtype,
+                use_compute_types=False,
+            )
+            result = ops.to_dtype(
+                rounded,
+                dtype,
+                src_dtype=src_dtype,
+                use_compute_types=use_compute_types,
+            )
+            if not use_compute_types and dtype in low_pr_fp:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+        return make_pointwise(
+            _to_dtype_preserve_explicit_lowp_source, override_return_dtype=dtype
+        )(x)
+
+    return to_dtype(x, dtype, copy=copy, use_compute_types=use_compute_types)
+
+
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
 def _foreach_map(subgraph, *args, **kwargs):
     """
@@ -956,11 +1179,25 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
+    current_node = (
+        getattr(V.graph, "current_node", None) if V.graph is not None else None
+    )
     use_compute_types = not (
         config.emulate_precision_casts
         and (src_dtype in low_pr_fp or dtype in low_pr_fp)
     )
-    return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
+
+    current_input_node: torch.fx.Node | None = None
+    if (
+        isinstance(current_node, torch.fx.Node)
+        and current_node.args
+        and isinstance(current_node.args[0], torch.fx.Node)
+    ):
+        current_input_node = current_node.args[0]
+
+    return _to_dtype_preserving_explicit_lowp_source(
+        x, dtype, current_input_node, copy=True, use_compute_types=use_compute_types
+    )
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
@@ -1161,7 +1398,13 @@ def where(cond, a, b):
         if isinstance(args[i], ir.Constant):
             args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
     return make_pointwise(fn, override_return_dtype=dtype)(
-        args[0], to_dtype(args[1], dtype), to_dtype(args[2], dtype)
+        args[0],
+        _to_dtype_preserving_explicit_lowp_source(
+            args[1], dtype, _get_current_node_arg_source_node(1)
+        ),
+        _to_dtype_preserving_explicit_lowp_source(
+            args[2], dtype, _get_current_node_arg_source_node(2)
+        ),
     )
 
 
@@ -2094,7 +2337,12 @@ def cat(inputs, dim=0):
     dtype = get_promoted_dtype(
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    inputs = [to_dtype(inp, dtype) for inp in inputs]
+    inputs = [
+        _to_dtype_preserving_explicit_lowp_source(
+            inp, dtype, _get_current_node_sequence_arg_source_node(0, i)
+        )
+        for i, inp in enumerate(inputs)
+    ]
 
     def unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
         if isinstance(x, TensorBox):
@@ -3626,7 +3874,9 @@ def copy(self, src, non_blocking=False):
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        x = to_dtype(x, self.get_dtype())
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, self.get_dtype(), _get_current_node_arg_source_node(1)
+        )
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
@@ -3717,7 +3967,9 @@ def arange_start_step(
 
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
-    src = to_dtype(src, x.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, x.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
@@ -3753,7 +4005,9 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    src = to_dtype(src, x.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, x.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -6711,7 +6965,9 @@ def _make_reduction_inner(
     x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
 ):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     size = x.get_size()
     axis = OrderedSet[int](_validate_reduction_axis(x, axis))
 
@@ -6826,7 +7082,9 @@ def make_reduction(
 
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     axis = _validate_dim(x, axis)
 
     return dict(
@@ -6841,13 +7099,17 @@ def _make_scan_inner(x, *, axis, dtype):
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
-        x = to_dtype(x, dtype)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0)
+        )
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     # compute in higher-precision until end of mean lowering
     output_dtype = x.get_dtype()
     if output_dtype in (torch.float16, torch.bfloat16):
-        x = to_dtype(x, torch.float)
+        x = _to_dtype_preserving_explicit_lowp_source(
+            x, torch.float, _get_current_node_arg_source_node(0)
+        )
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
@@ -6951,7 +7213,9 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
 def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     out_dtype = x.get_dtype()
     compute_dtype = get_computation_dtype(out_dtype)
-    x = to_dtype(x, compute_dtype, copy=False)
+    x = _to_dtype_preserving_explicit_lowp_source(
+        x, compute_dtype, _get_current_node_arg_source_node(0), copy=False
+    )
     kwargs = dict(
         x=x,
         axis=axis,
@@ -7111,7 +7375,9 @@ def copy_(dst, src, non_blocking=False):
         # dst.copy_(dst) can happen from the reinplacing pass
         return dst
     src = to_device(src, dst.get_device())
-    src = to_dtype(src, dst.get_dtype())
+    src = _to_dtype_preserving_explicit_lowp_source(
+        src, dst.get_dtype(), _get_current_node_arg_source_node(1)
+    )
     src = expand(src, dst.get_size())
     return mutate_to(dst, src)
 
@@ -7274,7 +7540,9 @@ def cumsum(x, axis=None, dtype=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
         dtype = dtype or x.get_dtype()
-        return to_dtype(x, dtype, copy=True)
+        return _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0), copy=True
+        )
 
     def combine_fn(a_tuple, b_tuple):
         (a,) = a_tuple
@@ -7298,7 +7566,9 @@ def cumprod(x, axis=None, dtype=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
         dtype = dtype or x.get_dtype()
-        return to_dtype(x, dtype, copy=True)
+        return _to_dtype_preserving_explicit_lowp_source(
+            x, dtype, _get_current_node_arg_source_node(0), copy=True
+        )
 
     def combine_fn(a_tuple, b_tuple):
         (a,) = a_tuple
@@ -8198,7 +8468,9 @@ if hasattr(torch.ops.fsdp, "copy_"):
             # dst.copy_(dst) can happen from the reinplacing pass
             return dst
         src = to_device(src, dst.get_device())
-        src = to_dtype(src, dst.get_dtype())
+        src = _to_dtype_preserving_explicit_lowp_source(
+            src, dst.get_dtype(), _get_current_node_arg_source_node(1)
+        )
         src = expand(src, dst.get_size())
         return mutate_to(dst, src)
 

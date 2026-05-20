@@ -5036,6 +5036,157 @@ class CPUReproTests(TestCase):
                 self.assertEqual(actual[0], expected[0])
                 self.assertEqual(actual[1], expected[1])
 
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_explicit_fp16_cast_mul_overflow(self):
+        def check(fn, *args, assert_all_nan=False):
+            expected = fn(*args)
+
+            torch._dynamo.reset()
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+            if assert_all_nan:
+                self.assertTrue(torch.isnan(expected).all())
+                self.assertTrue(torch.isnan(actual).all())
+            else:
+                self.assertEqual(actual, expected)
+
+        def fn(x):
+            y = x.to(torch.float16)
+            return (y * y).to(torch.float32)
+
+        def bfloat16_rounding(x):
+            y = x.to(torch.bfloat16)
+            return (y * y).to(torch.float32)
+
+        def cast_chain(x):
+            return x.to(torch.float16).to(torch.float32)
+
+        def repeated_lowp_cast(x):
+            y = x.to(torch.float16)
+            z = y.float().to(torch.float16)
+            return (z * z).float()
+
+        def repeated_bfloat16_cast(x):
+            return x.bfloat16().float().bfloat16().float()
+
+        def cast_alias_half(x):
+            y = x.half()
+            return (y * y).float()
+
+        def cast_alias_type(x):
+            y = x.type(torch.float16)
+            return (y * y).float()
+
+        def cast_alias_type_as(x, h):
+            y = x.type_as(h)
+            return (y * y).float()
+
+        def cast_alias_asarray(x):
+            y = torch.asarray(x, dtype=torch.float16)
+            return (y * y).float()
+
+        def cast_alias_as_tensor(x):
+            y = torch.as_tensor(x, dtype=torch.float16)
+            return (y * y).float()
+
+        def promoted_consumer(x):
+            y = x.to(torch.float16)
+            return y + x
+
+        def promoted_where_branch(x):
+            y = x.to(torch.float16)
+            return torch.where(x > 0, y, x)
+
+        def promoted_cat_input(x):
+            y = x.to(torch.float16)
+            return torch.cat([y, x])
+
+        def promoted_cat_dim_input(x):
+            y = x.to(torch.float16)
+            return torch.cat([y, x], 1)
+
+        def copy_from_explicit_lowp_cast(x):
+            y = x.to(torch.float16)
+            out = torch.empty_like(x)
+            out.copy_(y)
+            return out
+
+        def select_scatter_explicit_lowp_cast(x):
+            y = x.to(torch.float16)
+            return torch.select_scatter(torch.zeros(1, 1), y, 0, 0)
+
+        def slice_scatter_explicit_lowp_cast(x):
+            y = x.to(torch.float16)
+            return torch.slice_scatter(torch.zeros(2), y, 0, 0, 1)
+
+        def reduction_dtype_explicit_lowp_cast(x):
+            y = x.to(torch.float16)
+            return torch.sum(y, dtype=torch.float32), torch.mean(y)
+
+        def mixed_lowp_consumer(x, h):
+            y = x.to(torch.float16)
+            return (y + h).float()
+
+        def lowp_consumer_before_widening(x):
+            y = x.to(torch.float16)
+            z = y * y
+            return (z * torch.zeros_like(y)).float()
+
+        for size in (1, 32):
+            check(fn, torch.full((size,), 5000.0))
+
+        check(bfloat16_rounding, torch.tensor([257.0]))
+        check(cast_chain, torch.tensor([70000.0]))
+        check(repeated_lowp_cast, torch.tensor([5001.0]))
+        check(repeated_bfloat16_cast, torch.tensor([2.0039]))
+
+        x_alias = torch.tensor([5000.0])
+        h = torch.tensor([1.0], dtype=torch.float16)
+        check(cast_alias_half, x_alias)
+        check(cast_alias_type, x_alias)
+        check(cast_alias_type_as, x_alias, h)
+        check(cast_alias_asarray, x_alias)
+        check(cast_alias_as_tensor, x_alias)
+
+        x = torch.tensor([70000.0])
+        check(promoted_consumer, x)
+        check(promoted_where_branch, x)
+        check(promoted_cat_input, x)
+        check(promoted_cat_dim_input, x.reshape(1, 1))
+        check(copy_from_explicit_lowp_cast, x)
+        check(select_scatter_explicit_lowp_cast, x)
+        check(slice_scatter_explicit_lowp_cast, x)
+        check(reduction_dtype_explicit_lowp_cast, x)
+        check(mixed_lowp_consumer, torch.tensor([65504.0]), h)
+        check(lowp_consumer_before_widening, x, assert_all_nan=True)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_predicate_fp16_cast_does_not_round_unrelated_data_path(self):
+        def predicate_cast(x, h, one):
+            c = x.to(torch.float16) > 0
+            y = h + one
+            return torch.where(c, y, y).to(torch.float32)
+
+        def predicate_no_cast(x, h, one):
+            c = x > 0
+            y = h + one
+            return torch.where(c, y, y).to(torch.float32)
+
+        x = torch.tensor([1.0], dtype=torch.float32)
+        h = torch.tensor([65504.0], dtype=torch.float16)
+        one = torch.tensor([1.0], dtype=torch.float16)
+
+        torch._dynamo.reset()
+        actual_with_predicate_cast = torch.compile(
+            predicate_cast, backend="inductor", fullgraph=True
+        )(x, h, one)
+
+        torch._dynamo.reset()
+        actual_without_predicate_cast = torch.compile(
+            predicate_no_cast, backend="inductor", fullgraph=True
+        )(x, h, one)
+
+        self.assertEqual(actual_with_predicate_cast, actual_without_predicate_cast)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
