@@ -518,7 +518,6 @@ class TestCase(__TestCase):
                 pass
 
     # Test list()'s use of iterators.
-    @torch._dynamo.error_on_graph_break(False)
     def test_builtin_list(self):
         self.assertEqual(list(SequenceClass(5)), list(range(5)))
         self.assertEqual(list(SequenceClass(0)), [])
