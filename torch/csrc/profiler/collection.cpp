@@ -973,6 +973,7 @@ class TransferEvents {
     reassociate();
     extractEventsFromTrace();
     setParents();
+    propagateRfIds();
   }
 
  private:
@@ -1218,6 +1219,31 @@ class TransferEvents {
       if (e->parent_.expired()) {
         setKinetoTID(e, nullptr);
       }
+    }
+  }
+
+  // Walk up the parent chain from Kineto GPU/runtime events to find the nearest
+  // TorchOp ancestor and copy its record_function_id.
+  void propagateRfIds() {
+    for (auto& e : results_.get()) {
+      e->visit(c10::overloaded(
+          [&](ExtraFields<EventType::Kineto>& i) {
+            auto parent = e->parent_.lock();
+            while (parent) {
+              bool found = false;
+              parent->visit(c10::overloaded(
+                  [&](const ExtraFields<EventType::TorchOp>& op) {
+                    i.record_function_id_ = op.record_function_id_;
+                    found = true;
+                  },
+                  [](const auto&) {}));
+              if (found) {
+                break;
+              }
+              parent = parent->parent_.lock();
+            }
+          },
+          [](auto&) {}));
     }
   }
 

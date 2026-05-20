@@ -368,6 +368,19 @@ struct AddGenericMetadata : public MetadataBase {
     addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
   }
 
+  // - for Kineto events, write the propagated rf_id when the underlying
+  // activity is writable
+  // - CUPTI GPU kernel activities have kineto_activity_ == nullptr so
+  // addMetadata is a no-op for them
+  // - CUDA runtime activities (GenericTraceActivity) do have it
+  void operator()(const ExtraFields<EventType::Kineto>& kineto_event) {
+    if (kineto_event.record_function_id_ != 0) {
+      addMetadata(
+          "Record function id",
+          std::to_string(kineto_event.record_function_id_));
+    }
+  }
+
   template <typename T>
   void operator()(const T& /*unused*/) {}
 
