@@ -321,7 +321,7 @@ class BaseListVariable(VariableTracker):
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare
+        from .object_protocol import generic_richcompare, generic_richcompare_bool
         from .tensor import SymNodeVariable
 
         try:
@@ -344,7 +344,9 @@ class BaseListVariable(VariableTracker):
 
         sym_eq_acc = None
         for a, b in zip(left, right):
-            eq_result = generic_richcompare(tx, a, b, "__eq__")
+            # CPython uses PyObject_RichCompareBool per element, which has
+            # an identity shortcut before the full do_richcompare dispatch.
+            eq_result = generic_richcompare_bool(tx, a, b, "__eq__")
             if eq_result.is_python_constant():
                 if not eq_result.as_python_constant():
                     if cmp_op in (operator.eq, operator.ne):

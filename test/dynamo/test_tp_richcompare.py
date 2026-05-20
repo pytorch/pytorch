@@ -1336,6 +1336,82 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(fn(t, data_ptr))
 
+    def test_list_nan_identity(self):
+        """NaN element identity: [nan] == [nan] is True when same nan object."""
+        nan = float("nan")
+
+        def fn(a, b):
+            return a == b, a != b
+
+        expected = fn([nan], [nan])
+        result = torch.compile(fn, backend="eager", fullgraph=True)([nan], [nan])
+        self.assertEqual(result, expected)
+
+    def test_list_nan_different_objects(self):
+        """Different NaN objects: [float('nan')] == [float('nan')] is False."""
+
+        def fn():
+            return [float("nan")] == [float("nan")]
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_tuple_nan_identity(self):
+        """NaN element identity in tuples."""
+        nan = float("nan")
+
+        def fn(a, b):
+            return a == b, a != b
+
+        expected = fn((nan,), (nan,))
+        result = torch.compile(fn, backend="eager", fullgraph=True)((nan,), (nan,))
+        self.assertEqual(result, expected)
+
+    def test_dict_nan_identity(self):
+        """Dict value NaN identity: {k: nan} == {k: nan} is True."""
+        nan = float("nan")
+
+        def fn(a, b):
+            return a == b, a != b
+
+        expected = fn({"k": nan}, {"k": nan})
+        result = torch.compile(fn, backend="eager", fullgraph=True)(
+            {"k": nan}, {"k": nan}
+        )
+        self.assertEqual(result, expected)
+
+    def test_dict_nan_different_objects(self):
+        """Different NaN value objects in dicts compare as not equal."""
+
+        def fn():
+            return {"k": float("nan")} == {"k": float("nan")}
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_contains_nan_identity(self):
+        """NaN in list: nan in [nan] is True (identity shortcut)."""
+        nan = float("nan")
+
+        def fn(lst, x):
+            return x in lst
+
+        expected = fn([nan, 1, 2], nan)
+        result = torch.compile(fn, backend="eager", fullgraph=True)([nan, 1, 2], nan)
+        self.assertEqual(result, expected)
+
+    def test_contains_nan_different_objects(self):
+        """Different NaN objects: float('nan') in [float('nan')] is False."""
+
+        def fn():
+            return float("nan") in [float("nan"), 1, 2]
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
     def test_set_subclass_custom_eq(self):
         """set subclass with custom __eq__ must use the custom method."""
 
