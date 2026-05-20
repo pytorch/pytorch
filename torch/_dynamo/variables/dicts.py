@@ -741,6 +741,8 @@ class ConstDictVariable(VariableTracker):
         self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict_ass_sub)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
         self.install_dict_keys_match_guard()
         tx.output.side_effects.mutation(self)
         self.items[HashableTracker(key)] = value
