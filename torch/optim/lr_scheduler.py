@@ -285,7 +285,10 @@ class LRScheduler:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
-                values = self.get_lr()
+                if hasattr(self, "_get_closed_form_lr") and type(self).get_lr is LRScheduler.get_lr:
+                    values = cast(list[float | Tensor], self._get_closed_form_lr())
+                else:
+                    values = self.get_lr()
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):

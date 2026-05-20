@@ -2664,6 +2664,20 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_closed_form_lr_only_subclass(self):
+        # Subclass implementing only _get_closed_form_lr (no get_lr) should
+        # initialize without NotImplementedError.
+        class ClosedFormOnlyScheduler(LRScheduler):
+            def _get_closed_form_lr(self):
+                return [base_lr * 0.5**self.last_epoch for base_lr in self.base_lrs]
+
+        model = torch.nn.Linear(3, 3)
+        optim = SGD(model.parameters(), lr=0.1)
+        sch = ClosedFormOnlyScheduler(optim)
+        self.assertAlmostEqual(sch.get_last_lr()[0], 0.05)
+        sch.step()
+        self.assertAlmostEqual(sch.get_last_lr()[0], 0.025)
+
     def test_lr_scheduler_checkpoint_on_plateau(self):
         model = torch.nn.Linear(3, 3)
         optim = torch.optim.AdamW(model.parameters())
