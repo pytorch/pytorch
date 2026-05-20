@@ -9,6 +9,7 @@ live in their respective VT files.
 
 import abc
 import enum
+import inspect
 import types
 import typing
 from functools import lru_cache, partial
@@ -853,8 +854,13 @@ def generic_issubclass(
         )
     cls_type = maybe_get_python_type(cls)
 
-    # Step 1: PyType_CheckExact fast path — abstract.c L2772
-    if cls_type is type:
+    # Step 1: PyType_CheckExact fast path — abstract.c L2772.  Also checks __subclasscheck__ specifically, which doesn't
+    # match cpython but is needed for custom metaclasses that don't override __subclasscheck__
+    if (
+        cls_type is type
+        or inspect.getattr_static(cls_py, "__subclasscheck__", None)
+        is type.__subclasscheck__
+    ):
         try:
             return ConstantVariable.create(issubclass(derived_py, cls_py))
         except TypeError as e:
