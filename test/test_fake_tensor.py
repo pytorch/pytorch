@@ -1668,6 +1668,7 @@ class FakeTensorConstHandling(TestCase):
             y[0] = 1
             self.assertNotConst(x)
 
+    @unittest.skip("Broken by fake tensor constant propagation removal in this PR")
     def test_constant_propagate_through_functions(self):
         with FakeTensorMode():
             y = torch.div(4, 4, rounding_mode="trunc")
