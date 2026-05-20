@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import sys
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -11,7 +12,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import TorchRuntimeError, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -621,6 +622,160 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         res = opt_m(x)
         self.assertEqual(ref, res)
+
+    def test_fake_tensor_runtime_error_in_try_except(self):
+        mat1 = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.int64)
+        mat2 = torch.tensor([[1, 0, 2], [3, 1, 4], [5, 2, 6]], dtype=torch.int64)
+
+        def fn(x):
+            out_of_place = torch.addmm(x, mat1, mat2)
+            x_inplace = x.clone()
+            try:
+                x_inplace.addmm_(mat1, mat2)
+            except Exception:
+                return torch.tensor(False)
+            return torch.equal(out_of_place, x_inplace)
+
+        x = torch.tensor([[1, 0, -1]], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertNoLogs("torch._subclasses.fake_tensor", level="ERROR"):
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_fake_tensor_runtime_error_message_in_try_except(self):
+        mat1 = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.int64)
+        mat2 = torch.tensor([[1, 0, 2], [3, 1, 4], [5, 2, 6]], dtype=torch.int64)
+
+        def fn(x):
+            x_inplace = x.clone()
+            try:
+                x_inplace.addmm_(mat1, mat2)
+            except RuntimeError as e:
+                return str(e) == (
+                    "Bad in-place call: input tensor size [1, 3] "
+                    "and output tensor size [2, 3] should match"
+                )
+            return False
+
+        x = torch.tensor([[1, 0, -1]], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertNoLogs("torch._subclasses.fake_tensor", level="ERROR"):
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_fake_tensor_runtime_error_message_in_try_except_dynamic(self):
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.randn(3, 3)
+
+        def fn(x):
+            x_inplace = x.clone()
+            try:
+                x_inplace.addmm_(mat1, mat2)
+            except RuntimeError as e:
+                return str(e) == (
+                    "Bad in-place call: input tensor size [1, 3] "
+                    "and output tensor size [2, 3] should match"
+                )
+            return False
+
+        x = torch.randn(1, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertNoLogs("torch._subclasses.fake_tensor", level="ERROR"):
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_fake_tensor_runtime_error_overlap_message_in_try_except(self):
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.randn(3, 3)
+
+        def fn(x):
+            x_inplace = x.expand(2, 3)
+            try:
+                x_inplace.addmm_(mat1, mat2)
+            except RuntimeError as e:
+                return "Please clone() the tensor" in str(e)
+            return False
+
+        x = torch.zeros(1, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertNoLogs("torch._subclasses.fake_tensor", level="ERROR"):
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_fake_tensor_internal_runtime_error_in_try_except(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        orig_dispatch_impl = FakeTensorMode._dispatch_impl
+
+        def dispatch_impl(fake_mode, func, types, args, kwargs):
+            if func is torch.ops.aten.sin.default:
+                raise RuntimeError("fake-only sin failure")
+            return orig_dispatch_impl(fake_mode, func, types, args, kwargs)
+
+        def fn(x):
+            try:
+                return torch.sin(x)
+            except RuntimeError:
+                return torch.cos(x)
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with mock.patch.object(FakeTensorMode, "_dispatch_impl", dispatch_impl):
+            with self.assertRaisesRegex(TorchRuntimeError, "fake-only sin failure"):
+                opt_fn(x)
+
+    def test_fake_tensor_internal_mutable_runtime_error_in_try_except(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        orig_dispatch_impl = FakeTensorMode._dispatch_impl
+
+        def dispatch_impl(fake_mode, func, types, args, kwargs):
+            if func is torch.ops.aten.sin_.default:
+                raise RuntimeError("fake-only sin_ failure")
+            return orig_dispatch_impl(fake_mode, func, types, args, kwargs)
+
+        def fn(x):
+            y = x.clone()
+            try:
+                y.sin_()
+            except RuntimeError:
+                return torch.cos(x)
+            return y
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with mock.patch.object(FakeTensorMode, "_dispatch_impl", dispatch_impl):
+            with self.assertRaisesRegex(TorchRuntimeError, "fake-only sin_ failure"):
+                opt_fn(x)
+
+    def test_fake_tensor_internal_mutable_meta_error_logs(self):
+        with torch.library._scoped_library(
+            "dynamo_test_exceptions_meta_log", "FRAGMENT"
+        ) as lib:
+            lib.define("fake_meta_error_(Tensor(a!) self) -> Tensor(a!)")
+            lib.impl("fake_meta_error_", lambda x: x.sin_(), "CPU")
+
+            def meta(x):
+                raise RuntimeError("fake meta mutable failure")
+
+            lib.impl("fake_meta_error_", meta, "Meta")
+
+            def fn(x):
+                y = x.clone()
+                try:
+                    torch.ops.dynamo_test_exceptions_meta_log.fake_meta_error_.default(
+                        y
+                    )
+                except RuntimeError:
+                    return torch.cos(x)
+                return y
+
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertLogs("torch._subclasses.fake_tensor", level="ERROR") as cm:
+                with self.assertRaisesRegex(
+                    TorchRuntimeError, "fake meta mutable failure"
+                ):
+                    opt_fn(x)
+            self.assertTrue(
+                any("failed while attempting to run meta" in msg for msg in cm.output)
+            )
 
     def test_raise_from_None(self):
         # Inspired from os.environ

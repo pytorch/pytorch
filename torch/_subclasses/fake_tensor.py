@@ -149,13 +149,65 @@ class FakeTensorTLS(threading.local):
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
     non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
+    suppress_meta_copy_error_logging: bool
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
         self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
+        self.suppress_meta_copy_error_logging = False
 
 
 fake_tensor_tls = FakeTensorTLS()
+
+
+_META_COPY_INTERNAL_OVERLAP_ERROR = (
+    "more than one element of the written-to tensor refers to a single memory location"
+)
+
+
+def _has_exception_frame(exc: BaseException, *, name: str, module: str) -> bool:
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        if frame.f_code.co_name == name and frame.f_globals.get("__name__") == module:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def is_meta_copy_runtime_error(exc: BaseException) -> bool:
+    return _has_exception_frame(
+        exc, name="meta_copy_", module="torch._meta_registrations"
+    )
+
+
+def is_meta_copy_size_mismatch_runtime_error(exc: BaseException) -> bool:
+    return is_meta_copy_runtime_error(exc) and _has_exception_frame(
+        exc, name="expand", module="torch._refs"
+    )
+
+
+def is_meta_copy_internal_overlap_runtime_error(exc: BaseException) -> bool:
+    return (
+        is_meta_copy_runtime_error(exc)
+        and str(exc) == _META_COPY_INTERNAL_OVERLAP_ERROR
+    )
+
+
+def is_handled_meta_copy_runtime_error(exc: BaseException) -> bool:
+    return is_meta_copy_size_mismatch_runtime_error(
+        exc
+    ) or is_meta_copy_internal_overlap_runtime_error(exc)
+
+
+@contextlib.contextmanager
+def suppress_fake_tensor_meta_copy_error_logging() -> Generator[None, None, None]:
+    old = fake_tensor_tls.suppress_meta_copy_error_logging
+    fake_tensor_tls.suppress_meta_copy_error_logging = True
+    try:
+        yield
+    finally:
+        fake_tensor_tls.suppress_meta_copy_error_logging = old
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -2960,8 +3012,18 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
-        except Exception:
-            log.exception("failed while attempting to run meta for %s", func)
+        except Exception as e:
+            if (
+                fake_tensor_tls.suppress_meta_copy_error_logging
+                and is_handled_meta_copy_runtime_error(e)
+            ):
+                log.debug(
+                    "failed while attempting to run meta for %s",
+                    func,
+                    exc_info=True,
+                )
+            else:
+                log.exception("failed while attempting to run meta for %s", func)
             raise
 
         return maybe_propagate_real_tensors(
