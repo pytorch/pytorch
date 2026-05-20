@@ -650,8 +650,8 @@ class TestShapeOps(TestCase):
         self.assertEqual(data.rot90(-5, [0, 1]), data.rot90(-1, [0, 1]))
 
         # test for dims out-of-range error
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, -3]))
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 2]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, -3]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, 2]))
 
         # test tensor with more than 2D
         data = torch.arange(1, 9, device=device).view(2, 2, 2)

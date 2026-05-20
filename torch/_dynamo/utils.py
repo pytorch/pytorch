@@ -4161,6 +4161,10 @@ def run_node(
         except Unsupported:
             raise
         except IndexError:
+            # Re-raise IndexError from tensor dim validation (e.g. canonicalize_dim,
+            # maybe_wrap_dim) so it reaches the user as IndexError, not RuntimeError.
+            # This is intentionally broad: an internal Dynamo indexing bug would also
+            # propagate this way, but such bugs are rare and the traceback is preserved.
             raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
