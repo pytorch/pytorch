@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from optim.test_swa_utils import TestSWAUtils
 
 import torch
 from torch.nn import Parameter
@@ -2532,6 +2532,7 @@ class TestOptimRenewed(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":
