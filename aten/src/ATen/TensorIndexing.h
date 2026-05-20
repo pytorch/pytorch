@@ -518,7 +518,7 @@ inline Tensor handleDimInMultiDimIndexing(
         result = impl::applySelect(
             result,
             *dim_ptr,
-            tensor.item<int64_t>(),
+            tensor.item().toSymInt(),
             real_dim,
             original_tensor_device,
             prev_dim_result_sizes);

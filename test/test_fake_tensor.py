@@ -200,6 +200,17 @@ class FakeTensorTest(TestCase):
             self.checkType(out, "cuda", [36])
             self.assertEqual(out.dtype, dtype)
 
+    def test_scalar_tensor_index(self):
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                with FakeTensorMode() as mode:
+                    x, idx = map(
+                        mode.from_tensor,
+                        (torch.empty(3, 4), torch.tensor(0, dtype=dtype)),
+                    )
+                    out = x[idx]
+                self.checkType(out, "cpu", [4])
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with FakeTensorMode():
