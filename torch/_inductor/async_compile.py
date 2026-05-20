@@ -496,6 +496,7 @@ class AsyncCompile:
                 load_kernel,
                 extra_env,
                 extra_config,
+                kernel_name_for_profiling,
             )
 
             def get_result() -> CachingAutotuner:

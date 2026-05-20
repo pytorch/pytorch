@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import re
+import types
 from unittest.mock import patch
 
 import torch
@@ -9,7 +10,10 @@ from torch._inductor.async_compile import (
     CompiledTritonKernels,
     shutdown_compile_workers,
 )
+from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.compile_worker.subproc_pool import SubprocException
+from torch._inductor.runtime.compile_tasks import _worker_compile_triton
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
@@ -121,6 +125,110 @@ class TestAsyncCompile(TestCase):
         self.assertTrue(
             any(event.name == "triton_poi_fused_add_1" for event in prof.events())
         )
+
+    def test_worker_compile_triton_uses_descriptive_kernel_name(self):
+        class FakeKernel:
+            def __init__(self, inductor_meta=None):
+                self.inductor_meta = inductor_meta or {}
+                self.kernel_name_at_precompile = None
+
+            def with_kernel_name(self, kernel_name):
+                return FakeKernel({**self.inductor_meta, "kernel_name": kernel_name})
+
+            def precompile(self, *, warm_cache_only):
+                self.kernel_name_at_precompile = self.inductor_meta.get("kernel_name")
+
+            def prepare_for_pickle(self):
+                pass
+
+        original_kernel = FakeKernel()
+        kernel, _ = _worker_compile_triton(
+            lambda: original_kernel, {}, {}, "triton_template_descriptive_name"
+        )
+
+        self.assertIsNot(kernel, original_kernel)
+        self.assertNotIn("kernel_name", original_kernel.inductor_meta)
+        self.assertIsNone(original_kernel.kernel_name_at_precompile)
+        self.assertEqual(
+            kernel.kernel_name_at_precompile, "triton_template_descriptive_name"
+        )
+
+    def test_triton_benchmark_request_uses_descriptive_kernel_name(self):
+        renamed_kernels = []
+
+        class FakeKernel:
+            def __init__(self, inductor_meta=None):
+                self.inductor_meta = inductor_meta or {}
+                self.kernel_name_at_precompile = None
+                self.launchers = [types.SimpleNamespace(n_regs=0)]
+
+            def with_kernel_name(self, kernel_name):
+                kernel = FakeKernel({**self.inductor_meta, "kernel_name": kernel_name})
+                renamed_kernels.append(kernel)
+                return kernel
+
+            def precompile(self):
+                self.kernel_name_at_precompile = self.inductor_meta.get("kernel_name")
+
+            def run(self, *args, **kwargs):
+                pass
+
+        request = TritonBenchmarkRequest(
+            kernel_name="triton_template_descriptive_name",
+            input_tensor_meta=[],
+            output_tensor_meta=[],
+            extra_args=(),
+            module_path="fake_path",
+            module_cache_key="fake_key",
+            num_stages=1,
+            num_warps=1,
+        )
+        kernel = FakeKernel()
+        module = types.SimpleNamespace(triton_template_descriptive_name=kernel)
+
+        with patch(
+            "torch._inductor.autotune_process.PyCodeCache.load_by_key_path",
+            return_value=module,
+        ):
+            run_fn = request.make_run_fn(out=torch.empty(()))
+
+        self.assertEqual(len(renamed_kernels), 1)
+        self.assertIs(run_fn.func.__self__, renamed_kernels[0])
+        self.assertEqual(
+            run_fn.func.__self__.inductor_meta["kernel_name"],
+            "triton_template_descriptive_name",
+        )
+        self.assertNotIn("kernel_name", kernel.inductor_meta)
+
+        with patch(
+            "torch._inductor.autotune_process.PyCodeCache.load_by_key_path",
+            return_value=module,
+        ):
+            request.precompile()
+
+        self.assertEqual(len(renamed_kernels), 2)
+        self.assertEqual(
+            renamed_kernels[1].kernel_name_at_precompile,
+            "triton_template_descriptive_name",
+        )
+        self.assertIsNone(kernel.kernel_name_at_precompile)
+
+    def test_triton_benchmark_module_uses_returned_kernel_name(self):
+        class FakeKernel:
+            def __init__(self, inductor_meta=None):
+                self.inductor_meta = inductor_meta or {}
+
+            def with_kernel_name(self, kernel_name):
+                return FakeKernel({**self.inductor_meta, "kernel_name": kernel_name})
+
+        original_kernel = FakeKernel()
+        mod = types.SimpleNamespace(triton_=original_kernel)
+
+        TritonScheduling._set_benchmark_kernel_name(mod)
+
+        self.assertIsNot(mod.triton_, original_kernel)
+        self.assertNotIn("kernel_name", original_kernel.inductor_meta)
+        self.assertEqual(mod.triton_.inductor_meta["kernel_name"], "triton_")
 
     @requires_gpu()
     @requires_triton()
