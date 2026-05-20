@@ -248,15 +248,17 @@ constexpr ck_tile::index_t get_k_warp_tile()
 #endif
 }
 
-template <typename PrecType>
+template <typename PrecType, typename LayoutB>
 struct AsyncGemmConfig
 {
-    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t M_Tile = 256;
     static constexpr ck_tile::index_t N_Tile = 256;
-    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+    // Row-major B regressed with K_Tile=64 in the reference tuning sweep.
+    static constexpr ck_tile::index_t K_Tile =
+        std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor> ? 32 : 64;
 
     static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 2;
     static constexpr ck_tile::index_t K_Warp = 1;
 
     static constexpr ck_tile::index_t M_Warp_Tile = 32;
@@ -268,13 +270,13 @@ struct AsyncGemmConfig
     static constexpr bool kPadN = true;
     static constexpr bool kPadK = true;
 
-    static constexpr bool DoubleSmemBuffer = false;
+    static constexpr bool DoubleSmemBuffer = true;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
     static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::Intrawave;
 
     static constexpr bool TransposeC = false;
     static constexpr bool UseStructuredSparsity = false;
-    static constexpr ck_tile::index_t NumWaveGroups = 2;
+    static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool Preshuffle = false;
 
     static constexpr ck_tile::index_t TilePartitionerGroupNum = 8;
@@ -282,13 +284,21 @@ struct AsyncGemmConfig
     static constexpr bool PermuteA = false;
     static constexpr bool PermuteB = false;
 
-    static constexpr int kBlockPerCu = 2;
+    static constexpr int kBlockPerCu = 1;
+};
+
+template <typename PrecType, typename LayoutB>
+struct AsyncGemmLargeKConfig : AsyncGemmConfig<PrecType, LayoutB>
+{
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 64;
 };
 
 } // namespace
 
-template <typename LayoutB>
-at::Tensor async_input_mm_impl_ck_tile(
+template <typename LayoutB, template <typename, typename> class Config>
+at::Tensor async_input_mm_impl_ck_tile_config(
     at::Tensor a,
     at::Tensor b,
     at::Tensor a_chunk_signals,
@@ -337,7 +347,7 @@ at::Tensor async_input_mm_impl_ck_tile(
       "async_input_mm: `a.shape(0)` must be an integer multiple of `a_chunk_signals.numel()`");
 
   // Set up GEMM configuration using CK tile
-  using GemmConfig = AsyncGemmConfig<ElementA>;
+  using GemmConfig = Config<ElementA, LayoutB>;
 
   using GemmShape = ck_tile::TileGemmShape<
       ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -397,7 +407,6 @@ at::Tensor async_input_mm_impl_ck_tile(
                                        GemmConfig::NumWaveGroups,
                                        false, /*FixedVectorSize_*/
                                        1,     /*VectorSizeC_*/
-                                       false, /*TiledMMAPermuteN_*/
                                        1,     /*BlockedXDLN_PerWarp_*/
                                        GemmConfig::DoubleSmemBuffer>>;
 
@@ -493,6 +502,21 @@ at::Tensor async_input_mm_impl_ck_tile(
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
+}
+
+template <typename LayoutB>
+at::Tensor async_input_mm_impl_ck_tile(
+    at::Tensor a,
+    at::Tensor b,
+    at::Tensor a_chunk_signals,
+    int64_t a_chunk_pivot,
+    at::Tensor out) {
+  if (a.dim() == 2 && a.sizes()[1] >= 2048) {
+    return async_input_mm_impl_ck_tile_config<LayoutB, AsyncGemmLargeKConfig>(
+        a, b, a_chunk_signals, a_chunk_pivot, out);
+  }
+  return async_input_mm_impl_ck_tile_config<LayoutB, AsyncGemmConfig>(
+      a, b, a_chunk_signals, a_chunk_pivot, out);
 }
 #endif // defined(USE_ROCM)
 
