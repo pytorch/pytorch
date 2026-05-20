@@ -2587,6 +2587,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             setter = inspect.getattr_static(type(descriptor), "__set__", None)
             deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
+            # collections._tuplegetter (namedtuple field accessor) is a C-level
+            # data descriptor whose __set__/__delete__ unconditionally raise
+            # AttributeError. Short-circuit so we don't need to model it.
+            _tuplegetter = getattr(collections, "_tuplegetter", None)
+            if _tuplegetter is not None and type(descriptor) is _tuplegetter:
+                raise_readonly_attr()
             desc_var = VariableTracker.build(tx, descriptor, desc_source)
             if isinstance(value, variables.DeletedVariable):
                 if isinstance(deleter, types.FunctionType):
