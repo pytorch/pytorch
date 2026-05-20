@@ -11,7 +11,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
-    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
@@ -527,8 +526,8 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS
     @dtypes(*complex_types())
+    @dtypesIfMPS(torch.cfloat)
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
