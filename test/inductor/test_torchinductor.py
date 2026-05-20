@@ -3873,6 +3873,24 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    def test_floordiv_int_min_neg_one_cpu(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184406
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
+        def fn(a, b):
+            return torch.floor_divide(a, b)
+
+        for dtype in [torch.int32, torch.int64]:
+            min_value = torch.iinfo(dtype).min
+            a = torch.tensor([min_value], dtype=dtype, device=self.device)
+            b = torch.tensor([-1], dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
+            a = torch.full((128,), min_value, dtype=dtype, device=self.device)
+            b = torch.full((128,), -1, dtype=dtype, device=self.device)
+            self.common(fn, (a, b))
+
     @skip_if_cpu
     def test_floordiv_div_by_zero_int(self):
         # Integer floor division by zero is undefined behavior on CUDA/Triton.
