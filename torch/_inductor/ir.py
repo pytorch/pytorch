@@ -6308,9 +6308,7 @@ class ExternKernel(InputsKernel):
     )
     op_overload: _OpOverloads | None = None
     arg_properties: list[ArgProperty] | None = None
-    allarg_properties: dict[str, ArgProperty] = dataclasses.field(
-        default_factory=dict
-    )
+    allarg_properties: dict[str, ArgProperty] = dataclasses.field(default_factory=dict)
     kwarg_properties: dict[str, ArgProperty] | None = None
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
@@ -7067,12 +7065,12 @@ class ExternKernel(InputsKernel):
             # in which case the following 'len(self.inputs) + i' logic works. But this
             # may not be true for other ops, and if that is the case, caller needs to
             # pass in a list of const arg names for arg_properties lookup.
-            name_to_arg_properties = None
+            name_to_arg_properties: dict[str, ArgProperty] | None = None
             if names and self.arg_properties:
                 assert len(self.constant_args) == len(names), (
                     "names passed to codegen_const_args does not match self.constant_args"
                 )
-                name_to_arg_properties: dict[str, ArgProperty] = {
+                name_to_arg_properties = {
                     name: arg
                     for arg in self.arg_properties
                     if (name := arg.get("name")) is not None
