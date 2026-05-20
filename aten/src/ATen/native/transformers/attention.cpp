@@ -506,6 +506,20 @@ int64_t _fused_sdp_choice_meta(
         enable_gqa);
     return choice_int;
   }
+  bool has_mps = query_key_set.has(c10::DispatchKey::MPS);
+  if (has_mps) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kMPS,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
+    return choice_int;
+  }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
@@ -773,14 +787,23 @@ Tensor scaled_dot_product_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
+      if (query_device_type == DeviceType::MPS) {
+        // MPS kernels accept the head dims they're instantiated for directly,
+        // so no padding shim is needed.
+        auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
+            query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+        return std::get<0>(out_lse_softmax);
+      }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
-      if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+      // MPS kernels handle arbitrary mask shapes/strides themselves, skip the
+      // 8-aligned padding shim that mem_eff CUDA needs.
+      if (attn_mask.has_value() && query_device_type != DeviceType::MPS) {
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
