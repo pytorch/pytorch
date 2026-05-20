@@ -315,7 +315,7 @@ def aot_compile(
         )
 
 
-lite_mode_options = {
+lite_mode_options: dict[str, bool | int] = {
     # Fallback by default unless users explicitly annotated with
     # regional inductor compile.
     "fallback_by_default": True,
@@ -349,7 +349,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: dict[str, dict[str, Any]] = {
+    mode_options: dict[str, dict[str, bool | int]] = {
         "default": {},
         # lite backend for opt-in optimizations
         "lite": lite_mode_options,
