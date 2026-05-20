@@ -324,8 +324,6 @@ class BaseListVariable(VariableTracker):
         from .object_protocol import generic_richcompare
         from .tensor import SymNodeVariable
 
-        if not isinstance(other, BaseListVariable):
-            return ConstantVariable.create(NotImplemented)
         try:
             self_base = list if issubclass(self.python_type(), list) else tuple
             other_base = list if issubclass(other.python_type(), list) else tuple
@@ -335,7 +333,7 @@ class BaseListVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
 
         left = self.items
-        right = other.items
+        right = other.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 

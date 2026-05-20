@@ -4555,15 +4555,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedSetVariable) and other._base_vt is not None:
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
-
     def as_python_constant(self) -> object:
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in as_python_constant")
@@ -4693,23 +4684,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             _, (idx, _) = type_attr.__reduce__()
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if op in ("__eq__", "__ne__"):
-            result = self.is_python_equal(other)
-            if op == "__ne__":
-                result = not result
-            return VariableTracker.build(tx, result)
-        # Ordering: delegate to base TupleVariable, unwrapping other if needed.
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedTupleVariable):
-            if other._base_vt is None:
-                raise AssertionError("expected other._base_vt to be set")
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from

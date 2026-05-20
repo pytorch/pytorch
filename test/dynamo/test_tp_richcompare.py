@@ -1336,6 +1336,101 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(fn(t, data_ptr))
 
+    def test_set_subclass_custom_eq(self):
+        """set subclass with custom __eq__ must use the custom method."""
+
+        class MySet(set):
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __ne__(self, other):
+                return "custom_ne"
+
+            def __hash__(self):
+                return 0
+
+        def fn(s1, s2):
+            return (s1 == s2, s1 != s2)
+
+        s1 = {1, 2, 3}
+        s2 = MySet({1, 2, 3})
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
+    def test_set_subclass_custom_eq_reversed(self):
+        """MySet == set uses subclass priority."""
+
+        class MySet(set):
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __hash__(self):
+                return 0
+
+        def fn(s1, s2):
+            return s2 == s1
+
+        s1 = MySet({1, 2, 3})
+        s2 = {1, 2, 3}
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
+    def test_tuple_subclass_custom_eq(self):
+        """tuple subclass with custom __eq__ must use the custom method."""
+
+        class MyTuple(tuple):  # noqa: SLOT001
+            def __eq__(self, other):
+                return "custom_eq"
+
+            def __hash__(self):
+                return 0
+
+        def fn(t1, t2):
+            return t1 == t2
+
+        t1 = (1, 2, 3)
+        t2 = MyTuple((1, 2, 3))
+        expected = fn(t1, t2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t1, t2)
+        self.assertEqual(result, expected)
+
+    def test_tuple_subclass_inherited_eq(self):
+        """tuple subclass without __eq__ uses tuple's comparison."""
+
+        class MyTuple(tuple):  # noqa: SLOT001
+            pass
+
+        def fn(t1, t2):
+            return t1 == t2, t1 != t2, t1 < t2
+
+        t1 = MyTuple((1, 2, 3))
+        t2 = MyTuple((1, 2, 4))
+        expected = fn(t1, t2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t1, t2)
+        self.assertEqual(result, expected)
+
+    def test_set_subclass_inherited_eq(self):
+        """set subclass without __eq__ uses set's comparison."""
+
+        class MySet(set):
+            pass
+
+        def fn(s1, s2):
+            return s1 == s2, s1 != s2, s1 < s2
+
+        s1 = MySet({1, 2})
+        s2 = MySet({1, 2, 3})
+        expected = fn(s1, s2)
+        torch._dynamo.reset()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
