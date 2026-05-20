@@ -111,6 +111,8 @@ def aot_eager_regional_inductor(
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 @instantiate_parametrized_tests
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
+    _max_mm_configs = None
+
     @parametrize("serialize", [False, True])
     def test_simple(self, serialize):
         def fn(x, y):
@@ -588,6 +590,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch("enable_invoke_subgraph_regional_compile", True)
 @instantiate_parametrized_tests
 class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
+    _max_mm_configs = None
+
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 

@@ -81,6 +81,8 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    _max_mm_configs = None
+
     def setUp(self):
         super().setUp()
         if not is_big_gpu():
