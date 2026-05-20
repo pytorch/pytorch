@@ -97,6 +97,7 @@ def _flex_bwd_kernel_shared_memory(
     kernel_options: dict[str, Any], dtype: torch.dtype
 ) -> int | None:
     try:
+        num_stages = int(kernel_options.get("num_stages", 1))
         qk_head_dim = int(kernel_options["QK_HEAD_DIM_ROUNDED"])
         v_head_dim = int(kernel_options["V_HEAD_DIM_ROUNDED"])
         block_mn1 = int(kernel_options["BLOCK_M1"]) + int(kernel_options["BLOCK_N1"])
@@ -104,16 +105,21 @@ def _flex_bwd_kernel_shared_memory(
     except (KeyError, TypeError, ValueError):
         return None
 
-    return max(block_mn1, block_mn2) * (qk_head_dim + v_head_dim) * dtype.itemsize + 8
+    return (
+        max(block_mn1, block_mn2)
+        * (qk_head_dim + v_head_dim)
+        * dtype.itemsize
+        * num_stages
+        + 8
+    )
 
 
 def _exceeds_max_shared_memory(
-    device: torch.device,
+    max_shared_memory: int | None,
     kernel_options: dict[str, Any],
     dtype: torch.dtype,
     estimate_shared_memory: Callable[[dict[str, Any], torch.dtype], int | None],
 ) -> bool:
-    max_shared_memory = _get_cuda_max_shared_memory(device)
     if max_shared_memory is None:
         return False
 
@@ -449,6 +455,7 @@ def flex_attention(
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    max_shared_memory = _get_cuda_max_shared_memory(query.get_device())
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -512,7 +519,7 @@ def flex_attention(
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
         if _exceeds_max_shared_memory(
-            query.get_device(),
+            max_shared_memory,
             cur_kernel_options,
             dtype,
             _flex_fwd_kernel_shared_memory,
@@ -988,6 +995,7 @@ def flex_attention_backward(*args, **kwargs):
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    max_shared_memory = _get_cuda_max_shared_memory(query.get_device())
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -1043,7 +1051,7 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
         if _exceeds_max_shared_memory(
-            query.get_device(),
+            max_shared_memory,
             cur_kernel_options,
             dtype,
             _flex_bwd_kernel_shared_memory,

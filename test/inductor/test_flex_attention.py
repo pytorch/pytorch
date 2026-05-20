@@ -3467,6 +3467,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_bwd_fallback_handles_low_shared_memory_limit(self, device):
         import triton.compiler.compiler as triton_compiler
 
+        from torch._inductor.kernel.flex.flex_attention import (
+            _flex_bwd_kernel_shared_memory,
+        )
         from torch._inductor.template_heuristics.triton import (
             CUDAConfigHeuristic,
             FlexBwDConfig,
@@ -3476,20 +3479,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         with (
             config.patch({"max_autotune": False}),
-            patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
+            patch.object(torch.cuda, "get_device_capability", return_value=(8, 9)),
         ):
             bwd_configs = CUDAConfigHeuristic().get_flex_attn_bwd_configs(
-                256, torch.float16
+                128, torch.float16
             )
-        self.assertEqual(bwd_configs[0], FlexBwDConfig(64, 64, 64, 64, 1, 4))
+        self.assertEqual(bwd_configs[0], FlexBwDConfig(64, 64, 64, 64, 2, 4))
+        self.assertEqual(bwd_configs[1], FlexBwDConfig(64, 64, 64, 64, 1, 4))
         self.assertIn(FlexBwDConfig(32, 64, 64, 32, 1, 4), bwd_configs)
+
+        bwd_kernel_options = {
+            "QK_HEAD_DIM_ROUNDED": 128,
+            "V_HEAD_DIM_ROUNDED": 128,
+            "BLOCK_M1": 64,
+            "BLOCK_N1": 64,
+            "BLOCK_M2": 64,
+            "BLOCK_N2": 64,
+        }
+        self.assertGreater(
+            _flex_bwd_kernel_shared_memory(
+                {**bwd_kernel_options, "num_stages": 2}, torch.float16
+            ),
+            101376,
+        )
+        self.assertLess(
+            _flex_bwd_kernel_shared_memory(
+                {**bwd_kernel_options, "num_stages": 1}, torch.float16
+            ),
+            101376,
+        )
 
         q, k, v = (
             torch.randn(
                 1,
                 2,
                 256,
-                256,
+                128,
                 device=device,
                 dtype=torch.float16,
                 requires_grad=True,
@@ -3525,7 +3550,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out.backward(grad_out, retain_graph=True)
             torch.cuda.synchronize()
 
-        self.assertEqual(out.shape, (1, 2, 256, 256))
+        self.assertEqual(out.shape, (1, 2, 256, 128))
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")
@@ -5545,6 +5570,44 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    def test_cpu_qk_chunk_same_addmm_buffer(self, device):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.H = 2
+                self.D = 16
+                self.S = 128
+                self.project_qk = nn.Linear(self.H * self.D, self.H * self.D * 2)
+                self.project_v = nn.Linear(self.H * self.D, self.H * self.D)
+
+            def forward(self, hidden_states):
+                B = hidden_states.size(0)
+                qk = self.project_qk(hidden_states)
+                query, key = qk.chunk(2, dim=-1)
+
+                query = query.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                key = key.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                value = (
+                    self.project_v(hidden_states)
+                    .view(B, self.S, self.H, self.D)
+                    .permute(0, 2, 1, 3)
+                )
+
+                return flex_attention(query, key, value, score_mod=_identity)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 128, 32, device=device)
+        model = Model().to(device).eval()
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model)(x)
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -5560,6 +5623,31 @@ class GraphModule(torch.nn.Module):
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_nested_tensor_inputs_error(self, device):
+        def make_nt(lengths, heads=2, dim=8):
+            elems = [
+                torch.randn(s, heads, dim, device=device, dtype=torch.float32)
+                for s in lengths
+            ]
+            return torch.nested.nested_tensor(elems, layout=torch.jagged).transpose(
+                1, 2
+            )
+
+        q = make_nt([3, 2])
+        k = make_nt([3, 2])
+        v = make_nt([3, 2])
+        msg = "flex_attention does not support NestedTensor inputs"
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            flex_attention(q, k, v)
+
+        compiled_flex = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            compiled_flex(q, k, v)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
@@ -8513,7 +8601,7 @@ class TestLearnableBiases(InductorTestCase):
                 )
 
                 compiled_flex = torch.compile(
-                    flex_attention, mode="max-autotune-no-cudagraphs"
+                    flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
                 )
 
                 out = compiled_flex(
