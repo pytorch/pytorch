@@ -834,7 +834,8 @@ def create_flex_flash_attention_backward_kernel(
     supports_dq_kv_order = False
     supports_spt = False
     if has_block_mask:
-        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch  # pyrefly: ignore[missing-import]
+        # pyrefly: ignore[missing-import]
+        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
 
         block_sparse_fields = getattr(BlockSparseTensorsTorch, "_fields", ())
         supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
