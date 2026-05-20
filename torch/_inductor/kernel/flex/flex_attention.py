@@ -53,13 +53,19 @@ from .flex_flash_attention import (
 
 
 if TYPE_CHECKING:
-    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
+    from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 Expr = sympy.Expr
+
+# Extra bytes Triton includes in the static shared-memory metadata for these
+# templates. Keep these separate from the tile storage terms below so the
+# estimates line up with the OutOfResources "Required" value.
+_FLEX_FWD_SHARED_MEMORY_OVERHEAD = 4096
+_FLEX_BWD_SHARED_MEMORY_OVERHEAD = 8
 
 
 def _get_cuda_max_shared_memory(device: torch.device) -> int | None:
@@ -90,7 +96,7 @@ def _flex_fwd_kernel_shared_memory(
 
     return (
         block_m * qk_head_dim + block_n * max(qk_head_dim, v_head_dim)
-    ) * dtype.itemsize + 4096
+    ) * dtype.itemsize + _FLEX_FWD_SHARED_MEMORY_OVERHEAD
 
 
 def _flex_bwd_kernel_shared_memory(
@@ -110,7 +116,7 @@ def _flex_bwd_kernel_shared_memory(
         * (qk_head_dim + v_head_dim)
         * dtype.itemsize
         * num_stages
-        + 8
+        + _FLEX_BWD_SHARED_MEMORY_OVERHEAD
     )
 
 

@@ -3375,7 +3375,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_fwd_fallback_handles_low_shared_memory_limit(self, device):
         import triton.compiler.compiler as triton_compiler
 
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             FlexConfig,
         )
@@ -3426,7 +3426,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_fwd_fallback_handles_large_value_head_dim(self, device):
         import triton.compiler.compiler as triton_compiler
 
-        from torch._inductor.template_heuristics.triton import FlexConfig
+        from torch._inductor.heuristics.template.triton import FlexConfig
         from torch._inductor.virtualized import V
 
         q = torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
@@ -3467,13 +3467,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_bwd_fallback_handles_low_shared_memory_limit(self, device):
         import triton.compiler.compiler as triton_compiler
 
-        from torch._inductor.kernel.flex.flex_attention import (
-            _flex_bwd_kernel_shared_memory,
-        )
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             FlexBwDConfig,
             FlexConfig,
+        )
+        from torch._inductor.kernel.flex.flex_attention import (
+            _flex_bwd_kernel_shared_memory,
         )
         from torch._inductor.virtualized import V
 
