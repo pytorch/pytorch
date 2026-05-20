@@ -548,10 +548,27 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This should never happen in auto_functionalize_v2 non-inference mode,
             # since all mutated_arg are bases.
 
-            # If mutated arg is view of any of the inputs of the graph,
-            # do not allow for inplacing.
-            # This would require more sophisticated algorithm to handle
-            return False
+            # mutated_arg is not a placeholder itself, but shares storage with one.
+            # Allow inplacing if there is exactly one base placeholder with a copy_
+            # epilogue, and no conflicting uses of views between the op and the copy_.
+            base_placeholders = [
+                v for v in shared_view_nodes if v.op in ("placeholder", "get_attr")
+            ]
+
+            if len(base_placeholders) != 1:
+                return False
+            base = base_placeholders[0]
+
+            copy_node = copy_nodes.get(base)
+            if copy_node is None:
+                return False
+
+            if any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=copy_node, mutated_arg=base
+            ):
+                return False
+
+            return True
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
@@ -694,6 +711,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         replace_dict[copy_node] = copy_node.args[0]
+                    else:
+                        # mutated_arg is a view of a placeholder; eliminate the
+                        # base's copy_ epilogue since the inplace op already
+                        # mutates the storage through the view.
+                        storage = get_node_storage(mutated_arg)
+                        for view in storage_to_nodes.get(storage, []):
+                            if view.op in ("placeholder", "get_attr"):
+                                base_copy = copy_nodes.get(view)
+                                if (
+                                    base_copy is not None
+                                    and get_node_storage(base_copy.args[1]) == storage
+                                ):
+                                    replace_dict[base_copy] = base_copy.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
