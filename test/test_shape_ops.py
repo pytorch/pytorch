@@ -661,7 +661,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
 
         # test for errors
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, 3]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))

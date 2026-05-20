@@ -43,5 +43,6 @@ class TestIndexErrorContract(TestCase):
         with self.assertRaises(IndexError):
             compiled(t)
 
+
 if __name__ == "__main__":
     run_tests()
