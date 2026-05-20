@@ -631,9 +631,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
                                                                forwardConvolutionDescriptor:conv3dDescriptor_
                                                                                        name:nil];
         if (use_dhwio) {
-          gradWeightTensor = [mpsGraph transposeTensor:gradWeightTensor
-                                           permutation:@[ @4, @3, @0, @1, @2 ]
-                                                  name:nil];
+          gradWeightTensor = [mpsGraph transposeTensor:gradWeightTensor permutation:@[ @4, @3, @0, @1, @2 ] name:nil];
         }
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
