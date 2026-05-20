@@ -941,6 +941,60 @@ class CompiledOptimizerTests(TestCase):
         self.assertLess(end - start, 90)
 
     @requires_gpu_and_triton
+    def test_foreach_shared_body_codegen(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        xs = [torch.randn(n, device=GPU_TYPE) for n in (1536, 2048, 2560)]
+        ys = [torch.randn_like(x) for x in xs]
+        expected = torch._foreach_add(xs, ys)
+
+        with fresh_cache():
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), xs, ys)
+
+        self.assertEqual(actual, expected)
+        foreach_codes = [code for code in codes if "@triton_heuristics.foreach" in code]
+        self.assertEqual(len(foreach_codes), 1)
+        code = foreach_codes[0]
+        self.assertEqual(code.count("tl.load("), 2)
+        self.assertEqual(code.count("tl.store("), 1)
+        self.assertIn("foreach_arg0 = in_ptr0", code)
+        self.assertIn("foreach_arg0 = in_ptr2", code)
+        self.assertGreater(
+            code.rfind("tmp0 = tl.load(foreach_arg0"),
+            code.rfind("elif pid < num_xblocks_2"),
+        )
+
+    @requires_gpu_and_triton
+    def test_foreach_optimizer_shared_body_correctness(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def opt_step(params, grads, momentum):
+            torch._foreach_mul_(momentum, 0.9)
+            torch._foreach_add_(momentum, grads, alpha=0.1)
+            torch._foreach_add_(params, momentum, alpha=-0.01)
+            return params, momentum
+
+        params = [torch.randn(n, device=GPU_TYPE) for n in (1536, 2048, 2560)]
+        grads = [torch.randn_like(p) for p in params]
+        momentum = [torch.zeros_like(p) for p in params]
+        params_ref = [p.clone() for p in params]
+        momentum_ref = [m.clone() for m in momentum]
+
+        with fresh_cache():
+            _, codes = run_and_get_code(
+                torch.compile(opt_step, fullgraph=True), params, grads, momentum
+            )
+        opt_step(params_ref, grads, momentum_ref)
+
+        self.assertEqual(params, params_ref)
+        self.assertEqual(momentum, momentum_ref)
+        foreach_codes = [code for code in codes if "@triton_heuristics.foreach" in code]
+        self.assertTrue(any("foreach_arg0" in code for code in foreach_codes))
+
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
