@@ -49,10 +49,12 @@ class FlexFlashConfig:
     mask_mod_vec_size: Number of consecutive KV lanes evaluated per mask_mod
         call. Maps to mask_mod.__mask_vec_size__ in CuTe flash attention and to
         the direct captured-tensor vector-load width for mask_mod.
+    mask_mod_vec_size_forced: Whether callers explicitly forced mask_mod_vec_size.
     """
 
     score_mod_vec_size: int | None = None
     mask_mod_vec_size: int | None = None
+    mask_mod_vec_size_forced: bool = False
 
 
 class AuxLoadVecInfo(NamedTuple):
@@ -1238,7 +1240,12 @@ def create_flex_flash_attention_kernel(
             )
     if packed_mask_intervals is not None:
         configs = [
-            FlexFlashConfig(conf.score_mod_vec_size, DEFAULT_MASK_MOD_VEC_SIZE)
+            conf
+            if conf.mask_mod_vec_size_forced
+            else FlexFlashConfig(
+                score_mod_vec_size=conf.score_mod_vec_size,
+                mask_mod_vec_size=DEFAULT_MASK_MOD_VEC_SIZE,
+            )
             for conf in configs
         ]
 

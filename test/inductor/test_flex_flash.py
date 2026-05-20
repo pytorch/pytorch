@@ -139,7 +139,10 @@ def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
     ):
         if has_mask_mod:
             return [
-                flex_flash_attention_module.FlexFlashConfig(mask_mod_vec_size=vec_size)
+                flex_flash_attention_module.FlexFlashConfig(
+                    mask_mod_vec_size=vec_size,
+                    mask_mod_vec_size_forced=True,
+                )
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
@@ -313,18 +316,6 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 AuxLoadVecInfo(None, False),
             )
 
-    def _select_mask_mod_vec_size_for_test(self, graph_module, buffers):
-        return _select_aux_mod_vec_size(
-            graph_module,
-            buffers,
-            q_idx_placeholder=2,
-            kv_idx_placeholder=3,
-            max_vec_size=32,
-            min_index_rank_for_contiguous_load=2,
-            allow_gather_loads=True,
-            require_contiguous_load=True,
-        )
-
     @parametrize(
         "case",
         [
@@ -444,7 +435,16 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         graph_module = torch.fx.GraphModule({}, graph)
         with V.set_graph_handler(MockGraphHandler()):
             self.assertEqual(
-                self._select_mask_mod_vec_size_for_test(graph_module, buffers),
+                _select_aux_mod_vec_size(
+                    graph_module,
+                    buffers,
+                    q_idx_placeholder=2,
+                    kv_idx_placeholder=3,
+                    max_vec_size=32,
+                    min_index_rank_for_contiguous_load=2,
+                    allow_gather_loads=True,
+                    require_contiguous_load=True,
+                ),
                 expected,
             )
 
@@ -2335,7 +2335,8 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_document_offsets_uses_packed_shift_mask(self):
+    @parametrize("vec_size", [None, 16])
+    def test_flash_attention_sm100_packed_mask_respects_forced_vec_size(self, vec_size):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -2345,15 +2346,10 @@ class TestFlexFlash(InductorTestCase):
             dtype=torch.float16,
             device="cuda",
         )
-        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
-        doc_ids = (positions // 32).expand(1, -1).contiguous()
-        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
 
-        def fn(q, k, v, doc_ids, offsets):
-            def mask_mod(b, _h, q_idx, kv_idx):
-                doc = doc_ids[b, q_idx]
-                start = offsets[doc]
-                return (kv_idx >= start) & (kv_idx <= q_idx)
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
 
             block_mask = _create_block_mask_for_device(
                 mask_mod, 1, 1, seq_len, seq_len, device="cuda"
@@ -2362,23 +2358,30 @@ class TestFlexFlash(InductorTestCase):
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
             )
 
-        expected = fn(q, k, v, doc_ids, offsets)
+        expected = fn(q, k, v)
         torch._dynamo.reset()
-        actual, code = run_and_get_code(
-            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, doc_ids, offsets
-        )
+        with force_flex_flash_mask_mod_vec_size(vec_size):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+            )
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        self.assertIn("utils.shr_u32", src)
-        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+        if vec_size is None:
+            self.assertNotIn("mask_mod.__mask_vec_size__", src)
+        else:
+            self.assertIn(f"mask_mod.__mask_vec_size__ = {vec_size}", src)
+        self.assertNotIn("utils.shr_u32", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_packed_mask_with_score_capture(self):
+    @parametrize("with_score_mod", [False, True])
+    def test_flash_attention_sm100_document_offsets_uses_packed_shift_mask(
+        self, with_score_mod
+    ):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -2409,7 +2412,7 @@ class TestFlexFlash(InductorTestCase):
                 q,
                 k,
                 v,
-                score_mod=score_mod,
+                score_mod=score_mod if with_score_mod else None,
                 block_mask=block_mask,
                 kernel_options={"BACKEND": "FLASH"},
             )
@@ -2423,7 +2426,8 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        self.assertIn("score_mod.__vec_size__", src)
+        if with_score_mod:
+            self.assertIn("score_mod.__vec_size__", src)
         self.assertIn("utils.shr_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
 
@@ -2432,7 +2436,7 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    @parametrize("vec_size", [None, 8, 16, 32])
+    @parametrize("vec_size", [None, 1, 8, 16, 32])
     def test_flash_attention_sm100_mask_mod_forced_vec_sizes(self, vec_size):
         seq_len = 128
         q, k, v = create_test_tensors(
