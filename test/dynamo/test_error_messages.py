@@ -1504,7 +1504,7 @@ Graph Break Reason: Data-dependent branching
         # File "test_error_messages.py", line N, in torch_dynamo_resume_in_helper_at_N, code: if x.sum() > 0:  # 1
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
