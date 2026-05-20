@@ -17,7 +17,6 @@
     can_device_access_peer
     check_error
     current_blas_handle
-    current_solver_handle
     current_device
     current_stream
     cudart

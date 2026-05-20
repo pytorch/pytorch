@@ -17,9 +17,6 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
-    # Old TorchBench SAM is flaky even with mask IoU checking.
-    # https://github.com/pytorch/pytorch/issues/176776
-    "sam",
 }
 
 

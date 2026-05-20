@@ -13,9 +13,6 @@
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
-#include <fstream>
-#include <iterator>
-#include <vector>
 #endif
 
 /**
@@ -105,19 +102,6 @@ CUdeviceptr getPointer(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
-#if defined(USE_ROCM)
-std::vector<char> readKernelImage(const std::string& filePath) {
-  std::ifstream file(filePath, std::ios::binary);
-  TORCH_CHECK(file, "Failed to open kernel image: ", filePath);
-
-  auto begin = std::istreambuf_iterator<char>(file);
-  auto end = std::istreambuf_iterator<char>();
-  std::vector<char> image(begin, end);
-  TORCH_CHECK(!image.empty(), "Kernel image is empty: ", filePath);
-  return image;
-}
-#endif
-
 CUfunction loadKernel(
     std::string filePath,
     const std::string& funcName,
@@ -133,10 +117,7 @@ CUfunction loadKernel(
   CUfunction func = nullptr;
 
 #if defined(USE_ROCM)
-  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
-  // HSACO. Load from memory to avoid retaining one FD per static launcher.
-  auto image = readKernelImage(filePath);
-  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+  AT_CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
@@ -646,7 +627,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
     return THPUtils_unpackUInt64(obj);
 #endif
   }
-  if (Py_IsNone(obj)) {
+  if (obj == Py_None) {
     return 0;
   }
   // Fast type check: inductor-generated tensors are always exact THPVariable
@@ -940,14 +921,24 @@ bool StaticCudaLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  if (PyModule_AddType(module, &StaticCudaLauncherType) < 0) {
+  Py_INCREF(&StaticCudaLauncherType);
+  if (PyModule_AddObject(
+          module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
+      0) {
+    Py_DECREF(&StaticCudaLauncherType);
     return false;
   }
   return true;
 }
 
 bool FastCudaLauncher_init(PyObject* module) {
-  if (PyModule_AddType(module, &FastCudaLauncherType) < 0) {
+  if (PyType_Ready(&FastCudaLauncherType) < 0) {
+    return false;
+  }
+  Py_INCREF(&FastCudaLauncherType);
+  if (PyModule_AddObject(
+          module, "_FastCudaLauncher", (PyObject*)&FastCudaLauncherType) < 0) {
+    Py_DECREF(&FastCudaLauncherType);
     return false;
   }
   return true;

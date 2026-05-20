@@ -26,6 +26,7 @@ for more information on the design.
 
 import collections
 import contextlib
+import functools
 import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
@@ -130,6 +131,13 @@ banned_attrs = [
 ]
 
 
+@functools.cache
+def get_prev_stack_var_name() -> str:
+    from ..bytecode_transformation import unique_id
+
+    return unique_id("___prev_torch_function_mode_stack")
+
+
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
     @staticmethod
     def is_supported_torch_function_mode(ty: type[TorchFunctionMode]) -> bool:
@@ -158,7 +166,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.value = value
         # needed for BC with calling enter from CM code
         self.cm_obj = value  # type: ignore[assignment]
-        self.source = source  # type: ignore[assignment]
+        self.source = source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
@@ -187,7 +195,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     ) -> VariableTracker:
         return call_torch_function(
             tx,
-            get_torch_function_fn(tx, self),  # type: ignore[arg-type]
+            get_torch_function_fn(tx, self),
             fn,
             types,
             args,
@@ -603,7 +611,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
-        tensor_var = tensor_var.realize()
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")

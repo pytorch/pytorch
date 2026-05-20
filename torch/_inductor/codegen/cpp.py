@@ -36,7 +36,6 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
-from ..sizevars import stride_at_vec_range
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -211,7 +210,7 @@ def reduction_combine(
     var,
     next_value,
     helper_val=None,
-    index: sympy.Expr | CSEVariable | None = None,
+    index: sympy.Symbol | None = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
@@ -388,6 +387,90 @@ def replace_cascade_sum_with_add(buffer: IndentedBuffer):
                 buffer._lines[i] = new_content
 
 
+@functools.lru_cache
+def stride_at(index: sympy.Expr, var: sympy.Symbol):
+    if not index.has(var):
+        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
+        # in this case, there is no dependencies between index and var.
+        return sympy.S.Zero
+    replacement = {var: var + 1}
+    new_index = sympy_subs(index, replacement)
+    return sympy.simplify(new_index - index)
+
+
+@functools.lru_cache
+def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
+    """
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
+
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
+    """
+
+    div_freevar_id = 0
+    mod_freevar_id = 0
+
+    def visit_indexing_div(divisor):
+        nonlocal div_freevar_id
+        result = FloorDiv(var, divisor)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
+            div_freevar_id += 1
+        return result
+
+    def visit_modular_indexing(divisor, modulus):
+        nonlocal mod_freevar_id
+        result = ModularIndexing(var, divisor, modulus)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        return result
+
+    original_index = index
+
+    div = sympy.Wild("divisor", integer=True)
+    if index.has(FloorDiv):
+        index = index.replace(FloorDiv(var, div), visit_indexing_div)
+
+    mod = sympy.Wild("modulus", integer=True)
+    if index.has(ModularIndexing):
+        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
+
+    index = sympy.simplify(index)
+    if index != original_index:
+        return simplify_index_in_vec_range(index, var, vec_length)
+
+    return index
+
+
+@functools.lru_cache
+def stride_at_vec_range(
+    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
+):
+    if vec_length:
+        index = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index, var)
+
+
 @dataclasses.dataclass
 class ParallelDepth:
     """
@@ -451,7 +534,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         for _node in self.outer_fused_nodes:
             assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
             flatten_snodes.extend(list(_node.get_nodes()))
-        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
+        super().__init__(scheduler, flatten_snodes)
 
     def get_outer_nodes(self):
         return self.outer_fused_nodes
@@ -1519,26 +1602,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        vec_t = f"decltype({x})"
-        code = BracesBuffer()
-        code.writeline("[&]()")
-        with code.indent():
-            # Avoid Vectorized::asinh/SLEEF here: it overflows internally for
-            # large finite fp32 inputs where eager std::asinh remains finite.
-            # This is asinh(x) = sign(x) * log(abs(x) + sqrt(abs(x)^2 + 1)),
-            # rewritten with 1 / abs(x) to avoid squaring large values.
-            code.writeline(f"auto abs_x = {x}.abs();")
-            code.writeline(f"auto one = {vec_t}(1);")
-            code.writeline("auto inv_abs_x = one / abs_x;")
-            code.writeline(
-                "auto correction = "
-                "(one / (one + inv_abs_x)) / "
-                "((one + inv_abs_x * inv_abs_x).sqrt() + inv_abs_x);"
-            )
-            code.writeline("auto result = abs_x.log1p() + correction.log1p();")
-            code.writeline(f"return result.copysign({x});")
-        code.writeline("()")
-        return code
+        return f"{x}.asinh()"
 
     @staticmethod
     def acosh(x):
@@ -1754,7 +1818,7 @@ class CppVecOverrides(CppOverrides):
                     overrides: type[CppOverrides | CppVecOverrides] = (
                         # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
-                    )  # type: ignore[has-type]
+                    )
                     code.writeline(
                         f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
@@ -1949,7 +2013,7 @@ class CppKernel(Kernel):
         num_threads: Number of threads for parallel execution
     """
 
-    overrides = CppOverrides  # type: ignore[assignment]
+    overrides = CppOverrides
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
@@ -2101,8 +2165,8 @@ class CppKernel(Kernel):
         return any(
             self.cse.varname_map[s.name].depends_on(itervar)  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name in self.cse.varname_map  # type: ignore[attr-defined]
-            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)  # type: ignore[attr-defined]
+            if s.name in self.cse.varname_map
+            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)
         )
 
     def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
@@ -2319,15 +2383,7 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
-        logical_index = None
-        if argmax_or_argmin and isinstance(value, tuple):
-            value, logical_index = value
-
-        if logical_index is not None:
-            logical_index_key = cast(CSEVariable, logical_index)
-            reduction_key = src_dtype, reduction_type, (value, logical_index_key)
-        else:
-            reduction_key = src_dtype, reduction_type, value
+        reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -2372,13 +2428,10 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
             )
         else:
-            if logical_index is not None:
-                index = logical_index
-            else:
-                assert self.reduction_depth is not None
-                index = self.itervars[self.reduction_depth]
-                for i in range(self.reduction_depth + 1, len(self.itervars)):
-                    index = index * self.ranges[i] + self.itervars[i]
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
@@ -2532,7 +2585,7 @@ class CppKernel(Kernel):
                 depth: int = 0,
                 in_reduction: bool = False,
             ):
-                if _loop_nest.loops is None or depth == len(_loop_nest.loops):  # type: ignore[arg-type]
+                if _loop_nest.loops is None or depth == len(_loop_nest.loops):
                     gen_kernel(_loop_nest)
                 else:
                     gen_loop_with_reduction(_loop_nest, depth, in_reduction)
@@ -2686,7 +2739,7 @@ class CppKernel(Kernel):
 
 
 class CppVecKernel(CppKernel):
-    overrides = CppVecOverrides  # type: ignore[assignment]
+    overrides = CppVecOverrides
 
     def __init__(
         self,
@@ -2709,7 +2762,7 @@ class CppVecKernel(CppKernel):
         if self.index_indirect_depends_on(index, itervar):
             return None
         for indirect_var in (
-            self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+            self.cse.varname_map[s.name]
             for s in index.free_symbols
             if symbol_is_type(s, SymT.TMP)
         ):
@@ -2869,7 +2922,7 @@ class CppVecKernel(CppKernel):
             )
             replacements = {}
             for indirect_var in (
-                self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+                self.cse.varname_map[s.name]
                 for s in index.free_symbols
                 if symbol_is_type(s, SymT.TMP)
             ):
@@ -2916,7 +2969,7 @@ class CppVecKernel(CppKernel):
                 else:
                     code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
             if not store_value:
-                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
+                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)
                 code.writeline(f"return {load_line};")
         code.writeline("()")
         if store_value:
@@ -2941,7 +2994,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -3053,23 +3106,14 @@ class CppVecKernel(CppKernel):
         # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
-        logical_index = None
-        if argmax_or_argmin and isinstance(value, tuple):
-            value, logical_index = value
-
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
-        assert isinstance(logical_index, (CppCSEVariable, type(None))), logical_index
 
         if not value.is_vec:
             value = self.broadcast(value)
 
-        if logical_index is not None:
-            logical_index_key = cast(CppCSEVariable, logical_index)
-            reduction_key = src_dtype, reduction_type, (value, logical_index_key)
-        else:
-            reduction_key = src_dtype, reduction_type, value
+        reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -3104,7 +3148,6 @@ class CppVecKernel(CppKernel):
 
         use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
         if use_acc_helper:
-            assert logical_index is None, logical_index
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3182,19 +3225,14 @@ class CppVecKernel(CppKernel):
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
                 )
         else:
-            if logical_index is not None:
-                index = logical_index
-                index_horizontal_reduction = False
-            else:
-                assert self.reduction_depth is not None
-                index = self.itervars[self.reduction_depth]
-                for i in range(self.reduction_depth + 1, len(self.itervars)):
-                    index = index * self.ranges[i] + self.itervars[i]
-                index_horizontal_reduction = horizontal_reduction
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
             kwargs = {
                 "next_value": value,
                 "index": index,
-                "horizontal_reduction": index_horizontal_reduction,
+                "horizontal_reduction": horizontal_reduction,
                 "src_dtype": src_dtype,
             }
             self.stores.writeline(
@@ -3421,11 +3459,10 @@ class CppVecKernel(CppKernel):
         var,
         next_value,
         helper_val=None,
-        index: sympy.Expr | CppCSEVariable | None = None,
+        index: sympy.Symbol | None = None,
         horizontal_reduction: bool | None = None,
         src_dtype: torch.dtype | None = torch.float32,
     ):
-        """Emit the C++ expression for combining vector reduction values."""
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
             if self.tail_size:
@@ -3505,16 +3542,9 @@ class CppVecKernel(CppKernel):
             t_extra = ""
             arg_extra = ""
             if index is not None:
-                if isinstance(index, CppCSEVariable):
-                    if index.is_vec:
-                        arg_extra = f", {index}"
-                    else:
-                        t_extra = ", false"
-                        arg_extra = f", {index}"
-                else:
-                    assert horizontal_reduction is not None
-                    t_extra = f", {str(horizontal_reduction).lower()}"
-                    arg_extra = f", {self._adjust_argreduce_index(index)}"
+                assert horizontal_reduction is not None
+                t_extra = f", {str(horizontal_reduction).lower()}"
+                arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
@@ -3634,7 +3664,7 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    overrides = CppTile2DOverrides  # type: ignore[assignment]
+    overrides = CppTile2DOverrides
 
     def __init__(
         self,
@@ -3751,7 +3781,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
-            line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
+            line = self._get_vec_load_line(loadbuf, 0, dtype)
             csevar = self.cse.generate(self.loads, line, dtype=dtype)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
@@ -4040,7 +4070,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4256,13 +4286,13 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, value, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, x, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
@@ -4455,7 +4485,6 @@ class CppKernelProxy(CppKernel):
             )
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
-            _tiled_loop_reduction_descendant = False
             _outer_loop = None
             if tiling_indices:
                 inner_loop_reduction = False
@@ -4470,10 +4499,6 @@ class CppKernelProxy(CppKernel):
                     ].is_reduction
                     _inner_loop_reduction_outer_not = (
                         inner_loop_reduction and not outer_loop_reduction
-                    )
-                    _tiled_loop_reduction_descendant = not outer_loop_reduction and any(
-                        loop.is_reduction
-                        for loop in self.loop_nest.loops[inner_loop_level:]
                     )
 
             if len(tiling_indices) == 1:
@@ -4576,12 +4601,8 @@ class CppKernelProxy(CppKernel):
                 _outer_loop = outer_loop
             else:
                 self.kernels = [scalar_kernel]
-            # A non-reduction tiled loop with a nested reduction needs its
-            # reduction suffix selected by the same main/tail active range.
             self.aggregate_reduction_buffers(
-                _inner_loop_reduction_outer_not
-                or (len(tiling_indices) == 1 and _tiled_loop_reduction_descendant),
-                _outer_loop,
+                _inner_loop_reduction_outer_not, _outer_loop
             )
             self.loop_nest.set_kernel(self)
 
@@ -5516,9 +5537,9 @@ class CppScheduling(BaseScheduling):
         )
         with kernel:
             if not is_multi_outputs_template(template_node.node):
-                template_node.mark_run()  # type: ignore[attr-defined]
+                template_node.mark_run()
             for node in epilogue_nodes:
-                node.mark_run()  # type: ignore[attr-defined]
+                node.mark_run()
             src_code = render()
 
         with V.set_kernel_handler(kernel):
@@ -5611,7 +5632,7 @@ class CppScheduling(BaseScheduling):
                 V.graph.wrapper_code.write_kernel_context_guard_begin()
                 V.graph.wrapper_code.write_kernel_context_guard(
                     kernel_name,
-                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
+                    self.kernel_group.scheduled_nodes,
                 )
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
             if config.cpp.enable_kernel_profile:
@@ -5624,7 +5645,7 @@ class CppScheduling(BaseScheduling):
         # below add provenance tracing info for cpu CppKernel types
         wrapper = V.graph.wrapper_code
         debug_handle = set_kernel_post_grad_provenance_tracing(
-            node_schedule,  # type: ignore[arg-type]
+            node_schedule,
             # pyrefly: ignore [bad-argument-type]
             kernel_name,
         )

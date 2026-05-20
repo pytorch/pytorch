@@ -49,7 +49,6 @@ autoload
 operators
 amp
 profiler
-distributed
 ci
 ```
 

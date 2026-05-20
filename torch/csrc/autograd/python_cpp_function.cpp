@@ -167,7 +167,8 @@ PyObject* THPCppFunction_metadata(PyObject* self, void* _unused) {
           reinterpret_cast<THPCppFunction*>(self)->cdata->metadata())
           ->dict();
 
-  return Py_XNewRef(metadata);
+  Py_XINCREF(metadata);
+  return metadata;
 }
 
 PyObject* THPCppFunction_requires_grad(PyObject* self, void* unused) {

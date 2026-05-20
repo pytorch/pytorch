@@ -338,7 +338,12 @@ PyTypeObject THPSizeType = {
 };
 
 void THPSize_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPSizeType) < 0) {
+  if (PyType_Ready(&THPSizeType) < 0) {
+    throw python_error();
+  }
+  Py_INCREF(&THPSizeType);
+  if (PyModule_AddObject(
+          module, "Size", reinterpret_cast<PyObject*>(&THPSizeType)) < 0) {
     throw python_error();
   }
 }

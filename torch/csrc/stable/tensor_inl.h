@@ -5,7 +5,6 @@
 // implementations of the Tensor methods can depend on APIs in library.h
 // without circular dependencies.
 
-#include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/Layout.h>
@@ -20,7 +19,7 @@ using torch::headeronly::ScalarType;
 
 inline ScalarType Tensor::scalar_type() const {
   int32_t dtype;
-  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
   return torch::stable::detail::to<ScalarType>(
       torch::stable::detail::from(dtype));
 }
@@ -28,9 +27,8 @@ inline ScalarType Tensor::scalar_type() const {
 inline Device Tensor::device() const {
   int32_t device_type;
   int32_t device_index;
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_get_device_type(ath_.get(), &device_type));
-  STABLE_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(ath_.get(), &device_type));
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_device_index(ath_.get(), &device_index));
   DeviceType extension_device_type = torch::stable::detail::to<DeviceType>(
       torch::stable::detail::from(device_type));
@@ -39,7 +37,7 @@ inline Device Tensor::device() const {
 
 inline Layout Tensor::layout() const {
   int32_t layout;
-  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(ath_.get(), &layout));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(ath_.get(), &layout));
   return torch::stable::detail::to<Layout>(torch::stable::detail::from(layout));
 }
 

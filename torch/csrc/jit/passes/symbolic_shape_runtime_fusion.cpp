@@ -608,7 +608,8 @@ static RegisterOperators reg_guard({
                   flattened_input_dims,
                   flattened_input_striding,
                   num_symbolic_dims](Stack& stack) {
-            auto inputs = pop(stack, num_inputs);
+            at::ArrayRef<IValue> inputs = last(stack, num_inputs);
+            drop(stack, num_inputs);
             // each invocation we need to reset what value of each symbolic
             // symbol is.
             // TODO: could this be a reference and not allocated on

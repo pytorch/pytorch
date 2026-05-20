@@ -222,7 +222,7 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
 // Indicates that we're in the watchdog's event-query phase. This allows ROCm
 // workaround behavior to be applied only to watchdog-side queries, while
 // preserving existing behavior for user/main-thread `WorkNCCL::isCompleted()`
@@ -241,9 +241,9 @@ struct RocmWatchdogEventQueryContextGuard {
  private:
   bool previous_;
 };
-#endif // defined(USE_ROCM) && ROCM_VERSION < 70201
+#endif // USE_ROCM
 
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
 // Watchdog-side cudaEventQuery workaround for HIP runtimes without the
 // capture-mode fix.
 // TODO: Remove once all supported runtimes include
@@ -279,7 +279,7 @@ bool queryEventWithRocmWatchdogCaptureWorkaround(
 
   return false;
 }
-#endif // defined(USE_ROCM) && ROCM_VERSION < 70201
+#endif // USE_ROCM
 
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
@@ -704,7 +704,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
   if (!queryEventWithRocmWatchdogCaptureWorkaround(ncclStartEvent_)) {
 #else
   if (!ncclStartEvent_->query()) {
@@ -721,7 +721,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
   if (!queryEventWithRocmWatchdogCaptureWorkaround(ncclEndEvent_)) {
 #else
   if (!ncclEndEvent_->query()) {
@@ -2367,7 +2367,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // Skip if work has encountered an error.
 
       bool timedout = false;
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
       // On ROCm, watchdog event queries may be intentionally skipped during
       // active graph capture to avoid HIP runtime capture invalidation.
       // In that window, timeout checks can report false positives for
@@ -2399,11 +2399,6 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
             work.seq_,
             " PG status: last enqueued work: ",
             pg_->pgStatus_->lastEnqueuedSeq,
-            ", last started work: ",
-            pg_->pgStatus_->lastStartedSeq,
-            " (",
-            pg_->pgStatus_->lastStartedWorkName,
-            ")",
             ", last completed work: ",
             pg_->pgStatus_->lastCompletedSeq);
 
@@ -2449,7 +2444,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // allow watchdog to do an event query on a side thread
       at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
       at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
-#if defined(USE_ROCM) && ROCM_VERSION < 70201
+#ifdef USE_ROCM
       // Mark this thread/scope as watchdog event-query context so the ROCm
       // workaround applies only here (not to main-thread wait()/isCompleted()).
       RocmWatchdogEventQueryContextGuard watchdog_event_query_context_guard;
@@ -5708,7 +5703,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   std::vector<at::Tensor> outputs;
 
   if (getRank() == opts.rootRank) {
-    assertGatherOutputTensorList(invalidArgument, outputTensors, getSize());
+    if (outputTensors.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (outputTensors[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect output list size " << outputTensors[0].size()
+         << ". Output list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
 
     const auto& options = inputTensor.options();
     const auto& sizes = inputTensor.sizes();
@@ -5716,7 +5722,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     outputs = outputTensors[0];
   } else {
     // if not in the root rank, initialize outputs as empty list
-    assertEmptyOutputTensorList(invalidArgument, outputTensors);
+    if (!outputTensors.empty()) {
+      invalidArgument("requires empty output on non-root");
+    }
     outputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
@@ -5783,7 +5791,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   std::vector<at::Tensor> inputs;
 
   if (getRank() == opts.rootRank) {
-    assertScatterInputTensorList(invalidArgument, inputTensors, getSize());
+    if (inputTensors.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element input list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputTensors[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
 
     const auto& options = outputTensor.options();
     const auto& sizes = outputTensor.sizes();
@@ -5792,7 +5811,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   } else {
     // if not in the root rank, initialize inputTensors as empty place holder
     // with an empty list
-    assertEmptyInputTensorList(invalidArgument, inputTensors);
+    if (!inputTensors.empty()) {
+      invalidArgument("requires empty input on non-root");
+    }
     inputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function

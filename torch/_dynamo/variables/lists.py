@@ -44,8 +44,6 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
-    unpack_and_apply_fn,
-    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -119,6 +117,46 @@ class BaseListVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def is_python_constant(self) -> bool:
+        """Check if this container is a python constant without realizing lazy constants.
+
+        Uses try_peek_constant() to check each item without realizing lazy constants.
+        Returns False if any item is an unrealized lazy constant - this forces
+        the codegen path to use reconstruct() instead of loading as a constant,
+        which avoids installing guards on the lazy constants.
+        """
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        # Return False if any item is unrealized to avoid as_python_constant()
+        # being called, which would realize lazy constants and install guards
+        return can_peek and not is_unrealized
+
+    def _try_peek_items(
+        self,
+    ) -> tuple[bool, bool, list[Any]]:
+        """Peek at items without triggering realization.
+
+        Returns (can_peek, any_unrealized, values). Subclasses use this
+        in try_peek_constant() and apply their own constructor.
+        """
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            if item is self:
+                return (False, False, [])
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, [])
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        return (True, any_unrealized, values)
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, self.python_type()(values))
 
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
@@ -295,22 +333,6 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
-    def sq_repeat_impl(
-        self,
-        tx: "InstructionTranslator",
-        count: VariableTracker,
-    ) -> VariableTracker:
-        n = count.as_python_constant()
-        try:
-            new_items = self.items * n
-        except (MemoryError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
-        kwargs: dict[str, Any] = {}
-        if issubclass(self.python_type(), list):
-            kwargs["mutation_type"] = ValueMutationNew()
-        return type(self)(new_items, **kwargs)
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -387,6 +409,31 @@ class BaseListVariable(VariableTracker):
                 return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
+                return self
+        elif name in ("__mul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            if not (args[0].is_python_constant() and args[0].python_type() is int):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                    ],
+                )
+
+            val = args[0].as_python_constant()
+
+            if name == "__mul__":
+                return type(self)(self.items * val, source=self.source)
+            else:
+                self.items *= val
                 return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
@@ -593,6 +640,12 @@ class RangeVariable(BaseListVariable):
 
     def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, range(*values))
 
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -817,30 +870,15 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            # CPython has a series of checks to optimize list.extend for different data types
-            # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
-            from .dicts import ConstDictVariable
-            from .sets import SetVariable
-            from .user_defined import UserDefinedObjectVariable
-
-            sz = len(self.items)
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                self.items.extend(args[0].items)
-            elif isinstance(args[0], UserDefinedObjectVariable):
-                self.items.extend(unpack_iterable(tx, args[0]))
-            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
-                items = [item.vt for item in args[0].items]
-                self.items.extend(items)
-            elif isinstance(args[0], ConstantVariable):
-                items = unpack_iterable(tx, args[0])
-                self.items.extend(items)
-            else:
-                unpack_and_apply_fn(
-                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
+            if not args[0].has_force_unpack_var_sequence(tx):
+                raise_observed_exception(
+                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
                 )
 
-            if len(self.items) > sz:
-                tx.output.side_effects.mutation(self)
+            (arg,) = args
+            arg.force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "append", [item], {})
+            )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
@@ -1040,26 +1078,6 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
-    def sq_inplace_repeat_impl(
-        self,
-        tx: "InstructionTranslator",
-        count: VariableTracker,
-    ) -> VariableTracker:
-        # list_inplace_repeat: https://github.com/python/cpython/blob/v3.13.13/Objects/listobject.c#L1071
-        if not self.is_mutable():
-            raise AssertionError(
-                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
-                "every construction site should set mutation_type."
-            )
-        n = count.as_python_constant()
-        try:
-            new_items = self.items * n
-        except (MemoryError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        self.items[:] = new_items
-        return self
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1132,10 +1150,10 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if not all(k.is_python_constant() for k in keys):
+            if not all(k.try_peek_constant()[0] for k in keys):
                 first_non_constant_key = None
                 for k in keys:
-                    if not k.is_python_constant():
+                    if not k.try_peek_constant()[0]:
                         first_non_constant_key = k
                 if first_non_constant_key is None:
                     raise AssertionError(
@@ -1175,7 +1193,11 @@ class ListVariable(CommonListMethodsVariable):
                 )
                 self.items[:] = [x for x, *_ in sorted_items_with_keys]
             except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=[VariableTracker.build(tx, a) for a in e.args],
+                )
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1183,10 +1205,10 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
-            elif len(args) == 1:
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
-                self.items[:] = unpack_iterable(tx, arg)
+                self.items[:] = arg.force_unpack_var_sequence(tx)
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1333,6 +1355,20 @@ class DequeVariable(CommonListMethodsVariable):
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
         )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        # Also check maxlen
+        can_peek_maxlen, is_unrealized_maxlen, maxlen_value = (
+            self.maxlen.try_peek_constant()
+        )
+        if not can_peek_maxlen:
+            return (False, False, None)
+        if is_unrealized_maxlen:
+            any_unrealized = True
+        return (True, any_unrealized, self.python_type()(values, maxlen=maxlen_value))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
@@ -2014,18 +2050,18 @@ class ListIteratorVariable(IteratorVariable):
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
-        )
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
             # pyrefly: ignore [implicit-any]
             remaining_items = []
         codegen.foreach(remaining_items)
-        codegen.append_output(create_build_tuple(len(remaining_items)))
-        codegen.extend_output(create_call_function(1, False))
+        codegen.extend_output(
+            [
+                create_build_tuple(len(remaining_items)),
+                create_instruction("GET_ITER"),
+            ]
+        )
 
 
 class TupleIteratorVariable(ListIteratorVariable):
@@ -2072,10 +2108,6 @@ class RangeIteratorVariable(IteratorVariable):
         return range_iterator
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
-        )
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(range))  # type: ignore[arg-type]
         )
@@ -2083,4 +2115,4 @@ class RangeIteratorVariable(IteratorVariable):
         codegen.append_output(codegen.create_load_const(self.stop))
         codegen.append_output(codegen.create_load_const(self.step))
         codegen.extend_output(create_call_function(3, False))
-        codegen.extend_output(create_call_function(1, False))
+        codegen.append_output(create_instruction("GET_ITER"))

@@ -705,11 +705,8 @@ endif(MSVC)
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 # Set linker max-page-size to 64KiB on AArch64 Linux
-# And stub group size to 32MiB to workaround R_AARCH64_CALL26
-# relocation errors
 if(LINUX AND CPU_AARCH64)
   add_link_options_if_supported("-z,max-page-size=0x10000")
-  add_link_options_if_supported("--stub-group-size=0x2000000")
 endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not

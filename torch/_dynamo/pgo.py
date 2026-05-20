@@ -57,7 +57,6 @@ class ReservedWorkflowIdUserError(ValueError):
 
 
 log = logging.getLogger(__name__)
-symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 
 LOCK_TIMEOUT = 10
 
@@ -441,10 +440,6 @@ def update_automatic_dynamic(
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
         if is_update and old_entry.scalar != mut_entry.scalar:
-            symbolic_shape_log.info(
-                "marking %s as dynamic (from automatic dynamic/PGO)",
-                name,
-            )
             log.debug(
                 "automatic dynamic int %s val %s != %s",
                 name,
@@ -479,10 +474,6 @@ def update_automatic_dynamic(
                 getattr(old_entry, tup_name)
                 if i is None
                 else getattr(old_entry, tup_name)[i]
-            )
-            symbolic_shape_log.info(
-                "marking %s as dynamic (from automatic dynamic/PGO)",
-                name,
             )
             log.debug(
                 "automatic dynamic %s %s %s %s != %s",
@@ -689,7 +680,7 @@ def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     for src, fs in code_state.automatic_dynamic.items():
         dynamic = False
         if isinstance(fs.size, tuple):
-            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
+            dynamic = auto_dynamic in fs.size
         elif fs.scalar == auto_dynamic:
             dynamic = True
         if dynamic:
@@ -804,7 +795,7 @@ def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
     trace_structured_artifact(
         f"get_{ty}_code_state",
         "string",
-        lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
+        lambda: render_code_state(_CODE_STATE),
     )
     set_feature_use("pgo", True)
     _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)

@@ -12,11 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    run_tests,
-    slowTest,
-    TEST_WITH_TORCHDYNAMO,
-)
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -212,10 +208,6 @@ class TestBase(__TestCase):
 
 class TestBugs(__TestCase):
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_bug453523(self):
         # bug 453523 -- list.sort() crasher.
         # If this fails, the most likely outcome is a core dump.
@@ -232,10 +224,6 @@ class TestBugs(__TestCase):
         L = [C() for i in range(50)]
         self.assertRaises(ValueError, L.sort)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_undetected_mutation(self):
         # Python 2.4a1 did not always detect mutation
         memorywaster = []
@@ -285,10 +273,6 @@ class TestDecorateSortUndecorate(__TestCase):
         self.assertRaises(ZeroDivisionError, data.sort, key=lambda x: 1/x)
         self.assertEqual(data, dup)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_key_with_mutation(self):
         data = list(range(10))
         def k(x):
@@ -297,10 +281,6 @@ class TestDecorateSortUndecorate(__TestCase):
             return x
         self.assertRaises(ValueError, data.sort, key=k)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_key_with_mutating_del(self):
         data = list(range(10))
         class SortKiller(object):
@@ -479,6 +459,8 @@ class TestOptimizedCompares(__TestCase):
         expected = [(None, 1), (None, 2)]
         actual = sorted([(None, 2), (None, 1)])
         self.assertEqual(actual, expected)
+
+#==============================================================================
 
 if __name__ == "__main__":
     run_tests()

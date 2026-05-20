@@ -77,6 +77,7 @@ from ..source import (
     TypeSource,
 )
 from ..utils import (
+    check_args_peekable_as_constant,
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -508,7 +509,7 @@ class BaseUserFunctionVariable(VariableTracker):
             result = True
         else:
             try:
-                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+                result = hasattr(self.get_function(), name)
             except NotImplementedError:
                 result = False
         return VariableTracker.build(tx, result)
@@ -620,7 +621,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         source = self.source
 
         if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn  # type: ignore[assignment]
+            source = self.source_fn
         return source  # type: ignore[return-value]
 
     def bind_args(
@@ -1523,7 +1524,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         return self.generator_cls(
             code,
             f_globals,
-            inline_tracer,  # type: ignore[arg-type]
+            inline_tracer,
             source=self.source,
         )
 
@@ -1598,7 +1599,7 @@ class UserMethodVariable(UserFunctionVariable):
         # operates on the unbound function, most guards should target
         # `source_fn` rather than the original `source`.
         if source_fn is None and kwargs.get("source") is not None:
-            self.source_fn = AttrSource(kwargs.get("source"), "__func__")  # type: ignore[assignment, arg-type]
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -1683,7 +1684,7 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         elif (
             _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
@@ -1700,7 +1701,7 @@ class UserMethodVariable(UserFunctionVariable):
             # We might have a better way to access the function object, this
             # information is stored in self.source_fn, use that to construct the
             # variable tracker.
-            return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
+            return VariableTracker.build(tx, self.fn, self.source_fn)
         return super().var_getattr(tx, name)
 
     def get_real_python_backed_value(self) -> Any:
@@ -1737,7 +1738,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -1771,7 +1772,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -2540,30 +2541,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
-        # Skip this for recursive calls to the same compiled function
-        # (the wrapper's original callable matches the root frame's code).
-        is_inner_torch_compile = (
-            self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
-            and getattr(
-                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
-                "__code__",
-                None,
-            )
-            is not tx.output.root_tx.f_code
-        )
-        polyfill = (
-            polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
-            else polyfills.getattr_and_trace
-        )
         return VariableTracker.build(
             tx,
-            polyfill,  # type: ignore[arg-type]
+            polyfills.getattr_and_trace,
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
@@ -2807,23 +2787,27 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        constant_args = check_constant_args(args, kwargs)
-        if constant_args:
+        if check_constant_args(args, kwargs) or check_args_peekable_as_constant(
+            args, kwargs
+        ):
             try:
                 value = self.fn(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
+            except AsPythonConstantNotImplementedError:
+                pass  # lazy arg became symbolic after realization, fall through
             except TypeError as exc:
                 raise_observed_exception(
                     type(exc),
                     tx,
                     args=list(exc.args),
                 )
-            return variables.UserDefinedClassVariable(
-                value,
-                mutation_type=ValueMutationNew(),
-            )
+            else:
+                return variables.UserDefinedClassVariable(
+                    value,
+                    mutation_type=ValueMutationNew(),
+                )
         unimplemented(
             gb_type="namedtuple construction",
             context=f"{args=}, {kwargs=}",

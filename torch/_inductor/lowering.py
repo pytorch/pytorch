@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -11,7 +12,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -96,7 +97,6 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
-    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -188,7 +188,7 @@ def tag_to_layout_constraint(
 ) -> Callable[..., tuple[Any, Any]] | None:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
-    if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
+    if tag == torch._C.Tag.needs_contiguous_strides:
         return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
@@ -280,7 +280,7 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
-        return x.is_integer is True  # type: ignore[attr-defined]
+        return x.is_integer is True
     else:
         return isinstance(x, int)
 
@@ -566,11 +566,7 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(
-    inputs: Sequence[_T],
-    override_return_dtype: torch.dtype | None = None,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
-) -> Sequence[_T | BaseView | BaseConstant]:
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -664,25 +660,24 @@ def _add_with_alpha_fma(a, b, alpha):
 
 
 def make_pointwise(
-    fn: Callable[..., Any],
-    override_return_dtype: torch.dtype | None = None,
-    override_device: torch.device | None = None,
-    override_fn_when_input_bool: Callable[..., Any] | None = None,
-    allow_alpha: bool = False,
-    use_fma_for_alpha: bool = False,
-    triton_fallback: Callable[..., _T] | None = None,
-) -> Callable[..., TensorBox | _T]:
+    fn,
+    override_return_dtype=None,
+    override_device=None,
+    override_fn_when_input_bool=None,
+    allow_alpha=False,
+    use_fma_for_alpha=False,
+    triton_fallback=None,
+):
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
+    def inner(*inputs: TensorBox, alpha=None):
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
-        # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -750,7 +745,6 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -761,7 +755,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,  # type: ignore[arg-type]
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -770,15 +764,8 @@ def make_pointwise(
     return inner
 
 
-foreach_node_t = TypeVar("foreach_node_t", bound=IRNode)
-
-
-def make_foreach_pointwise(
-    pw_fn: Callable[..., foreach_node_t],
-    allow_alpha: bool = False,
-    scalar_kwarg: str = "alpha",
-) -> Callable[..., list[foreach_node_t]]:
-    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1) -> list[foreach_node_t]:
+def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
+    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1):
         # For ops like addcmul/addcdiv, the scalar `value` arrives as a
         # positional arg (not keyword) due to the ATen schema. Extract it
         # from the end of inputs if present.
@@ -822,7 +809,7 @@ def make_foreach_pointwise(
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        def apply_fn(args) -> foreach_node_t:
+        def apply_fn(args):
             if allow_alpha:
                 return pw_fn(*args, **{scalar_kwarg: scalar_val})
             else:
@@ -833,12 +820,7 @@ def make_foreach_pointwise(
     return inner
 
 
-def foreach_group_loop(
-    groups: Mapping[tuple[Any, bool], list[tuple[int, Any]]],
-    num_outputs: int,
-    apply_fn: Callable[..., foreach_node_t],
-    realize_outputs: bool,
-) -> list[foreach_node_t]:
+def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
     """
     Common loop over grouped foreach arguments.
 
@@ -848,7 +830,7 @@ def foreach_group_loop(
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
     """
-    outputs: list[foreach_node_t | None] = [None] * num_outputs
+    outputs = [None] * num_outputs
     for (device, use_foreach), group in groups.items():
         operation_list: list[str] = []
         for output_ind, args in group:
@@ -867,8 +849,7 @@ def foreach_group_loop(
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
-
-    return cast(list[foreach_node_t], outputs)
+    return outputs
 
 
 def to_dtype(
@@ -1209,7 +1190,7 @@ def squeeze(x, dim=None):
         if isinstance(dim, (int, sympy.Expr))
         else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
-    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
+    dim = canonicalize_dims(len(x.get_size()), dim)
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1616,8 +1597,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
-        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
+        prev_end = inputs_ranges[-1][-1]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -2258,7 +2239,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1] + offset,
                 original_shape[dim2],
             ),
-            0,  # type: ignore[arg-type]
+            0,
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
@@ -2266,7 +2247,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1],
                 original_shape[dim2] - offset,
             ),
-            0,  # type: ignore[arg-type]
+            0,
         )
 
     base_idx = (0, 0)
@@ -2427,7 +2408,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.check_leq(size, dim_size)
-    sizevars.check_lt(0, step)  # type: ignore[arg-type]
+    sizevars.check_lt(0, step)
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.guarding_hint_or_throw(dim_size) > 0:
@@ -2930,36 +2911,23 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    # Calculate the maximum offset for the boundaries tensor
+    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
+    # This ensures the mask check in bucketize_binary_search works correctly
+    # for both contiguous and non-contiguous tensors.
     size = tb.get_size()
     stride = tb.get_stride()
+    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
         size[-1],
-        tb.get_layout().storage_size(),
+        max_offset,
         stride[-1],
     )
 
 
-def _realize_bucketize_lookup_tensor(tb: TensorBox) -> TensorBox:
-    # ops.bucketize needs a named strided tensor.  realize_input() also replays
-    # affine views over newly-realized inputs as ReinterpretViews when possible.
-    return TensorBox(ir.ExternKernel.realize_input(tb))
-
-
 def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
-
-
-def _bucketize_indices(
-    tb: TensorBox, index: Sequence[sympy.Expr], index_dtype: torch.dtype
-) -> Any:
-    strides = tb.get_stride()
-    flattened_index = tb.get_layout().offset + sum(
-        (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
-    )
-    if not index and isinstance(flattened_index, sympy.Integer):
-        return int(flattened_index)
-    return ops.index_expr(flattened_index, index_dtype)
 
 
 @register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
@@ -2998,12 +2966,14 @@ def searchsorted(
     index_dtype = torch.int32 if out_int32 else torch.int64
     values_loader = self.make_loader()
 
-    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we
-    # need a named strided tensor for codegen below.
-    sorted_sequence = _realize_bucketize_lookup_tensor(sorted_sequence)
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
 
     if sorter is not None:
-        sorter = _realize_bucketize_lookup_tensor(sorter)
+        sorter.realize()
 
     if len(sorted_sequence.get_size()) == 1:
 
@@ -3012,15 +2982,11 @@ def searchsorted(
             return ops.bucketize(
                 val,
                 _boundaries_helper(sorted_sequence),
-                _bucketize_indices(sorted_sequence, (), index_dtype),
+                0,
                 index_dtype,
                 right,
                 sorter=None if sorter is None else _sorter_helper(sorter),
-                sorter_indices=(
-                    None
-                    if sorter is None
-                    else _bucketize_indices(sorter, (), index_dtype)
-                ),
+                sorter_indices=None if sorter is None else 0,
             )
 
     else:
@@ -3031,7 +2997,13 @@ def searchsorted(
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
             def get_flattened_index(tb: TensorBox):
-                return _bucketize_indices(tb, idx, index_dtype)
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
 
             return ops.bucketize(
                 val,
@@ -3077,8 +3049,10 @@ def bucketize(
         )
 
     # The entire boundaries tensor needs to be used by ops.bucketize, so we
-    # need a named strided tensor for codegen below.
-    boundaries = _realize_bucketize_lookup_tensor(boundaries)
+    # need to realize it into global memory; or in other words, we can't
+    # guarantee that boundaries.get_name() (used below) will exist unless
+    # we call boundaries.realize().
+    boundaries.realize()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -3089,7 +3063,7 @@ def bucketize(
         indices = ops.bucketize(
             val,
             _boundaries_helper(boundaries),
-            _bucketize_indices(boundaries, (), index_dtype),
+            0,
             index_dtype,
             right,
         )
@@ -3360,11 +3334,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            size = x.get_size()
-            if len(size) == 0:
-                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
@@ -3434,6 +3405,7 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
+make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.miopen_rnn, require_dense)
@@ -3505,13 +3477,6 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
-# Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
-# native implementations)
-make_fallback(aten.bincount.default, warn=False)
-make_fallback(aten._unique2.default, warn=False)
-make_fallback(aten.unique_dim.default, warn=False)
-make_fallback(aten.unique_consecutive.default, warn=False)
-make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
@@ -3520,12 +3485,6 @@ make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
-
-# AMP / GradScaler ops: both the in-place (_amp_update_scale_) and functional
-# (_amp_update_scale) variants need explicit fallbacks.  Inductor uses the
-# functional form when the input tensor is a computed (non-leaf) value.
-make_fallback(aten._amp_update_scale_.default, warn=False)
-make_fallback(aten._amp_update_scale.default, warn=False)
 
 
 # Implemented / Half implemented
@@ -3728,8 +3687,8 @@ def select_scatter(x, src, dim: int, index: int):
         # unbacked index
         return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
 
-    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
-    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    V.graph.sizevars.check_leq(0, index)
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -4199,7 +4158,7 @@ def gather(x, dim, index, sparse_grad=False):
 
     def fn(idx):
         idx = list(idx)
-        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim], wrap_neg=False)
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
         if len(idx) == 0:
             idx = [gather_idx]
         else:
@@ -4235,9 +4194,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [
-            ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)
-        ] + [*idx[indices_ndim:]]
+        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
+            *idx[indices_ndim:]
+        ]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -5137,7 +5096,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -6729,13 +6688,10 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
-    )
     if (
         reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
-        and supports_logical_index_argreduce
+        and is_triton(x)
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
@@ -6792,10 +6748,8 @@ def _make_reduction_inner(
     )
 
 
-def make_reduction(
-    reduction_type: ReductionType, override_return_dtype=None
-) -> Callable[..., TensorBox]:
-    def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
+def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
+    def inner(x, axis=None, keepdims=False, *, dtype=None):
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
@@ -7745,6 +7699,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
+        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
@@ -8005,8 +7960,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.List, sub)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
@@ -8236,7 +8191,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitialized_val = 0.0
 
-    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
     strides = x.maybe_get_stride()
@@ -8497,41 +8452,26 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
+def associative_scan(
+    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
+):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    num_scan_inputs = 2 * len(xs)
-    placeholders = [
-        node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
-    ]
-    additional_placeholders = placeholders[num_scan_inputs:]
-    if len(additional_placeholders) != len(additional_inputs):
-        raise RuntimeError("Unable to generate code for associative_scan op")
-
-    # Dynamic shapes can lift symbols from the scan element metadata into the
-    # combine graph even when the combine function does not read them.
-    unsupported_inputs = []
-    for arg, placeholder in zip(additional_inputs, additional_placeholders):
-        if not isinstance(arg, (int, sympy.Basic)) or placeholder.users:
-            unsupported_inputs.append(arg)
-    if unsupported_inputs:
+    if len(additional_inputs) > 0:
         raise RuntimeError(
-            "Unable to generate code for associative_scan op, because there are "
-            "unsupported lifted arguments"
+            "Unable to generate code for associative_scan op, because there are lifted arguments"
         )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    subgraph_inputs.extend(additional_inputs)
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
-            *additional_inputs,
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
@@ -8680,7 +8620,7 @@ def prepare_softmax_online(x, dim):
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
     hint, num_split = ir.Reduction.num_splits(
         **kwargs,
-        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
+        reduction_type="online_softmax_reduce",
         reduction_numel=rnumel,
     )
 
