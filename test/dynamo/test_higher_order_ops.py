@@ -3911,6 +3911,26 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_vmap_hessian_aot_eager(self):
+        def fn(x):
+            return (x**4).sum()
+
+        def wrapper_fn(x):
+            return torch.vmap(torch.func.hessian(fn))(x)
+
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+
+        for device in devices:
+            with self.subTest(device=device):
+                x = torch.randn(4, 8, device=device, dtype=torch.float64)
+                actual = torch.compile(wrapper_fn, fullgraph=True, backend="aot_eager")(
+                    x
+                )
+                expected = torch.diag_embed(12 * x.square())
+                self.assertEqual(actual, expected)
+
     def test_hessian_argnums(self):
         counters.clear()
 
