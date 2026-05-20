@@ -38,6 +38,10 @@ except ModuleNotFoundError:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+SAVED_TENSOR_SOURCE_INPUT = "input"
+SAVED_TENSOR_SOURCE_NONE = "none"
+SAVED_TENSOR_SOURCE_UNPACK_HOOK = "unpack_hook"
+
 if TYPE_CHECKING:
     # TorchScript does not support `@deprecated`
     # This is a workaround to avoid breaking TorchScript
@@ -143,6 +147,74 @@ class FakeBackwardCFunction:
         return getattr(self.real, name)
 
 
+def _materialize_saved_tensor_inputs(
+    saved_tensor_inputs: list[torch.Tensor | None] | None,
+    saved_tensor_indices: tuple[int, ...] | None,
+) -> tuple[torch.Tensor, ...]:
+    if saved_tensor_indices is None:
+        return ()
+    if saved_tensor_inputs is None:
+        raise AssertionError(
+            "saved_tensor_inputs must be set with saved_tensor_indices"
+        )
+
+    input_tensors: list[torch.Tensor] = []
+    for idx in saved_tensor_indices:
+        input_tensor = saved_tensor_inputs[idx]
+        if input_tensor is None:
+            raise AssertionError("saved tensor input was cleared before backward")
+        input_tensors.append(input_tensor)
+    return tuple(input_tensors)
+
+
+def _materialize_saved_tensor_unpack_hooks(
+    saved_tensor_unpack_hooks: tuple[tuple[Callable[[Any], torch.Tensor], Any], ...]
+    | None,
+) -> tuple[torch.Tensor, ...]:
+    return tuple(
+        call_hook(hook, packed, hook_type="unpack_hook")
+        for hook, packed in saved_tensor_unpack_hooks or ()
+    )
+
+
+def _materialize_saved_tensors_from_sources(
+    saved_tensor_sources: tuple[tuple[str, int | None], ...],
+    input_tensors: tuple[torch.Tensor, ...],
+    unpacked_tensors: tuple[torch.Tensor, ...],
+) -> tuple[torch.Tensor | None, ...]:
+    fake_saved_tensors: list[torch.Tensor | None] = []
+    for source, idx in saved_tensor_sources:
+        if source == SAVED_TENSOR_SOURCE_NONE:
+            fake_saved_tensors.append(None)
+            continue
+        if idx is None:
+            raise AssertionError(f"saved tensor source {source} requires an index")
+        if source == SAVED_TENSOR_SOURCE_INPUT:
+            fake_saved_tensors.append(input_tensors[idx])
+        elif source == SAVED_TENSOR_SOURCE_UNPACK_HOOK:
+            fake_saved_tensors.append(unpacked_tensors[idx])
+        else:
+            raise AssertionError(f"unexpected saved tensor source: {source}")
+    return tuple(fake_saved_tensors)
+
+
+def _clear_saved_tensor_input_refs(
+    saved_tensor_inputs: list[torch.Tensor | None] | None,
+    saved_tensor_clear_indices: tuple[int, ...] | None,
+) -> None:
+    if not saved_tensor_clear_indices or is_compiling():
+        return
+    # Mutating compiled-autograd graph inputs while Dynamo is tracing the CA
+    # graph corrupts the example inputs. The eager CA path still needs this
+    # mutation so weakref-based clear-on-access checks match eager autograd.
+    if saved_tensor_inputs is None:
+        raise AssertionError(
+            "saved_tensor_inputs must be set with saved_tensor_clear_indices"
+        )
+    for idx in saved_tensor_clear_indices:
+        saved_tensor_inputs[idx] = None
+
+
 def call_backward(
     backward_c_function: torch.autograd.function.BackwardCFunction,
     saved_tensors: list[torch.Tensor | None],
@@ -155,64 +227,25 @@ def call_backward(
     | None = None,
     saved_tensor_sources: tuple[tuple[str, int | None], ...] | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, ...]:
-    fake_saved_tensors: tuple[torch.Tensor | None, ...]
     if saved_tensor_sources is not None:
-        input_tensors: tuple[torch.Tensor, ...] = ()
-        if saved_tensor_indices is not None:
-            if saved_tensor_inputs is None:
-                raise AssertionError(
-                    "saved_tensor_inputs must be set with saved_tensor_indices"
-                )
-            input_tensor: torch.Tensor | None = None
-            input_tensors_list = []
-            for idx in saved_tensor_indices:
-                input_tensor = saved_tensor_inputs[idx]
-                if input_tensor is None:
-                    raise AssertionError(
-                        "saved tensor input was cleared before backward"
-                    )
-                input_tensors_list.append(input_tensor)
-            input_tensors = tuple(input_tensors_list)
-            del input_tensor
-            del input_tensors_list
-
-        unpacked_tensors_list = []
-        for hook, packed in saved_tensor_unpack_hooks or ():
-            unpacked_tensors_list.append(
-                call_hook(hook, packed, hook_type="unpack_hook")
-            )
-        unpacked_tensors = tuple(unpacked_tensors_list)
-        del unpacked_tensors_list
-
-        fake_saved_tensors_list = []
-        for source, idx in saved_tensor_sources:
-            if source == "none":
-                fake_saved_tensors_list.append(None)
-            elif source == "input" and idx is not None:
-                fake_saved_tensors_list.append(input_tensors[idx])
-            elif source == "unpack_hook" and idx is not None:
-                fake_saved_tensors_list.append(unpacked_tensors[idx])
-            else:
-                raise AssertionError(f"unexpected saved tensor source: {source}")
-        fake_saved_tensors = tuple(fake_saved_tensors_list)
-        if (
-            clear_saved_tensors_on_access
-            and saved_tensor_clear_indices
-            and not is_compiling()
-        ):
-            # Mutating compiled-autograd graph inputs while Dynamo is tracing
-            # the CA graph corrupts the example inputs. The eager CA path still
-            # needs this mutation so weakref-based clear-on-access checks match
-            # eager autograd.
-            if saved_tensor_inputs is None:
-                raise AssertionError(
-                    "saved_tensor_inputs must be set with saved_tensor_clear_indices"
-                )
-            for idx in saved_tensor_clear_indices:
-                saved_tensor_inputs[idx] = None
+        input_tensors = _materialize_saved_tensor_inputs(
+            saved_tensor_inputs,
+            saved_tensor_indices,
+        )
+        unpacked_tensors = _materialize_saved_tensor_unpack_hooks(
+            saved_tensor_unpack_hooks
+        )
+        fake_saved_tensors = _materialize_saved_tensors_from_sources(
+            saved_tensor_sources,
+            input_tensors,
+            unpacked_tensors,
+        )
+        _clear_saved_tensor_input_refs(
+            saved_tensor_inputs,
+            saved_tensor_clear_indices,
+        )
         del input_tensors
         del unpacked_tensors
-        del fake_saved_tensors_list
     else:
         fake_saved_tensors = tuple(saved_tensors)
     if clear_saved_tensors_on_access:

@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfCachingAllocatorDisabled,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -1178,6 +1179,15 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo(inp), out)
 
         def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float32)
+        with config.patch({"eager_numerics.use_pytorch_libdevice": True}):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
             return x.sigmoid()
 
         inp = torch.ones(64, device=device_type).to(torch.float64)
@@ -2109,6 +2119,43 @@ class CudaReproTests(TestCase):
         out2 = compiled_scan(a, b)
         self.assertEqual(out1, out2)
 
+    def test_associative_scan_dynamic_ndim(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def add_combine(a, b):
+            return a + b
+
+        def scan_dim0(x):
+            return associative_scan(add_combine, x, dim=0)
+
+        x1 = torch.randn(7, device=device_type)
+        torch.compiler.reset()
+        compiled_1d = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x1, 0), compiled_1d(x1))
+
+        x2 = torch.randn(4, 8, device=device_type)
+        torch.compiler.reset()
+        compiled_static = torch.compile(scan_dim0)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_static(x2))
+
+        torch.compiler.reset()
+        compiled_dynamic = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_dynamic(x2))
+
+        def mul_combine(a, b):
+            return a * b
+
+        def scan_dim1(x):
+            return associative_scan(mul_combine, x, dim=1)
+
+        x3 = torch.randn(2, 9, 5, device=device_type).clamp(-2, 2)
+        torch.compiler.reset()
+        compiled_3d = torch.compile(scan_dim1, dynamic=True)
+        self.assertEqual(scan_dim1(x3), compiled_3d(x3))
+
     def test_dynamic_persistent_reductions(self):
         @torch.compile(dynamic=True)
         def inner_reduce(x):
@@ -2254,6 +2301,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(idxs, [0])
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
@@ -2292,6 +2340,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)

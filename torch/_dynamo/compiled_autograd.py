@@ -31,6 +31,9 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
+    SAVED_TENSOR_SOURCE_INPUT,
+    SAVED_TENSOR_SOURCE_NONE,
+    SAVED_TENSOR_SOURCE_UNPACK_HOOK,
     unwrap_maybe_dynamic_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -68,6 +71,89 @@ from torch.utils._traceback import CapturedTraceback
 
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
+
+
+def _saved_tensor_input_index(proxy: Any) -> int | None:
+    node = proxy.node
+    if (
+        node.op == "call_function"
+        and node.target is operator.getitem
+        and isinstance(node.args[0], torch.fx.Node)
+        and node.args[0].op == "placeholder"
+        and node.args[0].target == "inputs"
+        and isinstance(node.args[1], int)
+    ):
+        return node.args[1]
+    return None
+
+
+def _saved_tensor_unpack_hook_args(
+    proxy: Any,
+    fx_tracer: PythonKeyTracer,
+) -> tuple[Any, Any] | None:
+    node = proxy.node
+    if not (
+        node.op == "call_function"
+        and node.target is call_hook
+        and node.kwargs.get("hook_type") == "unpack_hook"
+        and len(node.args) == 2
+        and isinstance(node.args[0], torch.fx.Node)
+        and isinstance(node.args[1], torch.fx.Node)
+    ):
+        return None
+    return (
+        torch.fx.Proxy(node.args[0], fx_tracer),
+        torch.fx.Proxy(node.args[1], fx_tracer),
+    )
+
+
+def _collect_saved_tensor_sources(
+    psaved_tensors: Sequence[Any],
+    fx_tracer: PythonKeyTracer,
+) -> (
+    tuple[
+        tuple[tuple[str, int | None], ...],
+        tuple[int, ...],
+        tuple[tuple[Any, Any], ...],
+        tuple[torch.fx.Node, ...],
+    ]
+    | None
+):
+    saved_tensor_indices: list[int] = []
+    saved_tensor_unpack_hooks: list[tuple[Any, Any]] = []
+    saved_tensor_unpack_hook_nodes: list[torch.fx.Node] = []
+    saved_tensor_sources: list[tuple[str, int | None]] = []
+
+    for proxy in psaved_tensors:
+        if proxy is None:
+            saved_tensor_sources.append((SAVED_TENSOR_SOURCE_NONE, None))
+            continue
+
+        input_idx = _saved_tensor_input_index(proxy)
+        if input_idx is not None:
+            saved_tensor_sources.append(
+                (SAVED_TENSOR_SOURCE_INPUT, len(saved_tensor_indices))
+            )
+            saved_tensor_indices.append(input_idx)
+            continue
+
+        unpack_hook_args = _saved_tensor_unpack_hook_args(proxy, fx_tracer)
+        if unpack_hook_args is not None:
+            saved_tensor_sources.append(
+                (SAVED_TENSOR_SOURCE_UNPACK_HOOK, len(saved_tensor_unpack_hooks))
+            )
+            saved_tensor_unpack_hooks.append(unpack_hook_args)
+            saved_tensor_unpack_hook_nodes.append(proxy.node)
+            continue
+
+        return None
+
+    return (
+        tuple(saved_tensor_sources),
+        tuple(saved_tensor_indices),
+        tuple(saved_tensor_unpack_hooks),
+        tuple(saved_tensor_unpack_hook_nodes),
+    )
 
 
 TURN_OFF_MSG = """You can turn off compiled autograd by either:
@@ -692,6 +778,77 @@ class AutogradCompilerInstance:
         presults = pytree.tree_map(self.to_proxy, results)
         return presults
 
+    def _clear_saved_tensor_call_args(
+        self,
+        psaved_tensors: Sequence[Any],
+    ) -> tuple[Any, dict[str, Any], tuple[int, ...] | None, tuple[torch.fx.Node, ...]]:
+        call_backward_kwargs: dict[str, Any] = {
+            "clear_saved_tensors_on_access": True,
+        }
+        collected = _collect_saved_tensor_sources(psaved_tensors, self.fx_tracer)
+        if collected is None:
+            return list(psaved_tensors), call_backward_kwargs, None, ()
+
+        (
+            saved_tensor_sources,
+            saved_tensor_indices,
+            saved_tensor_unpack_hooks,
+            saved_tensor_unpack_hook_nodes,
+        ) = collected
+        saved_tensor_clear_indices = tuple(dict.fromkeys(saved_tensor_indices))
+
+        call_backward_kwargs["saved_tensor_sources"] = saved_tensor_sources
+        if saved_tensor_indices:
+            if self.inputs_proxy is None:
+                raise AssertionError(
+                    "inputs_proxy must be set before proxy_call_backward"
+                )
+            call_backward_kwargs["saved_tensor_inputs"] = self.inputs_proxy
+            call_backward_kwargs["saved_tensor_indices"] = saved_tensor_indices
+            call_backward_kwargs["saved_tensor_clear_indices"] = (
+                saved_tensor_clear_indices
+            )
+        if saved_tensor_unpack_hooks:
+            call_backward_kwargs["saved_tensor_unpack_hooks"] = (
+                saved_tensor_unpack_hooks
+            )
+        return (
+            [],
+            call_backward_kwargs,
+            saved_tensor_clear_indices,
+            saved_tensor_unpack_hook_nodes,
+        )
+
+    def _record_saved_tensor_clear_nodes(
+        self,
+        saved_tensor_clear_indices: tuple[int, ...],
+        call_backward_node: torch.fx.Node,
+    ) -> None:
+        for idx in saved_tensor_clear_indices:
+            prev_node = self.saved_tensor_clear_nodes.get(idx)
+            if prev_node is not None:
+                prev_kwargs = dict(prev_node.kwargs)
+                prev_clear_indices = cast(
+                    tuple[int, ...],
+                    prev_kwargs["saved_tensor_clear_indices"],
+                )
+                prev_kwargs["saved_tensor_clear_indices"] = tuple(
+                    i for i in prev_clear_indices if i != idx
+                )
+                prev_node.kwargs = prev_kwargs
+            self.saved_tensor_clear_nodes[idx] = call_backward_node
+
+    def _erase_dead_saved_tensor_unpack_hooks(
+        self,
+        saved_tensor_unpack_hook_nodes: tuple[torch.fx.Node, ...],
+    ) -> None:
+        erased: set[torch.fx.Node] = set()
+        for node in saved_tensor_unpack_hook_nodes:
+            if node in erased or node.users:
+                continue
+            self.fx_tracer.graph.erase_node(node)
+            erased.add(node)
+
     def proxy_call_backward(
         self,
         inputs: Sequence[Any],
@@ -727,89 +884,20 @@ class AutogradCompilerInstance:
             clear_saved_tensors_on_access = (
                 ctx._forward_cls.clear_saved_tensors_on_access  # type: ignore[attr-defined]
             )
-            saved_tensor_indices: list[int] = []
-            saved_tensor_clear_indices: tuple[int, ...] | None = None
-            saved_tensor_unpack_hooks: list[tuple[Any, Any]] = []
-            saved_tensor_sources: tuple[tuple[str, int | None], ...] | None = None
-            if clear_saved_tensors_on_access:
-                # If we pass saved tensor proxies directly, generated Python
-                # keeps tensor locals live across call_backward. Pass source
-                # descriptors instead, so call_backward materializes tensors
-                # immediately before user backward. Because tensor graph inputs
-                # are de-duplicated by TensorImpl, only the last saved-variable
-                # owner for a given input index may clear the shared slot.
-                maybe_saved_tensor_sources: list[tuple[str, int | None]] = []
-                for proxy in psaved_tensors:
-                    if proxy is None:
-                        maybe_saved_tensor_sources.append(("none", None))
-                        continue
-                    node = proxy.node
-                    if (
-                        node.op == "call_function"
-                        and node.target is operator.getitem
-                        and isinstance(node.args[0], torch.fx.Node)
-                        and node.args[0].op == "placeholder"
-                        and node.args[0].target == "inputs"
-                        and isinstance(node.args[1], int)
-                    ):
-                        maybe_saved_tensor_sources.append(
-                            ("input", len(saved_tensor_indices))
-                        )
-                        saved_tensor_indices.append(node.args[1])
-                    elif (
-                        node.op == "call_function"
-                        and node.target is call_hook
-                        and node.kwargs.get("hook_type") == "unpack_hook"
-                        and len(node.args) == 2
-                        and isinstance(node.args[0], torch.fx.Node)
-                        and isinstance(node.args[1], torch.fx.Node)
-                    ):
-                        maybe_saved_tensor_sources.append(
-                            ("unpack_hook", len(saved_tensor_unpack_hooks))
-                        )
-                        saved_tensor_unpack_hooks.append(
-                            (
-                                torch.fx.Proxy(node.args[0], self.fx_tracer),
-                                torch.fx.Proxy(node.args[1], self.fx_tracer),
-                            )
-                        )
-                    else:
-                        maybe_saved_tensor_sources = []
-                        saved_tensor_indices = []
-                        saved_tensor_unpack_hooks = []
-                        break
-                if len(maybe_saved_tensor_sources) == len(psaved_tensors):
-                    saved_tensor_sources = tuple(maybe_saved_tensor_sources)
-                    saved_tensor_clear_indices = tuple(
-                        dict.fromkeys(saved_tensor_indices)
-                    )
             saved_tensors_arg: Any = psaved_tensors
             call_backward_kwargs: dict[str, Any] = {}
+            saved_tensor_clear_indices: tuple[int, ...] | None = None
+            saved_tensor_unpack_hook_nodes: tuple[torch.fx.Node, ...] = ()
             if clear_saved_tensors_on_access:
-                saved_tensors_arg = (
-                    list(psaved_tensors[:0])
-                    if saved_tensor_sources is not None
-                    else list(psaved_tensors)
-                )
-                call_backward_kwargs["clear_saved_tensors_on_access"] = True
-                if saved_tensor_sources is not None:
-                    call_backward_kwargs["saved_tensor_sources"] = saved_tensor_sources
-                if saved_tensor_indices:
-                    if self.inputs_proxy is None:
-                        raise AssertionError(
-                            "inputs_proxy must be set before proxy_call_backward"
-                        )
-                    call_backward_kwargs["saved_tensor_inputs"] = self.inputs_proxy
-                    call_backward_kwargs["saved_tensor_indices"] = tuple(
-                        saved_tensor_indices
-                    )
-                    call_backward_kwargs["saved_tensor_clear_indices"] = (
-                        saved_tensor_clear_indices
-                    )
-                if saved_tensor_unpack_hooks:
-                    call_backward_kwargs["saved_tensor_unpack_hooks"] = tuple(
-                        saved_tensor_unpack_hooks
-                    )
+                # If we pass saved tensor proxies directly, generated Python keeps
+                # tensor locals live across call_backward. Source descriptors let
+                # call_backward materialize them immediately before user backward.
+                (
+                    saved_tensors_arg,
+                    call_backward_kwargs,
+                    saved_tensor_clear_indices,
+                    saved_tensor_unpack_hook_nodes,
+                ) = self._clear_saved_tensor_call_args(psaved_tensors)
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
                 target=call_backward,
@@ -821,19 +909,11 @@ class AutogradCompilerInstance:
                 kwargs=call_backward_kwargs,
             )
             if saved_tensor_clear_indices is not None:
-                for idx in saved_tensor_clear_indices:
-                    prev_node = self.saved_tensor_clear_nodes.get(idx)
-                    if prev_node is not None:
-                        prev_kwargs = dict(prev_node.kwargs)
-                        prev_clear_indices = cast(
-                            tuple[int, ...],
-                            prev_kwargs["saved_tensor_clear_indices"],
-                        )
-                        prev_kwargs["saved_tensor_clear_indices"] = tuple(
-                            i for i in prev_clear_indices if i != idx
-                        )
-                        prev_node.kwargs = prev_kwargs
-                    self.saved_tensor_clear_nodes[idx] = proxies.node
+                self._record_saved_tensor_clear_nodes(
+                    saved_tensor_clear_indices,
+                    proxies.node,
+                )
+            self._erase_dead_saved_tensor_unpack_hooks(saved_tensor_unpack_hook_nodes)
         if proxies is None:
             raise AssertionError("proxies must not be None after backward call")
 

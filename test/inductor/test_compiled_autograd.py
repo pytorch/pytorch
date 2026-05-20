@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import weakref
 from copy import deepcopy
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -1747,12 +1748,13 @@ main()
 
     def test_custom_fn_clear_saved_tensors_unpack_hook(self):
         def fn():
-            import weakref
+            unpack_calls = []
 
             def pack(x):
                 return x.detach()
 
             def unpack(x):
+                unpack_calls.append(None)
                 return x.clone()
 
             class MyFn(torch.autograd.Function):
@@ -1776,6 +1778,7 @@ main()
                 y = MyFn.apply(x)
                 y.sum().backward()
             yield x.grad
+            yield len(unpack_calls)
 
         self.check_output_and_recompiles(
             fn, count=[1, 0], compiler_fn=make_compiler_fn(backend="ca_eager")
@@ -1783,8 +1786,6 @@ main()
 
     def test_custom_fn_clear_saved_tensors_with_none(self):
         def fn():
-            import weakref
-
             class MyFn(torch.autograd.Function):
                 clear_saved_tensors_on_access = True
 
