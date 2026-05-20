@@ -34,6 +34,10 @@ DEFAULT_MASK_MOD_VEC_SIZE = 32
 MAX_PACKED_MASK_INTERVALS = 8
 
 
+def is_mask_mod_vec_supported(cuda_major: int | None) -> bool:
+    return cuda_major in (10, 11)
+
+
 @dataclasses.dataclass
 class FlexFlashConfig:
     """Autotuning configuration for CuteDSL flex flash attention kernels.
@@ -117,7 +121,7 @@ def get_flex_flash_fwd_configs(
     mask_mod_vec_size = select_mask_mod_vec_size(
         has_mask_mod=has_mask_mod,
         has_mask_aux_tensors=has_mask_aux_tensors,
-        supports_mask_mod_vec=cuda_major in (10, 11),
+        supports_mask_mod_vec=is_mask_mod_vec_supported(cuda_major),
         graph_module=mask_mod_graph_module,
         other_buffers=mask_mod_other_buffers,
     )
@@ -664,7 +668,7 @@ class PackedMaskAnalyzer:
     """Lower one Flex mask_mod FX graph to packed 32-lane mask intervals.
 
     The analyzer owns the mask graph signature, symbolic q/kv/lane variables,
-    and any rendered CuteDSL code for q-uniform aux tensor bounds. Call
+    and any rendered CuteDSL code for KV-lane-uniform aux tensor bounds. Call
     ``node_to_intervals`` on the mask graph output; unsupported expressions
     return ``None`` so the caller can use the generic mask lowering path.
     """
@@ -679,14 +683,14 @@ class PackedMaskAnalyzer:
     )
     next_symbol_id: int = 0
 
-    def q_uniform_cute_expr(
+    def lane_uniform_cute_expr(
         self,
         expr: object,
         *,
         for_index: bool = False,
         index_dim_size: int | sympy.Expr | None = None,
     ) -> str | None:
-        """Return CuteDSL code for a scalar expression that is uniform across q lanes."""
+        """Return CuteDSL code for a scalar expression that is uniform across KV lanes."""
         if isinstance(expr, int | sympy.Integer):
             index = int(expr)
             if for_index and index < 0:
@@ -710,15 +714,15 @@ class PackedMaskAnalyzer:
             return None
 
         if is_aten_index_node(expr):
-            return self._q_uniform_index_cute_expr(
+            return self._lane_uniform_index_cute_expr(
                 expr, for_index=for_index, index_dim_size=index_dim_size
             )
 
         args = expr.args
         if len(args) < 2:
             return None
-        lhs = self.q_uniform_cute_expr(args[0])
-        rhs = self.q_uniform_cute_expr(args[1])
+        lhs = self.lane_uniform_cute_expr(args[0])
+        rhs = self.lane_uniform_cute_expr(args[1])
         if lhs is None or rhs is None:
             return None
         match expr.target:
@@ -737,14 +741,14 @@ class PackedMaskAnalyzer:
             case _:
                 return None
 
-    def _q_uniform_index_cute_expr(
+    def _lane_uniform_index_cute_expr(
         self,
         expr: torch.fx.Node,
         *,
         for_index: bool,
         index_dim_size: int | sympy.Expr | None,
     ) -> str | None:
-        """Render a q-uniform aux tensor index expression.
+        """Render a KV-lane-uniform aux tensor index expression.
 
         For example, ``offsets[doc_ids[b, q_idx]]`` becomes a nested CuteDSL
         load from ``aux_tensors``. Dynamic aux-derived indices are wrapped for
@@ -762,7 +766,7 @@ class PackedMaskAnalyzer:
         if result_shape is not None and len(result_shape) != 0:
             return None
         base, indices = expr.args
-        base_code = self.q_uniform_cute_expr(base)
+        base_code = self.lane_uniform_cute_expr(base)
         base_shape = fx_node_shape(base) if isinstance(base, torch.fx.Node) else None
         if base_code is None or not isinstance(indices, (list, tuple)):
             return None
@@ -771,7 +775,7 @@ class PackedMaskAnalyzer:
         index_codes = []
         for dim, index in enumerate(indices):
             dim_size = base_shape[dim]
-            index_code = self.q_uniform_cute_expr(
+            index_code = self.lane_uniform_cute_expr(
                 index, for_index=True, index_dim_size=dim_size
             )
             if index_code is None:
@@ -804,17 +808,17 @@ class PackedMaskAnalyzer:
         return _fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
     def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
-        """Assign a stable symbolic bound name to a q-uniform aux load."""
+        """Assign a stable symbolic bound name to a KV-lane-uniform aux load."""
         if not is_aten_index_node(node):
             return None
         if node in self.aux_load_symbols:
             return self.aux_load_symbols[node]
-        q_uniform_code = self.q_uniform_cute_expr(node)
-        if q_uniform_code is None:
+        lane_uniform_code = self.lane_uniform_cute_expr(node)
+        if lane_uniform_code is None:
             return None
         symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
         self.next_symbol_id += 1
-        self.symbol_codes[symbol] = q_uniform_code
+        self.symbol_codes[symbol] = lane_uniform_code
         self.aux_load_symbols[node] = symbol
         return symbol
 
@@ -1228,7 +1232,7 @@ def create_flex_flash_attention_kernel(
     if needs_block_mask and torch.cuda.is_available():
         device_index = None if device is None else device.index
         cuda_major = torch.cuda.get_device_capability(device_index)[0]
-        if cuda_major in (10, 11):
+        if is_mask_mod_vec_supported(cuda_major):
             packed_mask_intervals = select_packed_mask_intervals(
                 mask_graph.graph_module
             )
@@ -1237,9 +1241,6 @@ def create_flex_flash_attention_kernel(
             FlexFlashConfig(conf.score_mod_vec_size, DEFAULT_MASK_MOD_VEC_SIZE)
             for conf in configs
         ]
-        max_configs = torch._inductor.config.test_configs.max_flex_configs
-        if max_configs is not None and len(configs) > max_configs:
-            configs = configs[:max_configs]
 
     error: NotImplementedError | None = None
     for conf in configs:

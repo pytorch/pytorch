@@ -695,6 +695,8 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         self.assertIn("aux_tensors[0][b_idx[0], q_idx[0]]", intervals[0].lower)
         self.assertIn("aux_tensors[1]", intervals[0].lower)
         self.assertIn(" if ", intervals[0].lower)
+        self.assertIn("q_idx[0]", intervals[0].upper)
+        self.assertIn("cutlass.Int32(1)", intervals[0].upper)
 
     def test_packed_mask_interval_selector_rejects_interval_explosion(self):
         graph = torch.fx.Graph()
@@ -773,9 +775,12 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
 
         self.assertIsNotNone(intervals)
         self.assertEqual(len(intervals), 1)
+        self.assertIn("max(", intervals[0].lower)
         self.assertIn("aux_tensors[0]", intervals[0].lower)
         self.assertIn("aux_tensors[1]", intervals[0].lower)
+        self.assertIn("min(", intervals[0].upper)
         self.assertIn("q_idx[0]", intervals[0].upper)
+        self.assertIn("cutlass.Int32(1)", intervals[0].upper)
 
     @parametrize("chained", [False, True], name_fn=lambda chained: str(chained))
     def test_score_mod_vec_size_selector_rejects_score_placeholder_index(self, chained):
@@ -808,7 +813,9 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                 1,
             )
 
-    @parametrize("cuda_major", [10, 11, 12], name_fn=lambda cuda_major: str(cuda_major))
+    @parametrize(
+        "cuda_major", [9, 10, 11, 12], name_fn=lambda cuda_major: str(cuda_major)
+    )
     def test_mask_mod_vec_config_supports_only_sm100_path(self, cuda_major):
         expected_config = (
             flex_flash_attention_module.FlexFlashConfig(mask_mod_vec_size=32)

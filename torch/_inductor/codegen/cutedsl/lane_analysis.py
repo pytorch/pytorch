@@ -11,7 +11,11 @@ from ...virtualized import V
 
 @dataclasses.dataclass(frozen=True)
 class LaneExprInfo:
-    """Lane-wise uniformity and contiguity classification for an expression."""
+    """Lane-wise uniformity and contiguity classification for an expression.
+
+    ``is_contiguous`` means the expression is aligned and contiguous for the
+    full ``max_width`` requested by ``classify_lane_expr``.
+    """
 
     is_uniform: bool
     is_contiguous: bool
@@ -25,7 +29,7 @@ def classify_lane_expr(
     max_width: int,
     uniform_symbols: OrderedSet[sympy.Symbol] | None = None,
 ) -> LaneExprInfo:
-    """Classify whether an expression is uniform or contiguous across lanes."""
+    """Classify whether an expression is uniform or full-width contiguous."""
     if max_width <= 1:
         return LaneExprInfo(True, False, None)
 

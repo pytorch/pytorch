@@ -102,7 +102,8 @@ class CuteDSLIndexFragment:
         code: Python source expression for the index or index fragment.
         is_static_int: True when code is an inline integer index, not a fragment.
         is_lane_uniform: True when every vector lane has the same index.
-        is_contiguous: True when code is lane-contiguous in the vectorized index.
+        is_contiguous: True when code is aligned and contiguous for the full
+            requested vector width.
     """
 
     code: str
