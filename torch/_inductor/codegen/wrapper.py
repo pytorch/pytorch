@@ -40,6 +40,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -2485,10 +2486,8 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_dynamic_slice_size(self, node):
         def clamp_index(x):
-            pos = self.codegen_sizevar(sympy.Max(0, sympy.Min(x, node.size)))
-            neg = self.codegen_sizevar(
-                sympy.Max(0, sympy.Min(x + node.size, node.size))
-            )
+            pos = self.codegen_sizevar(Max(0, Min(x, node.size)))
+            neg = self.codegen_sizevar(Max(0, Min(x + node.size, node.size)))
             x_cond = self.codegen_sizevar(x)
             return f"{pos} if {x_cond} >= 0 else {neg}"
 
