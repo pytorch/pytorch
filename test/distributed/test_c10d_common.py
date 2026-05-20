@@ -2135,6 +2135,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 # Hide all GPUs
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["ZE_AFFINITY_MASK"] = ""
 
 import torch
 from torch import distributed as dist

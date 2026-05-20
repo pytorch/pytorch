@@ -64,7 +64,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     skipIfXpu,
-    TEST_MULTIGPU,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     TestCase,
@@ -340,7 +340,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         #       OS sends SIGABRT signal → process killed by signal → exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not TEST_MULTIGPU)
+            if (IS_SANDCASTLE and not TEST_MULTIACCELERATOR)
             else (
                 -signal.SIGABRT if (torch.version.hip or TEST_XPU) else signal.SIGABRT
             )
@@ -380,7 +380,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         return False
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 1 GPU")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
     def test_xccl_dist_backend_error(self):
         self.skipTest("Skipping due to no oneCCL error reporting")
@@ -396,7 +396,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         self.assertIsInstance(cm.exception, RuntimeError)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("eager_init", [True, False])
     def test_close_pg(self, eager_init: bool):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -419,7 +419,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
         # TODO: expand this test to non-blocking mode
@@ -459,7 +459,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t1)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_xpu_event_cache_mthd_race(self):
         # This unit test is to test the case when the collective is launched in
         # a side thread and the thread dies before the cache has been fully recycled.
@@ -491,7 +491,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
 
     @requires_xccl()
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU,
+        not TEST_MULTIACCELERATOR,
         "Test requires 2+ GPUs",
     )
     @parametrize(
@@ -716,7 +716,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         )
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_destruct_before_terminate_pg(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_xccl(store, self.opts())
@@ -796,7 +796,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("backend", [None, "xccl"])
     def test_set_xccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -819,7 +819,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
         self._check_xccl_timeout(timedelta(seconds=252))
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("eager_init", [True, False])
     def test_new_group(self, eager_init: bool):
         # Test the optimization of new groups that contain all world
@@ -839,7 +839,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         dist.broadcast(tensor, 0, group=ng)
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @skipIfXpu(msg="XCCL doesn't currently support comm split, skipping test")
     def test_comm_split_subgroup(self):
         # Test `xcclCommSplit` for smaller subgroups of the world when
@@ -863,7 +863,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(tensor, original_tensor)
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_comm_eager_init_subgroup(self):
         # Test `xcclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -882,7 +882,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         torch.xpu.synchronize()
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @skipIfXpu(msg="XCCL doesn't currently support comm split, skipping test")
     def test_comm_split_group(self):
         # Test `xcclCommSplit` for smaller subgroups of the world when
@@ -925,7 +925,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @skipIfXpu(msg="XCCL doesn't currently support comm split, skipping test")
     def test_comm_split_group_mixed_backend(self):
         # Test `xcclCommSplit` for smaller subgroups of the world when
@@ -981,7 +981,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("eager_init", [True, False])
     def test_subgroup_p2p(self, eager_init: bool):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1004,7 +1004,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_get_uid(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"xpu:{self.rank}")
@@ -1016,7 +1016,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(_get_process_group_uid(pg_2), 1)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_set_process_group_desc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"xpu:{self.rank}")
@@ -1030,7 +1030,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(pg_2.group_desc, "undefined")
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_deterministic_mode_no_break(self):
         torch.use_deterministic_algorithms(True)
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1040,7 +1040,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         dist.all_reduce(tensor)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_init_with_idx(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device_idx = self.rank
@@ -1053,7 +1053,7 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         dist.all_reduce(torch.empty(1, device=torch.device("xpu", device_idx)))
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_block_current_stream(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"xpu:{self.rank}")
@@ -4028,7 +4028,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         pthread_setname_np(tid, name.encode())
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
     def test_short_json(self, timing_enabled, include_collectives):
@@ -4055,7 +4055,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
     def test_short_pickle(self, timing_enabled, include_collectives):
@@ -4087,7 +4087,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -4115,7 +4115,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_dump_pipe(self):
         def open_file_with_timeout(file_path, mode, timeout=1.0):
             start_time = time.time()
@@ -4151,7 +4151,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         self.parent.recv()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_long(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -4190,7 +4190,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     def test_barrier_profiling(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -4212,7 +4212,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @skipIfXpu(msg="XCCL doesn't currently support onlyActive filtering")
     @parametrize("timing_enabled", [True, False])
     @parametrize("only_active", [True, False])
@@ -4262,7 +4262,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
             torch.xpu.synchronize(device=device)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_trace_while_stuck(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -4323,7 +4323,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
             torch.xpu.synchronize(device=device)
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize(
         "op_sizes_per_coalesce",
         [
@@ -4428,7 +4428,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
             )
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize(
         "op_sizes",
         [
@@ -4599,7 +4599,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
             self.assertTrue("duration_ms" not in t["entries"][0])
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
         """
@@ -4657,7 +4657,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_partial_overwrite(self, timing_enabled):
         """
@@ -4708,7 +4708,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_wraparound(self, timing_enabled):
         """
@@ -4763,7 +4763,7 @@ class XCCLTraceTest(XCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_xccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "XCCL test requires 2+ XPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "XCCL test requires 2+ XPUs")
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_multiple_resets(self, timing_enabled):
         """
