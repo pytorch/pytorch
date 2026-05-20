@@ -1235,8 +1235,8 @@ User code traceback:
         self.assertExpectedInline(
             msg,
             """\
-Received signal to skip frame (without graph break): No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
-Frame info: empty_fn (test_error_messages.py line N) empty_fn                 test_error_messages.py N""",
+skipping: empty_fn (reason: Dynamo decided to skip the frame while tracing: No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
+Frame info: empty_fn (test_error_messages.py line N), file: test_error_messages.py)""",
         )
 
     @make_logging_test(graph_breaks=True)
