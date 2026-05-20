@@ -506,6 +506,14 @@ pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
 )
 
+# use torch profiler to benchmark kernels during autotuning
+# when enabled, this takes precedence over use_experimental_benchmarker
+use_torch_profiler_benchmarker: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
+    justknob="pytorch/inductor:use_torch_profiler_benchmarker",
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1656,7 +1664,11 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )
+    )  # type: ignore[assignment]
+
+    # Target CPU architecture for C++ wrapper compilation. When unset, Inductor
+    # uses the platform default. Set to "" to suppress the architecture flag.
+    march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2888,6 +2900,8 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
+    # This can be enabled directly; Inductor also enables it while
+    # emulate_precision_casts is active.
     use_pytorch_libdevice: bool = False
 
 
