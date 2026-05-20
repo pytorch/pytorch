@@ -94,8 +94,8 @@ Review subagent:
 9. Inspect only `git status --short`, `git diff --stat`, and
    `git diff --cached --stat`.
 10. Ask the same implementation subagent to run final validation, stage only
-   intended files, run `lintrunner -a`, and create the gate commit/amend. The
-   manager does not commit.
+   intended non-Markdown files, run `lintrunner -a`, and create the gate
+   commit/amend. The manager does not commit.
 11. Append the audit log line.
 12. Start the next cycle unless the plan is complete or a blocker requires
    human input.
@@ -118,6 +118,19 @@ Do not relax gate exit criteria, do not mark a gate complete without measured
 evidence, and do not add new expected-failure or skip sentinels unless the
 human has explicitly approved it.
 
+If the same source fix makes additional CPython expected-failure sentinels
+unexpectedly pass, treat those as positive collateral coverage. Verify each
+collateral test, remove the corresponding sentinel files with `git rm`, include
+those removals in the same gate commit, and document them in `coverage.md`.
+This does not authorize implementing additional gates or removing unverified
+sentinels.
+
+`coverage.md` and other Markdown files are live operating notes for the
+agentic loop. You may update them while working, but never stage or include
+them in a gate commit unless the human explicitly asks for a docs-only commit.
+Gate commits should look as if they came from ordinary source work: source
+changes, focused regression tests, and sentinel removals only.
+
 Use `agent_space/` for temporary reports, JUnit XML, scratch scripts, and
 sentinel backups. If you temporarily bypass sentinels, restore them before
 reporting unless your fix proves they should be removed.
@@ -134,7 +147,8 @@ CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
   python agent_space/run_cpython_and_dynamo_timing.py --shards 32
 
 Update `test/cpython/agentic_loop/coverage.md` with exact commands, results,
-sentinels removed, known risks, and the next recommended gate.
+sentinels removed, known risks, and the next recommended gate. Leave this and
+all other Markdown changes unstaged for gate commits.
 
 Report:
 - Active gate
@@ -144,7 +158,7 @@ Report:
 - Tests added or updated
 - Exact commands run and results
 - CPU fast validation result
-- Plan updates made
+- Plan updates made but intentionally left unstaged
 - Known risks
 - Final `git status --short`
 - Recommended next gate
@@ -170,6 +184,7 @@ Review for:
 - Incorrect sentinel removals or additions
 - Unsupported gate-completion claims
 - Plan updates that change exit criteria or status without evidence
+- Markdown files staged for a gate commit
 - Accidental files, caches, logs, or scratch output
 - Test evidence that is too narrow for the claimed fix
 
@@ -208,6 +223,16 @@ manager must not stage or commit.
 Only stage intended project files. Do not stage `agent_space/`, unrelated
 untracked files, caches, logs, or generated scratch output.
 
+Do not stage or commit `coverage.md` or any other Markdown file for a gate
+commit. Markdown files may remain modified as local loop state, but the gate
+commit should include only source changes, focused regression tests, and
+sentinel removals unless the human explicitly asks for a docs-only commit.
+
+If final validation reports XPASS for CPython expected-failure sentinels fixed
+by the same source change, verify those tests, remove the sentinel files with
+`git rm`, and include the removals in the same commit. Do not leave known
+positive collateral sentinel removals for a later gate.
+
 The commit message should describe the docs or code change directly and include
 an informal AI-authorship note in the body. Do not add a `Co-authored-by:`
 trailer for the AI assistant.
@@ -215,6 +240,7 @@ trailer for the AI assistant.
 Report:
 - Exact validation commands and results
 - Files staged
+- Markdown files intentionally left unstaged
 - Commit hash and message
 - Final `git status --short`
 ```
@@ -225,6 +251,9 @@ Report:
 - Only the human can authorize changing exit criteria.
 - A subagent may propose gate changes only under "Proposed Gate Changes
   Awaiting Human Approval".
+- Removing additional CPython expected-failure sentinels is not rescoping when
+  the current gate's source fix already makes those tests pass, each test is
+  verified, and the removals are documented as collateral coverage.
 - A gate is complete only when measured evidence satisfies the criteria that
   were active at the start of the cycle.
 - If a subagent claims a gate is complete, verify that claim using its reported
