@@ -124,24 +124,17 @@ cdll.LoadLibrary("__lib_path__")
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
-                # Use a marker file to cache the subprocess load-check result.
-                # The subprocess spawns a full Python process that imports torch
-                # just to verify the .so can be loaded, which takes ~2s each.
-                # Caching the result avoids this on subsequent runs.
-                load_ok_marker = output_path + ".load_ok"
-                if not os.path.isfile(load_ok_marker):
-                    subprocess.check_call(
-                        [
-                            sys.executable,
-                            "-c",
-                            VecISA._avx_py_load.replace("__lib_path__", output_path),
-                        ],
-                        cwd=output_dir,
-                        stderr=subprocess.DEVNULL,
-                        env=python_subprocess_env(),
-                    )
-                    with open(load_ok_marker, "w") as f:
-                        f.write("")
+                # Check build result
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ],
+                    cwd=output_dir,
+                    stderr=subprocess.DEVNULL,
+                    env=python_subprocess_env(),
+                )
             except Exception:
                 return False
 
