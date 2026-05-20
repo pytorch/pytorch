@@ -2773,7 +2773,7 @@ make_fallback(torch.ops.streams.synchronize_device.default)
 def rand(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
-    elif config.fallback_random or kwargs.get("pin_memory"):
+    elif config.fallback_random:
         kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2783,7 +2783,7 @@ def rand(*args, **kwargs):
 def randn(*args, **kwargs):
     if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
-    elif config.fallback_random or kwargs.get("pin_memory"):
+    elif config.fallback_random:
         kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
@@ -2930,23 +2930,36 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
-    # Calculate the maximum offset for the boundaries tensor
-    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
-    # This ensures the mask check in bucketize_binary_search works correctly
-    # for both contiguous and non-contiguous tensors.
     size = tb.get_size()
     stride = tb.get_stride()
-    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
         size[-1],
-        max_offset,
+        tb.get_layout().storage_size(),
         stride[-1],
     )
 
 
+def _realize_bucketize_lookup_tensor(tb: TensorBox) -> TensorBox:
+    # ops.bucketize needs a named strided tensor.  realize_input() also replays
+    # affine views over newly-realized inputs as ReinterpretViews when possible.
+    return TensorBox(ir.ExternKernel.realize_input(tb))
+
+
 def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
+
+
+def _bucketize_indices(
+    tb: TensorBox, index: Sequence[sympy.Expr], index_dtype: torch.dtype
+) -> Any:
+    strides = tb.get_stride()
+    flattened_index = tb.get_layout().offset + sum(
+        (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
+    )
+    if not index and isinstance(flattened_index, sympy.Integer):
+        return int(flattened_index)
+    return ops.index_expr(flattened_index, index_dtype)
 
 
 @register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
@@ -2985,14 +2998,12 @@ def searchsorted(
     index_dtype = torch.int32 if out_int32 else torch.int64
     values_loader = self.make_loader()
 
-    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
-    # realize it into global memory; or in other words, we can't guarantee that
-    # sorted_sequence.get_name() (used below) will exist unless we call
-    # sorted_sequence.realize().
-    sorted_sequence.realize()
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we
+    # need a named strided tensor for codegen below.
+    sorted_sequence = _realize_bucketize_lookup_tensor(sorted_sequence)
 
     if sorter is not None:
-        sorter.realize()
+        sorter = _realize_bucketize_lookup_tensor(sorter)
 
     if len(sorted_sequence.get_size()) == 1:
 
@@ -3001,11 +3012,15 @@ def searchsorted(
             return ops.bucketize(
                 val,
                 _boundaries_helper(sorted_sequence),
-                0,
+                _bucketize_indices(sorted_sequence, (), index_dtype),
                 index_dtype,
                 right,
                 sorter=None if sorter is None else _sorter_helper(sorter),
-                sorter_indices=None if sorter is None else 0,
+                sorter_indices=(
+                    None
+                    if sorter is None
+                    else _bucketize_indices(sorter, (), index_dtype)
+                ),
             )
 
     else:
@@ -3016,13 +3031,7 @@ def searchsorted(
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
             def get_flattened_index(tb: TensorBox):
-                strides = tb.get_stride()
-                return ops.index_expr(
-                    functools.reduce(
-                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
-                    ),
-                    index_dtype,
-                )
+                return _bucketize_indices(tb, idx, index_dtype)
 
             return ops.bucketize(
                 val,
@@ -3068,10 +3077,8 @@ def bucketize(
         )
 
     # The entire boundaries tensor needs to be used by ops.bucketize, so we
-    # need to realize it into global memory; or in other words, we can't
-    # guarantee that boundaries.get_name() (used below) will exist unless
-    # we call boundaries.realize().
-    boundaries.realize()
+    # need a named strided tensor for codegen below.
+    boundaries = _realize_bucketize_lookup_tensor(boundaries)
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -3082,7 +3089,7 @@ def bucketize(
         indices = ops.bucketize(
             val,
             _boundaries_helper(boundaries),
-            0,
+            _bucketize_indices(boundaries, (), index_dtype),
             index_dtype,
             right,
         )
@@ -3638,11 +3645,6 @@ def clone(x, *, memory_format=None):
     )
 
 
-def _realize_as_pinned(result):
-    result.realize()
-    result.data.data.get_layout().is_pinned = True
-
-
 def clone_preserve_reinterpret_view(x):
     reinterpret_view_layouts = []
     if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
@@ -3664,18 +3666,8 @@ def clone_preserve_reinterpret_view(x):
     return x
 
 
-def lift_fresh_copy(x):
-    result = clone(x)
-    input_layout = x.maybe_get_layout()
-    if input_layout is not None and input_layout.is_pinned:
-        # torch.tensor(..., pin_memory=True) constants reach Inductor as a
-        # pinned constant followed by lift_fresh_copy.
-        _realize_as_pinned(result)
-    return result
-
-
 if hasattr(aten, "lift_fresh_copy"):
-    register_lowering(aten.lift_fresh_copy)(lift_fresh_copy)
+    register_lowering(aten.lift_fresh_copy)(clone)
 
 
 @register_lowering(prims.iota)
@@ -3837,6 +3829,7 @@ def _unwrap(x):
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -3879,20 +3872,15 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     else:
         return V.graph.add_tensor_constant(
-            torch.tensor(
-                data, dtype=dtype, device=device, pin_memory=pin_memory or False
-            )
+            torch.tensor(data, dtype=dtype, device=device)
         )
 
-    result = Pointwise.create(
+    return Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
     )
-    if pin_memory:
-        _realize_as_pinned(result)
-    return result
 
 
 @register_lowering(torch.as_tensor)
@@ -4033,7 +4021,9 @@ def tensor_constructor(fill_value):
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
-            _realize_as_pinned(full_pointwise)
+            # Realize the buffer
+            full_pointwise.realize()
+            full_pointwise.data.data.get_layout().is_pinned = True
 
         return full_pointwise
 
@@ -4209,7 +4199,7 @@ def gather(x, dim, index, sparse_grad=False):
 
     def fn(idx):
         idx = list(idx)
-        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim], wrap_neg=False)
         if len(idx) == 0:
             idx = [gather_idx]
         else:
@@ -6739,10 +6729,13 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
     if (
         reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
-        and is_triton(x)
+        and supports_logical_index_argreduce
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
@@ -8504,26 +8497,41 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(
-    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
-):
+def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    if len(additional_inputs) > 0:
+    num_scan_inputs = 2 * len(xs)
+    placeholders = [
+        node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    additional_placeholders = placeholders[num_scan_inputs:]
+    if len(additional_placeholders) != len(additional_inputs):
+        raise RuntimeError("Unable to generate code for associative_scan op")
+
+    # Dynamic shapes can lift symbols from the scan element metadata into the
+    # combine graph even when the combine function does not read them.
+    unsupported_inputs = []
+    for arg, placeholder in zip(additional_inputs, additional_placeholders):
+        if not isinstance(arg, (int, sympy.Basic)) or placeholder.users:
+            unsupported_inputs.append(arg)
+    if unsupported_inputs:
         raise RuntimeError(
-            "Unable to generate code for associative_scan op, because there are lifted arguments"
+            "Unable to generate code for associative_scan op, because there are "
+            "unsupported lifted arguments"
         )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+    subgraph_inputs.extend(additional_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
+            *additional_inputs,
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
