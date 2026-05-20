@@ -439,6 +439,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                               std::nullopt);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
+    output_t.fill_(std::numeric_limits<float>::quiet_NaN());
     return output_t;
   }
 
