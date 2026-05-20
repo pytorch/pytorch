@@ -3,7 +3,7 @@
 
 set -eux
 
-ACL_VERSION=${ACL_VERSION:-"451a2d05110892781715ebdbfb9b08d86733376d"}
+ACL_VERSION=${ACL_VERSION:-"v53.1.0"}
 ACL_INSTALL_DIR="/acl"
 ACL_REPO="https://github.com/ARM-software/ComputeLibrary.git"
 ACL_CHECKOUT_DIR="ComputeLibrary"
