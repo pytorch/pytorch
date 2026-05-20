@@ -2125,6 +2125,8 @@ class CudaKernelParamCache:
             )[0],
             key=basename,
         )
+        # Multi-arch mode rewrites cubin_path to an artifact built later.
+        runtime_bin_path = bin_path
         # Retrieve the basename again in case it is a generated hashcode
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
@@ -2171,6 +2173,7 @@ class CudaKernelParamCache:
                 )
 
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
+        params["runtime_bin_path"] = runtime_bin_path
         params["asm"] = asm_path
         cls.cache[key] = params
 
@@ -2907,7 +2910,7 @@ end
 
             cubins_o = []
             asm_files = []
-            fatbin_cmds: list[tuple[str, str]] = []
+            fatbin_cmds: list[tuple[str, str, str | None]] = []
             if not _IS_WINDOWS:
                 cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
@@ -2927,7 +2930,9 @@ end
                         and device_type == "cuda"
                     ):
                         if torch.version.hip is None:
-                            fatbin_cmds.append((asm_file, cubin_file))
+                            fatbin_cmds.append(
+                                (asm_file, cubin_file, value.get("runtime_bin_path"))
+                            )
 
                         else:
                             # ROCm multi-arch: compile LLVM IR to multi-arch bundle
@@ -2963,28 +2968,57 @@ end
                     if config.aot_inductor.embed_kernel_binary:
                         cubins_to_embed.append((cubin_file, kernel_name))
 
-                # Compile PTX → fatbin in parallel (each nvcc call is independent).
-                # Must complete before cubin embedding below.
+                # Build CUDA fatbins in parallel before cubin embedding below.
                 if fatbin_cmds:
                     from concurrent.futures import ThreadPoolExecutor
 
                     current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
                     nvcc = cuda_compile_utils._cuda_compiler()
+                    fatbinary = shutil.which("fatbinary")
+                    if nvcc is not None and (nvcc_dir := os.path.dirname(nvcc)):
+                        candidate = os.path.join(nvcc_dir, "fatbinary")
+                        if os.path.exists(candidate):
+                            fatbinary = candidate
 
-                    def _compile_fatbin(asm_and_cubin: tuple[str, str]) -> None:
-                        asm_f, cubin_f = asm_and_cubin
-                        cmd = (
-                            f"{nvcc} -fatbin {asm_f} -o {cubin_f} "
-                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                        )
+                    def _compile_fatbin(
+                        asm_cubin_and_raw: tuple[str, str, str | None],
+                    ) -> None:
+                        asm_f, cubin_f, raw_cubin_f = asm_cubin_and_raw
+                        if (
+                            fatbinary is not None
+                            and raw_cubin_f is not None
+                            and os.path.exists(raw_cubin_f)
+                        ):
+                            # Avoid re-running ptxas; the CUDA toolkit can lag
+                            # the PTX version emitted by Triton.
+                            cmd = [
+                                fatbinary,
+                                f"--create={cubin_f}",
+                                "-64",
+                                f"--image3=kind=elf,sm={current_arch},file={raw_cubin_f}",
+                                f"--image3=kind=ptx,sm={current_arch},file={asm_f}",
+                            ]
+                        else:
+                            if nvcc is None:
+                                raise RuntimeError("nvcc is required to build fatbin")
+                            cmd = [
+                                *shlex.split(nvcc),
+                                "-fatbin",
+                                asm_f,
+                                "-o",
+                                cubin_f,
+                                "-gencode",
+                                f"arch=compute_{current_arch},code=compute_{current_arch}",
+                                "-gencode",
+                                f"arch=compute_{current_arch},code=sm_{current_arch}",
+                            ]
                         try:
                             subprocess.run(
-                                cmd.split(), capture_output=True, text=True, check=True
+                                cmd, capture_output=True, text=True, check=True
                             )
                         except subprocess.CalledProcessError as e:
                             print(
-                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                f"{shlex.join(cmd)} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
                                 file=sys.stderr,
                             )
                             raise
