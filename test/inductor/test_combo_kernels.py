@@ -627,7 +627,7 @@ class ComboKernelTests(TestCase):
         grid2, out2 = get_grid(x2, y2)
         eager_out2 = fn(x2, y2)
 
-        self.assertNotEqual(grid1, grid2)
+        self.assertNotEqual(grid1[0], grid2[0])
         self.assertEqual(out1, eager_out1)
         self.assertEqual(out2, eager_out2)
 
