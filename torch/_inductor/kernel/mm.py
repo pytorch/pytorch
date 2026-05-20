@@ -624,6 +624,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         return lowerings[aten.add](arg1, arg2)
 
+    if beta == 0:
+        result = tuned_mm(mat1, mat2, layout=layout)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        return result
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
