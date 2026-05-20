@@ -943,19 +943,18 @@ def _match_quack_local_n_reduce(
     if source_node is None:
         return None
     shape = _normalize_quack_shape(view_match.shape)
-    if not isinstance(shape, (list, tuple)) or len(shape) != 3:
+    group_shape = _quack_grouped_n_fragment_shape(shape)
+    if not _is_quack_n_group_shape(group_shape):
         return None
-    if shape[-2] != -1 or not isinstance(shape[-1], int) or shape[-1] <= 0:
-        return None
-    group_size = shape[-1]
+    group_size = group_shape[-1]
     mm_meta = mm_node.meta.get("val")
     reduce_meta = sum_match.node.meta.get("val")
-    if mm_meta is None or reduce_meta is None or len(mm_meta.shape) != 2:
+    if mm_meta is None or reduce_meta is None or len(mm_meta.shape) not in (2, 3):
         return None
     expected_shape = (
-        (mm_meta.shape[0], mm_meta.shape[1] // group_size, 1)
+        (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // group_size, 1)
         if bool(sum_match.keepdim)
-        else (mm_meta.shape[0], mm_meta.shape[1] // group_size)
+        else (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // group_size)
     )
     if tuple(reduce_meta.shape) != expected_shape:
         return None
