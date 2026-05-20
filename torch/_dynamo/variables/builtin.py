@@ -2497,24 +2497,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         right_ty: VariableTracker,
     ) -> VariableTracker:
         """Checks if first arg is subclass of right arg"""
-        try:
-            left_ty_py = left_ty.as_python_constant()
-            right_ty_py = right_ty.as_python_constant()
-        except NotImplementedError:
-            unimplemented(
-                gb_type="issubclass() with non-constant arguments",
-                context=f"issubclass({left_ty}, {right_ty})",
-                explanation="issubclass() with non-constant arguments not supported.",
-                hints=[
-                    "Make sure your arguments are types.",
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
+        from .object_protocol import generic_issubclass
 
-        # WARNING: This might run arbitrary user code `__subclasscheck__`.
-        # See the comment in call_isinstance above.
-        # pyrefly: ignore [unbound-name]
-        return VariableTracker.build(tx, issubclass(left_ty_py, right_ty_py))
+        return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
