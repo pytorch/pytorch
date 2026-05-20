@@ -175,7 +175,7 @@ Tensor& set_storage_quantized_(
     int64_t storage_offset,
     IntArrayRef sizes,
     IntArrayRef strides) {
-  checkSetStorage(self, storage, storage_offset, sizes, strides);
+  checkSetStorage(self, std::move(storage), storage_offset, sizes, strides);
   checkInBoundsForStorage(
       sizes, strides, storage_offset, self.dtype(), self.storage());
   auto* self_ = self.unsafeGetTensorImpl();

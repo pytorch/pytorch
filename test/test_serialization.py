@@ -4981,11 +4981,26 @@ class TestSerialization(TestCase, SerializationMixin):
         with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
             qx.set_(torch.UntypedStorage(12), 0, (3, 4), (2 ** 17, 1))
 
+        # Stride is fine but storage_offset alone pushes the layout out of
+        # the storage — exercises the offset branch of the bounds formula
+        # (storage_offset + max_element_offset) * itemsize > storage.nbytes.
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            _rebuild_qtensor(
+                make_storage(12), 999, (3, 4), (4, 1),
+                per_channel_params, False, None,
+            )
+
         # Per-channel axis out of range / scales length mismatch
         with self.assertRaisesRegex(ValueError, "axis .* out of range"):
             _rebuild_qtensor(
                 make_storage(12), 0, (3, 4), (4, 1),
                 (torch.per_channel_affine, scales, zero_points, 5),
+                False, None,
+            )
+        with self.assertRaisesRegex(ValueError, "axis .* out of range"):
+            _rebuild_qtensor(
+                make_storage(12), 0, (3, 4), (4, 1),
+                (torch.per_channel_affine, scales, zero_points, -1),
                 False, None,
             )
         with self.assertRaisesRegex(ValueError, "scales/zero_points length"):
