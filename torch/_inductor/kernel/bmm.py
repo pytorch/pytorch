@@ -77,7 +77,8 @@ aten_baddbmm = ExternKernelChoice(
 
 # This path targets vmapped dot products and similar tiny vector contractions,
 # where extern bmm launch overhead and lost fusion dominate. Keep the threshold
-# conservative so larger reductions continue through the normal bmm machinery.
+# conservative so larger reductions with static or large hinted K continue
+# through the normal bmm machinery.
 _BMM_DOT_K_DECOMPOSE_THRESHOLD = 32
 _BMM_DOT_DECOMPOSE_DTYPES = (
     torch.float16,
@@ -103,8 +104,14 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and dtype in _BMM_DOT_DECOMPOSE_DTYPES
         and sizevars.statically_known_equals(mat1.get_size()[1], 1)
         and sizevars.statically_known_equals(mat2.get_size()[2], 1)
-        and sizevars.statically_known_leq(
-            mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD
+        and (
+            sizevars.statically_known_leq(
+                mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD
+            )
+            or sizevars.optimization_hint(
+                mat1.get_size()[2], fallback=_BMM_DOT_K_DECOMPOSE_THRESHOLD + 1
+            )
+            <= _BMM_DOT_K_DECOMPOSE_THRESHOLD
         )
     ):
         # Preserve dot-shaped bmm as pointwise/reduction IR so surrounding
