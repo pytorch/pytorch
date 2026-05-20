@@ -32,6 +32,12 @@ from ...registry import _OpCondFn, _OpImplFn
 
 _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 
+# Matches the `<16>` template parameter of fast_scatter_add_kernel_eligible
+# in caffe2/aten/src/ATen/native/cuda/IndexKernelUtils.h, and the
+# `_VEC_BYTES = 16` constant in vec_scatter_kernel.py. Required by both
+# `cp.reduce.async.bulk` (TMA path) and `LDG.128` (vec-scatter path).
+_ALIGNMENT_BYTES = 16
+
 
 @functools.cache
 def _has_sm90_plus() -> bool:
@@ -145,6 +151,32 @@ def _flatten_2d_view(t: torch.Tensor) -> torch.Tensor:
     return t.as_strided((t.shape[0], N), (t.stride(0), 1))
 
 
+def _alignment_contract_ok(self: torch.Tensor, src: torch.Tensor) -> bool:
+    """16B alignment of effective ptrs and outer row strides.
+
+    Required by both override paths:
+      - TMA: ``cp.reduce.async.bulk`` requires 16B-aligned gmem operands.
+      - vec-scatter: ``LDG.128`` from ``cute.autovec_copy`` reads
+        ``_VEC_BYTES == 16`` bytes per lane; the source address must be
+        16B-aligned. Per-row stride must also be a multiple of 16 so each
+        row starts on a 16B boundary.
+
+    Mirrors ``fast_scatter_add_kernel_eligible<16>`` in
+    ``caffe2/aten/src/ATen/native/cuda/IndexKernelUtils.h``. When this
+    returns False, the cond rejects so the call falls through to aten,
+    which has its own predicate + safe fallback to
+    ``vectorized_scatter_add_kernel_launch`` / ``indexFunc{Small,Large}Index``.
+    """
+    if self.data_ptr() % _ALIGNMENT_BYTES or src.data_ptr() % _ALIGNMENT_BYTES:
+        return False
+    elem = self.element_size()
+    if (self.stride(0) * elem) % _ALIGNMENT_BYTES or (
+        src.stride(0) * elem
+    ) % _ALIGNMENT_BYTES:
+        return False
+    return True
+
+
 def _flatten_for_expanded_1d(
     self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -181,6 +213,8 @@ def _is_tma_supported(
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
         return False
+    if not _alignment_contract_ok(self, src):
+        return False
     # TMA transfer size is baked in at compile time (chunk_bytes =
     # min(row_bytes, 512)); row_bytes must evenly divide by chunk_bytes
     # and chunk_bytes must be 16-byte aligned.
@@ -198,6 +232,8 @@ def _is_vec_scatter_supported(
         return False
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
+        return False
+    if not _alignment_contract_ok(self, src):
         return False
     # Each lane owns vec_elems consecutive elements; the loop is either
     # fully in-bounds or fully skipped per lane. Only requirement is
@@ -235,6 +271,15 @@ def _make_cond(
             # stride can differ from prod(shape[1:]) (same relaxation as
             # self/src). Inner dims must be packed for the 2D view.
             if not _inner_contiguous(out):
+                return False
+            # The .out impl runs the kernel on ``out``, not ``self``
+            # (see _make_impls.out_impl). ``support_check`` below
+            # validates self/src alignment via _alignment_contract_ok,
+            # but ``out`` may be a distinct buffer with different
+            # alignment from ``self`` -- check it explicitly here so a
+            # misaligned ``out`` falls through to aten instead of
+            # faulting in the kernel.
+            if not _alignment_contract_ok(out, src):
                 return False
             return support_check(self, dim, index, src)
 

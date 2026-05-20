@@ -623,6 +623,110 @@ class TestScatterAddOverrideConds(TestCase):
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
+    def test_rejects_data_ptr_not_16_aligned(self):
+        # row_bytes can be 16-aligned while the effective data_ptr is not
+        # (e.g. an autograd-produced gradient buffer whose storage_offset
+        # is non-zero). TMA's cp.reduce.async.bulk and vec-scatter's
+        # LDG.128 both require 16B-aligned gmem operands, so the cond
+        # must reject regardless of row_bytes.
+        #
+        # Construction: allocate one extra element and slice from index 1,
+        # yielding a contiguous view whose data_ptr is `elem_size` bytes
+        # past the underlying allocation's 16B-aligned base.
+        M_out, M_src, D = 100, 50, 128  # D=128 -> row_bytes=512 (16-aligned)
+
+        def _misaligned(rows, cols, dtype):
+            elem = torch.empty((), dtype=dtype).element_size()
+            t = torch.empty(rows * cols + 1, device="cuda", dtype=dtype)[1:].view(rows, cols)
+            self.assertNotEqual(
+                t.data_ptr() % 16, 0,
+                msg=f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}",
+            )
+            return t
+
+        idx = _expanded_idx(
+            torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
+            (D,),
+        )
+
+        # 1) Misaligned self, aligned src.
+        self_t = _misaligned(M_out, D, torch.float32).zero_()
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.float32)
+        self.assertEqual(
+            self._conds(self_t, idx, src), (False, False),
+            msg="cond accepted misaligned self.data_ptr()",
+        )
+
+        # 2) Aligned self, misaligned src.
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.float32)
+        src = _misaligned(M_src, D, torch.float32).normal_()
+        self.assertEqual(
+            self._conds(self_t, idx, src), (False, False),
+            msg="cond accepted misaligned src.data_ptr()",
+        )
+
+        # 3) Both misaligned.
+        self_t = _misaligned(M_out, D, torch.float32).zero_()
+        src = _misaligned(M_src, D, torch.float32).normal_()
+        self.assertEqual(
+            self._conds(self_t, idx, src), (False, False),
+            msg="cond accepted misaligned self.data_ptr() and src.data_ptr()",
+        )
+
+    def test_rejects_row_stride_not_16_aligned(self):
+        # Outer row stride must be a multiple of 16 bytes so each row
+        # starts on a 16B boundary. fp32 with outer stride 129 elements
+        # (516 bytes) is element-aligned but not 16B-aligned.
+        M_out, M_src, D = 100, 50, 128
+        # Build self with outer row stride = 129 elements (not 128).
+        big_self = torch.zeros(M_out, D + 1, device="cuda", dtype=torch.float32)
+        self_t = big_self[:, :D]
+        self.assertEqual(
+            self_t.stride(0), D + 1,
+            msg=f"test bug: expected stride(0)=={D + 1}, got {self_t.stride(0)}",
+        )
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
+            (D,),
+        )
+        self.assertEqual(
+            self._conds(self_t, idx, src), (False, False),
+            msg="cond accepted misaligned self row stride",
+        )
+
+    def test_out_cond_rejects_misaligned_out(self):
+        # The .out impl runs the kernel on ``out``, not ``self`` (see
+        # _make_impls.out_impl). A misaligned ``out`` with aligned
+        # ``self`` must be rejected -- otherwise the kernel runs on
+        # ``out``'s misaligned data_ptr and faults with
+        # cudaErrorMisalignedAddress (the exact bug this diff prevents,
+        # just on the .out variant).
+        M_out, M_src, D = 100, 50, 128
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.float32)
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.float32)
+        # Misaligned out: one-element pointer offset from a 16B boundary.
+        out_mis = (
+            torch.empty(M_out * D + 1, device="cuda", dtype=torch.float32)[1:]
+            .view(M_out, D)
+        )
+        self.assertNotEqual(
+            out_mis.data_ptr() % 16, 0,
+            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+        )
+        idx = _expanded_idx(
+            torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
+            (D,),
+        )
+        self.assertFalse(
+            self.impl._tma_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out TMA cond accepted misaligned `out`",
+        )
+        self.assertFalse(
+            self.impl._vs_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out vec-scatter cond accepted misaligned `out`",
+        )
+
     def test_tma_accepts_row_not_chunk_multiple(self):
         # bf16 D=264 -> row_bytes=528, 16-aligned but not a multiple of
         # chunk_bytes (512). TMA descriptor handles the partial final
@@ -774,6 +878,43 @@ class TestScatterAddOverrideCorrectness(TestCase):
         with DeterministicGuard(True):
             got = torch.scatter_add(self_t, 0, idx, src)
         self.assertEqual(got, ref)
+
+    @parametrize("which", ["self", "src", "both"])
+    def test_misaligned_data_ptr_falls_through_to_aten(self, which):
+        # End-to-end regression for the SEV-class crash where a misaligned
+        # data_ptr bypassed the cond and faulted in the TMA / vec-scatter
+        # kernel (cudaErrorMisalignedAddress from cp.reduce.async.bulk or
+        # LDG.128). With the alignment check in the cond, the call falls
+        # through to aten -- which has its own predicate plus safe
+        # fallback to indexFunc / vectorized atomicAdd -- and must
+        # produce the correct result.
+        torch.manual_seed(0)
+        M_out, M_src, D = 200, 100, 128
+
+        def _misaligned(rows, cols, dtype):
+            elem = torch.empty((), dtype=dtype).element_size()
+            t = torch.empty(rows * cols + 1, device="cuda", dtype=dtype)[1:].view(rows, cols)
+            self.assertNotEqual(t.data_ptr() % 16, 0)
+            return t
+
+        if which in ("self", "both"):
+            self_t = _misaligned(M_out, D, torch.float32).zero_()
+        else:
+            self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.float32)
+        if which in ("src", "both"):
+            src = _misaligned(M_src, D, torch.float32).normal_()
+        else:
+            src = torch.randn(M_src, D, device="cuda", dtype=torch.float32)
+
+        idx_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64)
+        idx = _expanded_idx(idx_1d, (D,))
+
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(
+            got, ref, atol=1e-4, rtol=1e-4,
+            msg=f"misalignment={which}: kernel output diverges from reference",
+        )
 
 
 
