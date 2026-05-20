@@ -7819,6 +7819,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             c_fn(x)
 
+    @torch._dynamo.config.patch(recompile_limit=32)
+    def test_convolution_errors_with_uint_input_float_weight(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU only")
+
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                input_shape = [1, 8] + [16] * dim
+                x = torch.ones(input_shape, device=self.device, dtype=dtype)
+                weight = torch.ones(
+                    8, 1, *([4] * dim), device=self.device, dtype=torch.float32
+                )
+                op = getattr(F, f"conv{dim}d")
+                c_op = torch.compile(op)
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r".*(Input type.*weight type|expected scalar type|"
+                    r"not implemented|aoti_torch_).*",
+                ):
+                    c_op(x, weight, stride=4, padding=2, groups=8)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
