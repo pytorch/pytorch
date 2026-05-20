@@ -146,7 +146,7 @@ STRUCT_CLASS_IDENTIFIER_MATCHER = MultilineMatcher(
 )
 
 
-IDENTIFIER_MATCHERS = [
+MULTILINE_MATCHERS = [
     FUNCTION_IDENTIFIER_MATCHER,
     TYPEDEF_IDENTIFIER_MATCHER,
     USING_IDENTIFIER_MATCHER,
@@ -246,7 +246,7 @@ class MatcherAccumulator:
                     self._buffer, self._scope_version
                 )
         else:
-            # No matcher active, search using all the identifier matchers.
+            # No multiline matcher active, search using all the identifier matchers.
             for identifier_matcher in self._identifier_matchers:
                 if identifier_matcher.pattern.search(line):
                     self._found_identifiers.append(
