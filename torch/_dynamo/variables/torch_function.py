@@ -26,7 +26,6 @@ for more information on the design.
 
 import collections
 import contextlib
-import functools
 import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
@@ -129,13 +128,6 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
-
-
-@functools.cache
-def get_prev_stack_var_name() -> str:
-    from ..bytecode_transformation import unique_id
-
-    return unique_id("___prev_torch_function_mode_stack")
 
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
@@ -611,6 +603,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
+        tensor_var = tensor_var.realize()
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
