@@ -1,3 +1,4 @@
+# Owner(s): ["module: dynamo"]
 """
 Tests that torch.compile preserves the IndexError exception contract for
 out-of-range dimension/index arguments, matching eager-mode behavior.
