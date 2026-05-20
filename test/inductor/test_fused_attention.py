@@ -18,12 +18,9 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_LINUX,
     skipIfXpu,
     TEST_WITH_ROCM,
-    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1783,9 +1780,7 @@ if HAS_CPU:
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
         )
         test_sdpa_rewriter_2_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_2
-        test_sdpa_rewriter_5_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
-        )
+        test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
