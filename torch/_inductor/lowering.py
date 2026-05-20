@@ -92,6 +92,7 @@ from .utils import (
     decode_device,
     is_dynamic,
     is_gpu,
+    infer_scale_swizzle_ir,
     is_pointwise_use,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8529,17 +8530,41 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             for arg in args
             if isinstance(arg, IRNode) and arg.has_tensor_output()
         )
-        if gemm_op == torch.ops.aten._scaled_mm.default and (
-            len(quack_args) != 4
-            or gemm_kwargs.get("out_dtype") is None
-            or gemm_kwargs.get("bias") is not None
-            or gemm_kwargs.get("scale_result") is not None
-            or gemm_kwargs.get("use_fast_accum", False)
-        ):
-            raise NotImplementedError(
-                "QUACK _scaled_mm epilogue currently supports only "
-                "(A, B, scale_a, scale_b) with explicit out_dtype"
+        if gemm_op == torch.ops.aten._scaled_mm.default:
+            if (
+                len(quack_args) != 4
+                or gemm_kwargs.get("out_dtype") is None
+                or gemm_kwargs.get("bias") is not None
+                or gemm_kwargs.get("scale_result") is not None
+                or gemm_kwargs.get("use_fast_accum", False)
+            ):
+                raise NotImplementedError(
+                    "QUACK _scaled_mm epilogue currently supports only "
+                    "(A, B, scale_a, scale_b) with explicit out_dtype"
+                )
+            from torch.nn.functional import ScalingType, SwizzleType
+
+            scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(
+                quack_args[0], quack_args[2]
             )
+            scale_b_type, scale_b_swizzle = infer_scale_swizzle_ir(
+                quack_args[1], quack_args[3], transpose=True
+            )
+            expected_swizzle = (
+                SwizzleType.NO_SWIZZLE
+                if torch.version.hip
+                else SwizzleType.SWIZZLE_32_4_4
+            )
+            if (
+                scale_a_type != ScalingType.BlockWise1x32
+                or scale_b_type != ScalingType.BlockWise1x32
+                or scale_a_swizzle != expected_swizzle
+                or scale_b_swizzle != expected_swizzle
+            ):
+                raise NotImplementedError(
+                    "QUACK _scaled_mm epilogue currently supports only MXFP8-like "
+                    "BlockWise1x32 float8_e8m0fnu scales"
+                )
         if gemm_op == torch.ops.aten._grouped_mm.default:
             grouped_mm_supported = (
                 len(quack_args) == 3

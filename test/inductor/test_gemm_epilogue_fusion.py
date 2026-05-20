@@ -828,6 +828,51 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels._scaled_mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_mm_non_mxfp8_scales(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"out_dtype": torch.bfloat16},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 32, 128
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        b = (
+            torch.eye(n, k, device="cuda", dtype=torch.bfloat16)
+            .to(torch.float8_e4m3fn)
+            .t()
+        )
+
+        with self.assertRaisesRegex(Exception, "MXFP8-like.*BlockWise1x32"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a,
+                b,
+                torch.ones((), device="cuda", dtype=torch.float32),
+                torch.ones((), device="cuda", dtype=torch.float32),
+            )
+
+        scale_a = torch.full(
+            (m, ceil_div(k, 32)),
+            1.0,
+            device="cuda",
+            dtype=torch.float8_e8m0fnu,
+        )
+        scale_b = torch.full(
+            (n, ceil_div(k, 32)),
+            1.0,
+            device="cuda",
+            dtype=torch.float8_e8m0fnu,
+        )
+        with self.assertRaisesRegex(Exception, "Invalid blockwise scaling configuration"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale_a, scale_b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
