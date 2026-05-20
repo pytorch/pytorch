@@ -139,7 +139,7 @@ class DynamicShapesTestCase(TestCase):
 
 if HAS_CPU:
 
-    class DynamicShapesCpuTests(DynamicShapesTestCase):
+    class DynamicShapesCpuTests(TestCase):
         common = check_model
         device = "cpu"
 
