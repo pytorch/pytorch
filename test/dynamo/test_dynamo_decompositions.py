@@ -161,6 +161,154 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_add_with_tensor_alpha(self):
+        def method_fn(x, other, alpha):
+            return x.add(other, alpha=alpha)
+
+        def method_kwargs_fn(x, other, alpha):
+            return x.add(other=other, alpha=alpha)
+
+        def function_fn(x, other, alpha):
+            return torch.add(x, other, alpha=alpha)
+
+        def function_kwargs_fn(x, other, alpha):
+            return torch.add(input=x, other=other, alpha=alpha)
+
+        for fn in (method_fn, method_kwargs_fn, function_fn, function_kwargs_fn):
+            with self.subTest(fn=fn.__name__):
+                with torch._dynamo.config.patch(enable_dynamo_decompositions=True):
+                    x = torch.randn(4)
+                    other = torch.randn(4)
+                    alpha = torch.tensor(2.0)
+                    expected = fn(x, other, alpha)
+                    actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                        x, other, alpha
+                    )
+                    self.assertEqual(actual, expected)
+
+    @skipIfCrossRef
+    def test_add_with_tensor_alpha_invalid_dtype_errors(self):
+        def method_fn(x, other, alpha):
+            return x.add(other, alpha=alpha)
+
+        def method_kwargs_fn(x, other, alpha):
+            return x.add(other=other, alpha=alpha)
+
+        def function_fn(x, other, alpha):
+            return torch.add(x, other, alpha=alpha)
+
+        def function_kwargs_fn(x, other, alpha):
+            return torch.add(input=x, other=other, alpha=alpha)
+
+        cases = (
+            (
+                "integral_input_float_alpha",
+                torch.tensor([1, 2], dtype=torch.int32),
+                torch.tensor([3, 4], dtype=torch.int32),
+                torch.tensor(0.5),
+                RuntimeError,
+                "For integral input tensors, argument alpha must not be a floating point number",
+            ),
+            (
+                "real_input_complex_alpha",
+                torch.randn(2),
+                torch.randn(2),
+                torch.tensor(1 + 2j),
+                RuntimeError,
+                "For non-complex input tensors, argument alpha must not be a complex number",
+            ),
+        )
+
+        for fn in (method_fn, method_kwargs_fn, function_fn, function_kwargs_fn):
+            for name, x, other, alpha, exc_type, msg in cases:
+                with self.subTest(fn=fn.__name__, case=name):
+                    with self.assertRaisesRegex(exc_type, msg):
+                        fn(x, other, alpha)
+                    with self.assertRaisesRegex(exc_type, msg):
+                        torch.compile(fn, backend="eager")(x, other, alpha)
+
+    @skipIfCrossRef
+    def test_add_with_bool_tensors_and_integral_tensor_alpha(self):
+        def method_fn(x, other, alpha):
+            return x.add(other, alpha=alpha)
+
+        def method_kwargs_fn(x, other, alpha):
+            return x.add(other=other, alpha=alpha)
+
+        def function_fn(x, other, alpha):
+            return torch.add(x, other, alpha=alpha)
+
+        def function_kwargs_fn(x, other, alpha):
+            return torch.add(input=x, other=other, alpha=alpha)
+
+        for fn in (method_fn, method_kwargs_fn, function_fn, function_kwargs_fn):
+            with self.subTest(fn=fn.__name__):
+                x = torch.tensor([True, False])
+                other = torch.tensor([True, True])
+                alpha = torch.tensor(2)
+
+                expected = fn(x, other, alpha)
+                actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                    x, other, alpha
+                )
+
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual.dtype, torch.bool)
+
+    @skipIfCrossRef
+    def test_add_inplace_with_tensor_alpha_decomposition_disabled(self):
+        def fn(x, other, alpha):
+            return x.clone().add_(other, alpha=alpha)
+
+        with torch._dynamo.config.patch(enable_dynamo_decompositions=False):
+            x = torch.randn(3, 2)
+            other = torch.ones(3, 2)
+            alpha = torch.tensor(2.0)
+
+            expected = fn(x, other, alpha)
+            actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(
+                x, other, alpha
+            )
+
+            self.assertEqual(actual, expected)
+
+    @skipIfCrossRef
+    def test_sub_with_tensor_alpha(self):
+        def method_fn(x, other, alpha):
+            return x.sub(other, alpha=alpha)
+
+        def method_kwargs_fn(x, other, alpha):
+            return x.sub(other=other, alpha=alpha)
+
+        def method_inplace_fn(x, other, alpha):
+            return x.clone().sub_(other, alpha=alpha)
+
+        def function_fn(x, other, alpha):
+            return torch.sub(x, other, alpha=alpha)
+
+        def function_kwargs_fn(x, other, alpha):
+            return torch.sub(input=x, other=other, alpha=alpha)
+
+        for fn in (
+            method_fn,
+            method_kwargs_fn,
+            method_inplace_fn,
+            function_fn,
+            function_kwargs_fn,
+        ):
+            with self.subTest(fn=fn.__name__):
+                x = torch.randn(3, 2)
+                other = torch.ones(3, 2)
+                alpha = torch.tensor(2.0)
+
+                expected = fn(x, other, alpha)
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=True
+                )(x, other, alpha)
+
+                self.assertEqual(actual, expected)
+
+    @skipIfCrossRef
     def test_add_inplace_with_alpha_decomposition_disabled(self):
         """With decompositions disabled, add_ with alpha should remain as the original op.
 
