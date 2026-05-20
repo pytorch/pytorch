@@ -402,26 +402,31 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
-        device = torch.cuda.current_device()
-        props = torch.cuda.get_device_properties(device)
-        return props.L2_cache_size
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties()
+            return props.L2_cache_size
+        elif torch.xpu.is_available():
+            props = torch.xpu.get_device_properties()
+            return props.global_mem_cache_size
+        else:
+            raise NotImplementedError("L2_cache_size is not implemented.")
 
     def get_event_pairs(
         self: Self, iters: int
-    ) -> list[tuple[torch.cuda.Event, torch.cuda.Event]]:
-        """Get `iters` pairs of CUDA events."""
+    ) -> list[tuple[torch.Event, torch.Event]]:
+        """Get `iters` pairs of generic events."""
         return [
             (
-                torch.cuda.Event(enable_timing=True),
-                torch.cuda.Event(enable_timing=True),
+                torch.Event(enable_timing=True),
+                torch.Event(enable_timing=True),
             )
             for _ in range(iters)
         ]
 
     def get_event_pairs_min_timing(
-        self: Self, event_pairs: list[tuple[torch.cuda.Event, torch.cuda.Event]]
+        self: Self, event_pairs: list[tuple[torch.Event, torch.Event]]
     ) -> float:
-        """Get the minimum timing, in milliseconds, for a group of CUDA event pairs."""
+        """Get the minimum timing, in milliseconds, for a group of generic event pairs."""
         return min(
             [
                 start_event.elapsed_time(end_event)
@@ -477,14 +482,15 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             may_ban_benchmarking()
 
         # we don't want any outside errors propagating into benchmarking
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # warmup `_callable` (and catches any failures in the process)
         _callable()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device=acc.type)
         buffer.zero_()
 
         # estimate the runtime of `_callable`
@@ -498,7 +504,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
@@ -522,7 +528,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
@@ -591,11 +597,11 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         - The runtime of `_callable` in milliseconds, computed according to return_mode.
         """
         # we don't want any outside errors propagating into benchmarking
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # warmup `_callable` (and catches any failures in the process)
         _callable()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # Keep Triton's 256 MB cache flush on ROCm. On other backends, reuse
         # the shared L2-sized flush from InductorBenchmarker.
@@ -604,7 +610,8 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
             buffer_size_bytes = 256 * 1024 * 1024
         else:
             buffer_size_bytes = self.L2_cache_size
-        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device=acc.type)
         buffer.zero_()
 
         # Estimation phase with separate event pairs — also serves as warmup.
@@ -619,7 +626,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         estimated_ms = self.get_event_pairs_min_timing(event_pairs)
         if estimated_ms > 0:
             rep = max(min(rep, int(max_benchmark_duration / estimated_ms)), 1)
@@ -630,12 +637,13 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
             buffer.zero_()
 
         # benchmark with profiler
-        # Use both CPU and CUDA activities, otherwise record_function
+        # Use both CPU and Device activities, otherwise record_function
         # will not record the region.
+        dispatchkey = torch._C._dispatch_key_for_device(acc.type)
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
+                getattr(torch.profiler.ProfilerActivity, dispatchkey),
             ],
             record_shapes=False,
         ) as prof:
@@ -648,7 +656,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
                 with torch.profiler.record_function("_CALLABLE"):
                     _callable()
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # Extract _CALLABLE GPU time directly from raw kineto events.
         # This avoids prof.key_averages() which triggers expensive lazy
@@ -660,7 +668,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         for kineto_event in prof.profiler.kineto_results.events():
             if (
                 kineto_event.name() == "_CALLABLE"
-                and kineto_event.device_type() == _DeviceType.CUDA
+                and kineto_event.device_type() == getattr(_DeviceType, acc.type)
             ):
                 callable_gpu_time_us += (
                     kineto_event.end_ns() - kineto_event.start_ns()
@@ -668,7 +676,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
 
         if callable_gpu_time_us <= 0:
             raise AssertionError(
-                "TorchProfilerBenchmarker: '_CALLABLE' CUDA event not found in "
+                f"TorchProfilerBenchmarker: '_CALLABLE' {dispatchkey} event not found in "
                 "raw kineto results. This indicates record_function('_CALLABLE') did "
                 "not produce a GPU_USER_ANNOTATION profiler event."
             )
