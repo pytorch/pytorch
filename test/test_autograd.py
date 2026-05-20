@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     skipMeta,
@@ -84,10 +85,10 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
-    TEST_XPU,
     TestCase,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -4337,7 +4338,7 @@ class TestAutograd(TestCase):
             for ref in refs:
                 self.assertIsNone(ref())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "Test requires an accelerator")
     def test_checkpoint_compile_no_recompile(self):
         # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
         expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
@@ -4360,12 +4361,12 @@ class TestAutograd(TestCase):
                 is not None
             )
             try:
-                # Using torch.device("cuda") directly doesn't work here because
+                # Using torch.device(...) directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
                 # invoking the TorchFunctionMode directly, it doesn't update the
                 # global state dynamo references for guards:
                 # torch.utils._device.CURRENT_DEVICE
-                torch.set_default_device("cuda")
+                torch.set_default_device(torch.accelerator.current_accelerator())
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
@@ -4379,8 +4380,10 @@ class TestAutograd(TestCase):
             else:
                 run()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "Test requires an accelerator")
     def test_checkpoint_device_context_fn(self):
+        device = torch.accelerator.current_accelerator()
+
         @contextlib.contextmanager
         def apply_device(device):
             prev = torch.get_default_device()
@@ -4396,12 +4399,12 @@ class TestAutograd(TestCase):
                 torch.set_default_device(prev if had_default_device else None)
 
         def context_fn():
-            return contextlib.nullcontext(), apply_device("cuda")
+            return contextlib.nullcontext(), apply_device(device)
 
         def fn(x):
             return x.sin().cos()
 
-        with apply_device("cuda"):
+        with apply_device(device):
             a = torch.tensor(1.0, requires_grad=True)
             out = torch.utils.checkpoint.checkpoint(
                 fn, a, context_fn=context_fn, use_reentrant=False
@@ -5052,8 +5055,10 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
     def test_node_ordering_when_none_returned(self):
+        device = torch.accelerator.current_accelerator()
+
         class Matmul(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, w):
@@ -5086,9 +5091,9 @@ class TestAutograd(TestCase):
         def hook(*args, **kwargs):
             executed.append("B")
 
-        x = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        x = torch.randn((3, 3), dtype=torch.bfloat16, device=device, requires_grad=True)
         x = HookFunction.apply(x)
-        w = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        w = torch.randn((3, 3), dtype=torch.bfloat16, device=device, requires_grad=True)
         w.register_hook(hook)
         o = Matmul.apply(x, w)
         o.sum().backward()
@@ -7053,7 +7058,7 @@ Done""",
         c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
         self.assertTrue(gradcheck(fn2, (c)))
 
-    @unittest.skipIf(TEST_CUDA, "CPU-only test")
+    @unittest.skipIf(TEST_ACCELERATOR, "CPU-only test")
     def test_gradcheck_adjusted_atol_complex_inputs(self):
         # Regression test for incorrect atol transformation for
         # complex inputs, allowing fast gradcheck to fail and slow gradcheck to pass.
@@ -7567,9 +7572,9 @@ class MyFunction(Function):
     def backward(ctx, grad):
         return grad
 
-# Run on cuda if it is available to ensure that the worker thread
+# Run on accelerator if available to ensure that the worker thread
 # is properly initialized by the time we exit.
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
 
 for shape in [(1,), ()]:
     v = torch.ones(shape, requires_grad=True, device=device)
@@ -7579,7 +7584,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA or torch.backends.mps.is_available() or torch.xpu.is_available():
+        if TEST_ACCELERATOR:
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -7702,7 +7707,7 @@ for shape in [(1,), ()]:
             x = torch.randn(3, 3, requires_grad=True)
             y = torch.randn(3, 3, requires_grad=True)
             z = torch.randn(3, 3, requires_grad=True)
-            if device_type in ("cuda", "xpu"):
+            if device_type != "cpu":
                 x = x.to(device_type)
                 y = y.to(device_type)
                 z = z.to(device_type)
@@ -7724,22 +7729,22 @@ for shape in [(1,), ()]:
         """
         self._test_checkpointing_non_reentrant_autocast(device_type="cpu")
 
-    @unittest.skipIf(
-        (not torch.cuda.is_available() or not torch.cuda.is_bf16_supported())
-        and (not torch.xpu.is_available() or not torch.xpu.is_bf16_supported()),
-        "Test requires CUDA or XPU bf16 support",
-    )
+    @unittest.skipIf(not TEST_ACCELERATOR, "Test requires an accelerator")
     def test_checkpointing_non_reentrant_autocast_gpu(self):
         """
         Test that autocast args/kwargs such as the dtype are preserved during
         non-reentrant checkpoint recomputation on GPU.
         """
-        device_type = "cuda" if torch.cuda.is_available() else "xpu"
+        device_type = torch.accelerator.current_accelerator().type
+        if not torch.amp.is_autocast_available(device_type):
+            self.skipTest(f"autocast not available for {device_type}")
         self._test_checkpointing_non_reentrant_autocast(device_type=device_type)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "Test requires an accelerator")
     @slowTest
     def test_checkpointing_without_reentrant_memory_savings(self):
+        device = torch.accelerator.current_accelerator()
+
         class MyModel(nn.Module):
             def __init__(self, n, use_checkpoint, use_reentrant):
                 super().__init__()
@@ -7770,32 +7775,32 @@ for shape in [(1,), ()]:
 
                 return x
 
-        model_no_checkpoint = MyModel(
-            8, use_checkpoint=False, use_reentrant=False
-        ).cuda()
+        model_no_checkpoint = MyModel(8, use_checkpoint=False, use_reentrant=False).to(
+            device
+        )
         model_reentrant_checkpoint = MyModel(
             8, use_checkpoint=True, use_reentrant=True
-        ).cuda()
+        ).to(device)
         model_no_reentrant_checkpoint = MyModel(
             8, use_checkpoint=True, use_reentrant=False
-        ).cuda()
+        ).to(device)
 
-        x = torch.randn(100, 256, requires_grad=True, device="cuda")
+        x = torch.randn(100, 256, requires_grad=True, device=device)
 
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         loss = model_no_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_no_checkpoint = torch.cuda.max_memory_allocated()
+        mem_no_checkpoint = torch.accelerator.max_memory_allocated()
 
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         loss = model_reentrant_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+        mem_reentrant_checkpoint = torch.accelerator.max_memory_allocated()
 
-        torch.cuda.reset_peak_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
         loss = model_no_reentrant_checkpoint(x.clone()).sum()
         loss.backward()
-        mem_no_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+        mem_no_reentrant_checkpoint = torch.accelerator.max_memory_allocated()
 
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
@@ -8482,7 +8487,7 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires an accelerator")
     def test_checkpointing_without_reentrant_with_block_mask(self):
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
         from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
@@ -8496,10 +8501,11 @@ for shape in [(1,), ()]:
                 serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
             )
 
+        device = torch.accelerator.current_accelerator()
         block_mask = create_block_mask(
             lambda b, h, q, kv: q >= kv, B=1, H=1, Q_LEN=128, KV_LEN=128
         )
-        x = torch.randn(4, 128, device="cuda")
+        x = torch.randn(4, 128, device=device)
 
         result = checkpoint(lambda x, mask: x * 2, x, block_mask, use_reentrant=False)
         self.assertEqual(result, x * 2)
@@ -8626,7 +8632,7 @@ for shape in [(1,), ()]:
 
         self.assertEqual(called[0], 2)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
     def test_callback_propagates_errors_from_device_thread(self):
         def callback():
             raise RuntimeError("blah")
@@ -8634,7 +8640,8 @@ for shape in [(1,), ()]:
         def hook_with_callback(*args):
             torch.autograd.Variable._execution_engine.queue_callback(callback)
 
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device("cuda"))
+        device = torch.accelerator.current_accelerator()
+        t = torch.tensor([1.0, 2.0], requires_grad=True, device=device)
         t.register_hook(hook_with_callback)
         output = t**2
         loss = output.sum()
@@ -11581,8 +11588,8 @@ for shape in [(1,), ()]:
                 )
                 test(lambda: x, cuda, pin_memory)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "test requires CUDA or XPU")
-    def test_graph_save_on_cpu_cuda(self):
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
+    def test_graph_save_on_cpu_accelerator(self):
         device_type = torch.accelerator.current_accelerator().type
 
         def f(x):
@@ -11592,9 +11599,7 @@ for shape in [(1,), ()]:
         # with grad
         a = torch.ones(1, requires_grad=True, device=device_type)
         y = f(a)
-        memory_with_grad = (
-            torch.cuda.memory_allocated() if TEST_CUDA else torch.xpu.memory_allocated()
-        )
+        memory_with_grad = torch.accelerator.memory_allocated()
 
         del a
         del y
@@ -11603,9 +11608,7 @@ for shape in [(1,), ()]:
         a = torch.ones(1, requires_grad=True, device=device_type)
         with torch.no_grad():
             y = f(a)
-        memory_without_grad = (
-            torch.cuda.memory_allocated() if TEST_CUDA else torch.xpu.memory_allocated()
-        )
+        memory_without_grad = torch.accelerator.memory_allocated()
 
         self.assertGreater(memory_with_grad, memory_without_grad)
 
@@ -11616,14 +11619,10 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.save_on_cpu():
             a = torch.ones(1, requires_grad=True, device=device_type)
             y = f(a)
-            memory_with_hooks = (
-                torch.cuda.memory_allocated()
-                if TEST_CUDA
-                else torch.xpu.memory_allocated()
-            )
+            memory_with_hooks = torch.accelerator.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "test requires CUDA and XPU")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
     def test_scalar_grad_mixed_device(self):
         device_type = torch.accelerator.current_accelerator().type
         x = torch.tensor(1.0, requires_grad=True)
@@ -12098,11 +12097,11 @@ get_out().sum().backward()
         self.assertEqual(y, y2)
         self.assertEqual(y_expected, y2_expected)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
     def test_gradcheck_default_device_placement_context(self):
         # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
         # This test ensures that this still works when the default device is set to something else by the user.
-        with torch.device("cuda"):
+        with torch.device(torch.accelerator.current_accelerator()):
             x = torch.randn(3, dtype=torch.double, requires_grad=True)
 
             def func(inp):
@@ -13246,7 +13245,7 @@ class TestAutogradDeviceType(TestCase):
                 ):
                     f()
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_advanced_indexing_backwards_large(self, device):
         # See https://github.com/pytorch/pytorch/issues/22843
         n = 1 << 16
@@ -13364,15 +13363,15 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where_scalar_second, (cond, x))
         gradgradcheck(where_scalar_second, (cond, x))
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_free_unneeded_tensor(self, device):
         x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
         m = torch.randn(1, 3, 1, 1, device=device)
 
         z = x.sum()
-        base_mem = torch.cuda.memory_allocated()
+        base_mem = torch.accelerator.memory_allocated()
         z = ((x + 2) * m).sum()
-        end_mem = torch.cuda.memory_allocated()
+        end_mem = torch.accelerator.memory_allocated()
 
         # In the end the memory usage should remain equal, because neither of
         # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
@@ -13399,7 +13398,7 @@ class TestAutogradDeviceType(TestCase):
             with emit_nvtx():
                 a.add(1.0)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_rnn_backward_to_input_but_not_parameters(self, device):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -13509,7 +13508,6 @@ class TestAutogradDeviceType(TestCase):
         output = input.to(device=devices[1]) + input.to(device=devices[1])
         output.backward()
 
-    @onlyCPU
     def test_copy_(self, device):
         # At the time of writing this test, copy_ is not generated from native_functions.yaml
         # there was a bug that bfloat16 was not recognized as floating.
@@ -13543,7 +13541,7 @@ class TestAutogradDeviceType(TestCase):
             non_dual.copy_(x_dual)
             self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
@@ -13582,7 +13580,7 @@ class TestAutogradDeviceType(TestCase):
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_cross_device_reentrant_autograd(self, device):
         # Output on gpu so that this task will be associated with the gpu thread
         def fn_on_gpu(inp):
@@ -13849,13 +13847,13 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_gradcheck_input_output_different_device(self, device):
-        x = torch.ones((1,), dtype=torch.double, device="cuda", requires_grad=True)
+        x = torch.ones((1,), dtype=torch.double, device=device, requires_grad=True)
         gradcheck(lambda x: x.to("cpu"), (x,))
 
         x = torch.ones((1,), dtype=torch.double, device="cpu", requires_grad=True)
-        gradcheck(lambda x: x.to("cuda"), (x,))
+        gradcheck(lambda x: x.to(device), (x,))
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181229"
@@ -14929,7 +14927,7 @@ class TestAutogradStreamSynchronization(TestCase):
             # when FuncBackward produces a gradient on a default stream
             # a sync is necessary.
             with torch.Stream(0) as s0:
-                a = torch.ones(256, 256, requires_grad=True, device="cuda")
+                a = torch.ones(256, 256, requires_grad=True, device=_get_device_name(0))
                 b = a * 2
 
             default_stream_0.wait_stream(s0)
@@ -15702,7 +15700,7 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.set_multithreading_enabled(True)
         self.assertTrue(torch.autograd.is_multithreading_enabled())
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires an accelerator")
     def test_custom_function_propagates_errors_from_device_thread(self):
         class MyFunc(Function):
             @staticmethod
@@ -15714,7 +15712,8 @@ class TestMultithreadAutograd(TestCase):
                 raise RuntimeError("blah")
                 return gO
 
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device("cuda"))
+        device = torch.accelerator.current_accelerator()
+        t = torch.tensor([1.0, 2.0], requires_grad=True, device=device)
         out = MyFunc.apply(t).sum()
 
         with self.assertRaisesRegex(RuntimeError, "blah"):
@@ -16840,8 +16839,8 @@ class TestAutogradMultipleDispatch(TestCase):
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
     )
-    @onlyCUDA
-    def test_backward_single_threaded(self):
+    @onlyAccelerator
+    def test_backward_single_threaded(self, device):
         threads_eq = None
 
         class TestFn(Function):
@@ -16857,7 +16856,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 threads_eq = ctx.tid == threading.get_ident()
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         with torch.autograd.set_multithreading_enabled(False):
             TestFn.apply(inp, None).sum().backward()
@@ -16866,8 +16865,8 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
 
-    @onlyCUDA
-    def test_backward_tls_stash(self):
+    @onlyAccelerator
+    def test_backward_tls_stash(self, device):
         local = threading.local()
         local.my_obj = {}
         local.my_obj[10] = 10
@@ -16886,7 +16885,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 torch._C._get_obj_in_tls("my_obj")[10] = 5
                 return gO, None
 
-        inp = torch.rand(10, device="cuda", requires_grad=True)
+        inp = torch.rand(10, device=device, requires_grad=True)
 
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
@@ -17065,9 +17064,7 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
 
-instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestAutogradMultipleDispatch, globals())
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
