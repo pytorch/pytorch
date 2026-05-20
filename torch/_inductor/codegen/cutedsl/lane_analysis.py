@@ -11,6 +11,8 @@ from ...virtualized import V
 
 @dataclasses.dataclass(frozen=True)
 class LaneExprInfo:
+    """Lane-wise uniformity and contiguity classification for an expression."""
+
     is_uniform: bool
     is_contiguous: bool
     contiguous_width: int | None
@@ -23,6 +25,7 @@ def classify_lane_expr(
     max_width: int,
     uniform_symbols: OrderedSet[sympy.Symbol] | None = None,
 ) -> LaneExprInfo:
+    """Classify whether an expression is uniform or contiguous across lanes."""
     if max_width <= 1:
         return LaneExprInfo(True, False, None)
 
@@ -51,6 +54,7 @@ def aligned_contiguous_width(
     max_width: int,
     lane_contiguity=None,
 ) -> int | None:
+    """Return the largest aligned power-of-two contiguous lane width."""
     assert max_width >= 2 and max_width.bit_count() == 1
     if lane_contiguity is None:
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(expr, lane_var)
@@ -68,12 +72,14 @@ def aligned_contiguous_width(
 
 
 def lane_group_start(expr: sympy.Expr, lane_var: sympy.Symbol) -> sympy.Expr:
+    """Return the expression value at the first lane in the lane group."""
     return V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
 
 
 def decompose_affine_lane_expr(
     expr: sympy.Expr, lane_var: sympy.Symbol
 ) -> tuple[sympy.Expr, sympy.Expr] | None:
+    """Decompose an affine lane expression into ``(lane_coeff, rest)``."""
     expr = V.graph.sizevars.simplify(expr)
     lane_coeff = expr.coeff(lane_var)
     rest = lane_group_start(expr, lane_var)

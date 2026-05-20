@@ -410,6 +410,7 @@ class CuteDSLTemplateKernel(Kernel):
         return self.collected_tensor_buffers
 
     def add_tensor_inputs(self, buffers):
+        """Register extra tensor buffers and return their rendered input names."""
         buffer_names = []
         for buffer in buffers:
             remapped_name = self.args.input(buffer.get_name())
@@ -940,6 +941,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return V.graph.sizevars.simplify(expr.xreplace(replacements))
 
     def _lane_uniform_symbols(self) -> OrderedSet[sympy.Symbol]:
+        """Return generated CSE source symbols that are uniform across lanes."""
         vector_index_name = (
             None
             if self.vector_load_config is None
