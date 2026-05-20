@@ -13,13 +13,12 @@ The module is critical for PyTorch Dynamo's ability to optimize code while prese
 Python semantics and execution state.
 """
 
+from __future__ import annotations
+
 import copy
 import dataclasses
 import sys
-import types
-from collections.abc import Callable, Iterable
-from contextlib import AbstractContextManager
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from .bytecode_transformation import (
     add_push_null,
@@ -36,6 +35,14 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .utils import ExactWeakKeyDictionary
+
+
+if TYPE_CHECKING:
+    import types
+    from collections.abc import Callable, Iterable
+    from contextlib import AbstractContextManager
+
+    from .output_graph import CodeOptions
 
 
 # taken from code.h in cpython
@@ -123,7 +130,7 @@ class ReenterWith:
     target_values: tuple[Any, ...] | None = None
 
     def try_except_torch_function_mode(
-        self, code_options: dict[str, Any], cleanup: list[Instruction]
+        self, code_options: CodeOptions, cleanup: list[Instruction]
     ) -> list[Instruction]:
         """
         Codegen based off of:
@@ -144,7 +151,7 @@ class ReenterWith:
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
     def try_finally(
-        self, code_options: dict[str, Any], cleanup: list[Instruction]
+        self, code_options: CodeOptions, cleanup: list[Instruction]
     ) -> list[Instruction]:
         """
         Codegen based off of:
