@@ -1088,6 +1088,32 @@ static at::Tensor linear_int8_with_onednn_weight(
     is_fp8 = true;
   }
 
+  // Fall back to fp8 reference impl on platforms without AMX FP16 support.
+  // On such platforms, `onednn_weight` is a plain (transposed) strided tensor
+  // produced by `pack_weight_to_onednn_tensor`, NOT an MKLDNN tensor.
+#if defined(__powerpc__)
+  if (is_fp8) {
+#else
+  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#endif
+    double input_scale_val;
+    if constexpr (std::is_same_v<std::decay_t<InputScaleType>, at::Tensor>) {
+      TORCH_CHECK(
+          input_scale_arg.numel() == 1,
+          "onednn fp8 linear: act scale size should be 1");
+      input_scale_val = input_scale_arg.item().toDouble();
+    } else {
+      input_scale_val = input_scale_arg;
+    }
+    // Fall back to ref impl on old platforms because not supported
+    // Transpose weight to align with behavior in oneDNN
+    return fp8_qlinear_onednn_ref(
+        input, input_scale_val, onednn_weight.t(), weight_scales, bias,
+        output_scale, output_dtype, other, other_scale,
+        binary_post_op, binary_alpha, unary_post_op,
+        unary_post_op_args, unary_post_op_algorithm);
+  }
+
   // Fast path with cache of params.
   static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
   static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
@@ -1186,19 +1212,6 @@ static at::Tensor linear_int8_with_onednn_weight(
           " (same as output dtype), but got ", other.value().scalar_type()
       );
     }
-  }
-#if defined(__powerpc__)
-  if (is_fp8) {
-#else
-  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
-#endif
-    // Fall back to ref impl on old platforms because not supported
-    // Transpose weight to align with behavior in oneDNN
-    return fp8_qlinear_onednn_ref(
-        input, input_scale, onednn_weight.t(), weight_scales, bias,
-        output_scale, output_dtype, other, other_scale,
-        binary_post_op, binary_alpha, unary_post_op,
-        unary_post_op_args, unary_post_op_algorithm);
   }
 
   // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
