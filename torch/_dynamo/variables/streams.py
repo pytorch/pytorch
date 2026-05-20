@@ -512,8 +512,8 @@ class StreamVariable(StreamContextVariable):
         from .constant import ConstantVariable
 
         if not isinstance(other, StreamVariable):
-            # Stream's tp_richcompare never returns NotImplemented.
-            # Non-Stream: eq->False, ne->True, ordering->False.
+            # Stream's tp_richcompare (THPStream_richcompare) compares
+            # stream_id/device and never returns NotImplemented.
             return ConstantVariable.create(op == "__ne__")
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))

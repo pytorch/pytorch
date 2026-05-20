@@ -1075,6 +1075,8 @@ def object_richcompare(
         return ConstantVariable.create(NotImplemented)
     elif op == "__ne__":
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
+        # Safe to call as_python_constant(): only identity-based types use
+        # object_richcompare, so eq_result is always True or NotImplemented.
         eq_result = self.richcompare_impl(tx, other, "__eq__")
         if is_richcompare_not_implemented(eq_result):
             return ConstantVariable.create(NotImplemented)
@@ -1191,6 +1193,28 @@ def generic_richcompare(
             f"'{_OP_STR[op]}' not supported between instances of "
             f"'{lhs.python_type_name()}' and '{rhs.python_type_name()}'",
         )
+
+
+def generic_richcompare_bool(
+    tx: "InstructionTranslator",
+    lhs: VariableTracker,
+    rhs: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Dynamo's PyObject_RichCompareBool for eq/ne.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1046-L1080
+
+    Like generic_richcompare, but with an identity shortcut first: if lhs
+    and rhs are the same Python object, eq is True and ne is False. This
+    matters for NaN (nan is nan -> True, but nan == nan -> False). Used by
+    container comparisons (list_richcompare, tuplerichcompare) which call
+    PyObject_RichCompareBool per element in CPython.
+    """
+    identity = vt_identity_compare(lhs, rhs)
+    if identity is not None and identity.as_python_constant():
+        return ConstantVariable.create(op == "__eq__")
+    return generic_richcompare(tx, lhs, rhs, op)
 
 
 def generic_hash_impl(
