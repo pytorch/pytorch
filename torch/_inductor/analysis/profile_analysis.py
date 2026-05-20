@@ -729,6 +729,263 @@ class ParseException(RuntimeError):
     pass
 
 
+def add_utilization_annotations(
+    data: dict[str, Any],
+    device_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Add achieved_flops_percent, achieved_bandwidth_percent, and roofline metrics to trace events.
+
+    This function augments a Chrome trace with performance utilization metrics by:
+    1. First ensuring kernel_flop and kernel_num_gb are present (via _augment_trace_helper)
+    2. Computing achieved FLOPS% and bandwidth% based on device peak specs
+    3. Computing roofline metrics (arithmetic intensity, roofline efficiency)
+
+    Args:
+        data: Chrome trace data (dict with "traceEvents" key)
+        device_name: Optional device name to use for looking up peak specs.
+                    If None, will try to use PyTorch's device query APIs or
+                    infer from trace's deviceProperties.
+
+    Returns:
+        The augmented trace data with utilization and roofline metrics added to kernel events.
+
+    Roofline metrics added:
+        - arithmetic_intensity: FLOP/byte ratio for the kernel
+        - roofline_ceiling_tflops: Theoretical max performance for this kernel
+        - roofline_bound: "memory" or "compute" indicating the limiting factor
+        - roofline_efficiency_percent: Actual performance / roofline ceiling
+    """
+    # First ensure we have kernel_flop and kernel_num_gb
+    data = _augment_trace_helper(data)
+
+    # Try to get device specs from PyTorch's APIs first (most accurate)
+    peak_tflops_by_dtype: dict[torch.dtype, float] = {}
+    peak_bw_gbps: Optional[float] = None
+
+    try:
+        from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
+
+        if torch.cuda.is_available():
+            peak_bw_gbps = get_gpu_dram_gbps()
+            for dt in [torch.float32, torch.float16, torch.bfloat16, torch.float64]:
+                try:
+                    peak_tflops_by_dtype[dt] = get_device_tflops(dt)
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+
+    # Fall back to device_info lookup if PyTorch APIs didn't work
+    device_info = None
+    if not peak_tflops_by_dtype or peak_bw_gbps is None:
+        if device_name is not None:
+            device_info = lookup_device_info(device_name)
+        elif "deviceProperties" in data and len(data["deviceProperties"]) > 0:
+            for dev_prop in data["deviceProperties"]:
+                if "name" in dev_prop:
+                    device_info = lookup_device_info(dev_prop["name"])
+                    if device_info is not None:
+                        break
+
+        if device_info is not None:
+            if not peak_tflops_by_dtype:
+                peak_tflops_by_dtype = {
+                    k: v
+                    for k, v in device_info.tops.items()
+                    if isinstance(k, torch.dtype)
+                }
+            if peak_bw_gbps is None:
+                peak_bw_gbps = device_info.dram_bw_gbs
+
+    if not peak_tflops_by_dtype or peak_bw_gbps is None:
+        log.warning(
+            "Could not determine device specs for utilization annotations. "
+            "Ensure CUDA is available or specify device_name."
+        )
+        return data
+
+    # Add utilization annotations to CUDA kernel events only
+    # CPU ops with kernel metadata are skipped - they represent the CPU-side launch,
+    # not the actual GPU execution where utilization matters
+    for event in data["traceEvents"]:
+        cat = event.get("cat", "")
+
+        # Skip events that don't have duration or args
+        if "args" not in event or "dur" not in event:
+            continue
+
+        # Only process kernel events (GPU-side)
+        if cat != "kernel":
+            continue
+
+        dur = event["dur"]  # microseconds
+        if dur == 0:
+            continue
+
+        # Get kernel metrics
+        kernel_flop = event["args"].get("kernel_flop", 0)
+        kernel_num_gb = event["args"].get("kernel_num_gb", 0)
+
+        # Determine dtype for this event
+        event_dtype: Optional[torch.dtype] = None
+        # Try to infer from event's input types
+        if "Input type" in event["args"]:
+            input_types = event["args"]["Input type"]
+            if isinstance(input_types, list) and len(input_types) > 0:
+                type_str = input_types[0]
+                if type_str in _dtype_map:
+                    event_dtype = _dtype_map[type_str]
+        # Try from kernel name
+        if event_dtype is None:
+            name = event.get("name", "")
+            if "bfloat16" in name:
+                event_dtype = torch.bfloat16
+            elif "float16" in name:
+                event_dtype = torch.float16
+            else:
+                event_dtype = torch.float32  # Default
+
+        # Get peak performance for dtype
+        peak_tflops = peak_tflops_by_dtype.get(event_dtype, 0)
+        peak_flops = peak_tflops * 1e12  # Convert to FLOPS
+        peak_bw = peak_bw_gbps * 1e9  # Convert to bytes/s
+
+        # Calculate achieved FLOPS%
+        op_flops = 0
+        if kernel_flop != 0:
+            op_flops = kernel_flop / (dur / 1e6)  # FLOPS/s
+            if peak_tflops > 0:
+                achieved_flops_pct = 100 * op_flops / peak_flops
+                event["args"]["achieved_flops_percent"] = achieved_flops_pct
+
+        # Calculate achieved bandwidth%
+        op_bw = 0
+        if kernel_num_gb != 0:
+            op_bw = kernel_num_gb * 1e9 / (dur / 1e6)  # bytes/s
+            achieved_bw_pct = 100 * op_bw / peak_bw
+            event["args"]["achieved_bandwidth_percent"] = achieved_bw_pct
+
+        # Calculate roofline metrics
+        if kernel_num_gb > 0 and peak_tflops > 0:
+            # Ridge point: where compute and memory ceilings meet (used internally)
+            ridge_point = peak_flops / peak_bw
+
+            if kernel_flop > 0:
+                # Standard roofline: kernel has both FLOPS and memory access
+                # Arithmetic intensity (FLOP/byte)
+                arith_intensity = kernel_flop / (kernel_num_gb * 1e9)
+                event["args"]["arithmetic_intensity"] = arith_intensity
+
+                # Roofline ceiling: theoretical max performance for this kernel
+                # min(peak_flops, peak_bandwidth * arithmetic_intensity)
+                roofline_ceiling = min(peak_flops, peak_bw * arith_intensity)
+                event["args"]["roofline_ceiling_tflops"] = roofline_ceiling / 1e12
+
+                # Roofline efficiency: actual vs theoretical max
+                roofline_efficiency = 100 * op_flops / roofline_ceiling
+                event["args"]["roofline_efficiency_percent"] = roofline_efficiency
+
+                # Bound type: is this kernel memory-bound or compute-bound on roofline?
+                if arith_intensity < ridge_point:
+                    event["args"]["roofline_bound"] = "memory"
+                else:
+                    event["args"]["roofline_bound"] = "compute"
+            else:
+                # Purely memory-bound kernel (no FLOPS tracked, only memory access)
+                # These are always memory-bound with arithmetic intensity ~0
+                event["args"]["arithmetic_intensity"] = 0.0
+                event["args"]["roofline_bound"] = "memory"
+                # For purely memory-bound, roofline efficiency = achieved bandwidth
+                event["args"]["roofline_efficiency_percent"] = achieved_bw_pct
+
+    return data
+
+
+def augment_trace_file(
+    input_path: str,
+    output_path: Optional[str] = None,
+    add_utilization: bool = True,
+) -> str:
+    """
+    Augment a Chrome trace file with FLOPS, bandwidth, and utilization annotations.
+
+    This is a convenience function for augmenting trace files with performance metrics.
+    It can be used as a post-processing step after profiler.export_chrome_trace().
+
+    Args:
+        input_path: Path to the input Chrome trace JSON file.
+        output_path: Path to write the augmented trace. If None, overwrites input_path.
+        add_utilization: If True, also adds achieved_flops_percent and
+                        achieved_bandwidth_percent. Device info is inferred
+                        from CUDA if available, or from the trace's deviceProperties.
+
+    Returns:
+        The path to the output file.
+    """
+    with open(input_path) as f:
+        data = json.load(f)
+
+    # Always run basic augmentation
+    data = _augment_trace_helper(data)
+
+    # Optionally add utilization annotations
+    if add_utilization:
+        data = add_utilization_annotations(data)
+
+    # Write output
+    if output_path is None:
+        output_path = input_path
+
+    with open(output_path, "w") as f:
+        json.dump(data, f)
+
+    return output_path
+
+
+# Legacy callback functions for backwards compatibility
+# New code should use torch.profiler.register_export_chrome_trace_callback
+_profiler_export_callbacks: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
+
+
+def register_profiler_export_callback(
+    callback: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    """
+    Register a callback to run before profiler trace export.
+
+    .. deprecated::
+        Use torch.profiler.register_export_chrome_trace_callback() instead.
+    """
+    _profiler_export_callbacks.append(callback)
+
+
+def clear_profiler_export_callbacks() -> None:
+    """Remove all registered profiler export callbacks (for testing)."""
+    _profiler_export_callbacks.clear()
+
+
+def run_profiler_export_callbacks(data: dict[str, Any]) -> dict[str, Any]:
+    """Run all registered profiler export callbacks on the trace data."""
+    for callback in _profiler_export_callbacks:
+        try:
+            data = callback(data)
+        except Exception as e:
+            log.warning("Profiler export callback failed: %s", e)
+    return data
+
+
+def _default_utilization_callback(data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Default callback that adds utilization annotations to profiler traces.
+
+    This callback is automatically registered with the profiler when this module
+    is imported. It detects the device from trace metadata and adds FLOPS/bandwidth
+    utilization metrics to kernel events.
+    """
+    return add_utilization_annotations(data)
+
+
 def main() -> None:
     """
     Main function for the profile analysis script.
@@ -817,6 +1074,26 @@ input files to combine.",
 
         combined.dump(output_file)
         print(f"Successfully combined {', '.join(input_files)} into {output_file}")
+
+
+# Register the default utilization callback with the profiler.
+# This enables automatic FLOPS/bandwidth utilization annotations in profiler traces.
+# lru_cache ensures we only register once per process.
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _register_profiler_callback() -> None:
+    try:
+        from torch.profiler import register_export_chrome_trace_callback
+
+        register_export_chrome_trace_callback(_default_utilization_callback)
+    except ImportError:
+        # Profiler not available (e.g., minimal build)
+        pass
+
+
+_register_profiler_callback()
 
 
 if __name__ == "__main__":
