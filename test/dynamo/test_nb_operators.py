@@ -1675,6 +1675,71 @@ class TestNbAdd(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_add_tensor_and_tensor(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_iadd_tensor_and_tensor(self):
+        def fn(x, y):
+            x += y
+            return x
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x.clone(), y), fn(x.clone(), y))
+
+    def test_iadd_tensor_preserves_identity(self):
+        def fn():
+            d = torch.ones(2, 2)
+            d_copy = d
+            d += torch.ones(2, 2)
+            return d is d_copy
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(opt_fn())
+
+    def test_iadd_tensor_and_scalar(self):
+        def fn(x):
+            x += 3
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x.clone()), fn(x.clone()))
+
+    def test_add_tensor_and_scalar(self):
+        def fn(x):
+            return x + 3, 3 + x, x + 2.5, 2.5 + x, x + True, False + x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_add_tensor_and_symnode(self):
+        def fn(x):
+            s = x.shape[0]
+            return x + s, s + x
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_add_tensor_broadcast(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
 
 instantiate_parametrized_tests(TestNbOr)
 instantiate_parametrized_tests(TestNbSub)

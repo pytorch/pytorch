@@ -34,12 +34,11 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
+    skipIfNoLapack, skipIfRocm, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
-    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, with_ieee_matmul_precision
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -6866,7 +6865,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(expected_out_t, out_t)
 
     @unittest.skipIf(IS_WINDOWS and IS_ARM64, "Fails as 'Unexpected success' on Windows ARM64")
-    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
+    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE)
     # see https://github.com/pytorch/pytorch/issues/177250
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
@@ -7300,32 +7299,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
-
-    def test_unfold_invalid_arg(self):
-        # input wrong dimension
-
-        unfold = nn.Unfold(kernel_size=(2, 3))
-
-        # calculated output shape is too small
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(2, 3))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
-            unfold(torch.randn(1, 2, 2, 3))
-
-        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
-            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
-            unfold(torch.randn(1, 2, 2, 2))
-
-        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
-            tensor_data = torch.tensor([
-                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
-                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
-                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
-            ])
-            F.fold(tensor_data, 16, 7318349394477056)
 
     def test_softmin(self):
         x = torch.randn(2, 16)
@@ -8794,9 +8767,13 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.001)
-    @reduced_f32_on_and_off(0.001)
+    # affine_grid does a K=3 matmul; grid_sample's bilinear interp then
+    # amplifies any matmul drift by the input's contrast (up to ~90× near
+    # step-edge corners in this test). The test's intent is algorithmic
+    # correctness vs scipy's CPU affine_transform reference, not matmul
+    # precision — disable reduced-precision matmul on both CPU and GPU.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @with_ieee_matmul_precision
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9048,9 +9025,10 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.005)
-    @reduced_f32_on_and_off(0.005)
+    # See test_affine_2d_rotate90: reduced-precision matmul noise in
+    # affine_grid (K=3) is amplified by grid_sample's bilinear interp.
+    # https://github.com/jeffdaily/tf32_analysis
+    @with_ieee_matmul_precision
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9101,9 +9079,10 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.005)
-    @reduced_f32_on_and_off(0.005)
+    # See test_affine_2d_rotate90: reduced-precision matmul noise in
+    # affine_grid (K=3) is amplified by grid_sample's trilinear interp.
+    # https://github.com/jeffdaily/tf32_analysis
+    @with_ieee_matmul_precision
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9657,7 +9636,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -10031,7 +10009,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
-    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -10043,10 +10020,48 @@ class TestNNDeviceType(NNTestCase):
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
 
+    def test_unfold_invalid_arg(self, device):
+        # output shape components must be >= 1
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(2, 3))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
+            unfold(torch.randn(1, 2, 2, 3, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
+            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
+            unfold(torch.randn(1, 2, 2, 2, device=device))
+
+        # im2col_shape_check invariants
+        x = torch.randn(1, 3, 8, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"kernel size should be greater than zero"):
+            F.unfold(x, kernel_size=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"dilation should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), dilation=(0, 1))
+        with self.assertRaisesRegex(RuntimeError, r"padding should be non-negative"):
+            F.unfold(x, kernel_size=(3, 3), padding=(-1, 0))
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
+            F.unfold(x, kernel_size=(3, 3), stride=(0, 1))
+
+        # Host-side overflow guard on kernel_size product.
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ], device=device)
+            F.fold(tensor_data, 16, 7318349394477056)
+
     @onlyCUDA
-    @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.005)
+    # Test asserts GPU RNN slowpath (cudnn disabled) matches CPU. The
+    # gradient check uses a tight explicit atol=5e-5 designed for FP32;
+    # TF32 drift in the backward GEMMs (measured ~3e-3) exceeds that by
+    # ~50x but is unrelated to what the test verifies. See
+    # https://github.com/jeffdaily/tf32_analysis.
+    @with_ieee_matmul_precision
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -10141,14 +10156,18 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
-        # cuda throws device assert for invalid data
-        # xla & mps ignore out of bound indices
-        if self.device_type == 'cpu':
+        # cpu raises synchronously; mps reports the bad index from its scatter
+        # kernel asynchronously, surfaced on the next sync. xla still ignores.
+        if self.device_type in ('cpu', 'mps'):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
+                if self.device_type == 'mps':
+                    torch.mps.synchronize()
 
         t = torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
@@ -12626,7 +12645,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
-    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
