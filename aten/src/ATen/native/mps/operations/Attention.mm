@@ -819,11 +819,11 @@ constexpr std::array<at::ScalarType, 3> mps_supported_dtypes{at::kFloat, at::kHa
 inline bool mps_check_head_dim(const sdp::sdp_params& params, bool debug) {
   auto qd = params.query.sym_size(-1).maybe_as_int();
   auto vd = params.value.sym_size(-1).maybe_as_int();
-  if (!qd.has_value() || !vd.has_value() || *qd != *vd ||
-      !prefill_attention_supports_head_dim(*qd)) {
+  if (!qd.has_value() || !vd.has_value() || *qd != *vd || !prefill_attention_supports_head_dim(*qd)) {
     if (debug) {
-      TORCH_WARN("MPS SDPA: head_dim must match between Q and V and be one of "
-                 "{32, 64, 72, 80, 96, 128, 256}.");
+      TORCH_WARN(
+          "MPS SDPA: head_dim must match between Q and V and be one of "
+          "{32, 64, 72, 80, 96, 128, 256}.");
     }
     return false;
   }
@@ -994,8 +994,8 @@ _scaled_dot_product_flash_attention_mps(const Tensor& query,
                                         [[maybe_unused]] bool return_debug_mask,
                                         std::optional<double> scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_mps");
-  const bool any_grad = at::GradMode::is_enabled() &&
-      (query.requires_grad() || key.requires_grad() || value.requires_grad());
+  const bool any_grad =
+      at::GradMode::is_enabled() && (query.requires_grad() || key.requires_grad() || value.requires_grad());
   TORCH_CHECK(!any_grad,
               "_scaled_dot_product_flash_attention on MPS is forward-only; "
               "use sdpa_kernel([MATH]) when grad is required.");
@@ -1036,8 +1036,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     bool is_causal,
     std::optional<double> scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.efficient_attention_mps");
-  const bool any_grad = at::GradMode::is_enabled() &&
-      (query.requires_grad() || key.requires_grad() || value.requires_grad());
+  const bool any_grad =
+      at::GradMode::is_enabled() && (query.requires_grad() || key.requires_grad() || value.requires_grad());
   TORCH_CHECK(!any_grad,
               "_scaled_dot_product_efficient_attention on MPS is forward-only; "
               "use sdpa_kernel([MATH]) when grad is required.");
