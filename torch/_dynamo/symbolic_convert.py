@@ -84,6 +84,7 @@ from .bytecode_transformation import (
     create_jump_absolute,
     create_rot_n,
     create_swap,
+    get_call_callable_depth,
     get_code_keys,
     Instruction,
     is_generator,
@@ -1128,6 +1129,12 @@ def break_graph_if_unsupported(
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
+            # When warnings.warn is called from an inlined frame, replace
+            # it on the symbolic stack before compile_subgraph so the codegen
+            # naturally reconstructs the wrapper via LOAD_GLOBAL.
+            if self.parent is not None:
+                self._maybe_replace_warnings_warn_on_stack(inst)
+
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=int(push) - stack_effect
@@ -1147,16 +1154,6 @@ def break_graph_if_unsupported(
                 if self.parent is not None
                 else inst
             )
-
-            # When warnings.warn is called from an inlined frame, wrap it so
-            # that Python's per-location dedup sees the leaf frame's filename
-            # and line number instead of the root frame's.
-            if (
-                self.parent is not None
-                and inst.opname == "CALL"
-                and inst.arg is not None
-            ):
-                self._maybe_swap_warnings_warn_wrapper(inst)
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -3396,28 +3393,26 @@ class InstructionTranslatorBase(
 
         return new_code, resume_name
 
-    def _maybe_swap_warnings_warn_wrapper(self, inst: Instruction) -> None:
-        """Swap warnings.warn on the bytecode stack with a wrapper that
+    def _maybe_replace_warnings_warn_on_stack(self, inst: Instruction) -> None:
+        """Replace warnings.warn on the symbolic stack with a wrapper that
         preserves the leaf frame's source location for warning dedup.
 
         When nested graph breaks inline a warnings.warn call into the root
         frame's bytecode, the root frame's line numbers defeat Python's
-        per-location warning dedup.  This emits bytecode to replace the
-        callable on the stack with a thin wrapper whose code object reports
-        the original (leaf frame) filename and line number.
+        per-location warning dedup.  This replaces the SkipFunctionVariable
+        for warnings.warn on the symbolic stack before compile_subgraph, so
+        the codegen naturally reconstructs the wrapper via LOAD_GLOBAL.
         """
         if inst.arg is None:
             return
 
-        # Find the callable on the symbolic stack (mirrors _call logic)
-        stack_items = self.stack[-(inst.arg + 2) :]
-        if sys.version_info >= (3, 13):
-            callable_var = stack_items[0]
-        elif isinstance(stack_items[0], NullVariable):
-            callable_var = stack_items[1]
-        else:
-            callable_var = stack_items[0]
+        try:
+            depth = get_call_callable_depth(inst.opname, inst.arg)
+        except ValueError:
+            return
 
+        callable_idx = len(self.stack) - depth
+        callable_var = self.stack[callable_idx]
         if not (
             isinstance(callable_var, SkipFunctionVariable)
             and callable_var.value is _warnings.warn
@@ -3431,22 +3426,9 @@ class InstructionTranslatorBase(
 
         wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
         wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
-
-        # The bytecode stack (after compile_subgraph) has:
-        #   ... | NULL/self | callable | arg0 | ... | argN-1
-        # callable position from TOS (1-indexed):
-        #   3.11/3.12: inst.arg + 1  (NULL below callable)
-        #   3.13+:     inst.arg + 2  (callable below NULL)
-        # After LOAD_GLOBAL pushes one item, positions shift by +1.
-        if sys.version_info >= (3, 13):
-            swap_pos = inst.arg + 3
-        else:
-            swap_pos = inst.arg + 2
-
-        load_wrapper = create_instruction("LOAD_GLOBAL", argval=wrapper_name)
-        swap = create_instruction("SWAP", arg=swap_pos)
-        pop = create_instruction("POP_TOP")
-        self.output.add_output_instructions([load_wrapper, swap, pop])
+        self.stack[callable_idx] = SkipFunctionVariable(
+            wrapper, source=GlobalSource(wrapper_name)
+        )
 
     def create_call_resume_at(
         self,
