@@ -20,7 +20,8 @@ struct softshrink_functor {
     } else if (x < -lambda) {
       return x + lambda;
     } else {
-      return T(0);
+      // multiplication to propagate Nan, Nan * 0 = Nan.
+      return x * T(0);
     }
   }
 };
@@ -64,7 +65,8 @@ REGISTER_UNARY_OP(relu, bool, bool);
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
-    return static_cast<T>(min(max(x + 3.0f, .0f), 6.f) / 6.f);
+    const auto r = (x + 3.0f) / 6.0f;
+    return static_cast<T>(r > 1.0f ? 1.0f : (r < 0.0f ? 0.0f : r));
   }
 };
 

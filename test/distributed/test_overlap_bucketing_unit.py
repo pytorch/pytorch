@@ -2391,15 +2391,13 @@ class TestBitsetAncestors(TestCase):
         self.assertFalse(ancestors.has_dep(c, b))
 
     def test_intersection(self):
-        """White-box test: verifies raw _bits AND matches expected common ancestors."""
+        """Verifies bitwise AND of ancestor sets matches expected common ancestors."""
         from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        d_idx = ancestors._node_to_idx[d]
-        e_idx = ancestors._node_to_idx[e]
-        common_bits = ancestors._bits[d_idx] & ancestors._bits[e_idx]
+        common_bits = ancestors.get_ancestor_bits(d) & ancestors.get_ancestor_bits(e)
         self.assertEqual(common_bits.bit_count(), 3)
 
     def test_extra_inputs(self):

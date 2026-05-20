@@ -97,6 +97,21 @@ class BitsetAncestors:
         """Check if either node is an ancestor of the other."""
         return self.is_ancestor(n1, n2) or self.is_ancestor(n2, n1)
 
+    def get_ancestor_bits(self, node: fx.Node) -> int:
+        """Return the raw ancestor bitset for ``node``."""
+        return self._bits[self._node_to_idx[node]]
+
+    def node_bit(self, node: fx.Node) -> int:
+        """Return the single-bit mask ``1 << idx`` for ``node``."""
+        return 1 << self._node_to_idx[node]
+
+    def ancestors_intersect(self, node: fx.Node, mask: int) -> bool:
+        """Check if any ancestor of ``node`` is set in ``mask``."""
+        idx = self._node_to_idx.get(node)
+        if idx is None:
+            return False
+        return bool(self._bits[idx] & mask)
+
     def iter_ancestors(self, node: fx.Node):
         """Yield all ancestors of ``node`` via lowest-bit scan."""
         bits = self._bits[self._node_to_idx[node]]
