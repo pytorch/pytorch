@@ -4,7 +4,7 @@ import logging
 import math
 import operator
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
@@ -37,6 +37,7 @@ from torch._prims_common import (
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, inductor_prims
 from .utils import (
@@ -152,6 +153,117 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+def _trilinear_canonicalize_dims(
+    dims: Sequence[int], total_dim: int
+) -> tuple[int, ...]:
+    canonical_dims = utils.canonicalize_dims(total_dim, dims)
+    seen: OrderedSet[int] = OrderedSet()
+    for dim in canonical_dims:
+        if dim in seen:
+            raise RuntimeError(f"dim {dim} appears multiple times in the list of dims")
+        seen.add(dim)
+    return canonical_dims
+
+
+def _trilinear_unsqueeze(
+    input: torch.Tensor, dims: Sequence[int], total_dim: int
+) -> torch.Tensor:
+    for dim in sorted(dims):
+        input = input.unsqueeze(dim)
+    return input
+
+
+def _trilinear_size_eq(lhs, rhs) -> bool:
+    return guard_or_false(lhs == rhs)
+
+
+def _trilinear_is_float8_dtype(dtype: torch.dtype) -> bool:
+    return dtype in (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+        torch.float8_e8m0fnu,
+    )
+
+
+def _trilinear_supported_shapes(
+    inputs: Sequence[torch.Tensor],
+    expands: Sequence[tuple[int, ...]],
+    total_dim: int,
+    unroll_dim: int,
+) -> bool:
+    unroll_sizes = [
+        input.size(unroll_dim - sum(dim < unroll_dim for dim in expand))
+        for input, expand in zip(inputs, expands)
+        if unroll_dim not in expand
+    ]
+    if not unroll_sizes:
+        return False
+    unroll_size = unroll_sizes[-1]
+    if any(not _trilinear_size_eq(size, unroll_size) for size in unroll_sizes[:-1]):
+        return False
+
+    expanded_inputs = [
+        _trilinear_unsqueeze(input, expand, total_dim)
+        for input, expand in zip(inputs, expands)
+    ]
+    for dim in range(total_dim):
+        dim_sizes = [input.size(dim) for input in expanded_inputs]
+        non_broadcast_sizes = [
+            size for size in dim_sizes if not statically_known_true(size == 1)
+        ]
+        if non_broadcast_sizes and any(
+            not _trilinear_size_eq(size, non_broadcast_sizes[0])
+            for size in non_broadcast_sizes[1:]
+        ):
+            return False
+    return True
+
+
+@register_decomposition(aten._trilinear.default)
+def _trilinear(
+    i1: torch.Tensor,
+    i2: torch.Tensor,
+    i3: torch.Tensor,
+    expand1: list[int],
+    expand2: list[int],
+    expand3: list[int],
+    sumdim: list[int],
+    unroll_dim: int = 1,
+) -> torch.Tensor:
+    total_dim = i1.dim() + len(expand1)
+    torch._check(
+        unroll_dim >= 0 and unroll_dim < total_dim,
+        lambda: f"unroll_dim must be in [0,{total_dim - 1}]",
+    )
+
+    expand_dims = (
+        _trilinear_canonicalize_dims(expand1, total_dim),
+        _trilinear_canonicalize_dims(expand2, total_dim),
+        _trilinear_canonicalize_dims(expand3, total_dim),
+    )
+    sum_dims = _trilinear_canonicalize_dims(sumdim, total_dim)
+
+    if i1.dtype != i2.dtype or i1.dtype != i3.dtype:
+        return NotImplemented
+    if i1.dtype == torch.bool or not (i1.is_floating_point() or i1.dtype.is_complex):
+        return NotImplemented
+    if _trilinear_is_float8_dtype(i1.dtype):
+        return NotImplemented
+    if not _trilinear_supported_shapes(
+        (i1, i2, i3), expand_dims, total_dim, unroll_dim
+    ):
+        return NotImplemented
+
+    result = (
+        _trilinear_unsqueeze(i1, expand_dims[0], total_dim)
+        * _trilinear_unsqueeze(i2, expand_dims[1], total_dim)
+        * _trilinear_unsqueeze(i3, expand_dims[2], total_dim)
+    )
+    return result.sum(sum_dims) if sum_dims else result
 
 
 @register_decomposition([aten.lerp.Scalar])
