@@ -1686,6 +1686,7 @@ class DeviceCachingAllocator {
     if ((offset > block->size) || (size > block->size - offset)) {
       return nullptr;
     }
+    pool.erase_from_blocks(block);
     return block;
   }
 
@@ -2018,16 +2019,17 @@ class DeviceCachingAllocator {
           is_expandable_segments_active);
       prefix_params.stat_types = stat_types;
       prefix_params.block = containing_block;
-      pool.erase_from_blocks(containing_block);
       prefix_block = alloc_found_block(
           prefix_params,
           prefix_size,
           context,
           true /* always split for prefix */);
       requested_source = prefix_block->next;
+      // alloc_found_block re-inserts the split remainder into the pool. We have
+      // to manually erase the requested_source.
+      pool.erase_from_blocks(requested_source);
     }
 
-    pool.erase_from_blocks(requested_source);
     AllocParams requested_params(
         device_id,
         size,
