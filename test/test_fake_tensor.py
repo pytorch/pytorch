@@ -273,6 +273,60 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_mul_complex_expanded_scalar_transposed_strides(self):
+        devices = ["cpu"]
+        if RUN_CUDA:
+            devices.append("cuda")
+
+        for device in devices:
+            x = torch.empty_strided(
+                (8, 4), (1, 8), dtype=torch.complex64, device=device
+            )
+            scalar = torch.empty_strided((), (), dtype=torch.float32, device=device)
+            exp = torch.as_strided(scalar, (8, 4), (0, 0))
+            broadcast = torch.empty_strided(
+                (1, 4), (4, 1), dtype=torch.float32, device=device
+            )
+            real_x = torch.empty_strided(
+                (8, 4), (1, 8), dtype=torch.float32, device=device
+            )
+            real_scalar = torch.empty_strided(
+                (), (), dtype=torch.float16, device=device
+            )
+            real_exp = torch.as_strided(real_scalar, (8, 4), (0, 0))
+            eager_out = exp * x
+            eager_scalar_out = x * 1
+            eager_broadcast_out = broadcast * x
+            eager_real_out = real_exp * real_x
+
+            with FakeTensorMode():
+                fake_x = torch.empty_strided(
+                    (8, 4), (1, 8), dtype=torch.complex64, device=device
+                )
+                fake_scalar = torch.empty_strided(
+                    (), (), dtype=torch.float32, device=device
+                )
+                fake_exp = torch.as_strided(fake_scalar, (8, 4), (0, 0))
+                fake_broadcast = torch.empty_strided(
+                    (1, 4), (4, 1), dtype=torch.float32, device=device
+                )
+                fake_real_x = torch.empty_strided(
+                    (8, 4), (1, 8), dtype=torch.float32, device=device
+                )
+                fake_real_scalar = torch.empty_strided(
+                    (), (), dtype=torch.float16, device=device
+                )
+                fake_real_exp = torch.as_strided(fake_real_scalar, (8, 4), (0, 0))
+                fake_out = fake_exp * fake_x
+                fake_scalar_out = fake_x * 1
+                fake_broadcast_out = fake_broadcast * fake_x
+                fake_real_out = fake_real_exp * fake_real_x
+
+            self.assertEqual(fake_out.stride(), eager_out.stride())
+            self.assertEqual(fake_scalar_out.stride(), eager_scalar_out.stride())
+            self.assertEqual(fake_broadcast_out.stride(), eager_broadcast_out.stride())
+            self.assertEqual(fake_real_out.stride(), eager_real_out.stride())
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:

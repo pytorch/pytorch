@@ -79,20 +79,33 @@ def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
 def elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    _use_original_input_strides: bool = False,
 ):
     # Perform type promotion, as this is expected from prim_metafunction
     _, result_dtype = utils.elementwise_dtypes(
         *args,
         type_promotion_kind=type_promotion,
     )
-    args = [_maybe_convert_to_dtype(x, result_dtype) for x in args]
 
-    # Broadcast
-    args = _maybe_broadcast(*args)
+    args_with_fixed_dtypes = None
+    if _use_original_input_strides:
+        # CUDA TensorIterator computes the output layout from the original
+        # broadcasted operands before promoted temporaries are materialized.
+        args_with_fixed_dtypes = _maybe_broadcast(*args)
+        args = [
+            _maybe_convert_to_dtype(x, result_dtype) for x in args_with_fixed_dtypes
+        ]
+    else:
+        # CPU TensorIterator observes promoted temporaries during layout
+        # selection, so keep the normal convert-then-broadcast ordering.
+        args = [_maybe_convert_to_dtype(x, result_dtype) for x in args]
+        args = _maybe_broadcast(*args)
 
     # Perform prim checks
     return _prim_elementwise_meta(
-        *args, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+        *args,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+        args_with_fixed_dtypes=args_with_fixed_dtypes,
     )
 
 
@@ -4635,6 +4648,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     ],
 )
 def meta_binop_alpha(self, other, alpha=1):
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+@register_meta(aten.mul.Tensor)
+def meta_mul(self, other):
     return elementwise_meta(
         self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )

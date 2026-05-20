@@ -346,6 +346,41 @@ def workaround_stride_incorrect_op(
     raise UnsupportedOperatorException(func)
 
 
+@register_op_impl(aten.mul.Tensor)
+def mul_tensor(
+    fake_mode: FakeTensorMode,
+    _func: OpOverload,
+    self: Any,
+    other: Any,
+) -> Any:
+    from torch._meta_registrations import elementwise_meta
+
+    if not isinstance(self, torch.Tensor) or not isinstance(other, torch.Tensor):
+        return NotImplemented
+
+    if self.layout != torch.strided or other.layout != torch.strided:
+        return NotImplemented
+
+    _, result_dtype = elementwise_dtypes(
+        self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    has_cuda_tensor = (
+        self.device.type == "cuda" and not utils.is_cpu_scalar_tensor(self)
+    ) or (other.device.type == "cuda" and not utils.is_cpu_scalar_tensor(other))
+    if (
+        self.dtype == result_dtype and other.dtype == result_dtype
+    ) or not has_cuda_tensor:
+        return NotImplemented
+
+    with fake_mode:
+        return elementwise_meta(
+            self,
+            other,
+            type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            _use_original_input_strides=True,
+        )
+
+
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
@@ -1880,15 +1915,22 @@ def fast_detach(
 def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
     import torch._refs
 
+    fast_mul_impl = make_fast_binary_impl(torch._refs.mul)
+
+    def fast_mul_tensor(mode: FakeTensorMode, *args: Any, **kwargs: Any) -> FakeTensor:
+        if not kwargs and len(args) == 2:
+            out = mul_tensor(mode, aten.mul.Tensor, args[0], args[1])
+            if out is not NotImplemented:
+                return out
+        return fast_mul_impl(mode, *args, **kwargs)
+
     register_fast_op_impl(torch.ops.aten.add.Tensor)(
         make_fast_binary_impl(torch._refs.add)
     )
     register_fast_op_impl(torch.ops.aten.sub.Tensor)(
         make_fast_binary_impl(torch._refs.sub)
     )
-    register_fast_op_impl(torch.ops.aten.mul.Tensor)(
-        make_fast_binary_impl(torch._refs.mul)
-    )  # type: ignore[has-type]
+    register_fast_op_impl(torch.ops.aten.mul.Tensor)(fast_mul_tensor)
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(
             torch._refs.div,
