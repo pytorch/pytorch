@@ -2431,6 +2431,37 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         super().__init__()
         self.should_scale_configs = False
 
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        configs = [
+            c for c in configs if V.graph.sizevars.statically_known_lt(c.block_k, k)
+        ]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
