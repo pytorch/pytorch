@@ -2637,6 +2637,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
