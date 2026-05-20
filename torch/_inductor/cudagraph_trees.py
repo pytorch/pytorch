@@ -630,8 +630,9 @@ def _use_cuda_memory_pool_manager(
 
     with torch.cuda.stream(stream), torch.device(device):
         # Begin allocate to mem pool for all memory allocation on the current thread.
-        # This is thread safe since a thread can only warmup or record 1 cudagraph
-        # at the same time.
+        # CUDAGraphTreeManager serializes runtime entry for callers that share
+        # a CUDA pool, since the allocator rejects overlapping begin calls for
+        # the same pool.
         torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
         try:
             yield
@@ -2373,20 +2374,21 @@ class CUDAGraphTreeManager:
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
         to avoid a reference cycle.
         """
-        nodes = []
-        for roots in self.roots.values():
-            nodes.extend(roots)
+        with self._run_lock:
+            nodes = []
+            for roots in self.roots.values():
+                nodes.extend(roots)
 
-        while nodes:
-            node = nodes.pop()
-            for children in node.children.values():
-                nodes.extend(children)
-            node.remove_node_cached_tensors()
-            node.graph = None
+            while nodes:
+                node = nodes.pop()
+                for children in node.children.values():
+                    nodes.extend(children)
+                node.remove_node_cached_tensors()
+                node.graph = None
 
-        self.graph = None
-        self.roots = None  # type: ignore[assignment]
-        self.current_node = None
+            self.graph = None
+            self.roots = None  # type: ignore[assignment]
+            self.current_node = None
 
     def record_function(
         self, new_inputs: list[InputType], function_id: FunctionID
@@ -2496,6 +2498,7 @@ class CUDAGraphTreeManager:
         ModelType,
         OutputType,
     ]:
+        container = get_container(self.device_index)
         with self._run_lock:
             id = self.new_func_id()
             self.ids_to_stack_traces[id] = stack_traces
@@ -2514,7 +2517,7 @@ class CUDAGraphTreeManager:
             fn = functools.partial(self.run, function_id=id)
 
             # container needs to set clean up when fn dies
-            get_container(self.device_index).add_strong_reference(fn)
+            container.add_strong_reference(fn)
             return fn, fn(inputs)
 
     @property

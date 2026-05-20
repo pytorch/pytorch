@@ -837,6 +837,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name in ("__mul__", "__rmul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_imul, slot_wrapper_mul
+
+            if name == "__mul__":
+                return slot_wrapper_mul(tx, self, args[0])
+            if name == "__rmul__":
+                return slot_wrapper_mul(tx, self, args[0], reverse=True)
+            return slot_wrapper_imul(tx, self, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1272,6 +1286,61 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmul__`` instead of ``__mul__``).  The base default
+        graph-breaks so unmigrated VTs surface loudly; ``binary_op1`` only
+        invokes this on types whose CPython type advertises the slot.
+        """
+        return self._nb_slot_not_implemented("nb_multiply_impl", other, reverse=reverse)
+
+    def nb_inplace_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
+
+    def sq_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_repeat slot.
+
+        Implements sequence repetition (e.g. ``[1, 2] * 3``).  ``count`` is
+        an int VariableTracker already produced by ``nb_index_impl``.
+        """
+        unimplemented(
+            gb_type="sq_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_repeat slot but no sq_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_repeat_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_inplace_repeat slot."""
+        unimplemented(
+            gb_type="sq_inplace_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_inplace_repeat slot but no sq_inplace_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_inplace_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def nb_or_impl(
         self,
         tx: Any,
@@ -1370,6 +1439,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
         return variables.ConstantVariable(NotImplemented)
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_absolute slot.
+
+        Called when type_implements_nb_absolute returns True for this type.
+        Subclasses override to provide the actual absolute value.
+        """
+        unimplemented(
+            gb_type="nb_absolute_impl not implemented",
+            context=f"{type(self).__name__} has nb_absolute slot but no nb_absolute_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_absolute C slot but "
+            "the corresponding VariableTracker doesn't implement nb_absolute_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def __init__(
         self,
