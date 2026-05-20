@@ -1385,7 +1385,11 @@ def default_partition(
         if is_multi_output(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
-        if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
+        if node.meta.get("recompute") in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ):
             if is_opaque_node(node):
                 saved_opaque_nodes.append(node)
             else:
@@ -3198,7 +3202,12 @@ def choose_saved_values_set(
     must_save_nodes = [
         i
         for i in recomputable_banned_nodes
-        if i.meta.get("recompute", False) == CheckpointPolicy.MUST_SAVE
+        if i.meta.get("recompute", False)
+        in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        )
     ]
     recomputable_banned_nodes = [
         i for i in recomputable_banned_nodes if i not in must_save_nodes
@@ -3763,6 +3772,19 @@ def min_cut_rematerialization_partition(
     force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
 
+    # Bridge selective-activation-checkpoint's CPU_OFFLOAD policies into the
+    # activation-offloading pipeline: tag the node so `enable_activation_offloading`
+    # picks it up downstream.
+    has_cpu_offload_policy = False
+    for node in joint_graph.nodes:
+        policy = node.meta.get("recompute")
+        if policy in (
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ):
+            node.meta["should_offload"] = True
+            has_cpu_offload_policy = True
+
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
     node_info = classify_nodes(
@@ -3805,6 +3827,47 @@ def min_cut_rematerialization_partition(
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
 
+    # Honor `should_offload` from custom joint passes. The activation offloading pass
+    # can only act on tensors that cross the autograd boundary as saved values, but the
+    # min-cut partitioner may pick to recompute the marked node instead. We force-add
+    # it here, and drop any of its transparent (view/permute/getitem) descendants that
+    # were saved, since those can be re-derived from the now-saved upstream tensor for
+    # free in backward.
+    transparent_targets = OrderedSet(
+        [
+            torch.ops.aten.view.default,
+            torch.ops.aten._unsafe_view.default,
+            torch.ops.aten.reshape.default,
+            torch.ops.aten.permute.default,
+            torch.ops.aten.transpose.int,
+            torch.ops.aten.expand.default,
+            torch.ops.aten.unbind.int,
+            operator.getitem,
+        ]
+    )
+    forced_saves = [n for n in joint_graph.nodes if n.meta.get("should_offload", False)]
+    if forced_saves:
+        saved_set = OrderedSet(saved_values)
+        for forced in forced_saves:
+            if forced not in saved_set:
+                saved_values.append(forced)
+                saved_set.add(forced)
+            # BFS forward through transparent ops and remove any descendant that's
+            # currently saved (it can be re-derived from `forced` at zero cost).
+            stack = [forced]
+            visited: OrderedSet[fx.Node] = OrderedSet()
+            while stack:
+                cur = stack.pop()
+                for user in cur.users:
+                    if user in visited:
+                        continue
+                    visited.add(user)
+                    if user.target in transparent_targets:
+                        if user in saved_set:
+                            saved_set.remove(user)
+                            saved_values = [v for v in saved_values if v is not user]
+                        stack.append(user)
+
     saved_sym_nodes = list(
         filter(
             lambda n: is_sym_node(n) and not _is_assert_only_symbool(n), saved_values
@@ -3833,7 +3896,7 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     # pyrefly: ignore [unbound-name]
-    if config.enable_activation_offloading:
+    if config.enable_activation_offloading or has_cpu_offload_policy:
         from ._activation_offloading.activation_offloading import (
             enable_activation_offloading,
         )

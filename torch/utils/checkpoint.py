@@ -1401,7 +1401,16 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+        if policy in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.PREFER_SAVE,
+            # CPU_OFFLOAD policies require the value to be saved across the autograd
+            # boundary so the compile-time offload pipeline can lift it to CPU. Under
+            # compile, the actual D2H/H2D is inserted by the activation offloading
+            # pass; under eager we behave like MUST_SAVE (no transfer) for now.
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ) or is_compiling:
             self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
         else:
             self.storage[key][idx] = _RECOMPUTE

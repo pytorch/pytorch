@@ -13,10 +13,7 @@ import torch
 import torch.fx as fx
 from torch._functorch._activation_offloading.offload_ops import (  # noqa: F401 -- registers ao::offload, ao::reload, ao::wait_tensor ops
     offload,
-    record_stream_event,
     reload,
-    reload_after,
-    reload_inplace,
     wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
@@ -36,16 +33,30 @@ CPU_OFFLOAD_PREFIX = "cpu_offload_"
 GPU_RELOAD_PREFIX = "gpu_reload_"
 
 
+_LIFETIME_TRANSPARENT_TARGETS = (
+    torch.ops.aten._unsafe_view.default,
+    torch.ops.aten.unbind.int,
+    torch.ops.aten.split.Tensor,
+    torch.ops.aten.split_with_sizes.default,
+    operator.getitem,
+)
+
+
 def _find_all_effective_users(node: fx.Node, op_types: OpTypes) -> OrderedSet[fx.Node]:
-    """Find all effective users of a node, where view ops extend the lifetime
-    of the original node. If a user is a view op, recursively find users of
-    the view."""
+    """Find all effective users of a node, where view-like ops extend the lifetime
+    of the original node. Views and multi-output split-like ops (unbind/split) are
+    transparent: we recurse through them so the "last user" we pick is always a
+    real consumer that produces a single Tensor, never a list-producing node."""
     effective_users: OrderedSet[fx.Node] = OrderedSet()
     for user in node.users:
         if user.op == "output":
             continue
-        effective_users.add(user)
-        if op_types.is_view(user) or user.target == torch.ops.aten._unsafe_view.default:
+        is_transparent = (
+            op_types.is_view(user) or user.target in _LIFETIME_TRANSPARENT_TARGETS
+        )
+        if not is_transparent:
+            effective_users.add(user)
+        else:
             effective_users.update(_find_all_effective_users(user, op_types))
     return effective_users
 
@@ -191,6 +202,10 @@ def reload_activation_bw(graph: fx.Graph) -> None:
 def offload_activation_fw_async(graph: fx.Graph) -> None:
     """Insert async CPU offload operations in the forward pass graph.
 
+    Places the offload (D2H copy) after the last effective consumer of the
+    activation so the transfer overlaps with subsequent compute. The wait_tensor
+    is later sunk to the end of the graph by activation_offload_sink_wait_async.
+
     Uses ao.offload + ao.wait_tensor ops which encapsulate stream management
     internally, producing a clean 2-node IR per offloaded tensor.
     """
@@ -219,7 +234,20 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
         else:
             last_user: fx.Node = node
 
-        with graph.inserting_after(last_user):
+        # Push the offload one hop further: past the downstream ops of the
+        # last consumer. Without keepalive, the GPU buffer is freed right after
+        # offload and enters the allocator's record_stream pending queue. If
+        # the very next op (e.g., down-proj mm) allocates a large output, the
+        # allocator may grab the pending block and insert cudaStreamWaitEvent,
+        # stalling compute. Pushing past that op lets the D2H overlap with
+        # later compute (attention, next layer) where no conflicting allocation
+        # occurs.
+        if downstream := _find_all_effective_users(last_user, op_types):
+            insert_after = max(downstream, key=lambda n: node_to_index[n])
+        else:
+            insert_after = last_user
+
+        with graph.inserting_after(insert_after):
             offload_node: fx.Node = graph.call_function(
                 torch.ops.ao.offload.default,
                 args=(node,),
@@ -229,13 +257,15 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
             offload_node.meta["tensor_meta"] = extract_tensor_metadata(
                 offload_node.meta["val"]
             )
-        # The keepalive=node arg extends the GPU tensor's lifetime in the
-        # graph so the allocator doesn't reclaim it before the async D2H
-        # copy completes.
+        # No keepalive: the GPU tensor is freed right after offload, exactly as
+        # activation checkpointing would free it after the last forward consumer.
+        # The offload op's set_stream + copy_ triggers record_stream on the GPU
+        # tensor, which guards the D2H window — the allocator won't reuse the
+        # block until the transfer stream finishes reading it.
         with graph.inserting_after(offload_node):
             wait_node: fx.Node = graph.call_function(
                 torch.ops.ao.wait_tensor.default,
-                args=(offload_node, node, last_user),
+                args=(offload_node,),
                 name=CPU_OFFLOAD_PREFIX + str(node.name),
             )
             wait_node.meta["val"] = offload_node.meta["val"]
@@ -484,6 +514,28 @@ def offload_chosen_sets_async(
     reload_activation_bw_async(bwd_module.graph)
 
 
+def find_last_compute_node(graph: fx.Graph) -> fx.Node | None:
+    """Walk backward through graph nodes to find the last compute node producing a Tensor."""
+    for node in reversed(graph.nodes):
+        if node.op in ("placeholder", "output"):
+            continue
+        if node.op == "call_function" and node.target in (
+            torch.ops.ao.offload.default,
+            torch.ops.ao.reload.default,
+            torch.ops.ao.wait_tensor.default,
+        ):
+            continue
+        val = node.meta.get("val")
+        if val is not None:
+            if isinstance(val, torch.Tensor):
+                return node
+            if isinstance(val, (list, tuple)) and any(
+                isinstance(x, torch.Tensor) for x in val
+            ):
+                return node
+    return None
+
+
 def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
     """Sink ao.wait_tensor operations for offload completion to the end of the graph.
 
@@ -508,8 +560,18 @@ def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
         and node.args[0].target == torch.ops.ao.offload.default
     ]
 
+    prefetch_dep = find_last_compute_node(graph)
+
     # prepend moves the node from its current position (no manual removal needed)
     for wait_node in wait_nodes_to_sink:
+        if prefetch_dep is not None:
+            # We must use prefetch_dependency to force the Inductor scheduler
+            # to schedule this wait_tensor node at the end of the graph.
+            args = list(wait_node.args)
+            while len(args) < 4:
+                args.append(None)
+            args[3] = prefetch_dep
+            wait_node.args = tuple(args)
         output_node.prepend(wait_node)
 
 
@@ -520,9 +582,10 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
     ao.wait_tensor at its original position.
     """
     graph: fx.Graph = bwd_module.graph
+    nodes_list: list[fx.Node] = list(graph.nodes)
 
-    reload_nodes: list[fx.Node] = []
-    wait_nodes: list[fx.Node] = []
+    # Identify reload + wait pairs
+    reload_patterns: dict[fx.Node, ReloadNodeInfo] = {}
     for node in graph.nodes:
         if not (
             node.op == "call_function" and node.target == torch.ops.ao.reload.default
@@ -532,95 +595,18 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
             (u for u in node.users if u.target == torch.ops.ao.wait_tensor.default),
             None,
         )
-        if wait_node is not None:
-            reload_nodes.append(node)
-            wait_nodes.append(wait_node)
-
-    if not reload_nodes:
-        return
-
-    placeholders = graph.find_nodes(op="placeholder")
-    if not placeholders:
-        return
-    last_placeholder = placeholders[-1]
-
-    window = config.activation_reload_prefetch_window
-    if window < 0:
-        raise ValueError(
-            f"activation_reload_prefetch_window must be >= 0, got {window}"
+        if wait_node is None:
+            continue
+        transfer_size_bytes: int = _calculate_transfer_size(node)
+        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
+        reload_patterns[node] = ReloadNodeInfo(
+            reload_group_nodes=[node],
+            wait_event_node=wait_node,
+            transfer_size_bytes=transfer_size_bytes,
+            transfer_time_ms=transfer_time_ms,
         )
-    if window == 0:
-        window = len(reload_nodes)
 
-    # The reload inputs are saved CPU activation placeholders, so a small initial
-    # window can be issued as soon as backward starts. Later reloads are inserted
-    # after compute-stream release events from earlier reloaded activations. This
-    # keeps the host from allocating every reload destination at backward entry.
-    for reload_node in reversed(reload_nodes[:window]):
-        last_placeholder.append(reload_node)
-
-    op_types: OpTypes = get_default_op_list()
-    for idx, reload_node in enumerate(reload_nodes[window:]):
-        release_wait_node = wait_nodes[idx]
-        target_wait_node = wait_nodes[idx + window]
-        nodes_list = list(graph.nodes)
-        node_to_index = {node: node_idx for node_idx, node in enumerate(nodes_list)}
-        release_users = _find_all_effective_users(release_wait_node, op_types)
-        release_point = (
-            max(release_users, key=lambda n: node_to_index[n])
-            if release_users
-            else release_wait_node
-        )
-        with graph.inserting_after(release_point):
-            release_token = graph.call_function(
-                torch.ops.ao.record_stream_event.default,
-                args=(release_wait_node,),
-                name=f"release_{release_wait_node.name}",
-            )
-            release_token.meta["val"] = torch.empty((), device="cpu")
-            release_token.meta["tensor_meta"] = extract_tensor_metadata(
-                release_token.meta["val"]
-            )
-
-        reload_val = reload_node.meta["val"]
-        reuse_val = release_wait_node.meta["val"]
-        if (
-            reload_val.shape == reuse_val.shape
-            and reload_val.stride() == reuse_val.stride()
-            and reload_val.dtype == reuse_val.dtype
-        ):
-            reload_node.target = torch.ops.ao.reload_inplace.default
-            reload_node.args = (
-                reload_node.args[0],
-                release_wait_node,
-                release_token,
-            )
-            reload_node.meta["val"] = torch.empty((), device="cpu")
-            reload_node.meta["tensor_meta"] = extract_tensor_metadata(
-                reload_node.meta["val"]
-            )
-            target_wait_node.args = (
-                release_wait_node,
-                target_wait_node.args[1],
-                reload_node,
-            )
-        else:
-            reload_node.target = torch.ops.ao.reload_after.default
-            reload_node.args = (
-                reload_node.args[0],
-                reload_node.args[1],
-                release_token,
-            )
-        release_token.append(reload_node)
-
-    # Make the one-activation lookahead explicit in dataflow so later compiler
-    # scheduling cannot sink a reload back to its own wait.
-    for idx, wait_node in enumerate(wait_nodes[:-1]):
-        wait_args = list(wait_node.args)
-        while len(wait_args) < 4:
-            wait_args.append(None)
-        wait_args[3] = reload_nodes[idx + 1]
-        wait_node.args = tuple(wait_args)
+    reorder_for_prefetch(nodes_list, reload_patterns)
 
 
 def _calculate_transfer_size(device_put_node: fx.Node) -> int:
@@ -691,16 +677,6 @@ def identify_reload_patterns(
         record_event_node: fx.Node = nodes_list[reload_node_idx + 1]
         join_node: fx.Node = nodes_list[reload_node_idx + 2]
         wait_event_node: fx.Node = nodes_list[reload_node_idx + 3]
-
-        # Validate the nodes are what we expect
-        # Removed in follow-up commit
-        _validate_pattern_nodes(  # noqa: F821  # pyrefly: ignore [unknown-name]
-            fork_node,
-            wait_stream_node,
-            record_event_node,
-            join_node,
-            wait_event_node,
-        )
 
         # Calculate transfer size and time
         transfer_size_bytes: int = _calculate_transfer_size(reload_node)
