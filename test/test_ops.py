@@ -451,6 +451,11 @@ class TestCommon(TestCase):
                 for dim in reduction_dims:
                     reduction_factor *= sample.input.shape[dim]
 
+                # An empty reduction axis means there is nothing to reduce over
+                # and the numel-by-factor relationship below does not hold.
+                if reduction_factor == 0:
+                    continue
+
                 expected_numel = sample.input.numel() // reduction_factor
 
                 self.assertEqual(

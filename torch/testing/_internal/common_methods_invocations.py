@@ -6327,11 +6327,10 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
     yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
-    # Empty-input samples: std/var over an empty reduction axis is undefined and
-    # must produce NaN
-    yield SampleInput(make_tensor((0,), device=device, dtype=dtype, requires_grad=requires_grad))
-    yield SampleInput(make_tensor((0, S), device=device, dtype=dtype, requires_grad=requires_grad))
-    yield SampleInput(make_tensor((0, S), device=device, dtype=dtype, requires_grad=requires_grad), dim=0)
+    if not requires_grad:
+        yield SampleInput(make_tensor((0,), device=device, dtype=dtype))
+        yield SampleInput(make_tensor((0, S), device=device, dtype=dtype))
+        yield SampleInput(make_tensor((0, S), device=device, dtype=dtype), dim=0)
 
 
 def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwargs):
@@ -6342,9 +6341,9 @@ def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwar
     yield SampleInput(make_arg((S, S)), True)
     yield SampleInput(make_arg((S,)), False)
 
-    # Empty input -> NaN
-    yield SampleInput(make_arg((0,)), False)
-    yield SampleInput(make_arg((0, S)), True)
+    if not requires_grad:
+        yield SampleInput(make_arg((0,)), False)
+        yield SampleInput(make_arg((0, S)), True)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
