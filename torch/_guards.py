@@ -766,6 +766,16 @@ class HopSubgraphCache:
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None: ...
+
+    @abstractmethod
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None: ...
+
+    @abstractmethod
     def add_lazy_bwd_entry(
         self,
         identifier: str,
@@ -836,6 +846,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
@@ -874,6 +885,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None:
+        self.functionalize_schema_cache[key] = schema
+
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None:
+        return self.functionalize_schema_cache.get(key, None)
 
     def add_lazy_bwd_entry(
         self,
