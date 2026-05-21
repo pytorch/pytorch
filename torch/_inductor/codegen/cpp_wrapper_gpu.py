@@ -60,6 +60,97 @@ def cpp_string_literal(s: str) -> str:
     return f'"{escaped}"'
 
 
+def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
+    """Generate a C header defining macros for each lazy-compiled kernel.
+
+    Called after the JIT first-pass runs and populates CudaKernelParamCache.
+    The AOTI compilation includes this header so that LazyKernelCompileResult
+    structs get compile-time-initialized with the autotuned values.
+    """
+
+    def braced(values: list[int]) -> str:
+        return "{" + ", ".join(str(v) for v in values) + "}"
+
+    buf = IndentedBuffer()
+    buf.splice("""
+        #pragma once
+        // Auto-generated kernel configurations for AOTInductor lazy compile.
+    """)
+
+    for kernel_name in kernel_names:
+        params = CudaKernelParamCache.get(kernel_name)
+        assert params is not None, (
+            f"CudaKernelParamCache not populated for {kernel_name} "
+            "after first-pass execution"
+        )
+
+        macro_prefix = kernel_name.upper()
+        cubin_path = cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()])
+        mangled_name = cpp_string_literal(params["mangled_name"])
+        num_warps = params["num_warps"]
+        shared_mem = params["shared_mem"]
+
+        # params["config"] is already a dict (from config_to_dict in CachingAutotuner)
+        config_dict = params.get("config") or {}
+
+        # For combo/foreach kernels, merge default_config
+        inductor_meta = params.get("inductor_meta") or {}
+        combo_grid_meta = inductor_meta.get("combo_grid_meta")
+        default_config = (
+            combo_grid_meta.get("default_config") if combo_grid_meta else None
+        )
+        if default_config:
+            config_dict = {**default_config, **config_dict}
+
+        config_index: int | None = None
+        grid_type = inductor_meta.get("grid_type")
+        if grid_type == "PrecomputedGrid":
+            precomputed_grids = inductor_meta.get("precomputed_grids", [])
+            for idx, entry in enumerate(precomputed_grids):
+                entry_config = entry.get("config", {})
+                if all(config_dict.get(k) == v for k, v in entry_config.items()):
+                    config_index = idx
+                    break
+
+        # Per-subkernel block sizes for combo kernels, or single-element lists.
+        num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
+        if num_kernels > 1 and "XBLOCK_0" in config_dict:
+            xblocks = [config_dict.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
+            yblocks = [config_dict.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
+            zblocks = [config_dict.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
+            r0blocks = [config_dict.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+        else:
+            xblocks = [config_dict.get("XBLOCK", 128)]
+            yblocks = [config_dict.get("YBLOCK", 1)]
+            zblocks = [config_dict.get("ZBLOCK", 1)]
+            r0blocks = [config_dict.get("R0_BLOCK", 1)]
+        rsplit = config_dict.get("RSPLIT", 1)
+        rsplit_size = config_dict.get("RSPLIT_SIZE", 1)
+        ci = config_index if config_index is not None else -1
+        gs = params.get("global_scratch", -1) or -1
+        ps = params.get("profile_scratch", -1) or -1
+
+        buf.writeline("")
+        buf.splice(f"""
+            // Kernel: {kernel_name}
+            #define {macro_prefix}_CUBIN_PATH {cubin_path}
+            #define {macro_prefix}_MANGLED_NAME {mangled_name}
+            #define {macro_prefix}_NUM_WARPS {num_warps}
+            #define {macro_prefix}_SHARED_MEM {shared_mem}
+            #define {macro_prefix}_XBLOCKS {braced(xblocks)}
+            #define {macro_prefix}_YBLOCKS {braced(yblocks)}
+            #define {macro_prefix}_ZBLOCKS {braced(zblocks)}
+            #define {macro_prefix}_R0BLOCKS {braced(r0blocks)}
+            #define {macro_prefix}_RSPLIT {rsplit}
+            #define {macro_prefix}_RSPLIT_SIZE {rsplit_size}
+            #define {macro_prefix}_CONFIG_INDEX {ci}
+            #define {macro_prefix}_GLOBAL_SCRATCH {gs}
+            #define {macro_prefix}_PROFILE_SCRATCH {ps}
+        """)
+
+    return buf.getvalue()
+
+
 TRITON_SIGNATURE_TO_CPP = {
     "i32": "int32_t",
     "i64": "int64_t",
@@ -220,7 +311,7 @@ class DeferredTritonCallWrapper:
 
         # Defer compilation to runtime if autotune_at_compile_time is False (JIT only).
         # AOTI lazy-compile emission is wired up later in the stack.
-        if not V.graph.aot_mode and config.triton.autotune_at_compile_time is False:
+        if config.triton.autotune_at_compile_time is False:
             return self.generate_lazy(wrapper)
 
         params = CudaKernelParamCache.get(self.kernel_name)
@@ -421,18 +512,10 @@ class DeferredTritonCallWrapper:
             prefix.splice(
                 maybe_hipify_code_wrapper(
                     f"""\
-                {device_ptr_type} {var} = 0;
+                int64_t {var}_numel = {size_expr} * {grid_extent};
                 RAIIAtenTensorHandle {var}_tensor;
-                if ({size_expr} > 0) {{
-                    int64_t {var}_size[] = {{{size_expr} * {grid_extent}}};
-                    int64_t {var}_stride[] = {{1}};
-                    AtenTensorHandle {var}_handle;
-                    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
-                        1, {var}_size, {var}_stride, {dtype_str},
-                        {device_type}, device_idx_, &{var}_handle));
-                    {var}_tensor = RAIIAtenTensorHandle({var}_handle);
-                    {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
-                }}
+                {device_ptr_type} {var} = allocate_scratch_tensor<{device_ptr_type}>(
+                    {var}_numel, {dtype_str}, {device_type}, device_idx_, {var}_tensor);
             """
                 )
             )
@@ -491,20 +574,60 @@ class DeferredTritonCallWrapper:
             f" {kernel_name}_result.shared_mem,"
             f" kernel_args_, stream_"
         )
+        launch_kernel_args = [
+            "grid_0",
+            "grid_1",
+            "grid_2",
+            f"{kernel_name}_result.num_warps",
+            f"{kernel_name}_result.shared_mem",
+        ]
 
-        prefix.writeline_jit(f"void* kernel_args_[] = {{{call_args_str}}};")
+        # kernel_args_ is consumed by both JIT and AOT launchKernel calls.
+        prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
+        if enable_kernel_profile:
+            profile_arg_types = [arg_type_lookup.get(n) for n in kernel_arg_names]
+            profile_arg_sigs = [signature.get(n) for n in kernel_arg_names]
+            aot_profile = IndentedBuffer(initial_indent=prefix._indent)
+            self.generate_profiled_launch_kernel(
+                aot_profile,
+                f"kernels_.{kernel_name}",
+                kernel_arg_names,
+                profile_arg_types,
+                profile_arg_sigs,
+                [
+                    f"kernels_.{kernel_name}",
+                    *launch_kernel_args,
+                    "kernel_args_",
+                    "stream_",
+                ],
+            )
+            prefix.splice_aot(aot_profile)
+        else:
+            prefix.writeline_aot(
+                f"launchKernel(kernels_.{kernel_name}, {common_launch_args});"
+            )
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
         """
-        Generate C++ code that embeds Triton source and compiles it at runtime.
+        Generate dual-wrapper-mode C++ code for lazy Triton kernel compilation.
 
-        Writes JIT-side content via writeline_jit/splice_jit; on a plain
-        IndentedBuffer those are equivalent to writeline/splice. AOTI-side
-        emission for dual-wrapper mode is added later in the stack.
+        DualIndentedBuffer routes lines into separate JIT and AOTI sources:
+        - JIT side: embeds Triton source, compiles at runtime, autotunes
+          with real inputs.
+        - AOTI side: uses a compile-time-initialized LazyKernelCompileResult
+          from a config header generated after the JIT first-pass.
+
+        Grid computation and kernel launch are shared between both sides
+        via the LazyKernelCompileResult struct.
         """
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
+        macro_prefix = kernel_name.upper()
 
         # Track kernel names for parallel initialization (JIT only)
         wrapper._lazy_kernel_names.append(kernel_name)
@@ -526,11 +649,34 @@ class DeferredTritonCallWrapper:
             f"static const char* {kernel_name}_source = {kernel_body};"
         )
 
+        # LazyKernelCompileResult: JIT fills at runtime; AOTI uses compile-time
+        # init from the config header generated after the first pass.
         prefix.writeline_jit(f"static LazyKernelCompileResult {kernel_name}_result;")
+        prefix.splice_aot(
+            f"""\
+            static LazyKernelCompileResult {kernel_name}_result = {{
+                {macro_prefix}_CUBIN_PATH,
+                {macro_prefix}_MANGLED_NAME,
+                {macro_prefix}_NUM_WARPS,
+                {macro_prefix}_SHARED_MEM,
+                {macro_prefix}_XBLOCKS,
+                {macro_prefix}_YBLOCKS,
+                {macro_prefix}_ZBLOCKS,
+                {macro_prefix}_R0BLOCKS,
+                {macro_prefix}_RSPLIT,
+                {macro_prefix}_RSPLIT_SIZE,
+                {macro_prefix}_CONFIG_INDEX,
+                {macro_prefix}_GLOBAL_SCRATCH,
+                {macro_prefix}_PROFILE_SCRATCH,
+            }};
+            """
+        )
 
         wrapper_arg_names, kernel_arg_names = self._resolve_lazy_arg_names()
         signature = (self.triton_meta or {}).get("signature", {})
 
+        # kernels_type_/kernels_ are routed to the AOTI buffer; if prefix is a
+        # plain IndentedBuffer (pure JIT lazy compile) those writes are dropped.
         self._write_wrapper_signature(
             prefix,
             wrapper,
@@ -560,9 +706,11 @@ class DeferredTritonCallWrapper:
                 autotune_arg_list.append(name)
         autotune_args = ", ".join(autotune_arg_list)
 
-        # Lazy compile with autotuning on first invocation.
-        # Build into temp buffer to avoid DualIndentedBuffer dispatch.
         with prefix.indent():
+            # First-call initialization: JIT lazy compiles, AOTI loads cubin
+
+            # JIT: lazy compile with autotuning on first invocation.
+            # Build into temp buffer to avoid DualIndentedBuffer dispatch.
             jit_init = IndentedBuffer(initial_indent=prefix._indent)
             jit_init.writeline(f"if ({kernel_name} == nullptr) {{")
             with jit_init.indent():
@@ -587,6 +735,23 @@ class DeferredTritonCallWrapper:
             jit_init.writeline("}")
             prefix.splice_jit(jit_init)
 
+            # AOTI: load precompiled cubin from compile-time-initialized result.
+            aoti_init = IndentedBuffer(initial_indent=prefix._indent)
+            aoti_init.writeline(f"if (kernels_.{kernel_name} == nullptr) {{")
+            with aoti_init.indent():
+                aoti_init.splice(
+                    f"""\
+                    kernels_.{kernel_name} = loadKernel(
+                        {kernel_name}_result.cubin_path,
+                        {kernel_name}_result.mangled_name,
+                        {kernel_name}_result.shared_mem,
+                        cubin_dir_);
+                    """
+                )
+            aoti_init.writeline("}")
+            prefix.splice_aot(aoti_init)
+
+            # Shared: grid computation and launch using result struct
             self._generate_lazy_grid(prefix)
             self._generate_lazy_launch(
                 prefix,
@@ -698,139 +863,158 @@ class DeferredTritonCallWrapper:
             "win32",
         ]
         if enable_kernel_profile:
-            normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
-            prefix.writeline("{")
-            with prefix.indent():
+            self.generate_profiled_launch_kernel(
+                prefix,
+                kernel_var_name,
+                call_args,
+                arg_types,
+                arg_signatures,
+                launch_kernel_args,
+            )
+        else:
+            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+
+    def generate_profiled_launch_kernel(
+        self,
+        prefix: IndentedBuffer,
+        kernel_var_name: str,
+        call_args: list[str],
+        arg_types: list[Any],
+        arg_signatures: list[str | None],
+        launch_kernel_args: list[str],
+    ) -> None:
+        """Wrap a kernel launch in an AOTI record_function profiling scope."""
+        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
+        prefix.writeline("{")
+        with prefix.indent():
+            prefix.writelines(
+                [
+                    f"std::unordered_map<std::string, C10IValueHandle> kwargs_{normalized_kernel_name};",
+                    "",
+                ]
+            )
+            # Add launch args info
+            record_launch_kernel_args = [
+                ("grid_0", "grid_0"),
+                ("grid_1", "grid_1"),
+                ("grid_2", "grid_2"),
+                ("num_warps", launch_kernel_args[4]),
+                ("shared_mem", launch_kernel_args[5]),
+            ]
+            for k, v in record_launch_kernel_args:
+                arg_name = f"{normalized_kernel_name}_{k}"
                 prefix.writelines(
                     [
-                        f"std::unordered_map<std::string, C10IValueHandle> kwargs_{normalized_kernel_name};",
-                        "",
+                        f"// Create c10::IValue for {k}",
+                        f"C10IValueHandle tmp_{arg_name};",
+                        f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
+                        f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                        f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
                     ]
                 )
-                # Add launch args info
-                record_launch_kernel_args = [
-                    ("grid_0", "grid_0"),
-                    ("grid_1", "grid_1"),
-                    ("grid_2", "grid_2"),
-                    ("num_warps", str(params["num_warps"])),
-                    ("shared_mem", str(params["shared_mem"])),
-                ]
-                for k, v in record_launch_kernel_args:
-                    arg_name = f"{normalized_kernel_name}_{k}"
-                    prefix.writelines(
-                        [
-                            f"// Create c10::IValue for {k}",
-                            f"C10IValueHandle tmp_{arg_name};",
-                            f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
-                            f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
-                            f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
-                        ]
-                    )
 
-                # Add input info (This copies the logic from args_decl)
-                curr_arg_id = -1
-                total_args = []
-                ordered_argsname = []
+            # Add input info (This copies the logic from args_decl)
+            curr_arg_id = -1
+            total_args = []
+            ordered_argsname = []
 
-                def write_dummy_scalar_ivalue(arg_name):
-                    # We only care about the shape, therefore we create a dummy scalar here.
+            def write_dummy_scalar_ivalue(arg_name):
+                # We only care about the shape, therefore we create a dummy scalar here.
+                prefix.writelines(
+                    [
+                        f"// Create c10::IValue for arg_{curr_arg_id}",
+                        f"C10IValueHandle tmp_{arg_name};",
+                        f"aoti_torch_int64_to_ivalue(0, &tmp_{arg_name});",
+                        f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                    ]
+                )
+                # pyrefly: ignore [bad-argument-type]
+                total_args.append(f"tmp_{arg_name}")
+
+            def process_args_for_input_shape(arg, arg_type, arg_signature=None):
+                nonlocal curr_arg_id
+                curr_arg_id += 1
+                arg_name = f"{normalized_kernel_name}_arg_{curr_arg_id}"
+                # ignore tma descriptors, as host-side TMA descriptors need
+                # to be passed to the compiled Triton kernel by value
+                if isinstance(arg_type, UnwrapUnspecArg) and not signature_is_tma_desc(
+                    arg_signature
+                ):
+                    write_dummy_scalar_ivalue(arg_name)
+                elif isinstance(arg_type, torch_dtype) and not signature_is_tma_desc(
+                    arg_signature
+                ):
+                    # This is an at::Tensor.
                     prefix.writelines(
                         [
                             f"// Create c10::IValue for arg_{curr_arg_id}",
                             f"C10IValueHandle tmp_{arg_name};",
-                            f"aoti_torch_int64_to_ivalue(0, &tmp_{arg_name});",
+                            f"aoti_torch_tensor_to_ivalue({arg}, &tmp_{arg_name});",
                             f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                         ]
                     )
                     # pyrefly: ignore [bad-argument-type]
                     total_args.append(f"tmp_{arg_name}")
+                elif (
+                    isinstance(arg_type, type(SymbolicCallArg))
+                    and arg_signature is not None
+                    and arg_signature in TRITON_SIGNATURE_TO_CPP
+                ) or arg_type in (sympy.Integer, int, sympy.Float, float):
+                    write_dummy_scalar_ivalue(arg_name)
+                elif arg_signature and arg_signature.startswith("tensordesc<"):
+                    # Skip tma related args
+                    pass
+                else:
+                    write_dummy_scalar_ivalue(arg_name)
 
-                def process_args_for_input_shape(arg, arg_type, arg_signature=None):
-                    nonlocal curr_arg_id
-                    curr_arg_id += 1
-                    arg_name = f"{normalized_kernel_name}_arg_{curr_arg_id}"
-                    # ignore tma descriptors, as host-side TMA descriptors need
-                    # to be passed to the compiled Triton kernel by value
-                    if isinstance(
-                        arg_type, UnwrapUnspecArg
-                    ) and not signature_is_tma_desc(arg_signature):
-                        write_dummy_scalar_ivalue(arg_name)
-                    elif isinstance(
-                        arg_type, torch_dtype
-                    ) and not signature_is_tma_desc(arg_signature):
-                        # This is an at::Tensor.
-                        prefix.writelines(
-                            [
-                                f"// Create c10::IValue for arg_{curr_arg_id}",
-                                f"C10IValueHandle tmp_{arg_name};",
-                                f"aoti_torch_tensor_to_ivalue({arg}, &tmp_{arg_name});",
-                                f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
-                            ]
-                        )
-                        # pyrefly: ignore [bad-argument-type]
-                        total_args.append(f"tmp_{arg_name}")
-                    elif (
-                        isinstance(arg_type, type(SymbolicCallArg))
-                        and arg_signature is not None
-                        and arg_signature in TRITON_SIGNATURE_TO_CPP
-                    ) or arg_type in (sympy.Integer, int, sympy.Float, float):
-                        write_dummy_scalar_ivalue(arg_name)
-                    elif arg_signature and arg_signature.startswith("tensordesc<"):
-                        # Skip tma related args
-                        pass
-                    else:
-                        write_dummy_scalar_ivalue(arg_name)
+            # Add input name and shape information
+            for arg, arg_type, arg_signature in zip_longest(
+                call_args, arg_types, arg_signatures
+            ):
+                # pyrefly: ignore [bad-argument-type]
+                ordered_argsname.append(f'"{arg}"')
+                process_args_for_input_shape(arg, arg_type, arg_signature)
 
-                # Add input name and shape information
-                for arg, arg_type, arg_signature in zip_longest(
-                    call_args, arg_types, arg_signatures
-                ):
-                    # pyrefly: ignore [bad-argument-type]
-                    ordered_argsname.append(f'"{arg}"')
-                    process_args_for_input_shape(arg, arg_type, arg_signature)
+            # Add input name into kwargs
+            name_var = f"{normalized_kernel_name}_input_names"
+            prefix.writelines(
+                [
+                    "// Create c10::IValue for input names",
+                    f"C10IValueHandle tmp_{name_var};",
+                    f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
+                    f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
+                    f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
+                    f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
+                ]
+            )
 
-                # Add input name into kwargs
-                name_var = f"{normalized_kernel_name}_input_names"
-                prefix.writelines(
-                    [
-                        "// Create c10::IValue for input names",
-                        f"C10IValueHandle tmp_{name_var};",
-                        f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
-                        f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
-                        f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
-                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
-                    ]
-                )
+            inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
+            # We pass in the non-RAII handles, since C10 doesn't automatically free them.
+            # The RAII will make sure they get freed when they are out of scope.
+            tmp_args = ",".join(total_args)
+            prefix.writelines(
+                [
+                    "// Aggregate all c10::IValue for inputs",
+                    f"std::vector<C10IValueHandle> {inputs_info_}({{{tmp_args}}});",
+                ]
+            )
 
-                inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
-                # We pass in the non-RAII handles, since C10 doesn't automatically free them.
-                # The RAII will make sure they get freed when they are out of scope.
-                tmp_args = ",".join(total_args)
-                prefix.writelines(
-                    [
-                        "// Aggregate all c10::IValue for inputs",
-                        f"std::vector<C10IValueHandle> {inputs_info_}({{{tmp_args}}});",
-                    ]
-                )
-
-                # Start recording Function
-                prefix.writelines(
-                    [
-                        "",
-                        (
-                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
-                            f"record_{normalized_kernel_name}_"
-                            f'("{kernel_var_name}", '
-                            f"reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}), "
-                            f"{inputs_info_});"
-                        ),
-                        "",
-                        f"launchKernel({', '.join(launch_kernel_args)});",
-                    ]
-                )
-            prefix.writeline("}")
-        else:
-            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+            # Start recording Function
+            prefix.writelines(
+                [
+                    "",
+                    (
+                        "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                        f"record_{normalized_kernel_name}_"
+                        f'("{kernel_var_name}", '
+                        f"reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}), "
+                        f"{inputs_info_});"
+                    ),
+                    "",
+                    f"launchKernel({', '.join(launch_kernel_args)});",
+                ]
+            )
+        prefix.writeline("}")
 
 
 class CppWrapperGpu(CppWrapperCpu):
@@ -867,8 +1051,9 @@ class CppWrapperGpu(CppWrapperCpu):
         super().write_header()
         kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         if V.graph.is_const_graph and V.graph.is_dual_wrapper_mode:
-            # const_graph's AOTI variant merges into main (which has its own
-            # kernel_driver) — JIT-only emission avoids the duplicate.
+            # For a dual-wrapper-mode const graph, only the standalone JIT
+            # output needs this header content. The AOTI const body is spliced
+            # into the main AOTI source, which has its own kernel driver.
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -878,7 +1063,19 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
+        # Pure AOTI receives the stream as a function parameter. JIT and
+        # dual-wrapper-mode code use an explicit stream variable so the shared kernel
+        # call arguments are valid for the JIT entry point.
+        if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
+            return "stream"
+
         name = f"stream{device_idx}"
+        # In dual-wrapper mode, the JIT stream is declared at the entry function
+        # prologue (see _codegen_entry_impl_prologue) so it stays in scope
+        # across all kernel call sites.
+        if V.graph.is_dual_wrapper_mode:
+            return name
+
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
@@ -955,11 +1152,29 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
-        self.prefix.writeline(
+        # ensure_triton_kernel_compiles_started() is JIT-only; AOTI has no
+        # Python-dependent lazy compile flow.
+        self.prefix.writeline_jit(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
             )
         )
+        # In dual-wrapper mode, hoist the JIT-side stream declaration to the entry
+        # function prologue. Kernel calls run inside KernelContextGuard
+        # scopes, so a per-call declaration would be scoped to the guard
+        # and unavailable to other kernel calls in the same function.
+        if V.graph.is_dual_wrapper_mode:
+            stream_type = maybe_hipify_code_wrapper(
+                self.device_codegen.cpp_stream_type()
+            )
+            get_stream = self.device_codegen.aoti_get_stream()
+            for device_idx in sorted(V.graph.device_idxs):
+                name = f"stream{device_idx}"
+                self.prefix.writeline_jit(f"{stream_type} {name};")
+                self.prefix.writeline_jit(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"{get_stream}({device_idx}, (void**)&{name}));"
+                )
 
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
@@ -1268,11 +1483,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        stream = (
-            "stream"
-            if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, graph_name)
-        )
+        stream = self.write_get_raw_stream(device.index, graph_name)
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -1317,18 +1528,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
-            call_args.append(device_idx)
-            call_args.append(stream)
-            if V.graph.aot_mode:
-                call_args.append("kernels")
-                call_args.append("this->cubin_dir_")
+            # AOTI side uses this->device_idx_ so the model honors runtime device
+            # assignment; JIT side has no this->device_idx_ in scope, so use the
+            # concrete graph device index. Similarly, AOTI side always uses the
+            # `stream` function parameter of run_impl, while JIT side uses the
+            # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
+            aoti_device_idx = (
+                "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            )
+            jit_device_idx = str(device.index)
+            jit_call_args = [*call_args, jit_device_idx, stream]
+            aot_call_args = [*call_args, aoti_device_idx, "stream"]
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
-                call_args[: len(arg_types)], kernel_name, arg_types, None
+                jit_call_args[: len(arg_types)], kernel_name, arg_types, None
             )
-            with debug_printer_manager:
-                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
+            # DebugPrinterManager is AOTI-only: route its writes through
+            # writeline_aot so they're dropped on the JIT side (no-op for the
+            # pure-JIT IndentedBuffer; AOT-only for DualIndentedBuffer). Without
+            # this, the JIT buffer would receive before/after-launch prints
+            # after the JIT launch, reporting post-launch state as pre-launch.
+            with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline_aot):
+                with debug_printer_manager:
+                    self.wrapper_call.writeline_jit(
+                        f"{wrapper_name}({', '.join(jit_call_args)});"
+                    )
+                    self.wrapper_call.writeline_aot(
+                        f"{wrapper_name}({', '.join(aot_call_args)}, "
+                        f"kernels, this->cubin_dir_);"
+                    )
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
