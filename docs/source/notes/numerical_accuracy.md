@@ -217,3 +217,23 @@ The following is the list of operations where MIOpen may be used:
   - `ConvBackend::Miopen`
   - `ConvBackend::MiopenDepthwise`
   - `ConvBackend::MiopenTranspose`
+
+(tf32_on_mi300)=
+
+## TensorFloat-32 (TF32) on AMD Instinct MI300 devices
+
+On AMD Instinct MI300 GPUs (gfx942, CDNA3), the `v_mfma_f32_*_xf32` matrix instructions used by hipBLASLt's TF32 path perform round-down accumulation. This is a documented property of the CDNA3 hardware. NVIDIA's TF32 implementation rounds to nearest, so a TF32 GEMM exhibits a small negative-biased error on MI300 that is absent on NVIDIA. The bias scales with `sqrt(K) * 2^-10 * |A|_inf` and reaches the low single-digit milli-units for typical random inputs; the corresponding error on NVIDIA TF32 is roughly half to a third of that.
+
+Only operations that dispatch through hipBLASLt with TF32 enabled are affected. To run a block of code in full IEEE FP32:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "ieee"
+```
+
+To enable TF32 on supported hardware:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "tf32"
+```
+
+For a per-shape characterization of the MI300 vs NVIDIA-TF32 numerical gap, see https://github.com/jeffdaily/tf32_analysis.
