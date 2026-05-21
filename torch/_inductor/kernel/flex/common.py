@@ -12,7 +12,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_leaves, tree_map, tree_map_only
 
 
 if TYPE_CHECKING:
@@ -243,7 +243,7 @@ def realize_captures_for_cutedsl(buffers):
     buffers = tree_map(_realize, buffers)
     freeze_irnodes(buffers)
 
-    for buf in tree_map_only(IRNode, lambda x: x, buffers) if buffers else []:
+    for buf in tree_leaves(buffers or []):
         if isinstance(buf, IRNode) and (name := buf.maybe_get_name()):
             V.graph._cutedsl_capture_nodes[name] = buf
     # Keep the original view nodes for call-site reinterpret_tensor emission.

@@ -641,6 +641,16 @@ class TestGenericPytree(TestCase):
         )
 
     @parametrize_pytree_module
+    def test_tree_map_only_returns_fresh_tree_when_no_match(self, pytree):
+        tree = {"a": [1, 2], "b": ("x", "y")}
+        out_type = pytree.tree_map_only(float, lambda x: x, tree)
+        self.assertEqual(out_type, tree)
+        self.assertIsNot(out_type, tree)
+        out_pred = pytree.tree_map_only(lambda _: False, lambda x: x, tree)
+        self.assertEqual(out_pred, tree)
+        self.assertIsNot(out_pred, tree)
+
+    @parametrize_pytree_module
     def test_tree_all_any(self, pytree):
         self.assertTrue(pytree.tree_all(lambda x: x % 2, [1, 3]))
         self.assertFalse(pytree.tree_all(lambda x: x % 2, [0, 1]))

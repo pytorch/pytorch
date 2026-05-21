@@ -1651,6 +1651,17 @@ def map_only(
 ) -> MapOnlyFn[FnAny[Any]]: ...
 
 
+def _make_pred(
+    type_or_types_or_pred: TypeAny | Callable[[Any], bool],
+) -> Callable[[Any], bool]:
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
+        types_arg: TypeAny = type_or_types_or_pred
+        return lambda x: isinstance(x, types_arg)
+    if callable(type_or_types_or_pred):
+        return type_or_types_or_pred
+    raise TypeError("Argument must be a type, a tuple of types, or a callable.")
+
+
 def map_only(
     type_or_types_or_pred: TypeAny | Callable[[Any], bool], /
 ) -> MapOnlyFn[FnAny[Any]]:
@@ -1672,15 +1683,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
-
-        def pred(x: Any) -> bool:
-            return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
-
-    elif callable(type_or_types_or_pred):
-        pred = type_or_types_or_pred  # type: ignore[assignment]
-    else:
-        raise TypeError("Argument must be a type, a tuple of types, or a callable.")
+    pred = _make_pred(type_or_types_or_pred)
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         @functools.wraps(func)
@@ -1751,7 +1754,11 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Callable[[PyTree], bool] | None = None,
 ) -> PyTree:
-    return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
+    pred = _make_pred(type_or_types_or_pred)
+    leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
+    if not any(pred(leaf) for leaf in leaves):
+        return treespec.unflatten(leaves)
+    return treespec.unflatten(func(leaf) if pred(leaf) else leaf for leaf in leaves)
 
 
 @overload
