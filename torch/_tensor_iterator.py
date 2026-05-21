@@ -172,10 +172,11 @@ class TensorIterator:
     @property
     def shape(self) -> memoryview:
         """Iterator shape (post coalesce/reorder), as a zero-copy
-        ``memoryview`` of ``int64`` elements. The view is live for the
-        lifetime of this iterator; copy via ``tuple(it.shape)`` if you
-        need a snapshot. Hot-path readers (dispatch conditionals) get
-        index access without an allocation."""
+        ``memoryview`` of ``int64`` elements. The view holds a reference
+        to this iterator and keeps it alive for as long as the view is
+        reachable; copy via ``tuple(it.shape)`` if you need a snapshot
+        you can outlive the iterator with. Hot-path readers (dispatch
+        conditionals) get index access without an allocation."""
         return self._impl.shape
 
     @property
@@ -239,13 +240,18 @@ class TensorIterator:
 
     def strides(self, index: int) -> memoryview:
         """Per-operand strides in bytes (post reorder/coalesce), as a
-        zero-copy ``memoryview`` of ``int64`` elements. The view is live
-        for the lifetime of this iterator; copy via ``tuple(it.strides(i))``
-        if you need a snapshot."""
+        zero-copy ``memoryview`` of ``int64`` elements. The view holds a
+        reference to this iterator and keeps it alive for as long as the
+        view is reachable; copy via ``tuple(it.strides(i))`` if you need
+        a snapshot you can outlive the iterator with."""
         return self._impl.strides(index)
 
     def element_strides(self, index: int) -> tuple[int, ...]:
-        """Per-operand strides in elements (byte stride / element size)."""
+        """Per-operand strides in elements (byte stride / element size).
+
+        Allocates a fresh tuple on every call. Don't use on a hot path:
+        cache the result, or read :meth:`strides` once and divide by
+        :meth:`element_size` of the operand inline."""
         return self._impl.element_strides(index)
 
     def __repr__(self) -> str:
