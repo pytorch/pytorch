@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import copy
 import enum
 import itertools
 import operator
@@ -45,6 +46,11 @@ class FakeMapping:
 
     def __getitem__(self, key: str) -> Any:
         return self._value
+
+
+class CopyableNonDefaultDict:
+    def __copy__(self):
+        return "wrong"
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
@@ -1435,6 +1441,45 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 list(d),
                 d[4],
             )
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_shallow_copy_preserves_factory(self):
+        def f(x):
+            d1 = defaultdict(int, {1: x})
+            d2 = copy.copy(d1)
+            d1.default_factory = list
+            d3 = copy.copy(d1)
+            d2[2] = x + 1
+            return (
+                type(d2) is defaultdict,
+                d2.default_factory is int,
+                d2[1],
+                d2[2],
+                d1.default_factory is list,
+                2 in d1,
+                d3.default_factory is list,
+                d3[1],
+            )
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
+    def test_defaultdict_unbound_copy_rejects_unrelated_receiver(self):
+        def f():
+            try:
+                result = defaultdict.__copy__(CopyableNonDefaultDict())
+            except TypeError as e:
+                return (
+                    "TypeError",
+                    "__copy__" in str(e),
+                    "CopyableNonDefaultDict" in str(e),
+                )
+            return ("wrong", result)
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
