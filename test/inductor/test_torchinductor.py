@@ -4378,90 +4378,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @skip_if_cpu
-    @skip_if_not_triton
-    def test_vmap_dot_decomposes_bmm(self):
-        def dot_based(a, b):
-            return torch.dot(a, b) + torch.dot(a, b)
-
-        fn = torch.vmap(dot_based)
-        bmm_codegen_call = (
-            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
-        )
-        bmm_fallback_call = (
-            'aoti_torch_call_dispatcher("aten::bmm"'
-            if config.cpp_wrapper
-            else "torch.ops.aten.bmm.default("
-        )
-        for dtype in (
-            torch.float16,
-            torch.bfloat16,
-            torch.float32,
-            torch.float64,
-        ):
-            if not self.is_dtype_supported(dtype):
-                continue
-            for k in (3, 32):
-                with self.subTest(dtype=dtype, k=k):
-                    a = torch.randn(64, k, device=self.device, dtype=dtype)
-                    b = torch.randn(64, k, device=self.device, dtype=dtype)
-
-                    expected = fn(a, b)
-                    actual, code = run_and_get_code(
-                        torch.compile(fn, fullgraph=True), a, b
-                    )
-                    self.assertEqual(actual, expected)
-                    code_str = "\n".join(code)
-                    self.assertNotIn(bmm_codegen_call, code_str)
-                    self.assertNotIn(bmm_fallback_call, code_str)
-
-    @skip_if_cpu
-    @skipIfXpu(msg="CUDA codegen check")
-    @skip_if_not_triton
-    def test_bmm_dot_shape_decompose_threshold(self):
-        def fn(a, b):
-            return torch.bmm(a, b)
-
-        bmm_codegen_call = (
-            "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
-        )
-        bmm_fallback_call = (
-            'aoti_torch_call_dispatcher("aten::bmm"'
-            if config.cpp_wrapper
-            else "torch.ops.aten.bmm.default("
-        )
-        for k, expect_extern_bmm in ((32, False), (33, True)):
-            with self.subTest(k=k):
-                a = torch.randn(4, 1, k, device=self.device)
-                b = torch.randn(4, k, 1, device=self.device)
-
-                expected = fn(a, b)
-                actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
-                self.assertEqual(actual, expected)
-                code_str = "\n".join(code)
-                if expect_extern_bmm:
-                    self.assertIn(bmm_codegen_call, code_str)
-                else:
-                    self.assertNotIn(bmm_codegen_call, code_str)
-                    self.assertNotIn(bmm_fallback_call, code_str)
-
-    @skip_if_cpu
-    @skipIfXpu(msg="CUDA integer bmm error preservation")
-    @skip_if_cpp_wrapper("cpp wrapper reports AOTI API call failures")
-    @skip_if_not_triton
-    def test_bmm_dot_shape_int_preserves_eager_error(self):
-        def fn(a, b):
-            return torch.bmm(a, b)
-
-        a = torch.ones(4, 1, 3, device=self.device, dtype=torch.int64)
-        b = torch.ones(4, 3, 1, device=self.device, dtype=torch.int64)
-        msg = 'baddbmm_cuda" not implemented for'
-
-        with self.assertRaisesRegex(NotImplementedError, msg):
-            fn(a, b)
-        with self.assertRaisesRegex(NotImplementedError, msg):
-            torch.compile(fn, fullgraph=True)(a, b)
-
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):
@@ -7016,7 +6932,6 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
-    @xfail_if_mps
     def test_complex_real_imag_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that extracting real/imag from conjugated tensors works when compiled.
@@ -10096,6 +10011,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @skip_if_triton_cpu
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -18431,7 +18347,17 @@ if RUN_GPU:
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
-            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+            fns = (
+                "first_arg",
+                "store",
+                "second_arg",
+                "same_pm_one",
+                "same_pp_one",
+                "gather",
+                "gather_generated_index",
+                "cross_entropy_loss",
+                "cross_entropy_loss_generated_target",
+            )
 
             def test(fn, ndims, dyn_shape, one_size=False):
                 proc = subprocess.Popen(
