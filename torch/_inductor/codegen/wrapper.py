@@ -1520,6 +1520,7 @@ class PythonWrapperCodegen(CodeGen):
             import triton
             import triton.language as tl
             from {triton_heuristics.__name__} import (
+                combo_seeds_need_tuning,
                 end_graph,
                 start_combo_kernel_standalone_autotune,
                 start_graph,
