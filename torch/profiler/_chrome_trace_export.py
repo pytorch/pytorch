@@ -23,28 +23,6 @@ _FLOW_NAMES = {1: "fwdbwd", 2: "ac2g"}
 
 _PARAM_COMMS_CALL_NAME = "record_param_comms"
 
-_NCCL_METADATA_KEYS = frozenset(
-    {
-        "Collective name",
-        "dtype",
-        "In msg nelems",
-        "Out msg nelems",
-        "Group size",
-        "In split size",
-        "Out split size",
-        "Process Group Name",
-        "Process Group Description",
-        "Process Group Ranks",
-        "Input Tensors start",
-        "Output Tensors start",
-        "Rank",
-        "Src Rank",
-        "Dst Rank",
-        "Seq",
-        "Comms Id",
-    }
-)
-
 _EXCLUDED_EXTERNAL_ID_TYPES = {
     "gpu_memcpy",
     "gpu_memset",
@@ -78,18 +56,6 @@ def _sanitize_tid(tid: int) -> int:
 def _json_escape(s: str) -> str:
     return json.dumps(s)
 
-
-def _extract_nccl_metadata(metadata_json: str) -> str:
-    """Extract NCCL-specific fields from a metadata JSON fragment."""
-    try:
-        parsed = json.loads("{" + metadata_json + "}")
-    except (json.JSONDecodeError, ValueError):
-        return ""
-    parts = []
-    for key, value in parsed.items():
-        if key in _NCCL_METADATA_KEYS:
-            parts.append(f"{json.dumps(key)}: {json.dumps(value)}")
-    return ", ".join(parts)
 
 
 def _write_metadata_event(
@@ -232,9 +198,7 @@ def export_chrome_trace(
                 if linked is not None and linked.name() == _PARAM_COMMS_CALL_NAME:
                     linked_md = linked.metadata_json()
                     if linked_md:
-                        nccl_md = _extract_nccl_metadata(linked_md)
-                        if nccl_md:
-                            args_parts.append(nccl_md)
+                        args_parts.append(linked_md)
 
             f.write(
                 f'{{"ph":"X","cat":{_json_escape(cat)},'
