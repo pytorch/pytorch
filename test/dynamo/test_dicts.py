@@ -3,6 +3,7 @@
 
 import copy
 import enum
+import gc
 import itertools
 import operator
 import types
@@ -2638,6 +2639,60 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
+
+    def test_copy_maintains_gc_tracking(self):
+        class A:
+            pass
+
+        key = A()
+
+        def fn():
+            result = []
+            for d in ({}, {"a": 1}, {key: "val"}):
+                d2 = d.copy()
+                result.append((gc.is_tracked(d), gc.is_tracked(d2)))
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_gc_is_tracked_mutated_dict_graph_breaks(self):
+        def fn():
+            d = {"a": []}
+            d["a"] = 1
+            return gc.is_tracked(d)
+
+        self.assertTrue(fn())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "mutated dict"):
+            opt_fn()
+
+    def test_gc_is_tracked_source_backed_history_sensitive_dict_graph_breaks(self):
+        def fn(d):
+            return gc.is_tracked(d)
+
+        d = {"a": []}
+        d["a"] = 1
+        self.assertTrue(gc.is_tracked(d))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "source-backed dict"):
+            opt_fn(d)
+
+    def test_gc_is_tracked_source_backed_history_sensitive_dict_copy_graph_breaks(
+        self,
+    ):
+        def fn(d):
+            d2 = d.copy()
+            return gc.is_tracked(d2)
+
+        d = {"a": []}
+        d["a"] = 1
+        self.assertTrue(fn(d))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "unknown tracking state"):
+            opt_fn(d)
 
     @make_dynamo_test
     def test_fromkeys(self):

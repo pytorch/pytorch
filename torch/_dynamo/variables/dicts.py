@@ -96,7 +96,9 @@ class ConstDictVariable(VariableTracker):
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
 
     _nonvar_fields = {
+        "gc_tracking_unknown",
         "user_cls",
+        "was_mutated",
         *VariableTracker._nonvar_fields,
     }
 
@@ -112,6 +114,8 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        gc_tracking_unknown = kwargs.pop("gc_tracking_unknown", False)
+        was_mutated = kwargs.pop("was_mutated", False)
 
         super().__init__(**kwargs)
 
@@ -142,6 +146,8 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         self.user_cls = user_cls
+        self.gc_tracking_unknown = gc_tracking_unknown
+        self.was_mutated = was_mutated
 
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
@@ -627,6 +633,7 @@ class ConstDictVariable(VariableTracker):
             temp_dict_vt = DictBuiltinVariable.call_custom_dict(
                 tx, dict, *args, **kwargs
             )
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
             return ConstantVariable.create(None)
@@ -677,7 +684,12 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                items=self.items.copy(),
+                gc_tracking_unknown=self.gc_tracking_unknown
+                or (self.user_cls is dict and self.source is not None)
+                or self.was_mutated,
+                mutation_type=ValueMutationNew(),
+                source=None,
             )
         elif name == "__setitem__" and self.is_mutable():
             self.install_dict_keys_match_guard()
@@ -688,6 +700,7 @@ class ConstDictVariable(VariableTracker):
                     "2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
@@ -696,6 +709,7 @@ class ConstDictVariable(VariableTracker):
             if arg_hashable:
                 self.install_dict_keys_match_guard()
                 self.should_reconstruct_all = True
+                self.was_mutated = True
                 tx.output.side_effects.mutation(self)
                 self.items.__delitem__(Hashable(args[0]))
                 return ConstantVariable.create(None)
@@ -726,6 +740,7 @@ class ConstDictVariable(VariableTracker):
                 return args[1]
 
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
@@ -745,6 +760,7 @@ class ConstDictVariable(VariableTracker):
 
             k, v = self.items.popitem()
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
 
             return variables.TupleVariable([k.vt, v])
@@ -757,6 +773,7 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
@@ -770,6 +787,7 @@ class ConstDictVariable(VariableTracker):
             has_kwargs = len(kwargs) > 0
             if has_arg or has_kwargs or not args:
                 if has_arg or has_kwargs:
+                    self.was_mutated = True
                     tx.output.side_effects.mutation(self)
                 if has_arg:
                     from .object_protocol import generic_getiter, vt_getitem
@@ -842,6 +860,7 @@ class ConstDictVariable(VariableTracker):
                     x = ConstantVariable.create(None)
                 else:
                     x = args[1]
+                self.was_mutated = True
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x

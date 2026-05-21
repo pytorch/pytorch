@@ -23,6 +23,7 @@ import ast
 import builtins
 import contextlib
 import functools
+import gc
 import inspect
 import itertools
 import logging
@@ -2781,6 +2782,72 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, real_id)
 
         return FakeIdVariable(id(arg))
+
+    def call_is_tracked(
+        self, tx: "InstructionTranslator", obj: VariableTracker
+    ) -> VariableTracker:
+        if self.fn is not gc.is_tracked:
+            return super().call_function(tx, [obj], {})
+
+        if isinstance(obj, ConstDictVariable):
+            if obj.user_cls is not dict:
+                return ConstantVariable.create(True)
+            if obj.source is not None:
+                unimplemented(
+                    gb_type="gc.is_tracked() on source-backed dict",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model pre-existing "
+                        "history-sensitive CPython dict GC tracking state."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if obj.gc_tracking_unknown:
+                unimplemented(
+                    gb_type="gc.is_tracked() on dict with unknown tracking state",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model history-sensitive CPython dict "
+                        "GC tracking state carried through dict.copy()."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if obj.was_mutated:
+                unimplemented(
+                    gb_type="gc.is_tracked() on mutated dict",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model history-sensitive CPython "
+                        "dict GC tracking state after mutation."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            concrete = {}
+            for key, value in obj.items.items():
+                if not isinstance(key, HashableTracker):
+                    raise AssertionError(f"expected HashableTracker key, got {key}")
+                concrete_key = key.vt.get_real_python_backed_value()
+                concrete_value = value.get_real_python_backed_value()
+                if concrete_key is NO_SUCH_SUBOBJ or concrete_value is NO_SUCH_SUBOBJ:
+                    unimplemented(
+                        gb_type="gc.is_tracked() on dict with symbolic contents",
+                        context=f"gc.is_tracked({obj})",
+                        explanation=(
+                            "Dynamo only supports gc.is_tracked() on "
+                            "dictionaries with Python-backed contents."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                concrete[concrete_key] = concrete_value
+            return ConstantVariable.create(gc.is_tracked(concrete))
+
+        unimplemented(
+            gb_type="unsupported gc.is_tracked() argument",
+            context=f"gc.is_tracked({obj})",
+            explanation="Dynamo only supports gc.is_tracked() on dictionaries.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_deepcopy(
         self, tx: "InstructionTranslator", x: VariableTracker
