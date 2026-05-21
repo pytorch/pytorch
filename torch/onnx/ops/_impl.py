@@ -60,6 +60,10 @@ def _rotary_embedding_23_fake_impl(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
+    if x.dim() == 3:
+        return x.clone(memory_format=torch.contiguous_format)
+    if x.dim() == 4:
+        return x.permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3)
     return x.clone()
 
 
