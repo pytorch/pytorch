@@ -14,7 +14,6 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
-from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -327,7 +326,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: BitsetAncestors | None = None,
+    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> bool:
     """Check if an all_gather derives from exactly one placeholder (parameter).
 
@@ -337,9 +336,7 @@ def is_fsdp_all_gather(
     if not is_all_gather_into_tensor(node):
         return False
     if all_node_ancestors is not None:
-        phs = (
-            a for a in all_node_ancestors.iter_ancestors(node) if a.op == "placeholder"
-        )
+        phs = (a for a in all_node_ancestors[node] if a.op == "placeholder")
         return next(phs, None) is not None and next(phs, None) is None
     from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
@@ -1059,6 +1056,37 @@ def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
     )
 
 
+def _sort_bucket_region(
+    g: torch.fx.Graph,
+    new_nodes: list[torch.fx.Node],
+    inputs: list[torch.fx.Node],
+) -> None:
+    """Stable topological sort of the region between ``new_nodes`` and any
+    ``inputs`` that ended up after them, so every input precedes the new
+    bucketed collective.
+
+    Only the smallest contiguous region that spans both ``new_nodes`` and
+    the out-of-place ``inputs`` is reordered; the rest of the graph is
+    untouched.
+    """
+    if not new_nodes or not inputs:
+        return
+
+    from torch._dynamo.graph_deduplication import _stable_topological_sort_region
+
+    positions: dict[torch.fx.Node, int] = {n: i for i, n in enumerate(g.nodes)}
+    first_pos = min(positions[n] for n in new_nodes)
+    last_pos = max(
+        *(positions[n] for n in new_nodes),
+        *(positions.get(inp, -1) for inp in inputs),
+    )
+    if last_pos <= first_pos:
+        return
+
+    region = OrderedSet(n for n in g.nodes if first_pos <= positions[n] <= last_pos)
+    _stable_topological_sort_region(g, region)
+
+
 def process_collective_bucket(
     g: torch.fx.Graph,
     bucket_nodes: list[torch.fx.Node],
@@ -1115,8 +1143,9 @@ def process_collective_bucket(
     if insert_before is None:
         insert_before = bucket_nodes[-1].next
 
-    # Insert traced function and get replacements + new nodes
     g_fn_inps = bucket_ins + (extra_graph_inps or [])
+
+    # Insert traced function and get replacements + new nodes
     replacements, new_nodes = _insert_fn_trace_before_node(
         g,
         fn_to_trace,
@@ -1157,6 +1186,8 @@ def process_collective_bucket(
         # Erase any convert_element_type nodes we tracked
         for pre_node in reversed(ag_node_to_pre_nodes[node]):
             g.erase_node(pre_node)
+
+    _sort_bucket_region(g, new_nodes, g_fn_inps)
 
     return new_nodes, replacements
 
@@ -1324,6 +1355,7 @@ def merge_all_gather_bucket(
         ag_nodes,
         ag_merge_fn,
         create_trace_args,
+        insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
