@@ -1,7 +1,6 @@
 # Owner(s): ["module: distributed"]
 
 import os
-import socket
 import sys
 import warnings
 from datetime import timedelta
@@ -19,19 +18,16 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
+    find_free_port,
+    retry_on_connect_failures,
     run_tests,
     TestCase,
 )
 
 
-def _free_port() -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return str(s.getsockname()[1])
-
-
 class ProcessGroupXCCLTest(TestCase):
     @requires_accelerator_dist_backend(["xccl"])
+    @retry_on_connect_failures
     def test_xccl_set_pg_timeout_api(self):
         """
         Test _set_pg_timeout API for XCCL backend.
@@ -51,7 +47,7 @@ class ProcessGroupXCCLTest(TestCase):
             self.skipTest("requires Intel XPU")
 
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-        os.environ.setdefault("MASTER_PORT", _free_port())
+        os.environ.setdefault("MASTER_PORT", str(find_free_port()))
         os.environ["WORLD_SIZE"] = "1"
         os.environ["RANK"] = "0"
         torch.xpu.set_device(0)
@@ -81,7 +77,7 @@ class ProcessGroupXCCLTest(TestCase):
                 unsupported_warnings,
                 [],
                 "_set_pg_timeout on an xccl PG should not emit the "
-                "'only supported for nccl or gloo' warning",
+                "'only supported for nccl, gloo, and xccl' warning",
             )
             self.assertEqual(
                 backend.options._timeout, timedelta(milliseconds=1)

@@ -1654,21 +1654,22 @@ def _set_pg_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> No
     # XCCL exposes the public Backend API method ``set_timeout`` rather
     # than the private ``_set_default_timeout`` alias NCCL uses, so it
     # cannot share the ``backends`` set above (which is drained via
-    # ``_set_default_timeout``). Route xpu PGs through ``set_timeout``
-    # directly.
-    xccl_backends: set[Backend] = set()
+    # ``_set_default_timeout``). An xpu PG resolves to a single xccl
+    # backend, so a single optional binding suffices here.
+    xccl_backend: ProcessGroupXCCL | None = None
     if torch.device("xpu") in devices and is_xccl_available():
         backend = group._get_backend(torch.device("xpu"))
         if isinstance(backend, ProcessGroupXCCL):
-            xccl_backends.add(backend)
-    if len(backends) == 0 and len(xccl_backends) == 0:
+            xccl_backend = backend
+    if len(backends) == 0 and xccl_backend is None:
         warnings.warn(
-            "Set timeout is now only supported for either nccl or gloo.", stacklevel=2
+            "Set timeout is now only supported for nccl, gloo, and xccl.",
+            stacklevel=2,
         )
     for backend in backends:
         backend._set_default_timeout(timeout)
-    for backend in xccl_backends:
-        backend.set_timeout(timeout)
+    if xccl_backend is not None:
+        xccl_backend.set_timeout(timeout)
 
 
 @_exception_logger
