@@ -23,6 +23,7 @@ from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout
 from torch._inductor.kernel_inputs import KernelInputs
+from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternalTritonTemplateKernel,
@@ -372,6 +373,68 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device=GPU_TYPE),
         )
         # Autotuning checks correctness of each version
+        if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch._inductor.config.patch(max_autotune_conv_backends="ATEN,TRITON")
+    def test_non_1x1_convolution_caps_template_warps(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(2, 3),
+                padding=(4, 5),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        class EightWarpConvChoice(InductorChoices):
+            def get_conv_configs(self, device_type: str | None = "cuda"):
+                def configs(*args, **kwargs):
+                    yield TritonConfig(
+                        {"BLOCK_M": 1024, "BLOCK_N": 16, "BLOCK_K": 16},
+                        num_stages=1,
+                        num_warps=8,
+                    )
+
+                return configs
+
+        recorded_conv_choices: list[tuple[bool, int]] = []
+        maybe_append_choice = TritonTemplate.maybe_append_choice
+
+        def record_conv_choice(template, choices, **kwargs):
+            if template.name == "convolution2d":
+                recorded_conv_choices.append((kwargs["UNROLL"], kwargs["num_warps"]))
+            return maybe_append_choice(template, choices, **kwargs)
+
+        x = torch.randn(2, 33, 34, 41, device=GPU_TYPE)
+        w = torch.randn(34, 33, 3, 3, device=GPU_TYPE)
+        b = torch.randn(34, device=GPU_TYPE)
+
+        with (
+            V.set_choices_handler(EightWarpConvChoice()),
+            patch.object(TritonTemplate, "maybe_append_choice", record_conv_choice),
+        ):
+            result_compile = foo(x, w, b)
+        result_eager = aten.convolution(
+            x + 1,
+            w,
+            b,
+            stride=(2, 3),
+            padding=(4, 5),
+            dilation=(1, 1),
+            transposed=False,
+            output_padding=(0, 0),
+            groups=1,
+        )
+
+        torch.testing.assert_close(result_compile, result_eager)
+        self.assertEqual(recorded_conv_choices, [(False, 4)])
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
