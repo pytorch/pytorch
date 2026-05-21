@@ -9,7 +9,7 @@ import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from collections.abc import Callable
-from functools import partial
+from functools import partial, wraps
 from typing import Any, NamedTuple
 
 import torch
@@ -67,6 +67,147 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_fromkeys_instance_method(self):
+        def fn():
+            d = {"z": 0}
+            result = d.fromkeys(["a", "a", "b"], 2)
+            return d, result, type(result) is dict
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_local_subclass_closure(self):
+        def fn():
+            data = [("stale", 0)]
+
+            class SeededDict(dict):
+                def __init__(self):
+                    dict.__init__(self, data)
+
+            data = {"seed": 1}
+            result = SeededDict.fromkeys(["a"])
+            return type(result) is SeededDict, dict(result)
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_external_subclass_closure_not_patched_by_name(self):
+        def make_cls():
+            data = {"outer": 1}
+
+            class SeededDict(dict):
+                def __init__(self):
+                    dict.__init__(self, data)
+
+            return SeededDict
+
+        SeededDict = make_cls()
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_nested_factory_closure_not_patched_by_name(self):
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            def make_cls():
+                data = {"outer": 1}
+
+                class SeededDict(dict):
+                    def __init__(self):
+                        dict.__init__(self, data)
+
+                return SeededDict
+
+            SeededDict = make_cls()
+            return dict(SeededDict.fromkeys(["a"])), inner(), SeededDict.__qualname__
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_external_init_not_patched_by_name(self):
+        def make_init():
+            data = {"outer": 1}
+
+            def init(self):
+                dict.__init__(self, data)
+
+            return init
+
+        external_init = make_init()
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            class SeededDict(dict):
+                __init__ = external_init
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_wrapped_init_not_patched_by_name(self):
+        def deco(fn):
+            data = {"outer": 1}
+
+            @wraps(fn)
+            def wrapper(self):
+                dict.__init__(self, data)
+
+            return wrapper
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            class SeededDict(dict):
+                @deco
+                def __init__(self):
+                    pass
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_same_frame_assigned_init_closure(self):
+        def fn():
+            data = [("stale", 0)]
+
+            def init(self):
+                dict.__init__(self, data)
+
+            class SeededDict(dict):
+                __init__ = init
+
+            data = {"seed": 1}
+            return dict(SeededDict.fromkeys(["a"]))
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
 
     def test_dict_contains_enum(self):
         class TensorDim(str, enum.Enum):
@@ -2453,13 +2594,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
         self.assertEqual(d, {"a": 1, "b": 1})
         p = self.thetype.fromkeys(["a", "b"], None)
         self.assertEqual(p, {"a": None, "b": None})
+        d3 = p.fromkeys(["a", "a", "c"], 3)
+        self.assertEqual(d3, {"a": 3, "c": 3})
+        self.assertIs(type(d3), self.thetype)
+        self.assertIsNot(d3, p)
 
         # Test Dict.fromkeys
         d2 = self.thetype.fromkeys(["c", "d"], 2)
