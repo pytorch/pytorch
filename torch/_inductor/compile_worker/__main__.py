@@ -42,6 +42,13 @@ SubprocMain = _subproc_pool_worker.SubprocMain
 SubprocPickler = _subproc_pool_worker.SubprocPickler
 
 
+def _assert_torch_not_imported() -> None:
+    if "torch" in sys.modules:
+        raise RuntimeError(
+            "compile_worker sidecar imported torch before creating worker processes"
+        )
+
+
 def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     """
     Given a base type and qualified name: import & lookup that name, check
@@ -50,15 +57,25 @@ def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     pkg, name = qname.rsplit(".", 1)
     mod = sys.modules.get(pkg)
     if mod is None:
+        if pkg == "torch" or pkg.startswith("torch."):
+            raise ImportError(
+                f"{qname} is not preloaded in the torch-free compile worker "
+                "sidecar. Custom SubprocPickler classes must be importable "
+                "without importing torch."
+            )
         mod = importlib.import_module(pkg)
+        _assert_torch_not_imported()
     ty = getattr(mod, name)
     if not issubclass(ty, base):
         raise TypeError(f"Type {ty} is not a subtype of {base}")
-    return ty()
+    value = ty()
+    _assert_torch_not_imported()
+    return value
 
 
 def main():
     try:
+        _assert_torch_not_imported()
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--pickler", type=functools.partial(_lookup_and_create_type, SubprocPickler)
@@ -70,6 +87,7 @@ def main():
         parser.add_argument("--write-fd", type=int)
         parser.add_argument("--torch-key", type=str)
         args = parser.parse_args()
+        _assert_torch_not_imported()
         if os.getppid() != args.parent:
             sys.exit(0)
         read_fd = os.fdopen(args.read_fd, "rb")
@@ -77,6 +95,7 @@ def main():
         torch_key_data = base64.b64decode(args.torch_key.encode("utf-8"))
 
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        _assert_torch_not_imported()
 
         SubprocMain(
             args.pickler, args.kind, args.workers, read_fd, write_fd, torch_key_data

@@ -228,6 +228,7 @@ class SubprocMain:
         self.nprocs = nprocs
         self.torch_key_data = torch_key_data
         self.pool: TrackedProcessPoolExecutor | None = None
+        self.pool_finalizer: Any | None = None
         self.running = True
 
     def main(self) -> None:
@@ -243,12 +244,7 @@ class SubprocMain:
                 return self._shutdown()
 
     def _quiesce(self) -> None:
-        if self.pool is not None:
-            # A later wakeup may create a new fork-based pool. Wait for the old
-            # executor manager thread to exit first so the sidecar is single-threaded
-            # before it forks again.
-            self.pool.shutdown(wait=True)
-            self.pool = None
+        self._shutdown_pool(terminate_workers=False)
 
     def _shutdown(self) -> None:
         try:
@@ -264,7 +260,28 @@ class SubprocMain:
                 finally:
                     self.read_pipe.close()
         finally:
-            self._quiesce()
+            self._shutdown_pool(terminate_workers=True)
+
+    def _shutdown_pool(self, *, terminate_workers: bool) -> None:
+        if self.pool is None:
+            return
+
+        pool = self.pool
+        self.pool = None
+
+        if self.pool_finalizer is not None:
+            self.pool_finalizer.cancel()
+            self.pool_finalizer = None
+
+        if terminate_workers:
+            # The sidecar is exiting, so do not let ProcessPoolExecutor's
+            # interpreter finalization wait for running compiler workers.
+            _terminate_process_pool(pool)
+        else:
+            # A later wakeup may create a new fork-based pool. Wait for the old
+            # executor manager thread to exit first so the sidecar is single-threaded
+            # before it forks again.
+            pool.shutdown(wait=True)
 
     def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
@@ -315,7 +332,7 @@ class SubprocMain:
                 _worker_initializer, os.getpid(), self.torch_key_data
             ),
         )
-        multiprocessing.util.Finalize(
+        self.pool_finalizer = multiprocessing.util.Finalize(
             None, self.pool.shutdown, exitpriority=sys.maxsize
         )
         _warm_process_pool(self.pool, self.nprocs)
@@ -344,6 +361,34 @@ def _worker_initializer(orig_ppid: int, torch_key_data: bytes) -> None:
     torch_key.set(torch_key_data)  # type: ignore[attr-defined]
     pre_fork_setup()
     _async_compile_initializer(orig_ppid)
+
+
+def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:
+    processes = getattr(pool, "_processes", None)
+    if processes is not None:
+        return list(processes.values())
+
+    manager_thread = getattr(pool, "_executor_manager_thread", None)
+    manager_processes = getattr(manager_thread, "processes", None)
+    if manager_processes is not None:
+        return list(manager_processes.values())
+
+    return []
+
+
+def _terminate_process_pool(pool: ProcessPoolExecutor) -> None:
+    processes = _get_process_pool_processes(pool)
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.terminate()
+        except (OSError, ValueError):
+            log.warning("Ignored error terminating compile worker", exc_info=True)
+
+    try:
+        pool.shutdown(wait=True, cancel_futures=True)
+    except Exception:
+        log.warning("Ignored error shutting down compile worker pool", exc_info=True)
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
