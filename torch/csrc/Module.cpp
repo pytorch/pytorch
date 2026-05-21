@@ -56,6 +56,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/TensorIterator.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -2526,6 +2527,8 @@ PyObject* initModule() {
 #endif
 
   torch::distributed::initPlacementBindings(module);
+
+  torch::initTensorIteratorBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
