@@ -4918,35 +4918,33 @@ class TestMetadataJsonFormat(TestCase):
     def test_kernel_metadata_has_expected_fields(self):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
-        for key in [
+        common_keys = ["device", "stream", "correlation", "grid", "block"]
+        cuda_only_keys = [
             "queued",
-            "device",
             "context",
-            "stream",
-            "correlation",
             "registers per thread",
             "shared memory",
             "blocks per SM",
             "warps per SM",
-            "grid",
-            "block",
             "graph node id",
-        ]:
+        ]
+        expected = common_keys if TEST_WITH_ROCM else common_keys + cuda_only_keys
+        for key in expected:
             self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
 
     def test_kernel_metadata_field_types(self):
         md = self._get_kernel_metadata()
         parsed = json.loads("{" + md + "}")
-        for key in [
+        common_int_keys = ["device", "stream", "correlation"]
+        cuda_only_int_keys = [
             "queued",
-            "device",
             "context",
-            "stream",
-            "correlation",
             "registers per thread",
             "shared memory",
             "graph node id",
-        ]:
+        ]
+        int_keys = common_int_keys if TEST_WITH_ROCM else common_int_keys + cuda_only_int_keys
+        for key in int_keys:
             self.assertIsInstance(
                 parsed[key],
                 int,
@@ -4960,7 +4958,8 @@ class TestMetadataJsonFormat(TestCase):
         md = self._get_kernel_metadata()
         # Verify the ": " (colon-space) separator convention that string
         # splicing in the export path relies on for field extraction.
-        self.assertIn('"graph node id": ', md)
+        if not TEST_WITH_ROCM:
+            self.assertIn('"graph node id": ', md)
         self.assertIn('"correlation": ', md)
         self.assertIn('"stream": ', md)
 
