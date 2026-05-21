@@ -446,7 +446,10 @@ def _verify_exported_program_signature(exported_program) -> None:
                 input_spec.persistent is True
                 and buffer not in exported_program.state_dict
             ):
-                raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
+                # Skip validation for _tensor_constant buffers in HOO subgraphs
+                # These are captured from torch.tensor() calls inside branches
+                if not ("_graph_" in buffer and "_tensor_constant" in buffer):
+                    raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
 
             if input_spec.persistent is False and buffer in exported_program.state_dict:
                 raise SpecViolationError(

@@ -2322,6 +2322,39 @@ def forward(self):
         self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
         self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
 
+    def test_cond_with_tensor_constants_in_branches(self):
+        """
+        Regression test for issue #180354.
+        Tests that cond with tensor constants in branches works correctly
+        when run through export and run_decompositions().
+        Previously would crash with "Attempting to use FunctionalTensor on its own".
+        """
+
+        def true_fn():
+            return torch.tensor(0)
+
+        def false_fn():
+            return torch.tensor(1)
+
+        def test(pred):
+            return control_flow.cond(pred, true_fn, false_fn, [])
+
+        # Test with export and run_decompositions
+        pred = torch.tensor(True)
+        result_true = test(pred)
+        self.assertEqual(result_true.item(), 0)
+
+        pred = torch.tensor(False)
+        result_false = test(pred)
+        self.assertEqual(result_false.item(), 1)
+
+        # Test with torch.compile to ensure it doesn't break compilation
+        opt_test = torch.compile(test, backend="eager")
+        pred = torch.tensor(True)
+        self.assertEqual(opt_test(pred).item(), 0)
+        pred = torch.tensor(False)
+        self.assertEqual(opt_test(pred).item(), 1)
+
     def test_map_graph_break(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
