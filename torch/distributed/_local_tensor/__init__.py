@@ -1324,6 +1324,38 @@ class LocalTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
+        # device_mesh::_runtime_compute_coordinate_on_dim is checked before the
+        # no-LocalTensor early return because compile-on-one-rank calls it with
+        # only a plain mesh-tensor argument, but the result must still vary per
+        # simulated rank under LocalTensorMode.
+        if (
+            not self._disable
+            and func.namespace == "device_mesh"
+            and func.overloadpacket.__name__ == "_runtime_compute_coordinate_on_dim"
+        ):
+            # Schema is "(Tensor full_mesh, int index) -> SymInt" so we accept
+            # both positional and keyword forms by looking up names from the
+            # op's schema. This avoids silently mis-unpacking if a caller
+            # passes either argument as a kwarg.
+            schema_args = func._schema.arguments
+            bound = dict(zip((a.name for a in schema_args), args))
+            bound.update(kwargs)
+            full_mesh = bound["full_mesh"]
+            index = bound["index"]
+            rank_results: dict[int, int] = {}
+            for r in self.ranks:
+                mesh_tensor = DeviceMesh._get_mesh_tensor_from_full_mesh(
+                    full_mesh, current_rank=r
+                )
+                mesh_coords = DeviceMesh._compute_coordinates_from_mesh(mesh_tensor, r)
+                if mesh_coords is None:
+                    raise AssertionError(
+                        f"Rank {r} not found in mesh tensor for "
+                        "_runtime_compute_coordinate_on_dim"
+                    )
+                rank_results[r] = mesh_coords[index]
+            return _combine_int_rank_results(rank_results)
+
         # Factory functions convert into LocalTensor, so we don't have to
         # transmute a Tensor into a LocalTensor if mutation happens...
         # But if you do an operation on a Tensor, do NOT wrap it into a
