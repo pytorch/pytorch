@@ -86,6 +86,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    raise_args_mismatch,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -1867,7 +1868,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
 
-    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
+    def get_function(
+        self,
+        _converting: set[int] | None = None,
+        *,
+        allow_source_backed_closure: bool = False,
+    ) -> types.FunctionType:
         # _converting is used a way to break cycles when
         # two nested_functions refer to each other.
         from .base import AsPythonConstantNotImplementedError
@@ -1881,7 +1887,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
         _converting.add(self_id)
         try:
-            return self._get_function_impl(_converting)
+            return self._get_function_impl(
+                _converting,
+                allow_source_backed_closure=allow_source_backed_closure,
+            )
         except AsPythonConstantNotImplementedError as e:
             raise ClosureConversionError(
                 "failed to convert closure cell to Python constant"
@@ -1896,7 +1905,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         except (NotImplementedError, Unsupported):
             return False
 
-    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
+    def _get_function_impl(
+        self,
+        _converting: set[int],
+        *,
+        allow_source_backed_closure: bool,
+    ) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1923,9 +1937,23 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 # If the cell contents is a NestedUserFunctionVariable, call get_function
                 # directly to properly propagate the _converting set for cycle detection
                 if isinstance(cell_contents, NestedUserFunctionVariable):
-                    value = cell_contents.get_function(_converting)
+                    value = cell_contents.get_function(
+                        _converting,
+                        allow_source_backed_closure=allow_source_backed_closure,
+                    )
                 else:
-                    value = cell_contents.as_python_constant()
+                    try:
+                        value = cell_contents.as_python_constant()
+                    except AsPythonConstantNotImplementedError:
+                        if (
+                            allow_source_backed_closure
+                            and isinstance(cell_contents, UserDefinedObjectVariable)
+                            and cell_contents.source is not None
+                            and not tx.output.side_effects.is_modified(cell_contents)
+                        ):
+                            value = cell_contents.guard_as_python_constant()
+                        else:
+                            raise
                 cells.append(make_cell(value))
             closure_cells = tuple(cells)
 
@@ -2237,6 +2265,20 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
+        if self.value is functools.cmp_to_key:
+            if len(args) == 1 and not kwargs:
+                return CmpToKeyVariable(args[0])
+            elif not args and set(kwargs) == {"mycmp"}:
+                return CmpToKeyVariable(kwargs["mycmp"])
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "cmp_to_key",
+                    "1 arg or 1 mycmp kwarg",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+                raise AssertionError("raise_args_mismatch should not return")
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
@@ -2427,6 +2469,20 @@ class SkipFunctionVariable(VariableTracker):
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+
+class CmpToKeyVariable(VariableTracker):
+    def __init__(self, cmp_fn: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.cmp_fn = cmp_fn
+
+    def compare(
+        self,
+        tx: "InstructionTranslator",
+        left: VariableTracker,
+        right: VariableTracker,
+    ) -> VariableTracker:
+        return self.cmp_fn.call_function(tx, [left, right], {})
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):

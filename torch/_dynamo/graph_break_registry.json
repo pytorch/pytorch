@@ -3690,6 +3690,46 @@
       ]
     }
   ],
+  "GB5271": [
+    {
+      "Gb_type": "Unsupported source-backed closure direct read in class body",
+      "Context": "{inst.opname} {inst.argrepr}",
+      "Explanation": "Dynamo cannot safely execute a class body that reads a source-backed closure object while tracing __build_class__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6447": [
+    {
+      "Gb_type": "Unsupported source-backed closure call in class body",
+      "Context": "{inst.opname} {inst.argrepr}",
+      "Explanation": "Dynamo cannot safely execute calls in a class body with a source-backed closure.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7210": [
+    {
+      "Gb_type": "Unsupported source-backed closure dynamic class body access",
+      "Context": "{inst.opname} {inst.argrepr}",
+      "Explanation": "Dynamo cannot safely execute a class body that uses dynamic introspection or execution with a source-backed closure.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1538": [
+    {
+      "Gb_type": "Unsupported source-backed closure function read in class body",
+      "Context": "{inst.opname} {inst.argrepr}",
+      "Explanation": "Dynamo cannot safely execute a class body that reads a source-backed closure object while tracing __build_class__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9840": [
     {
       "Gb_type": "Can't extract message from torch._check*()",
