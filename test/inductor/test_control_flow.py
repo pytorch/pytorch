@@ -348,6 +348,57 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
+    def _check_cond_no_outputs_input_mutation(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                x = x.clone()
+
+                def true_fn(x):
+                    x.add_(1)
+
+                def false_fn(x):
+                    x.sub_(1)
+
+                torch.cond(p, true_fn, false_fn, (x,))
+                return x * 2
+
+        model = Model()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        with torch.no_grad():
+            x = torch.ones(4)
+            self.assertEqual(
+                compiled_model(torch.tensor(True), x),
+                model(torch.tensor(True), x),
+            )
+            self.assertEqual(
+                compiled_model(torch.tensor(False), x),
+                model(torch.tensor(False), x),
+            )
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_cond_no_outputs_input_mutation(self):
+        self._check_cond_no_outputs_input_mutation()
+
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cond_no_outputs_input_mutation_cpp_wrapper(self):
+        self._check_cond_no_outputs_input_mutation()
+
+    def test_cond_differing_constant_outputs_rejected(self):
+        class Model(torch.nn.Module):
+            def forward(self, p, x):
+                return torch.cond(p, lambda y: 1, lambda y: 2, (x,))
+
+        with self.assertRaisesRegex(
+            Exception,
+            "differing constant outputs",
+        ):
+            torch.compile(Model(), backend="inductor", fullgraph=True)(
+                torch.tensor(True), torch.ones(4)
+            )
+
     @requires_gpu
     def test_cond_subgraph_output_stride_padding(self):
         self._run_test(

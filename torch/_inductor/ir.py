@@ -259,6 +259,7 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
                     int,
                     EffectfulKernel,
                     ShapeAsConstantBuffer,
+                    NoneAsConstantBuffer,
                     OpaqueMultiOutput,
                 ),
             ), (
@@ -9586,11 +9587,14 @@ class TensorBox(MutableBox):
     def create(data: ShapeAsConstantBuffer) -> ShapeAsConstantBuffer: ...
     @overload
     @staticmethod
+    def create(data: NoneAsConstantBuffer) -> NoneAsConstantBuffer: ...
+    @overload
+    @staticmethod
     def create(data: IRNode) -> TensorBox: ...
 
     @staticmethod
     def create(data: IRNode):
-        if isinstance(data, ShapeAsConstantBuffer):
+        if isinstance(data, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
             return data
         return TensorBox(StorageBox(data))
 
@@ -9868,14 +9872,14 @@ class Conditional(ExternKernel):
         operands: Input tensors passed to both true and false subgraphs.
         true_subgraph: Subgraph executed when predicate is True.
         false_subgraph: Subgraph executed when predicate is False.
-        outputs: MultiOutput nodes representing the conditional's outputs.
+        outputs: MultiOutput nodes or constants representing the conditional's outputs.
     """
 
     predicate: IRNode | None = None
     operands: Sequence[IRNode] | None = None
     true_subgraph: Subgraph | None = None
     false_subgraph: Subgraph | None = None
-    outputs: Sequence[MultiOutput] | None = None
+    outputs: Sequence[IRNode] | None = None
 
     def __init__(
         self,
@@ -9926,7 +9930,7 @@ class Conditional(ExternKernel):
         true_fn: Subgraph,
         false_fn: Subgraph,
         operands: list[TensorBox],
-    ) -> list[MultiOutput]:
+    ) -> list[IRNode]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
         # pyrefly: ignore [bad-assignment]
         predicate = cls.realize_input(predicate)
@@ -9949,13 +9953,14 @@ class Conditional(ExternKernel):
 
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
-            fake_tensors: Sequence[torch.Tensor],
+            fake_tensors: Sequence[Any],
         ) -> list[IRNode]:
             ret = []
             for output, fake in zip(graph_outputs, fake_tensors):
-                if isinstance(output, ShapeAsConstantBuffer):
+                if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                     ret.append(output)
                 else:
+                    assert isinstance(fake, torch.Tensor), (output, fake)
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
@@ -9997,6 +10002,19 @@ class Conditional(ExternKernel):
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
         for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            if isinstance(
+                t_o, (ShapeAsConstantBuffer, NoneAsConstantBuffer)
+            ) or isinstance(f_o, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                assert type(t_o) is type(f_o), (i, t_o, f_o)
+                if isinstance(t_o, ShapeAsConstantBuffer):
+                    assert isinstance(f_o, ShapeAsConstantBuffer)
+                    if t_o.expr != f_o.expr:
+                        raise AssertionError(
+                            "Inductor does not support torch.cond branches with "
+                            "differing constant outputs. "
+                            f"Got {t_o.expr} and {f_o.expr} at output {i}."
+                        )
+                continue
             assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
@@ -10024,30 +10042,38 @@ class Conditional(ExternKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    # pyrefly: ignore [bad-argument-type]
-                    device=output.get_device()
-                    if output.get_device() is not None
-                    else device,  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[
-                        Conditional._maybe_expr(sz) for sz in merged_output.stride()
-                    ],
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                conditional,
-                [(list, i)],
+        outputs: list[IRNode] = []
+        # As the true and false outputs are equivalent, we can use either one
+        # as a template for tensor outputs. Constant outputs are represented
+        # directly and do not allocate a conditional tensor output slot.
+        for i, (output, merged_output) in enumerate(
+            zip(true_outputs, V.graph.current_node.meta["val"])
+        ):
+            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                outputs.append(output)
+                continue
+            assert isinstance(merged_output, torch.Tensor), (output, merged_output)
+            outputs.append(
+                MultiOutput(
+                    FixedLayout(
+                        # pyrefly: ignore [bad-argument-type]
+                        device=output.get_device()
+                        if output.get_device() is not None
+                        else device,  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=[
+                            Conditional._maybe_expr(sz) for sz in merged_output.size()
+                        ],
+                        stride=[
+                            Conditional._maybe_expr(sz) for sz in merged_output.stride()
+                        ],
+                        offset=output.get_layout().offset,
+                        is_pinned=output.get_layout().is_pinned,
+                    ),
+                    conditional,
+                    [(list, i)],
+                )
             )
-            # as the true and false outputs are equivalent,
-            # we can use either of them here as a "template"
-            for i, (output, merged_output) in enumerate(
-                zip(true_outputs, V.graph.current_node.meta["val"])
-            )
-        ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
 

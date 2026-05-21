@@ -2496,19 +2496,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     gb_type="torch.cond: unsupported branch return type",
                     context=str(ret_val),
-                    explanation="Expected branches to return a possibly nested pytree of tensors or constant ints.",
+                    explanation="Expected branches to return a possibly nested pytree of tensors, constant ints, or None.",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
                 if ret.is_python_constant() and not isinstance(
-                    ret.as_python_constant(), int
+                    ret.as_python_constant(), (int, type(None))
                 ):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
-                        explanation="Constants returned from branches must be ints.",
+                        explanation="Constants returned from branches must be ints or None.",
                         hints=[
                             *graph_break_hints.USER_ERROR,
                         ],
