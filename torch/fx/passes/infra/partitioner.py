@@ -70,6 +70,7 @@ class CapabilityBasedPartitioner:
         allows_single_node_partition: bool = False,
         non_compute_ops: Sequence[str] | None = None,
         allowed_single_node_partition_ops: Sequence[str] | None = None,
+        skip_horizontal_fusion: bool = False,
     ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
@@ -80,6 +81,7 @@ class CapabilityBasedPartitioner:
             if allowed_single_node_partition_ops is not None
             else []
         )
+        self.skip_horizontal_fusion = skip_horizontal_fusion
         self.dependency_viewer = _DependencyViewer(graph_module)
 
     def _is_node_supported(self, node: Node) -> bool:
@@ -219,24 +221,34 @@ class CapabilityBasedPartitioner:
         for node_order, node in enumerate(reversed(self.graph_module.graph.nodes)):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: dict[int, None] = {}
+            created_partition = False
 
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
             #
-            # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
-            # the fusion by adding an `else` block here to skip horizontal fusion.
+            # When skip_horizontal_fusion is True, only merge the newly-created
+            # partition for this supported node with partitions for its direct users.
+            # This preserves data-dependent vertical fusion while avoiding fusion of
+            # independent consumer partitions around an unsupported node.
             if self._is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id
                 merge_single_node(node, node_order, partition_id)
                 merge_candidates[partition_id] = None
+                created_partition = True
 
-            # merge all possible partitions
-            for partition_id, _ in sorted(
-                partitions_order.items(), key=operator.itemgetter(1)
-            ):
-                merge_candidates[partition_id] = None
+            if self.skip_horizontal_fusion:
+                if created_partition:
+                    for user in node.users:
+                        if user in assignment:
+                            merge_candidates[assignment[user]] = None
+            else:
+                # merge all possible partitions
+                for partition_id, _ in sorted(
+                    partitions_order.items(), key=operator.itemgetter(1)
+                ):
+                    merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
