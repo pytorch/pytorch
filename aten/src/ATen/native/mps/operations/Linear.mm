@@ -40,8 +40,9 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
 
       const auto mpsDataType = getMPSDataType(weight.scalar_type());
 
-      auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
-      auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
+      // input/output/bias are contiguous here; skip the strided NDArray path.
+      auto inputNDArray = getMPSNDArray(input, input.sizes());
+      auto outNDArray = getMPSNDArray(output, output.sizes());
 
       auto weightBuf = getMTLBufferStorage(weight);
       auto weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:getMPSShape(weight.sizes())];
@@ -52,7 +53,7 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                                                     descriptor:weightDesc] autorelease];
 
       if (is_bias_defined) {
-        auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
+        auto biasNDArray = getMPSNDArray(bias, bias.sizes());
         auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
           return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3] autorelease];
         });
