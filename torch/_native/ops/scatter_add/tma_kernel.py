@@ -129,11 +129,10 @@ def _make_kernel(
     chunk_elems: int,
     reduce_op,
     contig: bool,
-    scale: bool,
 ):
     """Build a dtype-specialized kernel closure. dtype/elem_bytes/N
-    /chunk_elems/contig/scale are Python-time constants that the
-    preprocessor folds at cute.compile time.
+    /chunk_elems/contig are Python-time constants that the preprocessor
+    folds at cute.compile time.
 
     ``chunk_elems`` is baked in at compile time. The TMA descriptor
     built in ``_launch`` (via ``make_tiled_tma_atom`` on the source
@@ -153,13 +152,6 @@ def _make_kernel(
     ``out_row_stride`` arg so outer-strided outputs (e.g. slices) work.
     The TMA load always goes through the descriptor and doesn't use
     ``contig``.
-
-    When ``scale`` is True, after the mbarrier wait the driver lane
-    multiplies the chunk_elems smem buffer in place before the
-    bulk-reduce, followed by ``fence_view_async_shared`` so the
-    bulk-reduce sees the scaled values through the async proxy. The
-    ``alpha == 1`` fast path uses ``scale=False`` and avoids the smem
-    pass + proxy fence entirely.
     """
 
     chunk_bytes = chunk_elems * elem_bytes
@@ -187,52 +179,6 @@ def _make_kernel(
     # bf16 N=8 -> 64 B, fp32 N=12 -> 192 B).
     tile_stage_stride_elems = _round_up(K * N, _SMEM_ALIGN_BYTES // elem_bytes)
 
-    # Split chunk_elems into a 32-aligned bulk + a < 32 tail. fp32
-    # row_bytes >= 16 allows chunk_elems == 4; bf16/fp16 allows
-    # chunk_elems == 8; neither dtype's chunk_elems is required to be
-    # a multiple of 32 (e.g. bf16 N=40 -> chunk_elems=40 hits
-    # bulk_slots=32, tail_slots=8). Both branches must work.
-    _bulk_slots = (chunk_elems // 32) * 32
-    _tail_slots = chunk_elems - _bulk_slots
-
-    @cute.jit
-    def _scale_smem(cbuf_ptr, alpha, dtype, lane_id):
-        """Multiply chunk_elems smem slots starting at cbuf_ptr by
-        ``alpha`` (cast to ``dtype``) using up to 32 warp lanes
-        cooperatively. The 32-aligned bulk is handled via a
-        (32, slots_per_lane) strided view -- each lane vector-loads
-        its column, multiplies, vector-stores -- and any tail of
-        chunk_elems % 32 slots is handled by the first ``_tail_slots``
-        lanes.
-
-        Caller is responsible for the post-pass synchronization before
-        any bulk-reduce reads these slots: a ``cute.arch.sync_warp()``
-        (so lane 0 sees every other lane's writes) and a
-        ``cute.arch.fence_view_async_shared()`` (so the async proxy
-        sees the writes). Putting the fence here would issue redundant
-        fences on the small-N path where this is called K times in a
-        row -- only one fence is needed before the bulk-reduce.
-
-        Must be called outside any ``if lane_id == 0:`` gate so all
-        lanes participate.
-        """
-        alpha_t = dtype(alpha)
-        if const_expr(_bulk_slots > 0):
-            slots_per_lane = _bulk_slots // 32
-            buf_2d = cute.make_tensor(
-                cbuf_ptr,
-                cute.make_layout((32, slots_per_lane), stride=(1, 32)),
-            )
-            lane_slice = buf_2d[lane_id, None]
-            vals = lane_slice.load()
-            lane_slice.store(vals * alpha_t)
-        if const_expr(_tail_slots > 0):
-            if lane_id < Int32(_tail_slots):
-                slot = cute.make_tensor(
-                    cbuf_ptr + Int32(_bulk_slots) + lane_id, cute.make_layout(1)
-                )
-                slot[0] = slot[0] * alpha_t
-
     @cute.kernel
     def _kernel_small_n(
         tma_atom: cute.CopyAtom,
@@ -240,7 +186,6 @@ def _make_kernel(
         mIndex: cute.Tensor,
         mOut: cute.Tensor,
         out_row_stride: Int64,
-        alpha: cute.Numeric,
     ):
         # Small-N kernel: K rows per pipeline stage, single 2D TMA load
         # per stage. Smem layout per warp: (K, N, _NUM_STAGES) row-major
@@ -250,9 +195,9 @@ def _make_kernel(
         # Maintenance contract with ``_kernel``: this is a structural
         # specialization (K rows per stage, single 2D TMA descriptor)
         # of the same producer/consumer pipeline. Changes to the shared
-        # control flow -- pipeline state machine, scale path, mbarrier
-        # init, contig vs strided out, alpha plumbing -- must be made in
-        # both. Differences from ``_kernel``:
+        # control flow -- pipeline state machine, mbarrier init, contig
+        # vs strided out -- must be made in both. Differences from
+        # ``_kernel``:
         #   - smem layout has an extra K dim (row-major (K, N) tile);
         #   - tile_idx counts K-row groups, not single rows;
         #   - the inner reduce loop is unrolled K times with a
@@ -314,7 +259,9 @@ def _make_kernel(
         # row-major within a stage, padded between stages.
         my_sBuf = cute.make_tensor(
             my_buf_ptr,
-            cute.make_layout((K, N, _NUM_STAGES), stride=(N, 1, tile_stage_stride_elems)),
+            cute.make_layout(
+                (K, N, _NUM_STAGES), stride=(N, 1, tile_stage_stride_elems)
+            ),
         )
         # gmem (M, N) tiled by (K, N) -> shape (K, N, num_K_tiles, 1).
         tiled_gmem = cute.local_tile(tma_tensor_src, (K, N), (None, None))
@@ -356,25 +303,6 @@ def _make_kernel(
                 pipe.consumer_wait(cons_state)
                 stage_off = cons_state.index * Int32(tile_stage_stride_elems)
 
-                if const_expr(scale):
-                    # Scale all K*N smem slots cooperatively. The
-                    # _scale_smem helper uses compile-time chunk_elems
-                    # internally; for small_n chunk_elems == N so we
-                    # call it K times, once per row of the tile. One
-                    # fence + sync_warp after the K-loop is enough
-                    # (don't redundantly fence per row); fence-before-
-                    # sync_warp ordering ensures all 32 lanes' fences
-                    # have completed before lane 0's bulk-reduce.
-                    for k in cutlass.range_constexpr(K):
-                        _scale_smem(
-                            my_buf_ptr + stage_off + Int32(k * N),
-                            alpha,
-                            dtype,
-                            lane_id,
-                        )
-                    cute.arch.fence_view_async_shared()
-                    cute.arch.sync_warp()
-
                 if lane_id == Int32(0):
                     base_row = prev_tile_idx * Int32(K)
                     for k in cutlass.range_constexpr(K):
@@ -403,17 +331,6 @@ def _make_kernel(
             pipe.consumer_wait(cons_state)
             stage_off = cons_state.index * Int32(tile_stage_stride_elems)
 
-            if const_expr(scale):
-                for k in cutlass.range_constexpr(K):
-                    _scale_smem(
-                        my_buf_ptr + stage_off + Int32(k * N),
-                        alpha,
-                        dtype,
-                        lane_id,
-                    )
-                cute.arch.fence_view_async_shared()
-                cute.arch.sync_warp()
-
             if lane_id == Int32(0):
                 base_row = prev_tile_idx * Int32(K)
                 for k in cutlass.range_constexpr(K):
@@ -441,7 +358,6 @@ def _make_kernel(
         mOut: cute.Tensor,
         chunks_per_cta: Int32,
         out_row_stride: Int64,
-        alpha: cute.Numeric,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, bidy, _ = cute.arch.block_idx()
@@ -511,7 +427,9 @@ def _make_kernel(
         # slice as a (chunk_elems, _NUM_STAGES) tensor.
         my_sBuf = cute.make_tensor(
             my_buf_ptr,
-            cute.make_layout((chunk_elems, _NUM_STAGES), stride=(1, stage_stride_elems)),
+            cute.make_layout(
+                (chunk_elems, _NUM_STAGES), stride=(1, stage_stride_elems)
+            ),
         )
         tiled_gmem = cute.local_tile(tma_tensor_src, (1, chunk_elems), (None, None))
         tma_smem, tma_gmem = cpasync.tma_partition(
@@ -550,8 +468,9 @@ def _make_kernel(
                 # over-arrive. Per-thread ops (consumer_wait,
                 # mbarrier_wait inside) and the cute.copy TMA load
                 # (which elects internally per CuTeDSL contract) run
-                # on all 32 lanes; this keeps the warp converged so
-                # later sync_warp + warp-cooperative scale work.
+                # on all 32 lanes -- the warp must stay converged at
+                # the elect.sync inside the TMA atom, otherwise
+                # divergent lanes deadlock waiting for elected lane.
                 # Driver-thread-only ops (bulk-reduce gmem issue) stay
                 # lane-0-gated. mIndex[entry_id] is read by all lanes
                 # (uniform load, coalesces) but the bounds assert is
@@ -584,17 +503,6 @@ def _make_kernel(
                 if pair_count > Int32(0):
                     pipe.consumer_wait(cons_state)
                     cbuf_ptr = my_sBuf[None, cons_state.index].iterator
-                    if const_expr(scale):
-                        # Warp-cooperative scale: each lane scales a
-                        # strided subset of the chunk's smem slots,
-                        # then an async-proxy fence so lane 0's
-                        # bulk-reduce sees the writes, and a sync_warp
-                        # so the fence is ordered before lane 0's
-                        # bulk-reduce issue.
-                        _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
-                        cute.arch.fence_view_async_shared()
-                        cute.arch.sync_warp()
-
                     if lane_id == Int32(0):
                         off = prev_chunk_idx * Int32(chunk_elems)
                         cur_elems = Int32(N) - off
@@ -628,11 +536,6 @@ def _make_kernel(
         if pair_count > Int32(0):
             pipe.consumer_wait(cons_state)
             cbuf_ptr = my_sBuf[None, cons_state.index].iterator
-            if const_expr(scale):
-                _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
-                cute.arch.fence_view_async_shared()
-                cute.arch.sync_warp()
-
             if lane_id == Int32(0):
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
@@ -657,7 +560,6 @@ def _make_kernel(
         grid_x: Int32,
         grid_y: Int32,
         out_row_stride: Int64,
-        alpha: cute.Numeric,
     ):
         if const_expr(small_n):
             # Small-N: 2D TMA descriptor with cta_tiler=(K, N), one
@@ -675,7 +577,6 @@ def _make_kernel(
                 mIndex,
                 mOut,
                 out_row_stride,
-                alpha,
             ).launch(
                 grid=[grid_x, 1, 1],
                 block=[_THREADS_PER_CTA, 1, 1],
@@ -699,7 +600,6 @@ def _make_kernel(
                 mOut,
                 chunks_per_cta,
                 out_row_stride,
-                alpha,
             ).launch(
                 grid=[grid_x, grid_y, 1],
                 block=[_THREADS_PER_CTA, 1, 1],
@@ -723,19 +623,13 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     return chunk_bytes // elem_bytes
 
 
-def _alpha_dtype_for(torch_dtype: torch.dtype):
-    """Alpha is passed as fp32 across the ABI; tvm_ffi doesn't support
-    fp16/bf16 scalar args. Kernel casts to src dtype inside."""
-    return Float32
-
-
 @jit_cache
-def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: bool):
+def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     chunk_elems = _chunk_elems_for(torch_dtype, N)
     reduce_op = _reduce_op_for(dtype)
-    launcher = _make_kernel(dtype, elem_bytes, N, chunk_elems, reduce_op, contig, scale)
+    launcher = _make_kernel(dtype, elem_bytes, N, chunk_elems, reduce_op, contig)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
@@ -746,7 +640,6 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
-    alpha_dtype = _alpha_dtype_for(torch_dtype)
     return cute.compile(
         launcher,
         mSrc_fake,
@@ -757,7 +650,6 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
         Int32(0),  # grid_x
         Int32(0),  # grid_y
         Int64(0),  # out_row_stride
-        alpha_dtype(0.0),
         # ``--enable-assertions`` keeps the ``cute_testing.assert_``
         # bounds checks on ``r`` live in production. Cost is roughly
         # +1-10% (geomean +7.7%) on most shapes; the safety net is
@@ -829,27 +721,21 @@ def tma_scatter_add_into(
     out: torch.Tensor,
     index_1d: torch.Tensor,
     src: torch.Tensor,
-    alpha: float = 1.0,
 ) -> None:
-    """In-place: ``out[index_1d[i], :] += alpha * src[i, :]`` for every i.
+    """In-place: ``out[index_1d[i], :] += src[i, :]`` for every i.
 
     ``out`` / ``src`` are 2D with inner-dim stride 1 (outer row stride
     can differ from N, e.g. a slice of a wider buffer). ``index_1d`` is
     1D int64 of length M_src. ``row_bytes = N * elem_size`` must be a
     multiple of 16; the host cond enforces this.
-
-    ``alpha == 1.0`` dispatches to the non-scaling variant (no smem
-    scale pass, no proxy fence).
     """
     M, N = src.shape
     chunk_elems = _chunk_elems_for(src.dtype, N)
     contig = src.stride(0) == N and out.stride(0) == N
-    scale = alpha != 1.0
-    compiled = _compile_tma_scatter(src.dtype, N, contig, scale)
+    compiled = _compile_tma_scatter(src.dtype, N, contig)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
 
     grid_x, grid_y, chunks_per_cta = _plan_grid(M, N, chunk_elems, sm)
-    alpha_dtype = _alpha_dtype_for(src.dtype)
     compiled(
         src,
         index_1d,
@@ -858,5 +744,4 @@ def tma_scatter_add_into(
         grid_x,
         grid_y,
         out.stride(0),
-        alpha_dtype(float(alpha)),
     )
