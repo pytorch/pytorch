@@ -101,6 +101,34 @@ Review subagent:
    requires human input. Do not stop for human confirmation after a successful
    gate commit. A user-facing status summary is not a stopping condition.
 
+## Low-Relevance Early Exit
+
+Some CPython sentinels are mis-scored because the visible data-structure test
+only fails after Dynamo reaches class-creation machinery that is not relevant to
+normal model authoring.
+
+Before designing a fix, the implementation subagent must do a focused repro and
+classify the root cause. If making the gate pass primarily requires work on
+source-backed `__build_class__` closures, class-body closure cell conversion,
+local class construction machinery, or class-body `locals()` / `eval()` /
+`exec()` interactions, treat the gate as low-relevance and exit the gate early.
+Do not implement broad `build_class` or source-backed closure support unless the
+human explicitly reauthorizes that specific direction.
+
+Early-exit procedure:
+
+- Restore any source, test, or sentinel changes made while triaging the gate.
+- Leave the active sentinel in place.
+- Record in `coverage.md` that the gate was deferred as build-class /
+  source-backed-closure machinery, with the focused repro evidence.
+- Report the next highest remaining candidate from the relevance CSV.
+- The manager logs the discard/defer decision and immediately starts the next
+  gate. This is not a blocker requiring human input.
+
+The review subagent must push back on implementations that expand into
+`build_class` / source-backed closure machinery without explicit human approval,
+even if the target CPython test can be made to pass that way.
+
 ## Implementation Prompt
 
 Use this prompt shape for the implementation subagent:
@@ -118,6 +146,15 @@ object-protocol direction. The local CPython checkout is available at
 Do not relax gate exit criteria, do not mark a gate complete without measured
 evidence, and do not add new expected-failure or skip sentinels unless the
 human has explicitly approved it.
+
+Before designing the source change, run a focused repro and classify the root
+cause. If the gate would primarily require source-backed `__build_class__`
+closures, class-body closure cell conversion, local class construction
+machinery, or class-body `locals()` / `eval()` / `exec()` interactions, exit the
+gate early as low relevance: restore any changes, leave sentinels in place,
+record the defer reason in `coverage.md`, and report the next highest remaining
+candidate. Do not implement broad build-class/source-backed-closure support
+without explicit human approval.
 
 If the same source fix makes additional CPython expected-failure sentinels
 unexpectedly pass, treat those as positive collateral coverage. Verify each
@@ -193,6 +230,10 @@ Review for:
 - Incorrect sentinel removals or additions
 - Unsupported gate-completion claims
 - Plan updates that change exit criteria or status without evidence
+- Scope creep into source-backed `__build_class__` closures, class-body closure
+  cells, local class construction machinery, or class-body `locals()` /
+  `eval()` / `exec()` interactions without explicit human approval. These are
+  low-relevance early-exit gates, not default implementation work.
 - Unnecessary helper functions or abstractions. Push back on helpers that wrap
   tiny local checks, have only one call site, or make adjacent code harder to
   read without encoding a meaningful shared semantic rule.
