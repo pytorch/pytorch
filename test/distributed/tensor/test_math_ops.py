@@ -1064,8 +1064,7 @@ class DistMathOpsTest(DTensorOpTestBase):
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        torch.manual_seed(42)
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(15, dtype=torch.float, device=self.device_type).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1093,8 +1092,7 @@ class DistMathOpsTest(DTensorOpTestBase):
     def test_scan_ops(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        torch.manual_seed(42)
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(1, 16, dtype=torch.float, device=self.device_type).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1116,8 +1114,7 @@ class DistMathOpsTest(DTensorOpTestBase):
     def test_scan_ops_with_indices(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        torch.manual_seed(42)
-        inp = torch.rand(12, 8, device=self.device_type)
+        inp = torch.arange(96, dtype=torch.float, device=self.device_type).reshape(12, 8)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1281,8 +1278,7 @@ class DistMathOpsTest(DTensorOpTestBase):
     def test_logsumexp(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        torch.manual_seed(42)
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.arange(15, dtype=torch.float, device=self.device_type).reshape(3, 5)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
