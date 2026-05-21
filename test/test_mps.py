@@ -6349,6 +6349,22 @@ class TestMPS(TestCaseMPS):
             sorted_mi, _ = torch.sort(mi, dim=-1)
             self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(-1)).expand_as(mi))
 
+    def test_sort_padding_extremum_indices(self):
+        # Regression: bitonic-sort padding slots in the Metal kernel hold the
+        # dtype-extremum (True for bool asc, INT_MAX for int asc, NaN for float
+        # asc). Real inputs equal to that extremum tie with padding, unstable
+        # tie-breaks used to let padding's out-of-range index leak into the
+        # output. Every output index must be in [0, size).
+        cases = [
+            torch.tensor([True, False, True, False, True], device="mps"),
+            torch.tensor([1, torch.iinfo(torch.int32).max, 2], dtype=torch.int32, device="mps"),
+            torch.tensor([1.0, float('nan'), 2.0, float('nan'), 3.0], device="mps"),
+        ]
+        for t in cases:
+            _, idx = torch.sort(t)
+            self.assertLess(idx.max().item(), t.numel())
+            self.assertEqual(torch.gather(t, 0, idx), torch.sort(t.cpu())[0])
+
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("stable", [True, False])
