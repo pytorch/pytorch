@@ -1820,8 +1820,10 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   }
 
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
+  const bool input_nonempty =
+      TORCH_GUARD_OR_TRUE(input.sym_numel().sym_ne(0));
   Tensor ggO;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggI.defined()) {
       if (weight.is_cuda()) {
         weight = weight.contiguous();
@@ -1879,7 +1881,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
 
     Tensor gWt;
     // Compute conv
-    if (input.numel() != 0) {
+    if (input_nonempty) {
       if (groups == 1) {
 
         if (gOt.is_cuda()) {
@@ -1933,7 +1935,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // Compute gI = convT(gO, ggW) if !transposed
   //         gI = conv(gO, ggw)  if transposed
   Tensor gI;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggW.defined()) {
       ConvParams<int64_t> gi_conv_params(params);
       gi_conv_params.transposed = !params.transposed;
