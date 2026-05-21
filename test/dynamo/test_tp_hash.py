@@ -320,6 +320,93 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, 99)
 
+    def test_hash_int_subclass_base_descriptor_preserves_dict_key_hashes(self):
+        class HashCountingInt(int):
+            def __init__(self, *args):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return int.__hash__(self)
+
+        def fn(x):
+            d = dict.fromkeys(map(HashCountingInt, range(4)))
+            after_dict = sum(elem.hash_count for elem in d)
+            s = frozenset(d)
+            after_frozenset = sum(elem.hash_count for elem in d)
+            s.difference(d)
+            after_difference = sum(elem.hash_count for elem in d)
+            if hasattr(s, "symmetric_difference_update"):
+                s.symmetric_difference_update(d)
+            after_hasattr = sum(elem.hash_count for elem in d)
+            dict.fromkeys(set(d))
+            after_set_fromkeys = sum(elem.hash_count for elem in d)
+            dict.fromkeys(frozenset(d), 123)
+            after_frozenset_fromkeys = sum(elem.hash_count for elem in d)
+            keys = d.keys()
+            set(keys)
+            after_keys_set = sum(elem.hash_count for elem in d)
+            frozenset(keys)
+            after_keys_frozenset = sum(elem.hash_count for elem in d)
+            dict.fromkeys(keys)
+            after_keys_fromkeys = sum(elem.hash_count for elem in d)
+            frozenset(keys).difference(keys)
+            after_keys_difference = sum(elem.hash_count for elem in d)
+            return (
+                after_dict,
+                after_frozenset,
+                after_difference,
+                after_hasattr,
+                after_set_fromkeys,
+                after_frozenset_fromkeys,
+                after_keys_set,
+                after_keys_frozenset,
+                after_keys_fromkeys,
+                after_keys_difference,
+            )
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
+
+    def test_hash_object_descriptor_uses_identity_hash(self):
+        value = 1
+        nan_value = float("nan")
+        expected = (object.__hash__(value), object.__hash__(nan_value))
+
+        def fn(x):
+            return object.__hash__(value), object.__hash__(nan_value)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, expected)
+
+    def test_hash_object_descriptor_singleton_receiver(self):
+        expected = object.__hash__(None)
+
+        def fn(x):
+            return object.__hash__(None)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, expected)
+
+    def test_hash_object_descriptor_guards_dynamic_receiver_identity(self):
+        class C:
+            pass
+
+        def fn(o, x):
+            return x + object.__hash__(o)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.tensor(0, dtype=torch.int64)
+        o1 = C()
+        o2 = C()
+
+        self.assertEqual(opt_fn(o1, x), fn(o1, x))
+        self.assertEqual(opt_fn(o2, x), fn(o2, x))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(opt_fn(o2, x), fn(o2, x))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_hash_user_class_unhashable(self):
         """Class with __hash__ = None raises TypeError."""
 
