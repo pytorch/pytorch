@@ -5553,6 +5553,101 @@ def scaled_dot_product_flash_attention_for_cpu(
     return output, attn
 
 
+def _scaled_dot_product_flash_attention_for_cpu_logsumexp(
+    query: Tensor,
+    key: Tensor,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> Tensor:
+    if query.size(1) != key.size(1):
+        key = key.repeat_interleave(query.size(1) // key.size(1), dim=1)
+
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    scores = torch.matmul(query_acc, key_acc.transpose(-2, -1)) * scale_factor
+
+    if is_causal:
+        torch._check(
+            attn_mask is None,
+            lambda: "Explicit attn_mask should not be set when is_causal=True",
+        )
+        causal_mask = torch.ones(
+            (query.size(-2), key.size(-2)), dtype=torch.bool, device=query.device
+        ).tril()
+        scores = torch.where(
+            causal_mask, scores, torch.full_like(scores, float("-inf"))
+        )
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            scores = torch.where(
+                attn_mask, scores, torch.full_like(scores, float("-inf"))
+            )
+        else:
+            scores = scores + attn_mask
+
+    masked_rows = torch.all(scores == float("-inf"), dim=-1)
+    logsumexp = torch.logsumexp(scores, dim=-1)
+    logsumexp = torch.where(masked_rows, torch.zeros_like(logsumexp), logsumexp)
+    return logsumexp.transpose(1, 2).contiguous().transpose(1, 2).detach()
+
+
+def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
+    query: Tensor, attn_mask: Tensor | None
+) -> None:
+    if attn_mask is None:
+        return
+
+    torch._check(
+        not (attn_mask.requires_grad and torch.is_grad_enabled()),
+        lambda: "The function '_scaled_dot_product_flash_attention_for_cpu' is not differentiable with respect to argument 'attn_mask'. This input cannot have requires_grad True.",
+    )
+    torch._check(
+        attn_mask.dtype == torch.float32 or attn_mask.dtype == query.dtype,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query",
+    )
+    torch._check(
+        attn_mask.dim() == 2 or attn_mask.dim() == 4,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}",
+    )
+
+
+# Keep this separate from the export decomposition above: direct callers can
+# observe the second output, so the Autograd impl must return logsumexp.
+@aten._scaled_dot_product_flash_attention_for_cpu.default.py_impl(DispatchKey.Autograd)
+def scaled_dot_product_flash_attention_for_cpu_autograd(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
+) -> tuple[Tensor, Tensor]:
+    _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
+    output, _ = scaled_dot_product_flash_attention_for_cpu(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        attn_mask=attn_mask,
+        scale=scale,
+    )
+    logsumexp = _scaled_dot_product_flash_attention_for_cpu_logsumexp(
+        query,
+        key,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+    return output, logsumexp
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

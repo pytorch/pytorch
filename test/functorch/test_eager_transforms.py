@@ -39,6 +39,7 @@ from functorch import (
 )
 from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import allow_in_graph
 from torch._functorch.eager_transforms import _slice_argnums
 from torch._functorch.make_functional import (
@@ -5421,6 +5422,89 @@ class TestCompileTransforms(TestCase):
         compiled = torch.compile(grad(model), dynamic=True, backend=backend)
         result = compiled(x)
         self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_compile_grad_cpu_sdpa_higher_order(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181177
+        layer_norm = nn.LayerNorm([3]).to(device)
+        rrelu = nn.RReLU().to(device).eval()
+
+        def model(x):
+            y = layer_norm(x)
+            y = rrelu(y)
+            return F.scaled_dot_product_attention(y, y, y).mean()
+
+        torch.manual_seed(0)
+        x = torch.randn([5, 15, 9, 3], device=device)
+        expected = torch.func.grad(model)(x)
+
+        torch._dynamo.reset()
+        result = torch.compile(torch.func.grad(model), backend="inductor")(x)
+        self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_autograd_aux_output_contract(self, device):
+        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        detached_query = query.detach()
+        additive_mask = torch.zeros(1, 1, 4, 4, device=device)
+        additive_mask[..., 1, :] = float("-inf")
+
+        for attn_mask in (None, additive_mask):
+            _, expected_logsumexp = (
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    detached_query, detached_query, detached_query, attn_mask=attn_mask
+                )
+            )
+
+            with enable_python_dispatcher():
+                _, logsumexp = (
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                        query, query, query, attn_mask=attn_mask
+                    )
+                )
+
+            self.assertEqual(logsumexp.shape, expected_logsumexp.shape)
+            self.assertEqual(logsumexp.dtype, expected_logsumexp.dtype)
+            self.assertEqual(logsumexp.stride(), expected_logsumexp.stride())
+            self.assertFalse(logsumexp.requires_grad)
+            self.assertEqual(logsumexp, expected_logsumexp)
+
+        self.assertEqual(logsumexp[:, :, 1], torch.zeros_like(logsumexp[:, :, 1]))
+
+    @onlyCPU
+    def test_cpu_flash_sdpa_autograd_attn_mask_errors(self, device):
+        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        bool_mask = torch.ones(1, 1, 4, 4, device=device, dtype=torch.bool)
+        grad_mask = torch.zeros(1, 1, 4, 4, device=device, requires_grad=True)
+        dim_mask = torch.zeros(1, 4, 4, device=device)
+
+        cases = (
+            (
+                bool_mask,
+                "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query",
+            ),
+            (
+                grad_mask,
+                "not differentiable with respect to argument 'attn_mask'",
+            ),
+            (
+                dim_mask,
+                "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}",
+            ),
+        )
+        for attn_mask, error in cases:
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, query, query, attn_mask=attn_mask
+                )
+
+            with (
+                enable_python_dispatcher(),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                    query, query, query, attn_mask=attn_mask
+                )
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)
