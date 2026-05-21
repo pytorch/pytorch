@@ -109,6 +109,7 @@ from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
     binary_op,
+    generic_abs,
     generic_bool,
     generic_float,
     generic_getiter,
@@ -1691,6 +1692,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__pos__(4) → pos(4)
             return generic_pos(tx, args[0])
 
+        if name == "__abs__" and len(args) == 1 and not kwargs:
+            # type.__abs__(instance) → abs(instance)
+            # e.g., int.__abs__(-4) → abs(-4)
+            return generic_abs(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -2010,13 +2016,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_abs(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        # Call arg.__abs__()
-        abs_method = SourcelessBuilder.create(tx, getattr).call_function(
-            tx, [arg, VariableTracker.build(tx, "__abs__")], {}
-        )
-        return abs_method.call_function(tx, [], {})
+        return generic_abs(tx, arg)
 
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2315,8 +2315,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2822-L2887
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
                 raise_args_mismatch(
@@ -2326,10 +2325,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        iter_args = [
-            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
-            for arg in args
-        ]
+        items = []
+        for arg in args:
+            items.append(generic_getiter(tx, arg))
+        iter_args = TupleVariable(items, mutation_type=ValueMutationNew())
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
@@ -2512,6 +2511,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if len(seqs) == 0:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["map() must have at least two arguments."],
+            )
+
         strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
@@ -2531,13 +2537,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
 
-        seq_list = [
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-            for seq in seqs
-        ]
+        iterables = [generic_getiter(tx, seq) for seq in seqs]
+        iter_args = TupleVariable(iterables, mutation_type=ValueMutationNew())
         return variables.MapVariable(
             fn,
-            seq_list,  # type: ignore[arg-type]
+            iter_args,
             strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
@@ -2545,12 +2549,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_filter(
         self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
-        seq_or_list = (
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-        )
         return variables.FilterVariable(
             fn,
-            seq_or_list,  # type: ignore[arg-type]
+            generic_getiter(tx, seq),
             mutation_type=ValueMutationNew(),
         )
 
