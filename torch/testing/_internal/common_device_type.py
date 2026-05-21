@@ -1553,11 +1553,20 @@ def _has_sufficient_memory(device, size, self=None):
     # Prefer the device-type hook when available; once all relevant tests use
     # device-specific test classes, the legacy device-specific logic below can
     # be removed.
+    device_ = torch.device(device)
+    device_type = device_.type
+
+    self_device_type = (
+        torch.device(self.device_type).type
+        if self is not None and hasattr(self, "device_type")
+        else None
+    )
+
     get_available_memory = getattr(self, "get_available_memory", None)
-    if callable(get_available_memory):
+    if callable(get_available_memory) and self_device_type == device_type:
         try:
             required_size = size
-            if torch.device(self.device_type).type in ["cpu", "mps"]:
+            if device_type in ["cpu", "mps"]:
                 # The sanitizers have significant memory overheads
                 if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
                     required_size *= 10
@@ -1569,13 +1578,14 @@ def _has_sufficient_memory(device, size, self=None):
             available = get_available_memory()
             if available < required_size:
                 gc.collect()
+                acc = torch.accelerator.current_accelerator()
+                if acc is not None and acc.type == device_type:
+                    torch.accelerator.empty_cache()
                 available = get_available_memory()
             return available >= required_size
         except NotImplementedError:
             pass
 
-    device_ = torch.device(device)
-    device_type = device_.type
     if device_type in ["cuda", "xpu"]:
         acc = torch.accelerator.current_accelerator()
         # Case 1: no accelerator found
