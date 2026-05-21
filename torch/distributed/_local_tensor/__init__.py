@@ -1261,9 +1261,7 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
-        # Cache for get_coordinate results, keyed by mesh id
-        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
-        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        # Shared lock for LocalDeviceMesh coordinate caching for thread safety in MPMD contexts
         self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
@@ -1632,22 +1630,25 @@ class _LocalDeviceMesh:
         if lm is None:
             raise AssertionError("Unexpectedly not in LocalTensorMode")
 
+        ranks = lm.ranks
         # Check cache first (fast path without lock)
-        mesh_id = id(self)
-        if mesh_id in lm._coordinate_cache:
-            return lm._coordinate_cache[mesh_id]
-
+        # Note that we are caching the result based on the set of ranks,
+        # so that different LocalTensorModes with different ranks will not interfere with each other's cache.
+        with contextlib.suppress(AttributeError, KeyError):
+            return self._local_coordinates_cache[ranks]
         # Acquire lock for thread safety in MPMD contexts
         with lm._coordinate_cache_lock:
-            # Double-check after acquiring lock
-            if mesh_id in lm._coordinate_cache:
-                return lm._coordinate_cache[mesh_id]
-
+            try:
+                return self._local_coordinates_cache[ranks]
+            except AttributeError:
+                self._local_coordinates_cache = {}
+            except KeyError:
+                pass
             coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
             # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
             # error when running under torch.inference_mode()
             rank_map = self._rank_map.clone()
-            for r in lm.ranks:
+            for r in ranks:
                 rank_tensor = self._layout.remap_to_tensor(rank_map)
                 rank_coords = (rank_tensor == r).nonzero().tolist()
                 if len(rank_coords) != 1:
@@ -1656,8 +1657,7 @@ class _LocalDeviceMesh:
                     coords[d][r] = c
 
             out = [torch.SymInt(LocalIntNode(c)) for c in coords]
-            # Cache the result
-            lm._coordinate_cache[mesh_id] = out
+            self._local_coordinates_cache[ranks] = out
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
             # as the current mesh.
