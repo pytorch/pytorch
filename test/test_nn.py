@@ -8550,7 +8550,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertFalse(torch.allclose(running_means[1], running_means[2]),
                          "Running stats should continue changing across passes")
 
-    @skipIfMPS  # MPS batch_norm doesn't support mixed dtypes, crashes with LLVM error
     def test_instancenorm_mixed_dtype_backward(self, device):
         """test backward pass with mixed dtypes for InstanceNorm2d
 
@@ -8578,15 +8577,18 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.isfinite(input_tensor.grad).all(),
                         "Input gradient should not contain NaN or Inf")
 
-        # test that affine=True with mixed dtype errors out (from batch_norm checks)
-        layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
-        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
+        # affine=True with mixed dtype errors out on CPU/CUDA via batch_norm dtype
+        # checks. MPS implicitly promotes instead of erroring, so skip the assertion
+        # there.
+        if torch.device(device).type != 'mps':
+            layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
+            input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "(mixed dtype|does not match|Expected weight to have type|Expected tensor for argument #1 'input')",
-        ):
-            output = layer(input_tensor)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "(mixed dtype|does not match|Expected weight to have type|Expected tensor for argument #1 'input')",
+            ):
+                output = layer(input_tensor)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
