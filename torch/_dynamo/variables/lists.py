@@ -36,7 +36,6 @@ from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
-    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -55,6 +54,18 @@ from .object_protocol import type_implements_nb_index, validate_sequence_index
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+def pytuple_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is tuple
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), tuple)
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), list)
 
 
 class BaseListVariable(VariableTracker):
@@ -281,6 +292,105 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
+        kwargs: dict[str, Any] = {}
+        if issubclass(self.python_type(), list):
+            kwargs["mutation_type"] = ValueMutationNew()
+        return type(self)(new_items, **kwargs)
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """list_richcompare / tuplerichcompare.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/listobject.c#L3352
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L821
+        CPython operates on the internal C array directly, so we compare
+        VT items without going through a polyfill.
+        """
+        from .object_protocol import generic_richcompare
+        from .tensor import SymNodeVariable
+
+        if not isinstance(other, BaseListVariable):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            self_base = list if issubclass(self.python_type(), list) else tuple
+            other_base = list if issubclass(other.python_type(), list) else tuple
+            if self_base is not other_base:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+
+        left = self.items
+        right = other.items
+
+        cmp_op = cmp_name_to_op_mapping[op]
+
+        if cmp_op is operator.eq and len(left) != len(right):
+            return ConstantVariable.create(False)
+        if cmp_op is operator.ne and len(left) != len(right):
+            return ConstantVariable.create(True)
+
+        sym_eq_acc = None
+        for a, b in zip(left, right):
+            eq_result = generic_richcompare(tx, a, b, "__eq__")
+            if eq_result.is_python_constant():
+                if not eq_result.as_python_constant():
+                    if cmp_op in (operator.eq, operator.ne):
+                        return ConstantVariable.create(cmp_op is operator.ne)
+                    return generic_richcompare(tx, a, b, op)
+            elif eq_result.is_symnode_like():
+                if cmp_op not in (operator.eq, operator.ne):
+                    unimplemented(
+                        gb_type="list_richcompare_ordering_symbolic",
+                        context="lexicographic ordering with symbolic element comparison",
+                        explanation="Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if sym_eq_acc is None:
+                    sym_eq_acc = eq_result
+                else:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        operator.and_,
+                        (sym_eq_acc.as_proxy(), eq_result.as_proxy()),
+                        {},
+                    )
+                    sym_eq_acc = SymNodeVariable.create(tx, proxy, sym_num=None)
+            else:
+                unimplemented(
+                    gb_type="list_richcompare_nonconst",
+                    context=f"element comparison produced {type(eq_result).__name__}",
+                    explanation="Cannot determine list/tuple comparison at compile time when element comparison produces a non-constant result.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if sym_eq_acc is not None:
+            if cmp_op is operator.ne:
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    operator.not_,
+                    (sym_eq_acc.as_proxy(),),
+                    {},
+                )
+                return SymNodeVariable.create(tx, proxy, sym_num=None)
+            return sym_eq_acc
+
+        return ConstantVariable.create(cmp_op(len(left), len(right)))
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -288,8 +398,6 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
         if name == "index":
             if not len(args):
                 raise_args_mismatch(
@@ -358,79 +466,6 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
                 return self
-        elif name in ("__mul__", "__imul__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if not (args[0].is_python_constant() and args[0].python_type() is int):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
-                    ],
-                )
-
-            val = args[0].as_python_constant()
-
-            if name == "__mul__":
-                return type(self)(self.items * val, source=self.source)
-            else:
-                self.items *= val
-                return self
-        elif name in cmp_name_to_op_mapping:
-            if len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            left = self
-            right = args[0]
-            # TODO this type check logic mirrors the following
-            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
-            # But we should probably move it up the stack to so that we don't
-            # need to duplicate it for different VTs.
-            if not isinstance(left, BaseListVariable) or not isinstance(
-                right, BaseListVariable
-            ):
-                if name == "__eq__":
-                    return SourcelessBuilder.create(tx, operator.is_).call_function(
-                        tx, (left, right), {}
-                    )
-                elif name == "__ne__":
-                    return SourcelessBuilder.create(tx, operator.is_not).call_function(
-                        tx, (left, right), {}
-                    )
-                else:
-                    op_str = cmp_name_to_op_str_mapping[name]
-                    left_ty = left.python_type_name()
-                    right_ty = right.python_type_name()
-                    raise_observed_exception(
-                        TypeError,
-                        tx,
-                        args=[
-                            f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
-                        ],
-                    )
-
-            return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
-                tx,
-                [
-                    SourcelessBuilder.create(tx, cmp_name_to_op_mapping[name]),
-                    left,
-                    right,
-                ],
-                {},
-            )
-
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -708,6 +743,36 @@ class RangeVariable(BaseListVariable):
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """range_richcompare: eq/ne via range_equals, NotImplemented for ordering.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L472
+        """
+        from .builder import SourcelessBuilder
+
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            if other.python_type() is not range:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+
+        if isinstance(other, RangeVariable):
+            cmp = self.range_equals(other)
+        else:
+            cmp = False
+
+        if op == "__eq__":
+            return SourcelessBuilder.create(tx, cmp)
+        else:
+            return SourcelessBuilder.create(tx, not cmp)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -730,30 +795,6 @@ class RangeVariable(BaseListVariable):
                 tx,
                 args=[f"{x} is not in range"],
             )
-        elif name in cmp_name_to_op_mapping:
-            other = args[0]
-            pt = other.python_type()
-            if name not in ("__eq__", "__ne__"):
-                msg = f"{name} not supported between instances of 'range' and '{pt}'"
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[msg],
-                )
-
-            if pt is not range:
-                return VariableTracker.build(tx, NotImplemented)
-
-            if isinstance(other, RangeVariable):
-                cmp = self.range_equals(other)
-            else:
-                cmp = False
-
-            # Two ranges are equal if they produce the same sequence of values
-            if name == "__eq__":
-                return SourcelessBuilder.create(tx, cmp)
-            else:
-                return SourcelessBuilder.create(tx, not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -1020,6 +1061,26 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # list_inplace_repeat: https://github.com/python/cpython/blob/v3.13.13/Objects/listobject.c#L1071
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1168,6 +1229,32 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
 
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_Concat for sequences
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L725-L773 (list_concat)
+        if not pylist_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate list (not '{other.python_type_name()}') to list",
+            )
+
+        items = self.items + other.unpack_var_sequence(tx)
+        return ListVariable(items, mutation_type=ValueMutationNew())
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_InPlaceConcat for sequences
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1464-L1472
+        self.call_method(tx, "extend", [other], {})
+        return self
+
     def is_hashable(self) -> bool:
         return False
 
@@ -1216,7 +1303,7 @@ class DequeVariable(CommonListMethodsVariable):
         tx: "InstructionTranslator",
         key: VariableTracker,
     ) -> VariableTracker:
-        # deque_item: https://github.com/python/cpython/blob/62a6e898e01/Modules/_collectionsmodule.c#L1888
+        # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
         # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
@@ -1224,6 +1311,36 @@ class DequeVariable(CommonListMethodsVariable):
             return self.items[index]
         except IndexError:
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_Concat for deque
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L691-L699
+
+        if not issubclass(other.python_type(), collections.deque):
+            raise_type_error(
+                tx,
+                f"can only concatenate deque (not '{other.python_type_name()}') to deque",
+            )
+
+        return DequeVariable(
+            self.items + other.unpack_var_sequence(tx),
+            maxlen=self.maxlen,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_InPlaceConcat for deque
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L572-L584
+        self.call_method(tx, "extend", [other], {})
+        return self
 
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
@@ -1430,6 +1547,25 @@ class TupleVariable(BaseListVariable):
         if self.python_type() is not tuple:
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr((), name))
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ):
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L441-L486 (tuple_concat)
+        if len(self.items) == 0 and pytuple_checkexact(other):
+            return other
+
+        if not pytuple_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate tuple (not '{other.python_type_name()}') to tuple",
+            )
+
+        return TupleVariable(
+            self.items + other.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # CPython tuplehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L321
@@ -1671,6 +1807,37 @@ class SizeVariable(TupleVariable):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(torch.Size, name))
 
+    def sq_concat_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        """
+        Implements torch.Size concatenation via sq_concat protocol.
+        torch.Size accepts concatenation with any tuple-like object.
+        Ref: torch/csrc/Size.cpp::THPSize_concat
+        """
+        if not pytuple_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate tuple (not '{other.python_type_name()}') to torch.Size",
+            )
+        # Size nb_add uses sq_concat. We do the opposite here because of the reverse keyword
+        return self.nb_add_impl(tx, other)
+
+    def nb_add_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # NOTE: The python interpreter tries, in order:
+        #    1. right.nb_add(left, right)  (only if right is a subclass of left)
+        #    2. left.nb_add(left, right)
+        #    3. right.nb_add(left, right)
+        #    4. left.sq_concat(right)
+        #  Hence, to support tuple + size -> size, we need to implement nb_add
+        if not pytuple_check(other):
+            return ConstantVariable(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
+
 
 class SliceVariable(VariableTracker):
     # PySlice_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L689
@@ -1745,6 +1912,24 @@ class SliceVariable(VariableTracker):
         except TypeError as e:
             raise_observed_exception(TypeError, tx, args=[str(e)])
         return h, False
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """slice_richcompare: delegates all 6 ops to (start, stop, step) tuple comparison.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667-L686
+        """
+        from .object_protocol import generic_richcompare
+
+        if not isinstance(other, SliceVariable):
+            return ConstantVariable.create(NotImplemented)
+        self_tuple = TupleVariable(list(self.items))
+        other_tuple = TupleVariable(list(other.items))
+        return generic_richcompare(tx, self_tuple, other_tuple, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
