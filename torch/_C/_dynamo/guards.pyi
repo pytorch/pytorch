@@ -1,6 +1,6 @@
 import enum
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias
 
 import torch
@@ -492,6 +492,12 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
+    op_name: str | None = None,
+) -> None: ...
+def assert_size_stride_grouped(
+    items: Sequence[torch.Tensor],
+    sizes: Sequence[torch.types._size],
+    strides: Sequence[torch.types._size],
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(

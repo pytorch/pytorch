@@ -1235,6 +1235,19 @@ class AssertSizeStrideLine(WrapperLine):
         return converter._generate_assert_size_stride
 
 
+@dataclasses.dataclass
+class GroupedAssertSizeStrideLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    asserts: list[tuple[str, str, str]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.write_assert_size_stride_grouped(self.asserts, "input")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_size_stride
+
+
 BufferName = str
 Line = MemoryPlanningLine | LineContext
 
@@ -1406,6 +1419,7 @@ class PythonWrapperCodegen(CodeGen):
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
@@ -1695,15 +1709,31 @@ class PythonWrapperCodegen(CodeGen):
     # sequential assert calls (~1 us each) on the critical path before the first
     # GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
+        grouped_asserts: list[tuple[str, str, str]] = []
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(self, name, size, stride))
+                grouped_asserts.append((name, size, stride))
+        if len(grouped_asserts) == 1:
+            name, size, stride = grouped_asserts[0]
+            self.writeline(AssertSizeStrideLine(self, name, size, stride))
+        elif len(grouped_asserts) > 1:
+            self.writeline(GroupedAssertSizeStrideLine(self, grouped_asserts))
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
         self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+
+    def write_assert_size_stride_grouped(
+        self, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        names = ", ".join(name for name, _, _ in asserts)
+        sizes = ", ".join(size for _, size, _ in asserts)
+        strides = ", ".join(stride for _, _, stride in asserts)
+        self.writeline(
+            f"assert_size_stride_grouped(({names}), ({sizes}), ({strides}), {op_name!r})"
+        )
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.

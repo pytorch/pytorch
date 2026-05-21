@@ -40,6 +40,7 @@
 #endif
 
 #include <chrono>
+#include <memory>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -931,19 +932,15 @@ static PyObject* dict_version(PyObject* dummy, PyObject* obj) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
+static bool check_size_stride(
+    PyObject* item,
+    PyObject* size,
+    PyObject* stride,
+    const char* op_name) {
   /*
    Assert that a given tensor has a given size/stride, but ignore strides
    of size==1 dimensions.  Implemented in C++ as this is on the hot path.
   */
-  PyObject* item = nullptr;
-  PyObject* size = nullptr;
-  PyObject* stride = nullptr;
-  const char* op_name = nullptr;
-
-  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
-    return nullptr;
-  }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
     std::stringstream msg;
     msg << "expected Tensor()";
@@ -951,7 +948,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
       msg << " for op: " << op_name;
     }
     PyErr_SetString(PyExc_TypeError, msg.str().c_str());
-    return nullptr;
+    return false;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
     std::stringstream msg;
@@ -960,7 +957,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
       msg << " for op: " << op_name;
     }
     PyErr_SetString(PyExc_TypeError, msg.str().c_str());
-    return nullptr;
+    return false;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
@@ -971,16 +968,16 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
       msg << " for op: " << op_name;
     }
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-    return nullptr;
+    return false;
   }
 
   // We may add the size/stride assert at compile time due to unbacked symint,
   // but at runtime, the tensor can be empty.
   if (tensor.numel() == 0) {
-    Py_RETURN_TRUE;
+    return true;
   }
 
-  std::stringstream msg;
+  std::unique_ptr<std::stringstream> msg;
   int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
@@ -990,23 +987,108 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      if (num_errors > 0)
-        msg << "; ";
-      msg << "expected size " << actual_size << "==" << want_size << ", stride "
-          << actual_stride << "==" << want_stride << " at dim=" << i;
+      if (msg == nullptr) {
+        msg = std::make_unique<std::stringstream>();
+      }
+      if (num_errors > 0) {
+        *msg << "; ";
+      }
+      *msg << "expected size " << actual_size << "==" << want_size
+           << ", stride " << actual_stride << "==" << want_stride
+           << " at dim=" << i;
       num_errors++;
     }
   }
 
   if (num_errors) {
     if (op_name) {
-      msg << "\nError in op: " << op_name;
+      *msg << "\nError in op: " << op_name;
     }
-    msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
-    msg << "\nUse torch.library.opcheck to test your custom op.";
-    msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    *msg
+        << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
+    *msg << "\nUse torch.library.opcheck to test your custom op.";
+    *msg
+        << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
+    PyErr_SetString(PyExc_AssertionError, msg->str().c_str());
+    return false;
+  }
+
+  return true;
+}
+
+static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
+  PyObject* item = nullptr;
+  PyObject* size = nullptr;
+  PyObject* stride = nullptr;
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
     return nullptr;
+  }
+  if (!check_size_stride(item, size, stride, op_name)) {
+    return nullptr;
+  }
+
+  Py_RETURN_TRUE;
+}
+
+static Py_ssize_t tuple_or_list_size(PyObject* obj) {
+  if (PyTuple_CheckExact(obj)) {
+    return PyTuple_GET_SIZE(obj);
+  }
+  if (PyList_CheckExact(obj)) {
+    return PyList_GET_SIZE(obj);
+  }
+  return -1;
+}
+
+static PyObject* tuple_or_list_get_item(PyObject* obj, Py_ssize_t index) {
+  if (PyTuple_CheckExact(obj)) {
+    return PyTuple_GET_ITEM(obj, index);
+  }
+  return PyList_GET_ITEM(obj, index);
+}
+
+static PyObject* assert_size_stride_grouped(PyObject* dummy, PyObject* args) {
+  PyObject* items = nullptr;
+  PyObject* sizes = nullptr;
+  PyObject* strides = nullptr;
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO|s", &items, &sizes, &strides, &op_name)) {
+    return nullptr;
+  }
+
+  Py_ssize_t num_items = tuple_or_list_size(items);
+  Py_ssize_t num_sizes = tuple_or_list_size(sizes);
+  Py_ssize_t num_strides = tuple_or_list_size(strides);
+  if (num_items < 0 || num_sizes < 0 || num_strides < 0) {
+    std::stringstream msg;
+    msg << "expected tuple() or list()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    return nullptr;
+  }
+  if (num_sizes != num_items || num_strides != num_items) {
+    std::stringstream msg;
+    msg << "expected equal numbers of items, sizes, and strides";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    return nullptr;
+  }
+
+  for (const auto i : c10::irange(num_items)) {
+    if (!check_size_stride(
+            tuple_or_list_get_item(items, i),
+            tuple_or_list_get_item(sizes, i),
+            tuple_or_list_get_item(strides, i),
+            op_name)) {
+      return nullptr;
+    }
   }
 
   Py_RETURN_TRUE;
@@ -1224,6 +1306,10 @@ static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
+    {"assert_size_stride_grouped",
+     assert_size_stride_grouped,
+     METH_VARARGS,
+     nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
     {"dict_version", dict_version, METH_O, nullptr},
