@@ -4209,6 +4209,14 @@
       ]
     }
   ],
+  "GB2607": [
+    {
+      "Gb_type": "Unsupported custom metaclass __call__",
+      "Context": "type({self.value}) = {type(self.value)}",
+      "Explanation": "Dynamo does not know how to trace this metaclass __call__ descriptor.",
+      "Hints": []
+    }
+  ],
   "GB0298": [
     {
       "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",

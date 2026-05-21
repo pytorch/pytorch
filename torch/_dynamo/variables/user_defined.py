@@ -376,6 +376,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # existing singleton members, so they can always be constant-folded.
         return isinstance(self.value, type) and issubclass(self.value, enum.Enum)
 
+    def has_custom_metaclass_call(self) -> bool:
+        metaclass = type(self.value)
+        return (
+            metaclass is not type
+            and self.lookup_metaclass_attr("__call__") is not type.__call__
+        )
+
+    def call_custom_metaclass_call(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        metaclass_call = self.lookup_metaclass_attr("__call__")
+        if isinstance(metaclass_call, types.FunctionType):
+            source_fn = (
+                self.get_source_by_walking_metaclass_mro(tx, "__call__")
+                if self.source
+                else None
+            )
+            return variables.UserMethodVariable(
+                metaclass_call, self, source_fn=source_fn
+            ).call_function(tx, args, kwargs)
+
+        unimplemented(
+            gb_type="Unsupported custom metaclass __call__",
+            context=f"type({self.value}) = {type(self.value)}",
+            explanation="Dynamo does not know how to trace this metaclass __call__ descriptor.",
+            hints=graph_break_hints.SUPPORTABLE,
+        )
+
     def lookup_cls_mro_attr(self, name: str) -> object:
         """Walk cls.__mro__ only (not the metaclass chain) to find *name*."""
         for base in self.value.__mro__:
@@ -425,6 +456,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return out_source
 
         raise RuntimeError(f"Attribute {name} not found in MRO of {self.value}")
+
+    def get_source_by_walking_metaclass_mro(
+        self, tx: "InstructionTranslator", name: str
+    ) -> DictGetItemSource:
+        source = self.source
+        if source is None:
+            raise RuntimeError("get_source_by_walking_metaclass_mro requires source")
+
+        metacls_source = TypeSource(source)
+        metacls_mro = type(self.value).__mro__
+        for idx, klass in enumerate(metacls_mro):
+            if name in klass.__dict__:
+                for absent_idx in range(idx):
+                    absent_klass = metacls_mro[absent_idx]
+                    cache_key = (id(absent_klass), name)
+                    if cache_key in tx.output.guarded_mro_absent_keys:
+                        continue
+                    tx.output.guarded_mro_absent_keys.add(cache_key)
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source: Source = GetItemSource(mro_source, absent_idx)
+                    dict_source = TypeDictSource(klass_source)
+                    install_guard(
+                        dict_source.make_guard(
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                        )
+                    )
+
+                if idx != 0:
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source = GetItemSource(mro_source, idx)
+                else:
+                    klass_source = metacls_source
+                dict_source = TypeDictSource(klass_source)
+                return DictGetItemSource(dict_source, name)
+
+        raise RuntimeError(
+            f"Attribute {name} not found in metaclass MRO of {self.value}"
+        )
 
     def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
@@ -1040,6 +1109,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+        elif self.has_custom_metaclass_call():
+            return self.call_custom_metaclass_call(tx, args, kwargs)
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:

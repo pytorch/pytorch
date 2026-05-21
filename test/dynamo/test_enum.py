@@ -501,13 +501,10 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, Priority.LOW, Priority.HIGH)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_metaclass_custom_call(self):
         # When a class has a metaclass that overrides __call__, Python invokes
         # the metaclass's __call__ instead of the default type.__call__
-        # (which does __new__ + __init__). Dynamo currently bypasses the
-        # metaclass __call__ and uses instantiate_user_defined_class_object
-        # (which mimics type.__call__), producing wrong results.
+        # (which does __new__ + __init__).
         class ScalingMeta(type):
             def __call__(cls, val):
                 obj = cls.__new__(cls)
@@ -531,6 +528,27 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, 3)
         compiled_fn = torch.compile(fn, backend="eager")
         res = compiled_fn(x, 3)
+        self.assertEqual(ref, res)
+
+    def test_metaclass_custom_call_source_with_instance_call(self):
+        class ScalingMeta(type):
+            def __call__(cls, scale=(10,)):
+                obj = cls.__new__(cls)
+                obj.scaled = scale[0]
+                return obj
+
+        class Scaled(metaclass=ScalingMeta):
+            def __call__(self, x):
+                return x - 1
+
+        def fn(x):
+            obj = Scaled()
+            return x * obj.scaled
+
+        x = torch.tensor([1.0, 2.0])
+        ref = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = compiled_fn(x)
         self.assertEqual(ref, res)
 
     def test_enum_construction_no_extra_init(self):
