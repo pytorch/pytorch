@@ -8005,8 +8005,8 @@ class UserDefinedTritonKernel(ExternKernel):
         }
 
         if epilogue_fusion:
-            assert len(self.arg_accesses.read_writes.writes) == 1
-            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            assert len(self.formal_accesses.read_writes.writes) == 1
+            mutable_arg_name = next(iter(self.formal_accesses.read_writes.writes)).name
             assert mutable_arg_name in named_args
             epilogue_computed_buffer, _ = epilogue_fusion
             named_args[mutable_arg_name] = epilogue_computed_buffer
@@ -8136,8 +8136,8 @@ class UserDefinedTritonKernel(ExternKernel):
         # pyrefly: ignore [missing-attribute]
         self.kernel_src = kernel.src
         self.kernel_args = kernel_args
-        # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
-        self.arg_accesses = identify_accessed_tensors(
+        # names in `formal_accesses.read_writes` are names of formal arguments in the kernel's prototype
+        self.formal_accesses = identify_accessed_tensors(
             kernel,
             {**kernel_args, **autotuned_kwargs},
             tma_descriptor_metadata,
@@ -8147,7 +8147,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # includes scalars, so writes may reference non-tensor args like SymInts.
         self.mutable_args = [
             kernel_args[key.name]
-            for key in self.arg_accesses.read_writes.writes
+            for key in self.formal_accesses.read_writes.writes
             if isinstance(kernel_args.get(key.name), TensorBox)
         ]
 
@@ -8159,43 +8159,51 @@ class UserDefinedTritonKernel(ExternKernel):
 
     @override
     def get_read_writes(self) -> dependencies.ReadWrites:
-        # Limit the new `get_read_writes` to `epilogue_fusion_user_defined_triton_kernel`
-        # to avoid potential regression to existing models.
+        # Limit override to `epilogue_fusion_user_defined_triton_kernel` to
+        # avoid potential regression to existing models.
         if not config.epilogue_fusion_user_defined_triton_kernel:
             return super().get_read_writes()
 
-        # Maps kernel arg names to inductor-generated arg names.
-        # We keep to scheduler formality and include writes as reads.
-        read_renames = {
+        # Maps format kernel arg names to inductor buffer names.
+        formal_to_inductor = {
             formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
-            for formal_arg_dep in self.arg_accesses.read_writes.reads
+            for formal_arg_dep in self.formal_accesses.read_writes.reads_and_writes()
         }
 
-        formal_arg_writes = list(self.arg_accesses.read_writes.writes)
         write_renames = {
-            formal_arg_dep.name: mut_output.get_name()
-            for formal_arg_dep, mut_output in zip(
-                formal_arg_writes, self.mutation_outputs
+            dep.name: mut_output.get_name()
+            for dep, mut_output in zip(
+                (
+                    d
+                    for d in self.formal_accesses.read_writes.writes
+                    if isinstance(self.kernel_args.get(d.name), TensorBox)
+                ),
+                self.mutation_outputs,
             )
         }
 
-        read_writes = dependencies.ReadWrites(
-            reads=OrderedSet(
-                [
-                    dep.rename(read_renames)
-                    for dep in self.arg_accesses.read_writes.reads
-                ]
-            ),
+        tracked = OrderedSet([
+            dep.name for dep in self.formal_accesses.read_writes.reads_and_writes()
+        ])
+        reads = OrderedSet(
+            dep.rename(formal_to_inductor)
+            for dep in self.formal_accesses.read_writes.reads_and_writes()
+            if dep.name in formal_to_inductor
+        )
+        # Tensor args not accessed in the kernel body still need to be in reads.
+        for name, arg in self.kernel_args.items():
+            if name not in tracked and isinstance(arg, TensorBox):
+                reads.add(dependencies.UserTritonDep(arg.get_name()))
+
+        return dependencies.ReadWrites(
+            reads=reads,
             writes=OrderedSet(
-                [
-                    dep.rename(write_renames)
-                    for dep in self.arg_accesses.read_writes.writes
-                ]
+                dep.rename(write_renames)
+                for dep in self.formal_accesses.read_writes.writes
+                if dep.name in write_renames
             ),
             index_exprs=OrderedSet(),
         )
-        return read_writes
-
 
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)
