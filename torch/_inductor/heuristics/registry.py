@@ -209,12 +209,6 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
     heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
-        # Lazily import codegen heuristics to trigger registration
-        import torch._inductor.heuristics.triton_codegen  # noqa: F401
-
-        heuristic_class = _lookup(name, device_type, None)
-
-    if heuristic_class is None:
         raise ValueError(
             f"No codegen heuristic found - name={name}, device_type={device_type}. "
             f"Available: {list(_REGISTRY.keys())}"
