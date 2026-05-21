@@ -2107,7 +2107,7 @@ class triton:
     # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
     # by per-block amax over a small group dimension like FP8 block size)
     # into a single kernel with two sequential reduction passes.
-    nested_reduction = False
+    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2900,6 +2900,8 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
+    # This can be enabled directly; Inductor also enables it while
+    # emulate_precision_casts is active.
     use_pytorch_libdevice: bool = False
 
 
