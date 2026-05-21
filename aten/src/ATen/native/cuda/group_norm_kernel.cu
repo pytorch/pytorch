@@ -2,10 +2,11 @@
 #include <ATen/native/group_norm.h>
 
 #include <type_traits>
+#include <utility>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -39,17 +40,15 @@ __inline__ __device__ T ReduceSum32(T val) {
   return val;
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
     T eps,
     const T* X,
-    T* mean,
-    T* rstd) {
-  using T_ACC = acc_type<T, true>;
+    T_ACC* mean,
+    T_ACC* rstd) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
-  using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
+  using WelfordOp = WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
   const int64_t i = blockIdx.x;
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
@@ -80,27 +79,25 @@ __global__ void RowwiseMomentsCUDAKernel(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 __global__ void ComputeFusedParamsCUDAKernel(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
-    const T* rstd,
+    const T_ACC* mean,
+    const T_ACC* rstd,
     const T* gamma,
     const T* beta,
-    acc_type<T, true>* a,
-    acc_type<T, true>* b) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+    T_ACC* a,
+    T_ACC* b) {
+  const int64_t index = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   if (index < N * C) {
     const int64_t ng = index / (C / group);
     const int64_t c = index % C;
-    const T_ACC scale = (gamma == nullptr)
-        ? static_cast<T_ACC>(rstd[ng])
-        : static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(gamma[c]);
+    const T_ACC scale =
+        (gamma == nullptr) ? rstd[ng] : rstd[ng] * static_cast<T_ACC>(gamma[c]);
     a[index] = scale;
-    b[index] = -scale * static_cast<T_ACC>(mean[ng]) +
+    b[index] = -scale * mean[ng] +
         ((beta == nullptr) ? 0 : static_cast<T_ACC>(beta[c]));
   }
 }
@@ -114,6 +111,8 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     const T* mean,
     const T* rstd,
     const T* gamma,
+    const T* dmean,
+    const T* drstd,
     acc_type<T, true>* c2,
     acc_type<T, true>* c3) {
   using T_ACC = acc_type<T, true>;
@@ -124,31 +123,37 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
   const int64_t ng = n * G + g;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
-  for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
-    const int64_t index = ng * D + i;
-    const int64_t c = g * D + i;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
-    sum1 += dY[index] * X[index] * gamma_v;
-    sum2 += dY[index] * gamma_v;
-  }
-  if (blockDim.x <= C10_WARP_SIZE) {
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
-    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
+  if (C10_LIKELY(dY)) {
+    for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
+      const int64_t index = ng * D + i;
+      const int64_t c = g * D + i;
+      const T_ACC gamma_v =
+          gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
+      const T_ACC dY_acc = static_cast<T_ACC>(dY[index]);
+      sum1 += dY_acc * static_cast<T_ACC>(X[index]) * gamma_v;
+      sum2 += dY_acc * gamma_v;
+    }
+    if (blockDim.x <= C10_WARP_SIZE) {
+      sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
+      sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+    } else {
+      __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+      __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
+      sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
+      sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
+    }
   }
   if (threadIdx.x == 0) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D);
-    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1) *
+    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1 -
+                     static_cast<T_ACC>(drstd ? drstd[ng] : T(0))) *
         static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(rstd[ng]) *
         static_cast<T_ACC>(rstd[ng]) * s;
     c2[ng] = x;
     c3[ng] = -x * static_cast<T_ACC>(mean[ng]) -
-        sum2 * static_cast<T_ACC>(rstd[ng]) * s;
+        (sum2 * static_cast<T_ACC>(rstd[ng]) -
+         static_cast<T_ACC>(dmean ? dmean[ng] : T(0))) *
+            s;
   }
 }
 
@@ -164,7 +169,7 @@ __global__ void GammaBeta1dBackwardCUDAKernel1(
     T* dgamma,
     T* dbeta) {
   using T_ACC = acc_type<T, true>;
-  const int64_t c = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   if (c < C) {
     const int64_t G = group;
     const int64_t D = C / G;
@@ -204,7 +209,7 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
   using T_ACC = acc_type<T, true>;
   __shared__ T_ACC g_shared[kReduceTileSize][kReduceTileSize + 1];
   __shared__ T_ACC b_shared[kReduceTileSize][kReduceTileSize + 1];
-  const int64_t c = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   T_ACC dg_sum1 = 0;
   T_ACC dg_sum2 = 0;
   T_ACC db_sum1 = 0;
@@ -327,6 +332,8 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     const T* gamma,
     const acc_type<T, true>* ds,
     const acc_type<T, true>* db,
+    const T* dmean,
+    const T* drstd,
     acc_type<T, true>* c2,
     acc_type<T, true>* c3) {
   using T_ACC = acc_type<T, true>;
@@ -337,31 +344,36 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
   const int64_t ng = n * G + g;
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
-  for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
-    const int64_t index = ng * D + i;
-    const int64_t c = g * D + i;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
-    sum1 += ds[index] * gamma_v;
-    sum2 += db[index] * gamma_v;
-  }
-  if (blockDim.x <= C10_WARP_SIZE) {
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
-    sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-    sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
+  if (C10_LIKELY(ds && db)) {
+    for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
+      const int64_t index = ng * D + i;
+      const int64_t c = g * D + i;
+      const T_ACC gamma_v =
+          gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
+      sum1 += ds[index] * gamma_v;
+      sum2 += db[index] * gamma_v;
+    }
+    if (blockDim.x <= C10_WARP_SIZE) {
+      sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
+      sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+    } else {
+      __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+      __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
+      sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
+      sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
+    }
   }
   if (threadIdx.x == 0) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
-    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1) *
+    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1 -
+                     static_cast<T_ACC>(drstd ? drstd[ng] : T(0))) *
         static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(rstd[ng]) *
         static_cast<T_ACC>(rstd[ng]) * s;
     c2[ng] = x;
     c3[ng] = -x * static_cast<T_ACC>(mean[ng]) -
-        sum2 * static_cast<T_ACC>(rstd[ng]) * s;
+        (sum2 * static_cast<T_ACC>(rstd[ng]) -
+         static_cast<T_ACC>(dmean ? dmean[ng] : T(0))) *
+            s;
   }
 }
 
@@ -377,7 +389,7 @@ __global__ void GammaBetaBackwardCUDAKernel1(
     T* dgamma,
     T* dbeta) {
   using T_ACC = acc_type<T, true>;
-  const int64_t c = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   if (c < C) {
     const int64_t G = group;
     const int64_t D = C / G;
@@ -415,7 +427,7 @@ __global__ void GammaBetaBackwardCUDAKernel2(
   using T_ACC = acc_type<T, true>;
   __shared__ T_ACC g_shared[kReduceTileSize][kReduceTileSize + 1];
   __shared__ T_ACC b_shared[kReduceTileSize][kReduceTileSize + 1];
-  const int64_t c = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t c = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
   T_ACC dg_sum1 = 0;
   T_ACC dg_sum2 = 0;
   T_ACC db_sum1 = 0;
@@ -491,79 +503,79 @@ __global__ void GammaBetaBackwardCUDAKernel2(
   }
 }
 
-template <typename T>
+template <typename T, typename T_ACC>
 void GroupNorm1dForward(
     const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
+    const Tensor& mean_acc,
+    const Tensor& rstd_acc,
     const Tensor& gamma,
     const Tensor& beta,
     int64_t N,
     int64_t C,
     int64_t group,
     Tensor& Y) {
-  using T_ACC = acc_type<T, true>;
   const int64_t G = group;
   const int64_t D = C / G;
   if (gamma.defined() && beta.defined()) {
     auto iter = TensorIteratorConfig()
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
                     .add_owned_const_input(X.view({N, G, D}))
-                    .add_owned_input(mean.view({N, G, 1}))
-                    .add_owned_input(rstd.view({N, G, 1}))
+                    .add_owned_input(mean_acc.view({N, G, 1}))
+                    .add_owned_input(rstd_acc.view({N, G, 1}))
                     .add_owned_const_input(gamma.view({1, G, D}))
                     .add_owned_const_input(beta.view({1, G, D}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma, T beta) -> T {
-      return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
-          static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma) +
-          static_cast<T_ACC>(beta);
-    });
+    gpu_kernel(
+        iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T gamma, T beta) -> T {
+          return (static_cast<T_ACC>(x) - mean) * rstd *
+              static_cast<T_ACC>(gamma) +
+              static_cast<T_ACC>(beta);
+        });
   } else if (gamma.defined()) {
     auto iter = TensorIteratorConfig()
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
                     .add_owned_const_input(X.view({N, G, D}))
-                    .add_owned_input(mean.view({N, G, 1}))
-                    .add_owned_input(rstd.view({N, G, 1}))
+                    .add_owned_input(mean_acc.view({N, G, 1}))
+                    .add_owned_input(rstd_acc.view({N, G, 1}))
                     .add_owned_const_input(gamma.view({1, G, D}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma) -> T {
-      return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
-          static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T gamma) -> T {
+      return (static_cast<T_ACC>(x) - mean) * rstd * static_cast<T_ACC>(gamma);
     });
   } else if (beta.defined()) {
     auto iter = TensorIteratorConfig()
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
                     .add_owned_const_input(X.view({N, G, D}))
-                    .add_owned_input(mean.view({N, G, 1}))
-                    .add_owned_input(rstd.view({N, G, 1}))
+                    .add_owned_input(mean_acc.view({N, G, 1}))
+                    .add_owned_input(rstd_acc.view({N, G, 1}))
                     .add_owned_const_input(beta.view({1, G, D}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T beta) -> T {
-      return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
-          static_cast<T_ACC>(rstd) +
-          static_cast<T_ACC>(beta);
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd, T beta) -> T {
+      return (static_cast<T_ACC>(x) - mean) * rstd + static_cast<T_ACC>(beta);
     });
   } else {
     auto iter = TensorIteratorConfig()
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * G, D}))
                     .add_owned_const_input(X.view({N * G, D}))
-                    .add_owned_input(mean.view({N * G, 1}))
-                    .add_owned_input(rstd.view({N * G, 1}))
+                    .add_owned_input(mean_acc.view({N * G, 1}))
+                    .add_owned_input(rstd_acc.view({N * G, 1}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
-      return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
-          static_cast<T_ACC>(rstd);
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd) -> T {
+      return (static_cast<T_ACC>(x) - mean) * rstd;
     });
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename T>
+template <typename T, typename T_ACC = acc_type<T, true>>
 void GroupNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -576,7 +588,6 @@ void GroupNormKernelImplInternal(
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
-  using T_ACC = acc_type<T, true>;
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
@@ -586,36 +597,40 @@ void GroupNormKernelImplInternal(
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
-  T* mean_data = mean.mutable_data_ptr<T>();
-  T* rstd_data = rstd.mutable_data_ptr<T>();
+
+  const auto kAccType =
+      (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
+      ? kFloat
+      : X.scalar_type();
+  Tensor mean_acc = at::empty(mean.sizes(), X.options().dtype(kAccType));
+  Tensor rstd_acc = at::empty(rstd.sizes(), X.options().dtype(kAccType));
+  T_ACC* mean_acc_data = mean_acc.mutable_data_ptr<T_ACC>();
+  T_ACC* rstd_acc_data = rstd_acc.mutable_data_ptr<T_ACC>();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
-  RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-      D * HxW, eps, X_data, mean_data, rstd_data);
+  RowwiseMomentsCUDAKernel<T, T_ACC><<<N * G, num_threads, 0, cuda_stream>>>(
+      D * HxW, eps, X_data, mean_acc_data, rstd_acc_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (HxW == 1) {
-    GroupNorm1dForward<T>(X, mean, rstd, gamma, beta, N, C, G, Y);
+    GroupNorm1dForward<T, T_ACC>(
+        X, mean_acc, rstd_acc, gamma, beta, N, C, G, Y);
   } else if (!gamma.defined() && !beta.defined()) {
     auto iter = TensorIteratorConfig()
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * G, D * HxW}))
                     .add_owned_const_input(X.view({N * G, D * HxW}))
-                    .add_owned_input(mean.view({N * G, 1}))
-                    .add_owned_input(rstd.view({N * G, 1}))
+                    .add_owned_input(mean_acc.view({N * G, 1}))
+                    .add_owned_input(rstd_acc.view({N * G, 1}))
                     .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
-      return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
-          static_cast<T_ACC>(rstd);
+    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC mean, T_ACC rstd) -> T {
+      return (static_cast<T_ACC>(x) - mean) * rstd;
     });
   } else {
-    const auto kAccType =
-        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-        ? kFloat
-        : X.scalar_type();
     Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
     const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
@@ -627,8 +642,17 @@ void GroupNormKernelImplInternal(
     // using manual kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
-        N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
+    ComputeFusedParamsCUDAKernel<T, T_ACC>
+        <<<B, kCUDANumThreads, 0, cuda_stream>>>(
+            N,
+            C,
+            G,
+            mean_acc_data,
+            rstd_acc_data,
+            gamma_data,
+            beta_data,
+            a_data,
+            b_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     auto iter = TensorIteratorConfig()
@@ -643,6 +667,10 @@ void GroupNormKernelImplInternal(
       return a * static_cast<T_ACC>(x) + b;
     });
   }
+
+  mean.copy_(mean_acc);
+  rstd.copy_(rstd_acc);
+
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -681,21 +709,23 @@ void GroupNormKernelImpl(
 
 template <typename T>
 void GroupNorm1dBackward(
-    const Tensor dY,
-    const Tensor X,
-    const Tensor mean,
-    const Tensor rstd,
-    const Tensor gamma,
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
     int64_t N,
     int64_t C,
     int64_t group,
+    const Tensor& dmean,
+    const Tensor& drstd,
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
   using T_ACC = acc_type<T, true>;
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* dY_data = dY.const_data_ptr<T>();
+  const T* dY_data = dY.defined() ? dY.const_data_ptr<T>() : nullptr;
   const T* X_data = X.const_data_ptr<T>();
   const T* mean_data = mean.const_data_ptr<T>();
   const T* rstd_data = rstd.const_data_ptr<T>();
@@ -703,6 +733,8 @@ void GroupNorm1dBackward(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX.defined()) {
     const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+    const T* dmean_data = dmean.defined() ? dmean.const_data_ptr<T>() : nullptr;
+    const T* drstd_data = drstd.defined() ? drstd.const_data_ptr<T>() : nullptr;
     const auto kAccType =
         (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
         ? kFloat
@@ -723,11 +755,25 @@ void GroupNorm1dBackward(
             mean_data,
             rstd_data,
             gamma_data,
+            dmean_data,
+            drstd_data,
             c2_data,
             c3_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    if (gamma.defined()) {
+    if (C10_UNLIKELY(!dY.defined())) {
+      auto iter = TensorIteratorConfig()
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
+                      .resize_outputs(false)
+                      .add_owned_output(dX.view({N, G, D}))
+                      .add_owned_const_input(X.view({N, G, D}))
+                      .add_owned_const_input(c2.view({N, G, 1}))
+                      .add_owned_const_input(c3.view({N, G, 1}))
+                      .build();
+      gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC c2, T_ACC c3) -> T {
+        return c2 * static_cast<T_ACC>(x) + c3;
+      });
+    } else if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
@@ -766,7 +812,7 @@ void GroupNorm1dBackward(
           });
     }
   }
-  if (dgamma.defined() || dbeta.defined()) {
+  if (C10_LIKELY(dY.defined()) && (dgamma.defined() || dbeta.defined())) {
     T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
     T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
     if (N <= 128) {
@@ -816,65 +862,72 @@ void GroupNormBackwardKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
+    const Tensor& dmean,
+    const Tensor& drstd,
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
   using T_ACC = acc_type<T, true>;
   const int64_t G = group;
   const int64_t D = C / G;
-  TORCH_CHECK(dY.numel() == N * C * HxW);
+  TORCH_CHECK(!dY.defined() || dY.numel() == N * C * HxW);
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(mean.numel() == N * G);
   TORCH_CHECK(rstd.numel() == N * G);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(!dmean.defined() || dmean.numel() == N * G);
+  TORCH_CHECK(!drstd.defined() || drstd.numel() == N * G);
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
-  if (N == 0) {
-    if (dgamma.defined()) {
-      dgamma.fill_(T(0));
-    }
-    if (dbeta.defined()) {
-      dbeta.fill_(T(0));
-    }
-    return;
-  }
-
-  const T* dY_data = dY.const_data_ptr<T>();
+  const T* dY_data = dY.defined() ? dY.const_data_ptr<T>() : nullptr;
   const T* X_data = X.const_data_ptr<T>();
   const T* mean_data = mean.const_data_ptr<T>();
   const T* rstd_data = rstd.const_data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const T* dmean_data = dmean.defined() ? dmean.const_data_ptr<T>() : nullptr;
+  const T* drstd_data = drstd.defined() ? drstd.const_data_ptr<T>() : nullptr;
+
+  if (HxW == 1) {
+    GroupNorm1dBackward<T>(
+        dY, X, mean, rstd, gamma, N, C, G, dmean, drstd, dX, dgamma, dbeta);
+    return;
+  }
+
+  Tensor ds{};
+  Tensor db{};
+  T_ACC* ds_data{nullptr};
+  T_ACC* db_data{nullptr};
   const auto kAccType =
       (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
       ? kFloat
       : X.scalar_type();
-  Tensor ds = at::empty({N, C}, X.options().dtype(kAccType));
-  Tensor db = at::empty({N, C}, X.options().dtype(kAccType));
-  T_ACC* ds_data = ds.mutable_data_ptr<T_ACC>();
-  T_ACC* db_data = db.mutable_data_ptr<T_ACC>();
-
-  if (HxW == 1) {
-    GroupNorm1dBackward<T>(
-        dY, X, mean, rstd, gamma, N, C, G, dX, dgamma, dbeta);
-    return;
-  }
 
   int warp_size = at::cuda::warp_size();
   int64_t num_threads = HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
-  ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-      HxW, dY_data, X_data, ds_data, db_data);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (C10_LIKELY(dY.defined())) {
+    ds = at::empty({N, C}, X.options().dtype(kAccType));
+    db = at::empty({N, C}, X.options().dtype(kAccType));
+    ds_data = ds.mutable_data_ptr<T_ACC>();
+    db_data = db.mutable_data_ptr<T_ACC>();
+
+    ComputeInternalGradientsCUDAKernel<T>
+        <<<N * C, num_threads, 0, cuda_stream>>>(
+            HxW, dY_data, X_data, ds_data, db_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 
   if (dX.defined()) {
-    Tensor c1 = at::empty({0}, X.options().dtype(kAccType));
+    Tensor c1{};
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
     Tensor c3 = at::empty({N, G}, X.options().dtype(kAccType));
     T_ACC* c2_data = c2.mutable_data_ptr<T_ACC>();
     T_ACC* c3_data = c3.mutable_data_ptr<T_ACC>();
 
-    if (gamma.defined()) {
+    if (C10_LIKELY(dY.defined()) && gamma.defined()) {
+      c1 = at::empty({0}, X.options().dtype(kAccType));
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .add_output(c1)
@@ -899,11 +952,25 @@ void GroupNormBackwardKernelImplInternal(
             gamma_data,
             ds_data,
             db_data,
+            dmean_data,
+            drstd_data,
             c2_data,
             c3_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    if (gamma.defined()) {
+    if (C10_UNLIKELY(!dY.defined())) {
+      auto iter = TensorIteratorConfig()
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
+                      .resize_outputs(false)
+                      .add_owned_output(dX.view({N * G, D, HxW}))
+                      .add_owned_const_input(X.view({N * G, D, HxW}))
+                      .add_owned_const_input(c2.view({N * G, 1, 1}))
+                      .add_owned_const_input(c3.view({N * G, 1, 1}))
+                      .build();
+      gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC c2, T_ACC c3) -> T {
+        return c2 * static_cast<T_ACC>(x) + c3;
+      });
+    } else if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
@@ -937,7 +1004,7 @@ void GroupNormBackwardKernelImplInternal(
           });
     }
   }
-  if (dgamma.defined() || dbeta.defined()) {
+  if (C10_LIKELY(dY.defined()) && (dgamma.defined() || dbeta.defined())) {
     T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
     T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
     if (N <= 128) {
@@ -977,6 +1044,45 @@ void GroupNormBackwardKernelImplInternal(
   }
 }
 
+void GroupNormBackwardMultipleGradsKernelImpl(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "GroupNormBackwardMultipleGradsKernelImpl",
+      [&]() {
+        GroupNormBackwardKernelImplInternal<scalar_t>(
+            dY,
+            X,
+            mean,
+            rstd,
+            gamma,
+            N,
+            C,
+            HxW,
+            group,
+            dmean,
+            drstd,
+            dX,
+            dgamma,
+            dbeta);
+      });
+}
+
 void GroupNormBackwardKernelImpl(
     const Tensor& dY,
     const Tensor& X,
@@ -990,20 +1096,29 @@ void GroupNormBackwardKernelImpl(
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "GroupNormBackwardKernelImpl",
-      [&]() {
-        GroupNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
-      });
+  GroupNormBackwardMultipleGradsKernelImpl(
+      dY,
+      X,
+      mean,
+      rstd,
+      gamma,
+      N,
+      C,
+      HxW,
+      group,
+      Tensor{},
+      Tensor{},
+      dX,
+      dgamma,
+      dbeta);
 }
 
 } // namespace
 
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl)
+REGISTER_DISPATCH(
+    GroupNormBackwardMultipleGradsKernel,
+    &GroupNormBackwardMultipleGradsKernelImpl)
 REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl)
 
 } // namespace at::native

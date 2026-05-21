@@ -11,13 +11,17 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/full_native.h>
 #include <ATen/ops/group_norm_native.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
+#include <ATen/ops/var_mean_native.h>
+#include <ATen/ops/zeros_like_native.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <tuple>
 #include <vector>
@@ -130,7 +134,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(
+    dX = at::native::zeros_like(
         X,
         std::nullopt /* dtype */,
         std::nullopt /* layout */,
@@ -139,7 +143,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         memory_format);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(
+    dgamma = at::native::zeros_like(
         gamma,
         std::nullopt /* dtype */,
         std::nullopt /* layout */,
@@ -148,7 +152,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(
+    dbeta = at::native::zeros_like(
         gamma,
         std::nullopt /* dtype */,
         std::nullopt /* layout */,
@@ -156,20 +160,118 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         std::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
   }
-  GroupNormBackwardKernel(
-      X.device().type(),
-      dY,
-      X,
-      mean,
-      rstd,
-      gamma,
-      N,
-      C,
-      HxW,
-      group,
-      dX,
-      dgamma,
-      dbeta);
+  if (N != 0) {
+    GroupNormBackwardKernel(
+        X.device().type(),
+        dY,
+        X,
+        mean,
+        rstd,
+        gamma,
+        N,
+        C,
+        HxW,
+        group,
+        dX,
+        dgamma,
+        dbeta);
+  }
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
+std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
+    const std::optional<Tensor>& dY_opt,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const std::optional<Tensor>& gamma_opt,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    std::array<bool, 3> grad_input_mask,
+    const std::optional<Tensor>& dmean_opt,
+    const std::optional<Tensor>& drstd_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> dY_maybe_owned =
+      at::borrow_from_optional_tensor(dY_opt);
+  c10::MaybeOwned<Tensor> gamma_maybe_owned =
+      at::borrow_from_optional_tensor(gamma_opt);
+  c10::MaybeOwned<Tensor> dmean_maybe_owned =
+      at::borrow_from_optional_tensor(dmean_opt);
+  c10::MaybeOwned<Tensor> drstd_maybe_owned =
+      at::borrow_from_optional_tensor(drstd_opt);
+  const Tensor& dY = *dY_maybe_owned;
+  const Tensor& gamma = *gamma_maybe_owned;
+  const Tensor& dmean = *dmean_maybe_owned;
+  const Tensor& drstd = *drstd_maybe_owned;
+
+  TORCH_CHECK(
+      !dY.defined() || X.scalar_type() == dY.scalar_type(),
+      "Expected scalar types of X and dY to be the same.");
+  TORCH_CHECK(
+      !dmean.defined() || mean.scalar_type() == dmean.scalar_type(),
+      "Expected scalar types of mean and dmean to be the same.");
+  TORCH_CHECK(
+      !drstd.defined() || rstd.scalar_type() == drstd.scalar_type(),
+      "Expected scalar types of rstd and drstd to be the same.");
+
+  bool mixed_type = is_mixed_type(X, mean, rstd);
+  if (mixed_type) {
+    check_mixed_data_type(X, mean, rstd);
+  }
+  auto memory_format = X.device().is_cpu() ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::zeros_like(
+        X,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
+        memory_format);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = at::native::zeros_like(
+        gamma,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = at::native::zeros_like(
+        gamma,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  }
+
+  if (N != 0 && (dY.defined() || dmean.defined() || drstd.defined())) {
+    GroupNormBackwardMultipleGradsKernel(
+        X.device().type(),
+        dY,
+        X,
+        mean,
+        rstd,
+        gamma,
+        N,
+        C,
+        HxW,
+        group,
+        dmean,
+        drstd,
+        dX,
+        dgamma,
+        dbeta);
+  }
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
@@ -208,8 +310,8 @@ Tensor group_norm(
 
 DEFINE_DISPATCH(GroupNormKernel);
 DEFINE_DISPATCH(GroupNormBackwardKernel);
+DEFINE_DISPATCH(GroupNormBackwardMultipleGradsKernel);
 
-// Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const Tensor& input,
     const std::optional<Tensor>& weight_opt,
@@ -219,38 +321,30 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned =
-      at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = bias_opt.value_or(Tensor());
-
   auto input_shape = input.sizes();
-  at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
-  auto outputs = at::native_batch_norm(
-      input_reshaped,
-      /*weight=*/{},
-      /*bias=*/{},
-      /*running_mean=*/{},
-      /*running_var=*/{},
-      /*training=*/true,
-      /*momentum=*/0,
-      eps);
-  auto out = std::get<0>(outputs).view(input_shape);
-  std::vector<int64_t> affine_param_shape(input.dim(), 1);
-  affine_param_shape[1] = C;
-  if (weight.defined() && bias.defined()) {
-    out = bias.view(affine_param_shape)
-              .addcmul(out, weight.view(affine_param_shape), 1);
-  } else if (weight.defined()) {
-    out = out.mul(weight.view(affine_param_shape));
-  } else if (bias.defined()) {
-    out = out.add(bias.view(affine_param_shape));
+  if (std::any_of(input_shape.begin(), input_shape.end(), [](auto s) { return s == 0; })) {
+    return std::make_tuple(
+        at::native::empty_like(input),
+        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()),
+        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()));
   }
-  // convert mean/std to have the same dtype as input.
-  // This follows the same behavior as the CPU and CUDA kernels.
-  at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
-  at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
-  return std::make_tuple(std::move(out), std::move(mean), std::move(rstd));
+
+  auto input_reshaped = input.view({N, group, C / group * HxW});
+  auto [var, mean] = at::native::var_mean(input_reshaped, {2}, 0, true);
+  auto rsqrt = var.add_(eps).rsqrt_();
+  auto out = input_reshaped.sub(mean).mul_(rsqrt).reshape(input_shape);
+
+  std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
+  weight_bias_shape[1] = C;
+  if (weight_opt && weight_opt->defined()) {
+    out.mul_(weight_opt->view(weight_bias_shape));
+  }
+  if (bias_opt && bias_opt->defined()) {
+    out.add_(bias_opt->view(weight_bias_shape));
+  }
+
+  mean.squeeze_(-1);
+  rsqrt.squeeze_(-1);
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rsqrt));
 }
 } // namespace at::native
