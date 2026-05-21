@@ -4970,7 +4970,7 @@ class TestSerializationDeviceType(TestCase):
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True)
             for v in result.values():
-                self.assertTrue(v.is_cuda)
+                self.assertEqual(v.device.type, device.type)
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization(self, device, materialize_fake):
