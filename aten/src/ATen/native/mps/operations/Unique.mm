@@ -1,7 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -15,12 +17,14 @@
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/cumsum.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/masked_select.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/slice.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/unique_consecutive.h>
 #include <ATen/ops/unique_consecutive_native.h>
 #include <ATen/ops/unique_dim_consecutive.h>
@@ -30,6 +34,13 @@
 #endif
 
 namespace at::native {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Unique_metallib.h>
+#endif
+
 namespace mps {
 
 struct UniqueCachedGraph : public MPSCachedGraph {
@@ -242,6 +253,160 @@ static void runUniqueGraph(UniqueCachedGraph* uniqueGraph,
 
 } // namespace mps
 
+// Fast path for `_unique` / `_unique2` / `unique_consecutive` over a flat
+// 1D view of the input. Output shapes match the contract of _unique_impl_mps:
+// values are 1D, counts (when requested) is 1D, inverse_indices reshapes to
+// the original input shape.
+//
+// Pipeline:
+//   1. (Optional) Sort the flat input. Skipped for `consecutive=true`.
+//   2. Mark boundaries: mask[i] = (sorted[i] != sorted[i-1]); mask[0]=1.
+//   3. Inclusive scan of mask -> scan[i] is the 1-indexed unique-group id at i.
+//   4. Sync once to read num_unique = scan[N-1].
+//   5. Emit unique values and boundary positions in parallel.
+//   6. Counts from boundary-position differences (no atomics).
+//   7. Inverse via the sort permutation (no atomics).
+//
+// IMPORTANT — dispatch-queue re-entrancy: any `at::*` op (arange, sub, cumsum,
+// sort, etc.) acquires the MPS stream's serial queue via its own
+// dispatch_sync. Calling one from *inside* a block already running on that
+// queue deadlocks libdispatch (SIGTRAP / exit 133, no useful stack). Allocate
+// and transform tensors *outside* the block; only the raw
+// `lib.getPipelineStateForFunc` + `mtl_setArgs` + `mtl_dispatch1DJob` calls
+// belong inside it.
+static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& self_flat,
+                                                                const bool return_inverse,
+                                                                const bool return_counts,
+                                                                const bool consecutive,
+                                                                const IntArrayRef inverse_shape) {
+  using namespace mps;
+
+  TORCH_INTERNAL_ASSERT(self_flat.dim() == 1);
+  const int64_t numel = self_flat.numel();
+  const ScalarType in_dtype = self_flat.scalar_type();
+
+  // at::sort on MPS returns out-of-bounds sort indices for kBool inputs
+  // (see also the sort-bool path in Sort.mm); int8/uint8 indices are fine,
+  // and a byte reinterpret of int8 would invert the order of negative
+  // values, so this stays bool-only rather than covering all 1-byte dtypes.
+  // The promotion is a free bitwise view (not a cast): bool's 0/1 bit
+  // patterns are valid uint8 values, sort order is preserved, and the
+  // kernel pipeline below only keys on the working tensor's dtype. The
+  // unique-values output is viewed back to bool at the end.
+  const bool sort_via_byte = (in_dtype == kBool);
+  Tensor work = sort_via_byte ? self_flat.view(kByte) : self_flat;
+  const ScalarType work_dtype = work.scalar_type();
+
+  // Step 1: sort (unless consecutive).
+  Tensor sorted_values;
+  Tensor sort_idx; // only populated when return_inverse && !consecutive
+  if (consecutive) {
+    sorted_values = work;
+  } else {
+    auto sort_result = at::sort(work, /*dim=*/0, /*descending=*/false);
+    sorted_values = std::get<0>(sort_result);
+    if (return_inverse) {
+      sort_idx = std::get<1>(sort_result);
+    }
+  }
+
+  // Step 2: boundary mask (int32).
+  Tensor mask = at::empty({numel}, self_flat.options().dtype(kInt));
+  // Step 3: inclusive scan of mask. cumsum preserves int32 dtype.
+  Tensor scan;
+
+  // Kernel name suffix tracks the working dtype, not the input dtype, so the
+  // bool->byte promotion above flows through correctly.
+  const std::string type_name = mps::scalarToMetalTypeString(work_dtype);
+  MPSStream* stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      id<MTLComputePipelineState> pso =
+          lib.getPipelineStateForFunc(fmt::format("unique_mark_boundaries_{}", type_name));
+      getMPSProfiler().beginProfileKernel(pso, "unique_mark_boundaries", false);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, sorted_values, mask, static_cast<uint64_t>(numel));
+      mtl_dispatch1DJob(encoder, pso, numel);
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  // cumsum runs as a separate dispatch on MPS; that's fine.
+  scan = at::cumsum(mask, /*dim=*/0);
+  // cumsum of int32 may upcast to int64 on some paths; track the scan dtype.
+  const auto scan_dtype = scan.scalar_type();
+  TORCH_CHECK(scan_dtype == kInt || scan_dtype == kLong, "unique: unexpected cumsum output dtype ", scan_dtype);
+  const auto scan_suffix = std::to_string(c10::elementSize(scan_dtype) * 8);
+
+  // Step 4: read num_unique.
+  const int64_t num_unique = scan.select(0, numel - 1).item<int64_t>();
+  TORCH_INTERNAL_ASSERT(num_unique >= 1);
+
+  // Step 5/6/7: allocate outputs. unique_values is allocated in the working
+  // dtype (kByte when the input was bool) and cast back at the end so the
+  // emit kernel writes through a tensor whose stride matches `sorted_values`.
+  Tensor unique_values = at::empty({num_unique}, work.options());
+  Tensor bound_pos = at::empty({num_unique}, self_flat.options().dtype(kLong));
+  Tensor counts = return_counts ? at::empty({num_unique}, self_flat.options().dtype(kLong))
+                                : at::empty({0}, self_flat.options().dtype(kLong));
+  Tensor inverse = return_inverse ? at::empty({numel}, self_flat.options().dtype(kLong))
+                                  : at::empty({0}, self_flat.options().dtype(kLong));
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      {
+        id<MTLComputePipelineState> pso =
+            lib.getPipelineStateForFunc(fmt::format("unique_emit_{}_{}", type_name, scan_suffix));
+        getMPSProfiler().beginProfileKernel(pso, "unique_emit", false);
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, sorted_values, mask, scan, unique_values, bound_pos, static_cast<uint64_t>(numel));
+        mtl_dispatch1DJob(encoder, pso, numel);
+        getMPSProfiler().endProfileKernel(pso);
+      }
+
+      if (return_counts) {
+        id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc("unique_counts");
+        getMPSProfiler().beginProfileKernel(pso, "unique_counts", false);
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, bound_pos, counts, static_cast<uint64_t>(num_unique), static_cast<uint64_t>(numel));
+        mtl_dispatch1DJob(encoder, pso, num_unique);
+        getMPSProfiler().endProfileKernel(pso);
+      }
+
+      // For the sorted case we scatter via the sort permutation. For
+      // consecutive, the inverse is just (scan - 1), which we compute as a
+      // tensor op outside this block to avoid re-entering the queue.
+      if (return_inverse && !consecutive) {
+        id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(fmt::format("unique_inverse_{}", scan_suffix));
+        getMPSProfiler().beginProfileKernel(pso, "unique_inverse", false);
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, sort_idx, scan, inverse, static_cast<uint64_t>(numel));
+        mtl_dispatch1DJob(encoder, pso, numel);
+        getMPSProfiler().endProfileKernel(pso);
+      }
+    }
+  });
+
+  if (return_inverse && consecutive) {
+    inverse = scan.sub(1).to(kLong);
+  }
+
+  // inverse_shape can legitimately be {} (0-d scalar input). Only skip the
+  // view when we're not returning an inverse at all.
+  if (return_inverse) {
+    inverse = inverse.view(inverse_shape);
+  }
+
+  if (sort_via_byte) {
+    unique_values = unique_values.view(in_dtype);
+  }
+
+  return std::make_tuple(std::move(unique_values), std::move(inverse), std::move(counts));
+}
+
 static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
                                                            const bool return_inverse,
                                                            const bool return_counts,
@@ -249,19 +414,42 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
                                                            std::optional<int64_t> dimOpt) {
   const Tensor& input = self.contiguous();
 
+  // Fast native-Metal path: when no dim is specified, the operator works on
+  // a flat view of the input and the dispatch is one sort (skipped when
+  // consecutive) plus four small kernels. Avoids the MPSGraph scatter ops
+  // whose runtime explodes when the input contains long runs of duplicates.
+  if (!dimOpt.has_value()) {
+    // Reject unsupported dtypes up front with a clean error message. This
+    // list must stay in sync with the REGISTER_UNIQUE_FOR_T registrations
+    // in kernels/Unique.metal.
+    const auto in_dtype = input.scalar_type();
+    const bool fast_path_supports_dtype = in_dtype == kFloat || in_dtype == kHalf || in_dtype == kBFloat16 ||
+        in_dtype == kLong || in_dtype == kInt || in_dtype == kShort || in_dtype == kChar || in_dtype == kByte ||
+        in_dtype == kBool;
+    TORCH_CHECK(fast_path_supports_dtype, "unique is not supported on MPS for dtype ", in_dtype);
+    if (input.numel() == 0) {
+      Tensor output = at::empty({0}, input.options());
+      Tensor inv = at::empty(return_inverse ? input.sizes() : IntArrayRef{}, input.options().dtype(kLong));
+      Tensor cnt = at::empty(return_counts ? IntArrayRef{0} : IntArrayRef{}, input.options().dtype(kLong));
+      return std::make_tuple(std::move(output), std::move(inv), std::move(cnt));
+    }
+    Tensor input_flat = input.view({input.numel()});
+    IntArrayRef inv_shape = return_inverse ? input.sizes() : IntArrayRef{};
+    return _unique_flat_mps_fast(input_flat, return_inverse, return_counts, consecutive, inv_shape);
+  }
+
+  // Existing MPSGraph path retained for the unique-along-dim consecutive case.
   // get flat output size
   int64_t totalElems = c10::multiply_integers(input.sizes());
 
   IntArrayRef outputShape = IntArrayRef(totalElems);
   IntArrayRef inverseIndicesShape = input.sizes();
   IntArrayRef countsShape = IntArrayRef(totalElems);
-  int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
+  int64_t dim = maybe_wrap_dim(dimOpt.value(), self.dim());
 
-  if (dimOpt.has_value()) {
-    outputShape = input.sizes();
-    inverseIndicesShape = IntArrayRef(input.sizes()[dim]);
-    countsShape = IntArrayRef(input.sizes()[dim]);
-  }
+  outputShape = input.sizes();
+  inverseIndicesShape = IntArrayRef(input.sizes()[dim]);
+  countsShape = IntArrayRef(input.sizes()[dim]);
   if (!return_inverse)
     inverseIndicesShape = {};
   if (!return_counts)
@@ -291,10 +479,6 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
     counts = at::slice(counts, 0, 0, lengthScalar);
 
   return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
-}
-
-static std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, Tensor> out) {
-  return std::make_tuple(std::get<0>(out).to("mps"), std::get<1>(out).to("mps"), std::get<2>(out).to("mps"));
 }
 
 std::tuple<Tensor, Tensor, Tensor> unique_consecutive_mps(const Tensor& self,
