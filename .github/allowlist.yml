@@ -38,3 +38,7 @@
 L1:
   - Ascend/pytorch
   - riseproject-dev/pytorch-ci
+
+L2:
+  # Canonical test repo for CRCR.
+  - pytorch/crcr-test

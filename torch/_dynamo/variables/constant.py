@@ -28,8 +28,6 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
@@ -97,7 +95,9 @@ class ConstantVariable(VariableTracker):
             return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
-            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            slice_args_vars: list[VariableTracker] = [
+                ConstantVariable.create(arg) for arg in slice_args
+            ]
             return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
@@ -366,7 +366,7 @@ class ConstantVariable(VariableTracker):
         tx: InstructionTranslator,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.value is None:
@@ -604,6 +604,21 @@ class ConstantVariable(VariableTracker):
             return VariableTracker.build(tx, v + w)
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L588-L600
+        #   _Py_c_abs can set errno=ERANGE on overflow, which complex_abs
+        #   converts to OverflowError("absolute value too large").
+        # bool inherits nb_absolute from int via slot inheritance.
+        try:
+            return ConstantVariable.create(abs(self.value))
+        except OverflowError as e:
+            raise_observed_exception(OverflowError, tx, args=list(e.args))
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)

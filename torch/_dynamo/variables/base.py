@@ -20,7 +20,7 @@ import dataclasses
 import functools
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, TYPE_CHECKING
@@ -652,7 +652,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_function(
         self,
         tx: Any,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(
@@ -938,7 +938,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Performance optimization to implement optree.tree_map faster than tracing it"""
@@ -971,7 +971,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
@@ -988,7 +988,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
@@ -1010,7 +1010,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1049,7 +1049,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1064,7 +1064,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1413,6 +1413,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
         return variables.ConstantVariable(NotImplemented)
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_absolute slot.
+
+        Called when type_implements_nb_absolute returns True for this type.
+        Subclasses override to provide the actual absolute value.
+        """
+        unimplemented(
+            gb_type="nb_absolute_impl not implemented",
+            context=f"{type(self).__name__} has nb_absolute slot but no nb_absolute_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_absolute C slot but "
+            "the corresponding VariableTracker doesn't implement nb_absolute_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def __init__(
         self,
