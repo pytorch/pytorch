@@ -1868,12 +1868,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
 
-    def get_function(
-        self,
-        _converting: set[int] | None = None,
-        *,
-        allow_source_backed_closure: bool = False,
-    ) -> types.FunctionType:
+    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
         # _converting is used a way to break cycles when
         # two nested_functions refer to each other.
         from .base import AsPythonConstantNotImplementedError
@@ -1887,10 +1882,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
         _converting.add(self_id)
         try:
-            return self._get_function_impl(
-                _converting,
-                allow_source_backed_closure=allow_source_backed_closure,
-            )
+            return self._get_function_impl(_converting)
         except AsPythonConstantNotImplementedError as e:
             raise ClosureConversionError(
                 "failed to convert closure cell to Python constant"
@@ -1905,12 +1897,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         except (NotImplementedError, Unsupported):
             return False
 
-    def _get_function_impl(
-        self,
-        _converting: set[int],
-        *,
-        allow_source_backed_closure: bool,
-    ) -> types.FunctionType:
+    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1937,23 +1924,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 # If the cell contents is a NestedUserFunctionVariable, call get_function
                 # directly to properly propagate the _converting set for cycle detection
                 if isinstance(cell_contents, NestedUserFunctionVariable):
-                    value = cell_contents.get_function(
-                        _converting,
-                        allow_source_backed_closure=allow_source_backed_closure,
-                    )
+                    value = cell_contents.get_function(_converting)
                 else:
-                    try:
-                        value = cell_contents.as_python_constant()
-                    except AsPythonConstantNotImplementedError:
-                        if (
-                            allow_source_backed_closure
-                            and isinstance(cell_contents, UserDefinedObjectVariable)
-                            and cell_contents.source is not None
-                            and not tx.output.side_effects.is_modified(cell_contents)
-                        ):
-                            value = cell_contents.guard_as_python_constant()
-                        else:
-                            raise
+                    value = cell_contents.as_python_constant()
                 cells.append(make_cell(value))
             closure_cells = tuple(cells)
 
