@@ -14643,7 +14643,7 @@ if __name__ == '__main__':
         # resolved. Read the dispatch table directly so the test stays
         # in lock-step with future _AUTO_DEFAULTS edits.
         if acc_policy == "auto":
-            from torch.nn.modules.linear_cross_entropy import (
+            from torch.nn.modules.linear_cross_entropy_options import (
                 _AUTO_DEFAULTS, _AUTO_FALLBACK,
             )
             _resolved_policy, _ = _AUTO_DEFAULTS.get(

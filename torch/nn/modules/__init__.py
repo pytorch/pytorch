@@ -83,10 +83,7 @@ from .instancenorm import (
     LazyInstanceNorm2d,
     LazyInstanceNorm3d,
 )
-
-# LinearCrossEntropyOptions is not imported here -- its module uses
-# @torch.library.custom_op at top level (needs torch.library, which
-# isn't ready during torch init). Exposed lazily via torch.nn.__getattr__.
+from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .loss import (
     BCELoss,
     BCEWithLogitsLoss,
@@ -261,6 +258,7 @@ __all__ = [
     "LeakyReLU",
     "Linear",
     "LinearCrossEntropyLoss",
+    "LinearCrossEntropyOptions",
     "LocalResponseNorm",
     "LogSigmoid",
     "LogSoftmax",
