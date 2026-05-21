@@ -52,6 +52,8 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
 )
@@ -4946,8 +4948,12 @@ def _create_constants(*args, dtype):
 @register_lowering(prims.rev.default)
 def rev(x, dims):
     # note - dims pre-canonicalized
-    x_loader = x.make_loader()
     sizes = x.get_size()
+
+    if len(sizes) == 0:
+        return clone(x)
+
+    x_loader = x.make_loader()
 
     def loader(idx):
         idx = list(idx)
@@ -6294,10 +6300,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
@@ -8005,8 +8011,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
@@ -8670,43 +8676,23 @@ register_symm_mem_lowerings()
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
-    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum with
+    online softmax reductions when profitable.
     """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
 
-    reduction_ranges = kwargs["reduction_ranges"]
-    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-    hint, num_split = ir.Reduction.num_splits(
-        **kwargs,
-        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
-        reduction_numel=rnumel,
-    )
+    rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
 
-    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+    if V.graph.sizevars.statically_known_geq(
         rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
-            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+            input_node=x, num_output=2, **kwargs
         )
         return max_tensor, sum_tensor
     else:
-        # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
-
-        log.debug(
-            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
-        )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
