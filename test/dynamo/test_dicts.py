@@ -863,6 +863,132 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn({}, x), opt_fn({}, x))
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
 
+    def test_no_recompile_on_setitem_side_effect(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"obs": torch.randn(3)}
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["loss"] = d["obs"] * 2
+            return d["loss"]
+
+        self.assertEqual(fn(d), d["obs"] * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d), d["obs"] * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_then_contains_assigned_key_no_recompile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            if "c" in d:
+                return d["c"] * 2
+            return x
+
+        self.assertEqual(fn({"a": torch.ones(2)}, x), (x + 1) * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn({"a": torch.ones(2)}, x), (x + 1) * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_setitem_then_get_unrelated_key_guards_per_key(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"a": torch.ones(2)}
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return d.get("missing", x * 2)
+
+        self.assertEqual(fn(d, x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d, x), x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        d["missing"] = x * 3
+        self.assertEqual(fn(d, x), x * 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_setitem_then_len_guards_key_set(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        d = {"a": torch.ones(2)}
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts)
+        def fn(d, x):
+            d["c"] = x + 1
+            return x + len(d)
+
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(fn(d, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_then_contains_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.pop("a")
+            if "b" in d:
+                return x + 10
+            return x + 1
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x}
+        self.assertEqual(fn(d2, x), x + 10)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+        self.assertIs(d2["b"], x)
+
+    def test_pop_then_get_unrelated_key_recompiles(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            d.pop("a")
+            return d.get("b", x + 1)
+
+        d1 = {"a": x}
+        self.assertEqual(fn(d1, x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(d1, {})
+
+        d2 = {"a": x, "b": x + 2}
+        self.assertEqual(fn(d2, x), x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
+    def test_popitem_reconstruct_all_guards_keys_and_order(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(d, x):
+            _, value = d.popitem()
+            return value + x
+
+        d1 = {"a": x, "b": x + 2}
+        self.assertEqual(fn(d1, x), x * 2 + 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(set(d1), {"a"})
+
+        d2 = {"b": x + 2, "a": x}
+        self.assertEqual(fn(d2, x), x * 2)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(set(d2), {"b"})
+
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
             pass
