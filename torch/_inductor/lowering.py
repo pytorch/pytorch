@@ -8432,6 +8432,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
+    tuned = kernel_options.get("tuned", True)
     if gemm_op == torch.ops.aten._scaled_mm_v2.default:
         if backend != "TRITON" or split_k:
             raise NotImplementedError(
@@ -8653,7 +8654,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 raise NotImplementedError(
                     "QUACK local-reduce tuple epilogues currently support only aten.mm and aten.bmm"
                 )
-            if epilogue_arg_indices:
+            if epilogue_arg_indices and local_reduce.epilogue_reduce_source_node is None:
                 raise NotImplementedError(
                     "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
                 )
@@ -8767,6 +8768,11 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
             local_reduce_max_power=local_reduce.max_power if local_reduce is not None else 8,
             local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
+            local_reduce_source_from_epilogue=(
+                local_reduce.epilogue_reduce_source_node is not None
+                if local_reduce is not None
+                else False
+            ),
             main_output_transform=main_output_transform.kind
             if main_output_transform is not None
             else None,
@@ -8774,6 +8780,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             if main_output_transform is not None
             else None,
             mutated_inputs=mutated_inputs or None,
+            tuned=tuned,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout

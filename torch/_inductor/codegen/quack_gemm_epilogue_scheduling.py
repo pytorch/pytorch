@@ -102,6 +102,9 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 local_reduce_kwargs += f", local_reduce_max_power={qtb.local_reduce_max_power!r}"
             if qtb.local_reduce_feeds_main:
                 local_reduce_kwargs += ", local_reduce_feeds_main=True"
+            if getattr(qtb, "local_reduce_source_from_epilogue", False):
+                local_reduce_kwargs += ", local_reduce_source_from_epilogue=True"
+        tuned_kwargs = f", tuned={qtb.tuned!r}"
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
             out_dtype_kwargs = "" if qtb.out_dtype is None else f", out_dtype={qtb.out_dtype!r}"
@@ -128,6 +131,6 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         wrapper.writeline(
             f"{qtb.get_name()} = gemm_epilogue("
             f"{call_args[0]}, {call_args[1]}, "
-            f"{qtb.epilogue_name}, {qtb.epilogue_name!r}{call_kwargs})"
+            f"{qtb.epilogue_name}, {qtb.epilogue_name!r}{call_kwargs}{tuned_kwargs})"
         )
         self.free_buffers_in_scheduler()

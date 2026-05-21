@@ -38,7 +38,11 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         local_reduce_scale = kwargs.pop("local_reduce_scale", 1.0)
         local_reduce_max_power = kwargs.pop("local_reduce_max_power", 8)
         local_reduce_feeds_main = kwargs.pop("local_reduce_feeds_main", False)
+        local_reduce_source_from_epilogue = kwargs.pop(
+            "local_reduce_source_from_epilogue", False
+        )
         main_output_transform = kwargs.pop("main_output_transform", None)
+        tuned = kwargs.pop("tuned", True)
         main_output_transform_group = kwargs.pop("main_output_transform_group", None)
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         return QuackGemmEpilogueTemplateCaller(
@@ -60,8 +64,10 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             local_reduce_scale=local_reduce_scale,
             local_reduce_max_power=local_reduce_max_power,
             local_reduce_feeds_main=local_reduce_feeds_main,
+            local_reduce_source_from_epilogue=local_reduce_source_from_epilogue,
             main_output_transform=main_output_transform,
             main_output_transform_group=main_output_transform_group,
+            tuned=tuned,
             mutated_inputs=mutated_inputs,
         )
 
@@ -87,9 +93,11 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         local_reduce_scale: float = 1.0,
         local_reduce_max_power: int = 8,
         local_reduce_feeds_main: bool = False,
+        local_reduce_source_from_epilogue: bool = False,
         main_output_transform: str | None = None,
         main_output_transform_group: int | None = None,
         mutated_inputs: list[Buffer] | None = None,
+        tuned: bool = True,
     ) -> None:
         super().__init__(
             name=name,
@@ -112,9 +120,11 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.local_reduce_scale = local_reduce_scale
         self.local_reduce_max_power = local_reduce_max_power
         self.local_reduce_feeds_main = local_reduce_feeds_main
+        self.local_reduce_source_from_epilogue = local_reduce_source_from_epilogue
         self.main_output_transform = main_output_transform
         self.main_output_transform_group = main_output_transform_group
         self.mutated_inputs = mutated_inputs
+        self.tuned = tuned
 
     def benchmark(self, *args: Any, out: Any) -> float:
         return 0.0
@@ -139,9 +149,11 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 local_reduce_scale=self.local_reduce_scale,
                 local_reduce_max_power=self.local_reduce_max_power,
                 local_reduce_feeds_main=self.local_reduce_feeds_main,
+                local_reduce_source_from_epilogue=self.local_reduce_source_from_epilogue,
                 main_output_transform=self.main_output_transform,
                 main_output_transform_group=self.main_output_transform_group,
                 mutated_inputs=self.mutated_inputs,
+                tuned=self.tuned,
             )
         )
 
@@ -157,12 +169,17 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
             f"{self.epilogue_arg_indices}\n{self.local_reduce_out_index}\n{self.aux_out_index}\n"
             f"{self.local_reduce_group}\n{self.local_reduce_dim}\n{self.local_reduce_op}\n"
             f"{self.local_reduce_scale}\n{self.local_reduce_max_power}\n{self.local_reduce_feeds_main}\n"
-            f"{self.main_output_transform}\n{self.main_output_transform_group}\n"
+            f"{self.local_reduce_source_from_epilogue}\n"
+            f"{self.main_output_transform}\n{self.main_output_transform_group}\n{self.tuned}\n"
             f"{self.epilogue_name}\n{self.epilogue_source}"
         )
 
     def info_dict(self) -> dict[str, Any]:
-        return {"backend": "QuACK", "template": "quack_gemm_epilogue"}
+        return {
+            "backend": "QuACK",
+            "template": "quack_gemm_epilogue",
+            "tuned": self.tuned,
+        }
 
 
 quack_gemm_epilogue_template = QuackGemmEpilogueTemplate()

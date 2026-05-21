@@ -4,7 +4,7 @@ import inspect
 import math
 import operator
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -266,6 +266,8 @@ class QuackLocalReduceInfo:
     max_power: int = 8
     output_node: torch.fx.Node | None = None
     extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
+    epilogue_reduce_source_node: torch.fx.Node | None = None
+    epilogue_reduce_value_node: torch.fx.Node | None = None
 
     @property
     def aux_output_node(self) -> torch.fx.Node:
@@ -788,8 +790,13 @@ def _match_quack_local_n_amax_scale_view(
         extra_skip_nodes.add(aux_view.base)
     scaled = _split_quack_scalar_scale(aux_view.base)
     if scaled is None:
-        return None
-    reduce_node, scale = scaled
+        # Also accept the unscaled canonical keepdim form:
+        #   scale = x.abs().amax(-1, keepdim=True)
+        #   return main, scale.view(M, -1)
+        reduce_node = aux_view.base
+        scale = 1.0
+    else:
+        reduce_node, scale = scaled
     reduce_match = _match_quack_tensorssa_reduce(reduce_node)
     if reduce_match is None or reduce_match.kind != "amax":
         return None
@@ -810,8 +817,12 @@ def _match_quack_local_n_amax_scale_view(
     if view_match is None:
         return None
     source_node = _match_quack_acc_source(view_match.base, mm_node)
+    epilogue_reduce_source_node = None
     if source_node is None:
-        return None
+        if not _quack_output_uses_node(view_match.base, mm_node):
+            return None
+        source_node = view_match.base
+        epilogue_reduce_source_node = view_match.node
     grouped_shape = _quack_grouped_n_fragment_shape(
         _normalize_quack_shape(view_match.shape)
     )
@@ -835,6 +846,8 @@ def _match_quack_local_n_amax_scale_view(
         scale=scale,
         output_node=aux_output_node,
         extra_skip_nodes=frozenset(extra_skip_nodes | {reduce_node, abs_node}),
+        epilogue_reduce_source_node=epilogue_reduce_source_node,
+        epilogue_reduce_value_node=aux_view.base,
     )
 
 
@@ -1250,6 +1263,18 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 or _match_quack_local_n_nvfp4_scale_view(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
+                if (
+                    local_reduce.epilogue_reduce_value_node is not None
+                    and _quack_output_uses_node(
+                        output_value[0], local_reduce.epilogue_reduce_value_node
+                    )
+                ):
+                    local_reduce = replace(
+                        local_reduce,
+                        kind="copy",
+                        scale=1.0,
+                        epilogue_reduce_source_node=local_reduce.epilogue_reduce_value_node,
+                    )
                 if not _quack_output_uses_node(output_value[0], local_reduce.aux_output_node):
                     skip_nodes.add(local_reduce.aux_output_node)
                 if not _quack_output_uses_node(output_value[0], local_reduce.reduce_node):
@@ -1483,6 +1508,32 @@ def _lower_quack_tensorssa_reduce_node(
     return reduced
 
 
+def _is_quack_nonnegative_expr(node: Any) -> bool:
+    if not isinstance(node, torch.fx.Node):
+        return False
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten.abs.default,
+        torch.abs,
+        torch.ops.aten.relu.default,
+        torch.relu,
+    ):
+        return True
+    if node.op == "call_method" and node.target in ("abs", "relu"):
+        return True
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten._to_copy.default,
+        torch.ops.prims.convert_element_type.default,
+    ):
+        return _is_quack_nonnegative_expr(node.args[0])
+    if node.op == "call_function" and node.target == torch.ops.aten.clamp.default:
+        min_value = node.kwargs.get("min", node.args[1] if len(node.args) > 1 else None)
+        return isinstance(min_value, (int, float)) and min_value >= 0
+    if node.op == "call_method" and node.target == "clamp":
+        min_value = node.kwargs.get("min", None)
+        return isinstance(min_value, (int, float)) and min_value >= 0
+    return False
+
+
 def _propagate_quack_grouped_tensorssa_info(
     node: torch.fx.Node,
     grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
@@ -1540,9 +1591,15 @@ def _compile_quack_pointwise_nodes(
                     )
                     group_shape = _quack_grouped_n_fragment_shape(shape)
                     if _is_quack_same_fragment_n_group_shape(group_shape):
+                        base_info = grouped_tensors.get(view_match.base)
                         grouped_tensors[node] = QuackGroupedTensorSSAInfo(
                             group_size=group_shape[-1],
                             groups_per_fragment=32 // group_shape[-1],
+                            nonnegative=(
+                                base_info.nonnegative
+                                if base_info is not None
+                                else _is_quack_nonnegative_expr(view_match.base)
+                            ),
                         )
                     continue
                 select_value = _lower_quack_grouped_n_select_node(
@@ -1564,8 +1621,13 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == "abs":
-                        env[node] = ops.abs(arg).value
-                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        input_info = grouped_tensors.get(node.args[0])
+                        if input_info is not None and input_info.nonnegative:
+                            env[node] = arg
+                            grouped_tensors[node] = input_info
+                        else:
+                            env[node] = ops.abs(arg).value
+                            _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == "clamp":
                         result = arg
@@ -1577,6 +1639,12 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
+                    if node.target in (torch.ops.aten.abs.default, torch.abs):
+                        input_info = grouped_tensors.get(node.args[0])
+                        if input_info is not None and input_info.nonnegative:
+                            env[node] = _quack_cute_arg(node.args[0], env)
+                            grouped_tensors[node] = input_info
+                            continue
                     if node.target == torch.ops.flex_gemm.mx_e8m0_scale.default:
                         source = _quack_cute_arg(node.args[0], env)
                         max_power = node.args[1] if len(node.args) > 1 else node.kwargs.get("max_power", 8)
@@ -1683,6 +1751,8 @@ def _quack_cute_epilogue_code(
     )
     if aux_output is not None:
         result = f"({result}, {_quack_cute_arg(aux_output.output_value, env)})"
+    elif local_reduce is not None and local_reduce.epilogue_reduce_source_node is not None:
+        result = f"({result}, {_quack_cute_arg(local_reduce.epilogue_reduce_source_node, env)})"
 
     return (
         kernel.body.lines,
