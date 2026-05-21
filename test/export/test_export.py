@@ -18723,6 +18723,18 @@ def forward(self, x, mask):
             """\
 def forward(self, x, y):
     item = torch.ops.aten.item.default(y);  y = None
+    ge_3 = item >= -3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= -3 on node 'ge_3'");  ge_3 = _assert_scalar_default = None
+    le_1 = item <= 2
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 2 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+    lt_1 = item < 3
+    add_2 = 3 + item
+    ge_4 = add_2 >= 0
+    and__1 = lt_1 & ge_4;  ge_4 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(and__1, "Runtime assertion failed for expression (u0 < 3) & (0 <= u0 + 3) on node 'and__1'");  and__1 = _assert_scalar_default_2 = None
+    ge_1 = add_2 >= 0;  add_2 = None
+    and_ = lt_1 & ge_1;  lt_1 = ge_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(and_, "Runtime assertion failed for expression (u0 < 3) & (0 <= u0 + 3) on node 'and_'");  and_ = _assert_scalar_2 = None
     select = torch.ops.aten.select.int(x, 0, item);  x = item = None
     return (select,)""",
             ignore_empty_lines=True,

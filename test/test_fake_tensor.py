@@ -144,6 +144,18 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_select_bounds_check(self):
+        with FakeTensorMode() as mode:
+            x = mode.from_tensor(torch.empty(4, 1, 10, 16))
+            self.assertEqual(x.select(1, 0).shape, (4, 10, 16))
+            self.assertEqual(x.select(1, -1).shape, (4, 10, 16))
+
+            for index in (1, -2):
+                with self.assertRaisesRegex(
+                    IndexError, rf"select\(\): index {index} out of range"
+                ):
+                    x.select(1, index)
+
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 

@@ -477,7 +477,7 @@ def meta_select(
     dim: int,
     index: IntLikeType,
 ) -> FakeTensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
 
     if self.is_sparse:
         return NotImplemented
@@ -488,8 +488,15 @@ def meta_select(
         lambda: "select() cannot be applied to a 0-dim tensor.",
     )
 
-    dim = dim if dim >= 0 else dim + ndim
+    dim = canonicalize_dim(ndim, dim)
     size = self.size(dim)
+    torch._check_index(
+        sym_and(index >= -size, index < size),
+        lambda: (
+            f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}"
+        ),
+    )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
