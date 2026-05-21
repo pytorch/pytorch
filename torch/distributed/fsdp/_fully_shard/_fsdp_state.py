@@ -119,19 +119,16 @@ class FSDPState(_State):
         self._auto_reshard_after_forward = auto_reshard_after_forward
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
-                self._pre_forward,  # pyrefly: ignore[bad-argument-type]
-                prepend=True,
-                with_kwargs=True,
+                self._pre_forward, prepend=True, with_kwargs=True
             )
             self._post_forward_hook_handle = modules[0].register_forward_hook(
-                self._post_forward,  # pyrefly: ignore[bad-argument-type]
-                prepend=False,
+                self._post_forward, prepend=False
             )
         else:
             hook_handle = _register_group_forward_hooks(
                 modules,
-                self._pre_forward,  # pyrefly: ignore[bad-argument-type]
-                self._post_forward,  # pyrefly: ignore[bad-argument-type]
+                self._pre_forward,
+                self._post_forward,
                 self._modules_to_run_forward,
                 self._cast_output_dtype,
             )
@@ -277,7 +274,7 @@ class FSDPState(_State):
                         fsdp_param_group._module_fqn = module_fqn
 
     @_dynamo_disable
-    @dist._spmd_no_typecheck()
+    @dist.spmd_no_typecheck()
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -312,7 +309,7 @@ class FSDPState(_State):
         return args, kwargs
 
     @_dynamo_disable
-    @dist._spmd_no_typecheck()
+    @dist.spmd_no_typecheck()
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
@@ -370,7 +367,7 @@ class FSDPState(_State):
         return output
 
     @_dynamo_disable
-    @dist._spmd_no_typecheck()
+    @dist.spmd_no_typecheck()
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()

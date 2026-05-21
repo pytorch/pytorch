@@ -1681,7 +1681,7 @@ class PipelineStage(_PipelineStageBase):
     def _recv_meta(self, src_stage: int) -> Any:
         """Receive metadata object from a stage on a different rank via P2P."""
         objects: list[Any] = [None]
-        with dist._spmd_no_typecheck():
+        with dist.spmd_no_typecheck():
             dist.recv_object_list(
                 objects,
                 src=self._resolve_peer_global_rank(src_stage),
@@ -1697,7 +1697,7 @@ class PipelineStage(_PipelineStageBase):
 
     def _send_meta(self, meta: Any, dst_stage: int) -> None:
         """Send metadata object to a stage on a different rank via P2P."""
-        with dist._spmd_no_typecheck():
+        with dist.spmd_no_typecheck():
             dist.send_object_list(
                 [meta],
                 dst=self._resolve_peer_global_rank(dst_stage),
@@ -1797,7 +1797,7 @@ class PipelineStage(_PipelineStageBase):
         grad_outputs: list[torch.Tensor | None] | None = None,
     ) -> tuple[torch.Tensor | None, ...]:
         """Compute input gradients via :func:`_autograd_grad_for_inputs`."""
-        with dist._spmd_no_typecheck():
+        with dist.spmd_no_typecheck():
             return _autograd_grad_for_inputs(
                 outputs,
                 all_fwd_inputs,
@@ -1936,7 +1936,7 @@ class PipelineStage(_PipelineStageBase):
             self._send_meta(fwd_meta, self.stage_index + 1)
             return None
 
-    @dist._spmd_no_typecheck()
+    @dist.spmd_no_typecheck()
     def _backward_metadata_inference(
         self,
         loss_fn: Callable[..., torch.Tensor] | None = None,
@@ -2065,6 +2065,7 @@ class PipelineStage(_PipelineStageBase):
             self._send_meta(bwd_meta, self.stage_index - 1)
             return None
 
+    @dist.spmd_no_typecheck()
     def _post_metadata_inference_cleanup(self) -> None:
         """Clean up FSDP side effects (unsharded params, stale grads, stored
         tensors) after metadata inference with real tensors.

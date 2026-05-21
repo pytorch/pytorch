@@ -133,7 +133,7 @@ def _split_block_mask_tensor(
         )
     else:
         local_type = None
-    with dist._spmd_no_typecheck():
+    with dist.spmd_no_typecheck():
         chunks = list(torch.tensor_split(tensor, num_chunks, dim))
     if local_type is not None:
         import spmd_types as spmd  # pyrefly: ignore
@@ -196,7 +196,7 @@ def _split_block_mask(
 
             return batch_offset_mask_mod
 
-        with dist._spmd_no_typecheck():
+        with dist.spmd_no_typecheck():
             chunk_block_mask = BlockMask.from_kv_blocks(
                 kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
                 kv_indices=kv_indices_chunks[chunk_idx],

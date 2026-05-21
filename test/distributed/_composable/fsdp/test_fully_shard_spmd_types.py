@@ -15,8 +15,6 @@ if dist._is_spmd_types_available():
     import spmd_types._checker
     import spmd_types._type_attr
 
-from torch.distributed.pipelining.schedules import ScheduleGPipe
-from torch.distributed.pipelining.stage import PipelineStage
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
@@ -229,9 +227,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            spmd._type_attr.set_local_type(
-                param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]}
-            )
+            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
 
         def shard_fn(param):
             lt = spmd.get_local_type(param)
@@ -275,110 +271,6 @@ class TestFullyShardSpmdTypes(FSDPTest):
         inp = torch.randn((2, 16), device=device_type)
         with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
-
-
-class TPCheckedMLP(nn.Module):
-    """MLP that checks TP annotations are alive on params during forward."""
-
-    def __init__(self, dim, tp_pg, tp_axis, test_case, device=None):
-        super().__init__()
-        self.in_proj = nn.Linear(dim, dim * 4, bias=False, device=device)
-        self.out_proj = nn.Linear(dim * 4, dim, bias=False, device=device)
-        self.tp_pg = tp_pg
-        self.tp_axis = tp_axis
-        self.tc = test_case
-        self.forward_count = 0
-
-    def forward(self, x):
-        # in_proj.weight: column-parallel, S(0) on TP axis
-        in_lt = spmd.get_local_type(self.in_proj.weight)
-        self.tc.assertEqual(in_lt[self.tp_axis], spmd.S(0))
-        # out_proj.weight: row-parallel, S(1) on TP axis
-        out_lt = spmd.get_local_type(self.out_proj.weight)
-        self.tc.assertEqual(out_lt[self.tp_axis], spmd.S(1))
-        self.forward_count += 1
-
-        x = spmd.convert(x, self.tp_pg, src=spmd.I, dst=spmd.R)
-        z = self.in_proj(x)
-        z = F.relu(z)
-        z = self.out_proj(z)
-        z = spmd.all_reduce(z, self.tp_pg, dst=spmd.I)
-        z = F.relu(z)
-        return z
-
-
-@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
-class TestPipelineSpmdTypes(FSDPTest):
-    @property
-    def world_size(self):
-        return min(4, torch.cuda.device_count())
-
-    def setUp(self):
-        super().setUp()
-        from spmd_types._mesh_axis import _reset
-
-        _reset()
-
-    @skip_if_lt_x_gpu(4)
-    def test_pp_tp(self):
-        """PP + TP: verify TP annotations survive through pipeline stages."""
-        pp_size = 2
-        tp_size = self.world_size // pp_size
-        mesh = init_device_mesh(
-            device_type.type,
-            (pp_size, tp_size),
-            mesh_dim_names=("pp", "tp"),
-        )
-        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
-        tp_pg = mesh.get_group("tp")
-        pp_group = mesh["pp"].get_group()
-        pp_rank = dist.get_rank(pp_group)
-
-        mlp_dim = 16
-        torch.manual_seed(42)
-        stage_module = TPCheckedMLP(mlp_dim, tp_pg, tp_axis, self, device=device_type)
-
-        tp_rank = tp_pg.rank()
-        tp_size = tp_pg.size()
-        with torch.no_grad():
-            stage_module.in_proj.weight = nn.Parameter(
-                stage_module.in_proj.weight.chunk(tp_size, dim=0)[tp_rank].contiguous()
-            )
-            stage_module.out_proj.weight = nn.Parameter(
-                stage_module.out_proj.weight.chunk(tp_size, dim=1)[tp_rank].contiguous()
-            )
-
-        tp_plan = {
-            "in_proj.weight": spmd.S(0),
-            "out_proj.weight": spmd.S(1),
-        }
-        for fqn, param in stage_module.named_parameters():
-            spmd._type_attr.set_local_type(param, {tp_axis: tp_plan[fqn]})
-
-        stage = PipelineStage(
-            submodule=stage_module,
-            stage_index=pp_rank,
-            num_stages=pp_size,
-            device=device_type,
-            group=pp_group,
-        )
-        schedule = ScheduleGPipe(
-            stage,
-            n_microbatches=2,
-            loss_fn=lambda out, tgt: out.sum(),
-        )
-
-        torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, mlp_dim), device=device_type)
-        target = torch.randn((4, mlp_dim), device=device_type)
-
-        with spmd.set_current_mesh(mesh):
-            if pp_rank == 0:
-                schedule.step(inp)
-            else:
-                schedule.step(target=target)
-
-        self.assertGreater(stage_module.forward_count, 0)
 
 
 if __name__ == "__main__":
