@@ -1320,6 +1320,7 @@ def load(
     *,
     weights_only: bool | None = None,
     mmap: bool | None = None,
+    validate_sparse: bool | None = None,
     **pickle_load_args: Any,
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1378,6 +1379,15 @@ def load(
             loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
             See :ref:`weights-only` for more details.
+        validate_sparse: Controls whether sparse tensor invariants (e.g. index
+            bounds) are checked after unpickling. ``True`` always runs the
+            checks (overriding the global
+            :func:`torch.sparse.check_sparse_tensor_invariants` setting),
+            ``False`` skips them. The default ``None`` falls back to the
+            global setting, *except* when ``weights_only=True``: in that case
+            loading a checkpoint that contains a sparse tensor raises an
+            error unless the caller has explicitly opted in or out. The checks
+            are O(nnz) per sparse tensor.
         mmap: Indicates whether the file should be mapped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
@@ -1604,6 +1614,8 @@ def load(
                             map_location,
                             _weights_only_unpickler,
                             overall_storage=overall_storage,
+                            validate_sparse=validate_sparse,
+                            weights_only=True,
                             **pickle_load_args,
                         )
                     except pickle.UnpicklingError as e:
@@ -1613,6 +1625,8 @@ def load(
                     map_location,
                     pickle_module,
                     overall_storage=overall_storage,
+                    validate_sparse=validate_sparse,
+                    weights_only=False,
                     **pickle_load_args,
                 )
         if mmap:
@@ -1628,12 +1642,19 @@ def load(
                     opened_file,
                     map_location,
                     _weights_only_unpickler,
+                    validate_sparse=validate_sparse,
+                    weights_only=True,
                     **pickle_load_args,
                 )
             except pickle.UnpicklingError as e:
                 raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
-            opened_file, map_location, pickle_module, **pickle_load_args
+            opened_file,
+            map_location,
+            pickle_module,
+            validate_sparse=validate_sparse,
+            weights_only=False,
+            **pickle_load_args,
         )
 
 
@@ -1654,7 +1675,15 @@ _get_layout.cache = {}  # type: ignore[attr-defined]
 copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
-def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
+def _legacy_load(
+    f,
+    map_location,
+    pickle_module,
+    *,
+    validate_sparse=None,
+    weights_only=False,
+    **pickle_load_args,
+):
     deserialized_objects: dict[int, Any] = {}
 
     restore_location = _get_restore_location(map_location)
@@ -1915,7 +1944,9 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if offset is not None:
                 offset = f.tell()
 
-    torch._utils._validate_loaded_sparse_tensors()
+    torch._utils._validate_loaded_sparse_tensors(
+        validate_sparse=validate_sparse, weights_only=weights_only
+    )
 
     return result
 
@@ -1980,6 +2011,9 @@ def _load(
     pickle_module,
     pickle_file="data.pkl",
     overall_storage=None,
+    *,
+    validate_sparse=None,
+    weights_only=False,
     **pickle_load_args,
 ):
     restore_location = _get_restore_location(map_location)
@@ -2222,7 +2256,9 @@ def _load(
     result = unpickler.load()
     _serialization_tls.map_location = None
 
-    torch._utils._validate_loaded_sparse_tensors()
+    torch._utils._validate_loaded_sparse_tensors(
+        validate_sparse=validate_sparse, weights_only=weights_only
+    )
     torch._C._log_api_usage_metadata(
         "torch.load.metadata", {"serialization_id": zip_file.serialization_id()}
     )
