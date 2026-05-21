@@ -38,7 +38,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.template.registry import override_template_heuristics
+from torch._inductor.heuristics.registry import override_template_heuristics
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
@@ -187,7 +187,8 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+
+        triton_meta = {"device": torch.device(GPU_TYPE)}
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -2164,7 +2165,7 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.heuristics.template.registry import (
+        from torch._inductor.heuristics.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
@@ -2638,7 +2639,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.heuristics.template.registry.get_template_heuristic"
+            "torch._inductor.heuristics.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
@@ -3950,6 +3951,51 @@ class TestMaxAutotuneSubproc(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    def test_max_autotune_profiler_benchmarker_smoke(self):
+        """
+        Smoke test that a simple max-autotune matmul runs with profiler
+        benchmarker selection enabled through config patching, and records
+        positive autotune benchmark timing.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(64, 32).to(GPU_TYPE)
+        b = torch.randn(32, 64).to(GPU_TYPE)
+
+        import torch._inductor.runtime.benchmarking as inductor_benchmarking
+
+        benchmark_timings_ms = []
+        original_benchmark_gpu = inductor_benchmarking.benchmarker.benchmark_gpu
+
+        def benchmark_gpu_with_capture(*args, **kwargs):
+            timing_ms = original_benchmark_gpu(*args, **kwargs)
+            benchmark_timings_ms.append(timing_ms)
+            return timing_ms
+
+        with config.patch(
+            {"max_autotune": True, "use_torch_profiler_benchmarker": True}
+        ):
+            with mock.patch.object(
+                inductor_benchmarking.benchmarker,
+                "benchmark_gpu",
+                side_effect=benchmark_gpu_with_capture,
+            ):
+                torch.compile(mm)(a, b)
+
+        finite_timings_ms = [t for t in benchmark_timings_ms if math.isfinite(t)]
+        self.assertGreater(
+            len(finite_timings_ms),
+            0,
+            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+        )
+        self.assertGreater(
+            min(finite_timings_ms),
+            0.0,
+            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+        )
+
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, search_space, dynamic=False):
@@ -5125,7 +5171,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"
     )
-    @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize(
         "test_case",
         [

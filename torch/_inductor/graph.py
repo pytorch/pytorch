@@ -148,59 +148,6 @@ aten = torch.ops.aten
 
 _post_grad_graph_counter = itertools.count()
 
-
-def _is_valid_generator_user(user: Node, generator_node: Node) -> bool:
-    valid_targets = (
-        torch._prims.rng_prims.graphsafe_run_with_rng_state,
-        torch.ops.higher_order.invoke_subgraph,
-    )
-    if user.target in valid_targets:
-        return True
-
-    from torch._inductor.fx_passes.control_dependencies import control_deps
-
-    if user.target is not control_deps or len(user.args) < 2:
-        return False
-
-    # control_deps wraps the original op in a subgraph and passes the original
-    # FX node arguments after (deps, subgraph).
-    subgraph_node = user.args[1]
-    if not isinstance(subgraph_node, Node) or subgraph_node.op != "get_attr":
-        return False
-    if not isinstance(subgraph_node.target, str):
-        return False
-
-    owning_module = subgraph_node.graph.owning_module
-    if owning_module is None:
-        return False
-
-    try:
-        subgraph = getattr(owning_module, subgraph_node.target)
-    except AttributeError:
-        return False
-    if not isinstance(subgraph, torch.fx.GraphModule):
-        return False
-
-    placeholders = [n for n in subgraph.graph.nodes if n.op == "placeholder"]
-    generator_arg_indices = [
-        i for i, arg in enumerate(user.args[2:]) if arg is generator_node
-    ]
-    if not generator_arg_indices:
-        return False
-
-    for arg_idx in generator_arg_indices:
-        if arg_idx >= len(placeholders):
-            return False
-        placeholder = placeholders[arg_idx]
-        if not (
-            len(placeholder.users) == 1
-            and next(iter(placeholder.users)).target in valid_targets
-        ):
-            return False
-
-    return True
-
-
 if config.is_fbcode():
     from torch._inductor.fb.triton_kernel_metadata import (
         save_triton_kernel_perf_artifact,
@@ -833,9 +780,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         def is_grouped(n: Any) -> bool:
-            meta_val = n.args[1].meta["val"]
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
             assert isinstance(meta_val, torch.Tensor)
-            return n.args[-1] > 1 and meta_val.size(1) > 1
+            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
             return (
@@ -1232,7 +1179,7 @@ class GraphLowering(torch.fx.Interpreter):
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
             f"{hash(data):x}"
         )
-        self.allocated_constant_name[name] = orig_name
+        self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
         return name
 
     def add_tensor_constant(self, data: Tensor, name: str | None = None) -> TensorBox:
@@ -1326,16 +1273,13 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and _is_valid_generator_user(
-                next(iter(V.graph.current_node.users)), V.graph.current_node
-            )
             gen = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = gen
+            self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
         elif is_opaque_reference_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
-            self.graph_inputs[target] = opaque_obj
+            self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return opaque_obj
 
@@ -1469,7 +1413,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])
+            log.debug("  via %s", lowerings[target])  # type: ignore[index]
 
             n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
@@ -1630,7 +1574,7 @@ class GraphLowering(torch.fx.Interpreter):
         args: tuple[torch.fx.node.Argument, ...],
         kwargs: dict[str, object],
     ) -> None:
-        result = super().output(target, args, kwargs)
+        result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
             result = (result,)
@@ -1661,7 +1605,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = V.graph.current_node.args[0]
+        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
             fx_node_args = (fx_node_args,)
@@ -1959,9 +1903,9 @@ class GraphLowering(torch.fx.Interpreter):
                             inp_kwargs,
                         )
                     else:
-                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
@@ -2496,9 +2440,27 @@ class GraphLowering(torch.fx.Interpreter):
         self,
     ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         """
-        For GPU, Triton kernels are autotuned and stored as cubin files
+        For GPU, Triton kernels are autotuned and stored as cubin files.
+
+        For CPU with user-defined Triton kernels, AOTI also needs the
+        same two-pass compile when `autotune_at_compile_time` is off,
+        since `CpuTritonKernelCache` is otherwise only populated by the
+        autotune block (see `DeferredCpuTritonCallWrapper` in
+        `cpp_wrapper_cpu.py`).
         """
-        if any(device in self.device_types for device in ["cuda", "xpu"]):
+        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        # CPU + user-defined Triton + AOTI + autotune block disabled is the
+        # only CPU configuration that needs the two-pass dance: the autotune
+        # block normally populates CpuTritonKernelCache, but here it doesn't run.
+        needs_cpu_triton_two_pass = (
+            "cpu" in self.device_types
+            and self.aot_mode
+            and not config.triton.autotune_at_compile_time
+            and any(
+                isinstance(op, ir.UserDefinedTritonKernel) for op in self.operations
+            )
+        )
+        if has_gpu or needs_cpu_triton_two_pass:
 
             def extract_real_inputs() -> list[int | float | torch.Tensor]:
                 def materialize(
@@ -2778,7 +2740,7 @@ class GraphLowering(torch.fx.Interpreter):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
-                linemap=linemap,
+                linemap=linemap,  # type: ignore[arg-type]
                 attrs={
                     **self.constants,
                     **self.torchbind_constants,
@@ -2787,7 +2749,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         self.cache_key = key
         self.cache_path = path
-        self.cache_linemap = linemap
+        self.cache_linemap = linemap  # type: ignore[assignment]
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info

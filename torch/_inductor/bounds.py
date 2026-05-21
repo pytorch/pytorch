@@ -129,7 +129,7 @@ class BoundVars:
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
         assert len(output) == 1
-        # dont bother unioning with value since the load from buffer will be
+        # don't bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
@@ -165,11 +165,11 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     @staticmethod
     def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
         # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)
+        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
+        # so we don't have full coverage
         return ValueRanges.unknown()
 
     def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
