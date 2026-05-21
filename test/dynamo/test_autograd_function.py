@@ -8,6 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._functorch.autograd_function import custom_function_call
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
 
 
@@ -2630,6 +2631,43 @@ class GraphModule(torch.nn.Module):
         x.grad = None
         res.backward()
         self.assertEqual(x.grad, grad_ref)
+
+    def test_custom_function_call_custom_jvp_unsupported(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return torch.sin(x)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def jvp(ctx, x_t):
+                return x_t
+
+        def fn(x):
+            return custom_function_call(MySin, x)
+
+        x = torch.randn(2, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported custom jvp"
+        ) as cm:
+            opt_fn(x)
+        self.assertIn(
+            "Higher Order Operator: torch.ops.higher_order.custom_function_call",
+            str(cm.exception),
+        )
+        self.assertIn(
+            "Developer debug context: custom_function_call",
+            str(cm.exception),
+        )
 
     def test_apply_kwargs_all_kwargs(self):
         class Add(torch.autograd.Function):

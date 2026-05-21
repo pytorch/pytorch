@@ -2338,6 +2338,33 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     ) -> VariableTracker:
         if self.source is None:
             raise AssertionError("source must not be None")
+        if args and torch.is_grad_enabled():
+            from .misc import (
+                AutogradFunctionVariable,
+                raise_if_unsupported_autograd_function_methods,
+            )
+
+            autograd_function = args[0]
+            requires_grad = False
+
+            def visit(vt: VariableTracker) -> None:
+                nonlocal requires_grad
+                if vt.is_tensor():
+                    # type: ignore[attr-defined]
+                    if vt.requires_grad is not False:
+                        requires_grad = True
+                if isinstance(vt, variables.NNModuleVariable):
+                    if vt.is_training(tx):
+                        requires_grad = True
+
+            VariableTracker.visit(visit, (args[1:], kwargs))
+            if requires_grad and isinstance(
+                autograd_function, AutogradFunctionVariable
+            ):
+                raise_if_unsupported_autograd_function_methods(
+                    autograd_function.fn_cls,
+                    f"custom_function_call {autograd_function} {args[1:]} {kwargs}",
+                )
         return torch._dynamo.variables.UserMethodVariable(
             self.value.__call__.__func__,
             torch._dynamo.variables.UserDefinedObjectVariable(

@@ -1937,7 +1937,7 @@
   "GB0144": [
     {
       "Gb_type": "Unsupported custom jvp",
-      "Context": "call_apply {self} {args} {kwargs}",
+      "Context": "context",
       "Explanation": "Dynamo does not support tracing `torch.autograd.Function` subclasses that define a custom `jvp` method.",
       "Hints": [
         "Remove the custom `jvp` method if possible.",
@@ -1948,7 +1948,7 @@
   "GB0145": [
     {
       "Gb_type": "Unsupported custom vjp",
-      "Context": "call_apply {self} {args} {kwargs}",
+      "Context": "context",
       "Explanation": "Dynamo does not support tracing `torch.autograd.Function` subclasses that define a custom `vjp` method.",
       "Hints": [
         "Remove the custom `vjp` method if possible.",

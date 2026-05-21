@@ -859,6 +859,37 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+def raise_if_unsupported_autograd_function_methods(fn_cls: Any, context: str) -> None:
+    vjp_fn = fn_cls.vjp  # type: ignore[attr-defined]
+    if vjp_fn is not torch.autograd.Function.vjp:
+        unimplemented(
+            gb_type="Unsupported custom vjp",
+            context=context,
+            explanation="Dynamo does not support tracing "
+            "`torch.autograd.Function` subclasses that define "
+            "a custom `vjp` method.",
+            hints=[
+                "Remove the custom `vjp` method if possible.",
+                "Use standard `backward` instead if applicable.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    jvp_fn = fn_cls.jvp  # type: ignore[attr-defined]
+    if jvp_fn is not torch.autograd.Function.jvp:
+        unimplemented(
+            gb_type="Unsupported custom jvp",
+            context=context,
+            explanation="Dynamo does not support tracing "
+            "`torch.autograd.Function` subclasses that define "
+            "a custom `jvp` method.",
+            hints=[
+                "Remove the custom `jvp` method if possible.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
@@ -969,34 +1000,9 @@ class AutogradFunctionVariable(VariableTracker):
                 # is_setup_ctx_defined
                 source = None
 
-            vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
-            if vjp_fn is not torch.autograd.Function.vjp:
-                unimplemented(
-                    gb_type="Unsupported custom vjp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `vjp` method.",
-                    hints=[
-                        "Remove the custom `vjp` method if possible.",
-                        "Use standard `backward` instead if applicable.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
-            if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented(
-                    gb_type="Unsupported custom jvp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `jvp` method.",
-                    hints=[
-                        "Remove the custom `jvp` method if possible.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
+            raise_if_unsupported_autograd_function_methods(
+                self.fn_cls, f"call_apply {self} {args} {kwargs}"
+            )
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
