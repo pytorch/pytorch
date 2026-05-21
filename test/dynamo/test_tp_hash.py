@@ -329,6 +329,12 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
                 self.hash_count += 1
                 return int.__hash__(self)
 
+        class SetSubclass(set):
+            pass
+
+        class FrozenSetSubclass(frozenset):
+            pass
+
         def fn(x):
             d = dict.fromkeys(map(HashCountingInt, range(4)))
             after_dict = sum(elem.hash_count for elem in d)
@@ -352,6 +358,12 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
             after_keys_fromkeys = sum(elem.hash_count for elem in d)
             frozenset(keys).difference(keys)
             after_keys_difference = sum(elem.hash_count for elem in d)
+            SetSubclass(d)
+            after_set_subclass = sum(elem.hash_count for elem in d)
+            subclass_frozenset = FrozenSetSubclass(d)
+            after_frozenset_subclass = sum(elem.hash_count for elem in d)
+            subclass_frozenset.difference(d)
+            after_frozenset_subclass_difference = sum(elem.hash_count for elem in d)
             return (
                 after_dict,
                 after_frozenset,
@@ -363,10 +375,13 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
                 after_keys_frozenset,
                 after_keys_fromkeys,
                 after_keys_difference,
+                after_set_subclass,
+                after_frozenset_subclass,
+                after_frozenset_subclass_difference,
             )
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
+        self.assertEqual(result, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
 
     def test_hash_object_descriptor_uses_identity_hash(self):
         value = 1
