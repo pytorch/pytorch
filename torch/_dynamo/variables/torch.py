@@ -218,6 +218,66 @@ if torch.distributed.is_available():
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
+# Ops that consume scalar values from 0-d tensors (via .item()) for computation
+# only, not for output shapes. When capture_scalar_outputs is enabled, these ops
+# create unbacked symbols that don't affect the outputs, causing
+# PendingUnbackedSymbolNotFound errors.
+#
+# We use an explicit allowlist rather than generically suppressing for any 0-d
+# tensor argument because an op could legitimately create unbacked symbols for
+# data-dependent output shapes. Suppressing those would silently drop binding
+# information.
+ops_consuming_unbacked_scalars: frozenset[Callable[..., Any]] = frozenset(
+    {
+        # ops with Scalar alpha/beta/value arguments
+        torch.add,
+        torch.sub,
+        torch.addmm,
+        torch.addmv,
+        torch.addr,
+        torch.addbmm,
+        torch.baddbmm,
+        torch.addcmul,
+        torch.addcdiv,
+        # foreach ops with scalar/alpha arguments
+        torch._foreach_add,
+        torch._foreach_add_,
+        torch._foreach_sub,
+        torch._foreach_sub_,
+        torch._foreach_mul,
+        torch._foreach_mul_,
+        torch._foreach_div,
+        torch._foreach_div_,
+        torch._foreach_clamp_max,
+        torch._foreach_clamp_max_,
+        torch._foreach_clamp_min,
+        torch._foreach_clamp_min_,
+        torch._foreach_maximum,
+        torch._foreach_maximum_,
+        torch._foreach_minimum,
+        torch._foreach_minimum_,
+        torch._foreach_pow,
+        torch._foreach_pow_,
+        torch._foreach_lerp,
+        torch._foreach_lerp_,
+        torch._foreach_addcmul,
+        torch._foreach_addcmul_,
+        torch._foreach_addcdiv,
+        torch._foreach_addcdiv_,
+    }
+)
+
+# Derived set of method names for TensorVariable.call_method. Includes inplace
+# variants (e.g., "add_") since those are only callable as tensor methods.
+# This is a set of strings (not function objects) because the call_method path
+# only has the method name, whereas call_function has the actual function object.
+methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
+    name
+    for fn in ops_consuming_unbacked_scalars
+    for name in (fn.__name__, fn.__name__ + "_")
+    if hasattr(torch.Tensor, name)
+)
+
 
 @functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
@@ -539,6 +599,11 @@ class BaseTorchVariable(VariableTracker):
 
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -3067,38 +3132,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        # Ops that consume scalar values from tensors (via .item()) for computation only,
-        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
-        # create unbacked symbols that are not in the outputs, causing
-        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
-        # since they only affect tensor values, not shapes.
-        ops_consuming_unbacked_scalars = {
-            # foreach ops with scalar/alpha arguments
-            torch._foreach_add,
-            torch._foreach_add_,
-            torch._foreach_sub,
-            torch._foreach_sub_,
-            torch._foreach_mul,
-            torch._foreach_mul_,
-            torch._foreach_div,
-            torch._foreach_div_,
-            torch._foreach_clamp_max,
-            torch._foreach_clamp_max_,
-            torch._foreach_clamp_min,
-            torch._foreach_clamp_min_,
-            torch._foreach_maximum,
-            torch._foreach_maximum_,
-            torch._foreach_minimum,
-            torch._foreach_minimum_,
-            torch._foreach_pow,
-            torch._foreach_pow_,
-            torch._foreach_lerp,
-            torch._foreach_lerp_,
-            torch._foreach_addcmul,
-            torch._foreach_addcmul_,
-            torch._foreach_addcdiv,
-            torch._foreach_addcdiv_,
-        }
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:

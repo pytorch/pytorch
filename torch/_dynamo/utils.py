@@ -3172,14 +3172,6 @@ def iter_contains(
 ) -> Any:
     from .variables import ConstantVariable
 
-    if search.is_python_constant():
-        found_const = any(
-            x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
-            for x in items
-        )
-        return ConstantVariable.create(found_const)
-
     must_check_tensor_id = False
     if check_tensor_identity and search.is_tensor():
         must_check_tensor_id = True
@@ -3198,6 +3190,11 @@ def iter_contains(
             check = SourcelessBuilder.create(tx, operator.eq).call_function(
                 tx, [x, search], {}
             )
+            if check.is_python_constant():
+                if not check.as_python_constant():
+                    continue
+                if found is None:
+                    return ConstantVariable.create(True)
             if found is None:
                 found = check
             else:
@@ -5543,19 +5540,23 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(

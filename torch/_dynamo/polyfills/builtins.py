@@ -90,6 +90,12 @@ class _CallableIterator:
         # otherwise the value will be returned.
         return r
 
+    def __reduce__(self):  # type: ignore[no-untyped-def]
+        iter_fn = builtins.__dict__["iter"]
+        if self.exhausted:
+            return iter_fn, ((),)
+        return iter_fn, (self.fn, self.sentinel)
+
 
 class _SequenceIterator:
     def __init__(self, iterable) -> None:
@@ -111,6 +117,12 @@ class _SequenceIterator:
         except (IndexError, StopIteration):
             self.exhausted = True
             raise StopIteration from None
+
+    def __reduce__(self):
+        iter_fn = builtins.__dict__["iter"]
+        if self.exhausted:
+            return iter_fn, ((),)
+        return iter_fn, (self.iterable,), self.index
 
 
 def sequence_iterator(iterable) -> Iterable[object]:

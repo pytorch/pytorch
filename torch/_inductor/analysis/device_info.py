@@ -211,7 +211,19 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     callers always receive the throughput achievable by cuBLAS/cuDNN on
     non-sparse data.
     """
-    name: str | None = torch.cuda.get_device_name()
+    if torch.cuda.is_available():
+        name: str | None = torch.cuda.get_device_name()
+    elif torch.xpu.is_available():
+        name: str | None = torch.xpu.get_device_name()
+        log.info(
+            "No XPU devices are currently supported in the datasheet lookup. "
+            "To get accurate compute estimates, add your device to "
+            "torch/_inductor/analysis/device_info.py",
+        )
+    else:
+        log.info("No supported device available, skipping datasheet lookup")
+        return None
+
     if name is None:
         log.info("No device found, returning None")
         return None

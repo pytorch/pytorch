@@ -215,6 +215,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         y = fn(x)
         self.assertEqual(y, x.sin())
 
+    def test_symmetric_difference_update_replays_removed_source_items(self):
+        def fn(s):
+            s.symmetric_difference_update({1, 3})
+            return torch.tensor(len(s))
+
+        expected_set = {1, 2}
+        expected_result = fn(expected_set)
+
+        actual_set = {1, 2}
+        actual_result = torch.compile(fn, backend="eager", fullgraph=True)(actual_set)
+
+        self.assertEqual(actual_result, expected_result)
+        self.assertEqual(actual_set, expected_set)
+
 
 class TestSetGuards(LoggingTestCase):
     def test_set_with_function(self):
@@ -781,12 +795,40 @@ class _SetBase(_FrozensetBase):
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
     thetype = frozenset
 
+    @make_dynamo_test
+    def test_copy_preserves_identity(self):
+        p = frozenset("abc")
+        self.assertTrue(id(p) == id(p.copy()))
+        self.assertTrue(id(p) == id(frozenset.copy(p)))
+
 
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
+
+    @make_dynamo_test
+    def test_discard_unhashable_key(self):
+        s = set("abc")
+        self.assertRaises(TypeError, s.discard, [])
+
+    @make_dynamo_test
+    def test_discard_set_key_matches_frozenset(self):
+        s = {frozenset("abc")}
+        s.discard(set("abc"))
+        self.assertEqual(s, set())
+
+    @make_dynamo_test
+    def test_remove_unhashable_key(self):
+        s = set("abc")
+        self.assertRaises(TypeError, s.remove, [])
+
+    @make_dynamo_test
+    def test_remove_set_key_matches_frozenset(self):
+        s = {frozenset("abc")}
+        s.remove(set("abc"))
+        self.assertEqual(s, set())
 
 
 class UserDefinedSetTests(_SetBase, _BaseSetTests):
@@ -807,6 +849,17 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
         pass
 
     thetype = CustomFrozenset
+
+    @make_dynamo_test
+    def test_copy_returns_base_frozenset(self):
+        p = self.thetype("abc")
+        result = p.copy()
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
+
+        result = frozenset.copy(p)
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
 
     def test_in_frozenset(self):
         super().test_in_frozenset()

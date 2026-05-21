@@ -3,12 +3,231 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import sys
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
 lst = []
+
+
+class AlwaysEqualForListRemove:
+    def __eq__(self, other):
+        return True
+
+
+class NeverEqualForListRemove:
+    def __eq__(self, other):
+        return False
+
+
+class EmptyLengthHintIterator:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise StopIteration
+
+    def __length_hint__(self):
+        return sys.maxsize
+
+
+class LengthObservingIterator:
+    def __init__(self, items):
+        self.items = items
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.index == 2:
+            raise StopIteration
+        self.index += 1
+        return len(self.items)
+
+
+class IterSideEffectIterable:
+    def __init__(self):
+        self.iter_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        self.iter_calls += 1
+        self.index = 0
+        return self
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return self.iter_calls
+
+
+class LengthHintSideEffectIterable:
+    def __init__(self):
+        self.hint_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __length_hint__(self):
+        self.hint_calls += 1
+        return 1
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return self.hint_calls
+
+
+class BadLenGoodLengthHintIterable:
+    def __init__(self):
+        self.hint_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return 1.5  # noqa: PLE0303
+
+    def __length_hint__(self):
+        self.hint_calls += 1
+        return 1
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return self.hint_calls
+
+
+class LengthHintTypeErrorIterable:
+    def __init__(self):
+        self.hint_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __length_hint__(self):
+        self.hint_calls += 1
+        raise TypeError("bad hint")
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return 3
+
+
+class NonCallableLengthHintIterable:
+    __length_hint__ = 1
+
+    def __init__(self):
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return 4
+
+
+class TensorLengthHintIterable:
+    __length_hint__ = torch.tensor(1)
+
+    def __init__(self):
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return 5
+
+
+class PropertyLengthHintIterable:
+    def __init__(self):
+        self.hint_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    @property
+    def __length_hint__(self):
+        self.hint_calls += 1
+        return 1
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return self.hint_calls
+
+
+class TensorPropertyLengthHintIterable:
+    def __init__(self):
+        self.hint_calls = 0
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    @property
+    def __length_hint__(self):
+        self.hint_calls += 1
+        return torch.tensor(1)
+
+    def __next__(self):
+        if self.index == 1:
+            raise StopIteration
+        self.index += 1
+        return self.hint_calls
+
+
+class TensorReturnLengthHintIterable:
+    def __iter__(self):
+        return self
+
+    def __length_hint__(self):
+        return torch.tensor(1)
+
+    def __next__(self):
+        raise StopIteration
+
+
+class LengthHintOverflowIterable:
+    def __iter__(self):
+        return self
+
+    def __length_hint__(self):
+        return sys.maxsize + 1
+
+    def __next__(self):
+        raise StopIteration
+
+
+class LengthHintMutatingList(list):
+    def __len__(self):
+        self[0] = 7
+        return 1
+
+
+class NonIterable:
+    pass
 
 
 class TupleTests(torch._dynamo.test_case.TestCase):
@@ -246,6 +465,106 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.extend, 2, 3)
 
     @make_dynamo_test
+    def test_extend_empty_user_defined_iterator(self):
+        p = self.thetype([1, 2, 3])
+        self.assertIsNone(p.extend(EmptyLengthHintIterator()))
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_extend_user_defined_iterator_observes_mutation(self):
+        p = self.thetype([0])
+        self.assertIsNone(p.extend(LengthObservingIterator(p)))
+        self.assertEqual(p, self.thetype([0, 1, 2]))
+
+    @make_dynamo_test
+    def test_extend_user_defined_iter_called_once(self):
+        p = self.thetype([])
+        it = IterSideEffectIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([1]))
+        self.assertEqual(it.iter_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_user_defined_length_hint_side_effect(self):
+        p = self.thetype([])
+        it = LengthHintSideEffectIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([1]))
+        self.assertEqual(it.hint_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_bad_len_falls_back_to_length_hint(self):
+        p = self.thetype([])
+        it = BadLenGoodLengthHintIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([1]))
+        self.assertEqual(it.hint_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_length_hint_type_error_defaults(self):
+        p = self.thetype([])
+        it = LengthHintTypeErrorIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([3]))
+        self.assertEqual(it.hint_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_non_callable_length_hint_defaults(self):
+        p = self.thetype([])
+        self.assertIsNone(p.extend(NonCallableLengthHintIterable()))
+        self.assertEqual(p, self.thetype([4]))
+
+    @make_dynamo_test
+    def test_extend_tensor_length_hint_defaults(self):
+        p = self.thetype([])
+        self.assertIsNone(p.extend(TensorLengthHintIterable()))
+        self.assertEqual(p, self.thetype([5]))
+
+    @make_dynamo_test
+    def test_extend_property_length_hint_defaults(self):
+        p = self.thetype([])
+        it = PropertyLengthHintIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([1]))
+        self.assertEqual(it.hint_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_tensor_property_length_hint_defaults(self):
+        p = self.thetype([])
+        it = TensorPropertyLengthHintIterable()
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([1]))
+        self.assertEqual(it.hint_calls, 1)
+
+    @make_dynamo_test
+    def test_extend_tensor_return_length_hint_type_error(self):
+        p = self.thetype([])
+        with self.assertRaisesRegex(
+            TypeError, "__length_hint__ must be an integer, not Tensor"
+        ):
+            p.extend(TensorReturnLengthHintIterable())
+
+    @make_dynamo_test
+    def test_extend_length_hint_overflow(self):
+        p = self.thetype([])
+        with self.assertRaises(OverflowError):
+            p.extend(LengthHintOverflowIterable())
+
+    @make_dynamo_test
+    def test_extend_list_subclass_len_before_inherited_iter(self):
+        p = self.thetype([])
+        it = LengthHintMutatingList([1])
+        self.assertIsNone(p.extend(it))
+        self.assertEqual(p, self.thetype([7]))
+        self.assertEqual(it, [7])
+
+    @make_dynamo_test
+    def test_extend_user_defined_non_iterable_type_error(self):
+        p = self.thetype([])
+        with self.assertRaisesRegex(TypeError, "'NonIterable' object is not iterable"):
+            p.extend(NonIterable())
+
+    @make_dynamo_test
     def test_insert(self):
         p = self.thetype("abc")
         self.assertIsNone(p.insert(1, "ef"))
@@ -277,6 +596,19 @@ class ListTests(TupleTests):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.remove)
         self.assertRaises(TypeError, p.remove, 2, 3)
+
+    @make_dynamo_test
+    def test_remove_uses_item_richcompare(self):
+        p = [AlwaysEqualForListRemove()]
+        self.assertIsNone(p.remove(NeverEqualForListRemove()))
+        self.assertEqual(p, [])
+
+    @make_dynamo_test
+    def test_remove_matches_identity_before_richcompare(self):
+        item = NeverEqualForListRemove()
+        p = [item]
+        self.assertIsNone(p.remove(item))
+        self.assertEqual(p, [])
 
     @make_dynamo_test
     def test_reverse(self):
