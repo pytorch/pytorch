@@ -60,6 +60,34 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
+def _is_hopper_cuda(device: torch.device | None) -> bool:
+    if device is None or device.type != "cuda":
+        return False
+    try:
+        if not torch.cuda.is_available():
+            return False
+        major, _ = torch.cuda.get_device_capability(device)
+        return major == 9
+    except (AssertionError, RuntimeError, TypeError):
+        # Capability lookup can fail for fake or invalid CUDA devices while
+        # constructing candidate configs; leave pruning disabled in that case.
+        return False
+
+
+def _is_slow_hopper_wgmma_config(conf: BaseConfig) -> bool:
+    if config.max_autotune_gemm_search_space != "DEFAULT":
+        return False
+
+    # Hopper WGMMA codegen can hit pathological ptxas compile times. Keep the
+    # default search space focused on lower-pipeline-pressure configs, plus the
+    # 128x256x64 config that is known to win for large Hopper matmuls.
+    if conf.num_stages >= 5:
+        return True
+    if conf.num_stages >= 4 and conf.num_warps >= 8:
+        return (conf.block_m, conf.block_n, conf.block_k) != (128, 256, 64)
+    return False
+
+
 USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
 
 # Check if running on ROCm
@@ -2129,6 +2157,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
+        target_device = kwargs.pop("target_device", kernel_inputs.device())
         # Get the appropriate config generator
         configs = self._get_config_generator()
         # `origami is not None` encodes the module-load gate (see top of file);
@@ -2172,6 +2201,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                target_device=target_device,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2319,6 +2349,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     k,
                     dtype_size=dtype.itemsize,
                     op_name=op_name,
+                    target_device=target_device,
                     **kwargs,
                 ):
                     template_kwargs = self._convert_config_to_template_kwargs(
@@ -2348,6 +2379,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 k,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                target_device=target_device,
                 **kwargs,
             ):
                 template_kwargs = self._convert_config_to_template_kwargs(
@@ -2834,6 +2866,37 @@ class ScaledBlackwellTMAConfigMixin(
 )
 class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA"""
+
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        target_device: torch.device | None = None,
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        if _is_hopper_cuda(target_device):
+            configs = [c for c in configs if not _is_slow_hopper_wgmma_config(c)]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
 
 
 @register_template_heuristic(
