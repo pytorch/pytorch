@@ -682,10 +682,6 @@ class ExternKernelMultiOutLine(WrapperLine):
 
         code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
 
-        for out_node in node.out_variant_output_nodes:
-            if isinstance(out_node.layout, ir.Layout):
-                out_node.codegen_size_asserts(self.wrapper)
-
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -1959,6 +1955,9 @@ class PythonWrapperCodegen(CodeGen):
         for out_node in node.out_variant_output_nodes:
             self.codegen_allocation(out_node)
         self.writeline(ExternKernelMultiOutLine(self, node))
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -3014,6 +3013,7 @@ class PythonWrapperCodegen(CodeGen):
                 config_of(
                     signature,
                     indices=arg_indices,
+                    pointer_range_override=(),
                 )
             ],
         }
@@ -3138,6 +3138,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("\\", "\\\\")
         if config.cpp_wrapper:
             # With cpp_wrapper + autotune_at_compile_time=False, the source is
             # further embedded in a C++ raw string inside a Python r"""...""" wrapper.

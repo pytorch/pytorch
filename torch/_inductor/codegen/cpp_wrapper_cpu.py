@@ -291,6 +291,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        self.needs_vec_isa = self.device == "cpu"
 
     @staticmethod
     def create(
@@ -1434,6 +1435,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
             return
         if cpp_definition is not None:
+            self.needs_vec_isa = True
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
         else:
@@ -1556,7 +1558,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Close the wrapper code block
             result.splice('"""\n)')
 
-        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+        if config.cpp_wrapper_build_separate:
+            kernel_code = "kernel_src"
+            needs_vec_isa = "False"
+            kernel_needs_vec_isa = str(self.needs_vec_isa)
+        else:
+            kernel_code = "None"
+            needs_vec_isa = str(self.needs_vec_isa)
+            kernel_needs_vec_isa = "None"
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1564,6 +1573,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
+                needs_vec_isa={needs_vec_isa},
+                kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
