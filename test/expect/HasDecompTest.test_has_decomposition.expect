@@ -410,9 +410,9 @@ aten::_indices
 aten::_indices_copy
 aten::_indices_copy.out
 aten::_int_mm
-aten::_int_mm.out
 aten::_int_mm.dtype
 aten::_int_mm.dtype_out
+aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
 aten::_jagged_to_padded_dense_forward

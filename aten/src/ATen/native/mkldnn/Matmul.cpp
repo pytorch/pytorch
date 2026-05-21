@@ -86,7 +86,7 @@ void mkldnn_matmul_i8i8i32(
 }
 
 // Supports outdtype float32 or bfloat16
-void mkldnn_matmul_i8i8_acc(
+void mkldnn_matmul_i8i8_dtype(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -718,7 +718,7 @@ void mkldnn_matmul_i8i8_dtype(
   } else {
     TORCH_CHECK(
         false,
-        "mkldnn_matmul_i8i8_dtype_out: only float32 and bfloat16 are supported for result");
+        "mkldnn_matmul_i8i8_dtype: only float32 and bfloat16 are supported for result");
   }
 }
 
