@@ -3823,9 +3823,8 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    length = max(0, end - start)
-    y = y.narrow(dim=1, start=start, length=length)
-    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+    y = aten.slice.Tensor(y, 1, start, end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:
