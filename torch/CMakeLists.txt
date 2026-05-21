@@ -480,7 +480,7 @@ endif()
 
 add_custom_target(
   gen_torch_version ALL
-  "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+  "${Python_EXECUTABLE}" -m tools.generate_torch_version
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
     --hip-version=${HIP_VERSION_CLEAN}
