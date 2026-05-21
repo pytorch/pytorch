@@ -490,7 +490,9 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         acc = torch.accelerator.current_accelerator()
-        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device=acc.type)
+        buffer = torch.empty(
+            self.L2_cache_size // 4, dtype=torch.int, device=acc.type
+        )  # pyrefly: ignore [missing-attribute]
         buffer.zero_()
 
         # estimate the runtime of `_callable`
@@ -611,7 +613,9 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         else:
             buffer_size_bytes = self.L2_cache_size
         acc = torch.accelerator.current_accelerator()
-        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device=acc.type)
+        buffer = torch.empty(
+            buffer_size_bytes // 4, dtype=torch.int, device=acc.type
+        )  # pyrefly: ignore [missing-attribute]
         buffer.zero_()
 
         # Estimation phase with separate event pairs — also serves as warmup.
@@ -639,7 +643,9 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         # benchmark with profiler
         # Use both CPU and Device activities, otherwise record_function
         # will not record the region.
-        dispatchkey = torch._C._dispatch_key_for_device(acc.type)
+        dispatchkey = torch._C._dispatch_key_for_device(
+            acc.type
+        )  # pyrefly: ignore [missing-attribute]
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -659,7 +665,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         torch.accelerator.synchronize()
 
         callable_gpu_time_us = 0.0
-        if acc.type == "cuda":
+        if acc.type == "cuda":  # pyrefly: ignore [missing-attribute]
             # Extract _CALLABLE GPU time directly from raw kineto events.
             # This avoids prof.key_averages() which triggers expensive lazy
             # processing: _parse_kineto_results (wrapping every raw event in
