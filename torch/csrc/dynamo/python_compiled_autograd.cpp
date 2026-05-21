@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -418,11 +417,12 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    auto matching_sizes = cached_keys |
-        std::views::filter([&](const CacheKey& k) {
-                            return k.node_type == node_type;
-                          }) |
-        std::views::transform(&CacheKey::key_size);
+    std::vector<size_t> matching_sizes;
+    for (const auto& k : cached_keys) {
+      if (k.node_type == node_type) {
+        matching_sizes.push_back(k.key_size);
+      }
+    }
     std::string compile_reason = fmt::format(
         "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
         node_name,
