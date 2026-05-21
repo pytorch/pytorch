@@ -1519,7 +1519,26 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        return f"{x}.asinh()"
+        vec_t = f"decltype({x})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            # Avoid Vectorized::asinh/SLEEF here: it overflows internally for
+            # large finite fp32 inputs where eager std::asinh remains finite.
+            # This is asinh(x) = sign(x) * log(abs(x) + sqrt(abs(x)^2 + 1)),
+            # rewritten with 1 / abs(x) to avoid squaring large values.
+            code.writeline(f"auto abs_x = {x}.abs();")
+            code.writeline(f"auto one = {vec_t}(1);")
+            code.writeline("auto inv_abs_x = one / abs_x;")
+            code.writeline(
+                "auto correction = "
+                "(one / (one + inv_abs_x)) / "
+                "((one + inv_abs_x * inv_abs_x).sqrt() + inv_abs_x);"
+            )
+            code.writeline("auto result = abs_x.log1p() + correction.log1p();")
+            code.writeline(f"return result.copysign({x});")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def acosh(x):
@@ -4402,6 +4421,7 @@ class CppKernelProxy(CppKernel):
             )
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
+            _tiled_loop_reduction_descendant = False
             _outer_loop = None
             if tiling_indices:
                 inner_loop_reduction = False
@@ -4416,6 +4436,10 @@ class CppKernelProxy(CppKernel):
                     ].is_reduction
                     _inner_loop_reduction_outer_not = (
                         inner_loop_reduction and not outer_loop_reduction
+                    )
+                    _tiled_loop_reduction_descendant = not outer_loop_reduction and any(
+                        loop.is_reduction
+                        for loop in self.loop_nest.loops[inner_loop_level:]
                     )
 
             if len(tiling_indices) == 1:
@@ -4518,8 +4542,12 @@ class CppKernelProxy(CppKernel):
                 _outer_loop = outer_loop
             else:
                 self.kernels = [scalar_kernel]
+            # A non-reduction tiled loop with a nested reduction needs its
+            # reduction suffix selected by the same main/tail active range.
             self.aggregate_reduction_buffers(
-                _inner_loop_reduction_outer_not, _outer_loop
+                _inner_loop_reduction_outer_not
+                or (len(tiling_indices) == 1 and _tiled_loop_reduction_descendant),
+                _outer_loop,
             )
             self.loop_nest.set_kernel(self)
 
