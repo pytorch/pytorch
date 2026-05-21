@@ -4692,6 +4692,38 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_f(p, a)
             self.assertEqual(eager_out, compiled_out)
 
+        def test_autoregressive_cache_growth_output_as_input(self):
+            class KVCacheModel(torch.nn.Module):
+                def __init__(self, d=64):
+                    super().__init__()
+                    self.proj = torch.nn.Linear(d, d)
+
+                def forward(self, x, cache=None):
+                    out = self.proj(x)
+                    if cache is not None:
+                        cache = torch.cat([cache, out], dim=1)
+                    else:
+                        cache = out
+                    return out, cache
+
+            torch.manual_seed(0)
+            model = KVCacheModel().cuda().eval()
+            compiled = torch.compile(model, mode="reduce-overhead")
+            inputs = [torch.randn(1, 1, 64, device="cuda") for _ in range(6)]
+
+            eager_cache = None
+            compiled_cache = None
+            with torch.no_grad():
+                for step, x in enumerate(inputs):
+                    eager_out, eager_cache = model(x, eager_cache)
+
+                    torch.compiler.cudagraph_mark_step_begin()
+                    compiled_out, compiled_cache = compiled(x, compiled_cache)
+
+                    self.assertEqual(compiled_out, eager_out)
+                    self.assertEqual(compiled_cache, eager_cache)
+                    self.assertEqual(compiled_cache.shape, (1, step + 1, 64))
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_graph_partition_unbacked_symint_multi_output_layout(self):
