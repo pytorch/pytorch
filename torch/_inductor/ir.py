@@ -6286,7 +6286,6 @@ def is_node_sequence(
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
     inputs: Sequence[IRNode | Sequence[IRNode]]
-    _DepType = dependencies.StarDep
 
     def input_name(self, i: int) -> str:
         input = self.inputs[i]
@@ -6295,17 +6294,18 @@ class InputsKernel(OperationBuffer):
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         reads = OrderedSet[dependencies.Dep]()
+        StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, Sequence):
-                reads.update(self._DepType(x.get_name()) for x in input)
+                reads.update(StarDep(x.get_name()) for x in input)
             elif isinstance(input, ShapeAsConstantBuffer):
                 # Skip creating dependency for symbolics as they're visible globally
                 continue
             else:
-                reads.add(self._DepType(input.get_name()))
+                reads.add(StarDep(input.get_name()))
 
         writes = OrderedSet[dependencies.Dep](
-            self._DepType(buf.get_name()) for buf in self.get_outputs()
+            StarDep(buf.get_name()) for buf in self.get_outputs()
         )
 
         return dependencies.ReadWrites(
@@ -7924,8 +7924,6 @@ class UserDefinedTritonKernel(ExternKernel):
     A user-defined triton kernel (e.g. via @triton.jit).
     """
 
-    _DepType = dependencies.UserTritonDep
-
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
@@ -8158,6 +8156,46 @@ class UserDefinedTritonKernel(ExternKernel):
             for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
+
+    @override
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        # Limit the new `get_read_writes` to `epilogue_fusion_user_defined_triton_kernel`
+        # to avoid potential regression to existing models.
+        if not config.epilogue_fusion_user_defined_triton_kernel:
+            return super().get_read_writes()
+
+        # Maps kernel arg names to inductor-generated arg names.
+        # We keep to scheduler formality and include writes as reads.
+        read_renames = {
+            formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
+            for formal_arg_dep in self.arg_accesses.read_writes.reads
+        }
+
+        formal_arg_writes = list(self.arg_accesses.read_writes.writes)
+        write_renames = {
+            formal_arg_dep.name: mut_output.get_name()
+            for formal_arg_dep, mut_output in zip(
+                formal_arg_writes, self.mutation_outputs
+            )
+        }
+
+        read_writes = dependencies.ReadWrites(
+            reads=OrderedSet(
+                [
+                    dep.rename(read_renames)
+                    for dep in self.arg_accesses.read_writes.reads
+                ]
+            ),
+            writes=OrderedSet(
+                [
+                    dep.rename(write_renames)
+                    for dep in self.arg_accesses.read_writes.writes
+                ]
+            ),
+            index_exprs=OrderedSet(),
+        )
+        return read_writes
+
 
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)
