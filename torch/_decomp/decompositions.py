@@ -3168,7 +3168,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -4721,15 +4721,13 @@ def _grid_sampler_2d(
             f"grid last dimension must be 2 (for x,y coords), got {two}"
         )
 
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
 
     int32_max = torch.iinfo(torch.int32).max
     # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
     # the historical int64 path, and dynamic shapes fall back if we cannot guard.
-    use_32bit_indices = (
-        a.device.type in ("cuda", "xpu")
-        and guard_or_false(iH <= int32_max)
-        and guard_or_false(iW <= int32_max)
+    use_32bit_indices = a.device.type in ("cuda", "xpu") and guard_or_false(
+        sym_and(iH <= int32_max, iW <= int32_max)
     )
     index_dtype = torch.int32 if use_32bit_indices else torch.int64
 
@@ -5224,8 +5222,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps", "xpu"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
