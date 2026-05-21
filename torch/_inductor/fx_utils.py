@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import operator
-import warnings
 from collections import defaultdict
-from collections.abc import Callable, Collection, Container, Generator, Iterable
+from collections.abc import Callable, Container, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
@@ -22,6 +21,7 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     sym_eq,
 )
+from torch.fx.graph_module import _get_attr
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -84,14 +84,15 @@ def _extract_subgraphs_and_args(
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
         yield args[2], subgraph_args
-    elif node.target is torch.ops.higher_order.flex_attention:
-        # flex_attention currently yields two subgraphs.  The first (the score
-        # calculation) has a signature starting with a scalar argument of the same dtype
-        # as the query (args[0]), followed by four scalar integer arguments and optional
-        # additional tensors.  The second (the mask calculation) looks similar, with
-        # four scalar integer arguments and optional additional (different) tensors.  We
-        # assume this format here (adding some defensive assertions), which means that
-        # the only inputs we may need to update are the optional additional tensors. See
+    elif node.target in (
+        torch.ops.higher_order.flex_attention,
+        torch.ops.higher_order.flex_attention_backward,
+    ):
+        # flex_attention subgraphs have a small fixed scalar prefix plus optional
+        # captured tensors.  The backward HOP also has a joint graph with one extra
+        # gradient scalar before the optional captured tensors.  We assume this format
+        # here (adding some defensive assertions), which means that the only inputs we
+        # may need to update are the optional additional tensors. See
         # torch._higher_order_ops.flex_attention._math_attention_inner for more details.
 
         def get_subgraph_args(
@@ -105,26 +106,70 @@ def _extract_subgraphs_and_args(
         def is_integer(d: torch.dtype) -> bool:
             return not d.is_floating_point and not d.is_complex
 
-        score_subgraph: torch.fx.GraphModule = args[3]
+        def new_score_arg(reference: torch.Tensor) -> torch.Tensor:
+            return args[0].new_zeros(
+                (),
+                dtype=args[0].dtype,
+                requires_grad=reference.requires_grad,
+            )
+
+        if node.target is torch.ops.higher_order.flex_attention:
+            score_subgraph_idx = 3
+            mask_subgraph = args[4][-1]
+            score_mod_other_buffers_idx = 7
+            mask_mod_other_buffers_idx = 8
+        else:
+            score_subgraph_idx = 7
+            mask_subgraph = args[9][-1]
+            score_mod_other_buffers_idx = 12
+            mask_mod_other_buffers_idx = 13
+
+        score_subgraph: torch.fx.GraphModule = args[score_subgraph_idx]
         score_subgraph_args = get_subgraph_args(score_subgraph)
-        mask_subgraph = args[4][-1]
         mask_subgraph_args = get_subgraph_args(mask_subgraph)
+        score_args = (new_score_arg(score_subgraph_args[0]), *score_subgraph_args[1:5])
 
         integer_arg_dtypes = OrderedSet[torch.dtype](
-            a.dtype for a in chain(score_subgraph_args[1:5], mask_subgraph_args[:4])
+            a.dtype for a in chain(score_args[1:], mask_subgraph_args[:4])
         )
         assert (
-            score_subgraph_args[0].dtype == args[0].dtype
-            and len(integer_arg_dtypes) == 1
+            len(integer_arg_dtypes) == 1
             and is_integer(integer_arg_dtypes.pop())
             and all(
-                len(a.size()) == 0
-                for a in chain(score_subgraph_args[:5], mask_subgraph_args[:4])
+                len(a.size()) == 0 for a in chain(score_args, mask_subgraph_args[:4])
             )
         ), "flex_attention subgraph arg format has changed!"
 
-        yield score_subgraph, (*score_subgraph_args[:5], *args[7])
-        yield args[4][-1], (*mask_subgraph_args[:4], *args[8])
+        yield (
+            score_subgraph,
+            (
+                *score_args,
+                *args[score_mod_other_buffers_idx],
+            ),
+        )
+        yield (
+            mask_subgraph,
+            (
+                *mask_subgraph_args[:4],
+                *args[mask_mod_other_buffers_idx],
+            ),
+        )
+
+        if node.target is torch.ops.higher_order.flex_attention_backward:
+            if isinstance(joint_subgraph := args[8], torch.fx.GraphModule):
+                joint_subgraph_args = get_subgraph_args(joint_subgraph)
+                joint_args = (
+                    new_score_arg(joint_subgraph_args[0]),
+                    *joint_subgraph_args[1:5],
+                    new_score_arg(joint_subgraph_args[5]),
+                )
+                yield (
+                    joint_subgraph,
+                    (
+                        *joint_args,
+                        *args[score_mod_other_buffers_idx],
+                    ),
+                )
     elif node.target in (
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
@@ -133,6 +178,8 @@ def _extract_subgraphs_and_args(
         yield args[0], tuple(args[1:])
     elif node.target is torch.ops.higher_order.invoke_subgraph:
         yield args[0], tuple(args[2:])
+    elif node.target is torch.ops.higher_order.run_const_graph:
+        yield args[0], tuple(args[1])
     elif node.target is torch.ops.higher_order.map_impl:
         # Map is applied over slices from the first dimension of each value in args[1].
         yield args[0], (*(a[0] for a in args[1]), *args[2])
@@ -154,17 +201,8 @@ def _extract_subgraphs_and_args(
         )
         yield args[1], tuple(args[2:])
     else:
-        warnings.warn(
-            f"Please add support for subgraph args to function {node.target}!"
-        )
-
-        # By default, just return the detected list of subgraphs so that we can run
-        # updates on all of them.
-        flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
-        yield from (
-            (s, None)
-            for s in flat_args_kwargs
-            if isinstance(s, torch.fx.GraphModule) and s in valid_subgraphs
+        raise AssertionError(
+            f"Please add FakeTensorUpdater subgraph arg support for {node.target}!"
         )
 
 
@@ -226,7 +264,7 @@ class FakeTensorUpdater:
             def get_hash_or_id(o: object) -> int:
                 try:
                     return hash(o)
-                except Exception:
+                except TypeError:
                     return id(o)
 
             return tuple(get_hash_or_id(n) for n in n_iter)
@@ -276,7 +314,7 @@ class FakeTensorUpdater:
                 if new is None:
                     return old is None
 
-                if isinstance(new, Collection):
+                if isinstance(new, (list, tuple)):
                     return len(new) == len(old) and all(
                         is_fake_tensor_same(
                             new_i,
@@ -287,6 +325,21 @@ class FakeTensorUpdater:
                             node=node,
                         )
                         for new_i, old_i in zip(new, old)
+                    )
+
+                if isinstance(new, Mapping):
+                    if new.keys() != old.keys():
+                        return False
+                    return all(
+                        is_fake_tensor_same(
+                            new[key],
+                            old[key],
+                            check_dtype=check_dtype,
+                            check_strides=check_strides,
+                            check_storage=check_storage,
+                            node=node,
+                        )
+                        for key in new
                     )
 
                 if isinstance(new, torch.types.py_sym_types):
@@ -321,10 +374,11 @@ class FakeTensorUpdater:
             if not check_storage:
                 return True
 
-            if not statically_known_true(
-                new.storage_offset() == old.storage_offset()
-            ) or get_storage(new) != get_storage(old):
+            if not statically_known_true(new.storage_offset() == old.storage_offset()):
                 return False
+
+            if get_storage(new) == get_storage(old):
+                return True
 
             def any_user_may_alias(node):
                 if not isinstance(node.meta["val"], torch.Tensor):
@@ -387,6 +441,9 @@ class FakeTensorUpdater:
             return False
 
         def should_process_node(node: torch.fx.Node) -> bool:
+            if node.op != "call_function":
+                return False
+
             if isinstance(node.target, torch._ops.HigherOrderOperator):
                 return True
 
@@ -436,6 +493,9 @@ class FakeTensorUpdater:
             is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
             if not is_valid:
                 continue
+            node_needs_update = (
+                hash not in self.processed_hashes or id(node) in to_process
+            )
 
             # NB: Be very careful about skipping nodes (via continues) here
             # and ask for a careful review when changing this code. The
@@ -444,8 +504,7 @@ class FakeTensorUpdater:
             if (
                 # Always run updates on nodes that invoke subgraphs
                 not (invokes_subgraph := node_invokes_subgraph(node, *args, **kwargs))
-                and hash in self.processed_hashes
-                and id(node) not in to_process
+                and not node_needs_update
             ):
                 continue
 
@@ -530,7 +589,11 @@ class FakeTensorUpdater:
                 # subgraph have changed, we'll run FakeTensor propagation for every
                 # invocation of the subgraph, so that each node gets unique FakeTensor
                 # values which maintain appropriate aliasing relationships.
-                if not any_output_updated and "val" in node.meta:
+                if (
+                    not any_output_updated
+                    and not node_needs_update
+                    and "val" in node.meta
+                ):
                     continue
 
             with V.fake_mode, enable_python_dispatcher():
@@ -584,12 +647,12 @@ def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
             return x.meta["val"]
         if "example_value" in x.meta:
             return x.meta["example_value"]
-        if x.op == "get_attr" and isinstance(x.target, str) and hasattr(gm, x.target):
-            return getattr(gm, x.target)
-        # If a node has no available fake values and isn't a get_attr, it either returns
-        # None or is incorrectly configured.  Since there are real nodes which return
-        # None, we can't error here.
-        return None
+        if gm is not None and x.op == "get_attr" and isinstance(x.target, str):
+            attr = _get_attr(gm, x.target)
+            if isinstance(attr, torch.Tensor):
+                return x
+            return attr
+        return x
     # If there are no example values, return x
     return x
 
