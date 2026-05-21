@@ -312,16 +312,8 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
 
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
-        def make_configs(xblock, yblock):
-            return [
-                triton.Config(
-                    {"XBLOCK": xblock, "YBLOCK": yblock},
-                    num_warps=4,
-                    num_stages=1,
-                )
-            ]
-
         inductor_meta = {
+            "coordinate_descent_tuning": True,
             "combo_grid_meta": {
                 "num_kernels": 3,
                 "heuristic_0": "pointwise",
@@ -330,36 +322,27 @@ class TestCoordinateDescentTuner(TestCase):
                 "size_hints_0": {"x": 64, "y": 64},
                 "size_hints_1": {"x": 256, "y": 256},
                 "size_hints_2": {"x": 128, "y": 16},
-                "tile_hint_0": "TileHint.SQUARE",
-                "tile_hint_1": "TileHint.SQUARE",
-                "tile_hint_2": "TileHint.SQUARE",
-                "no_x_dim_0": False,
-                "no_x_dim_1": False,
-                "no_x_dim_2": False,
-            }
+            },
         }
-
-        configs_by_size = {
-            (64, 64): make_configs(64, 32),
-            (256, 256): make_configs(256, 64),
-            (128, 16): make_configs(128, 16),
+        # Signature must list all per-subkernel block constexprs.
+        triton_meta = {
+            "signature": {
+                f"{block}_{i}": "i32"
+                for i in range(3)
+                for block in ("XBLOCK", "YBLOCK")
+            },
         }
-
-        def pointwise_side_effect(size_hints, *args, **kwargs):
-            return configs_by_size[(size_hints["x"], size_hints["y"])]
 
         with mock.patch.object(
             triton_heuristics,
-            "pointwise",
-            side_effect=pointwise_side_effect,
+            "cached_autotune",
+            return_value=lambda fn: fn,
         ):
-            configs = triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
-                {"x": 256, "y": 256},
-                inductor_meta,
-                triton_meta={},
+            triton_heuristics.combo_kernel(
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
             )
 
-        self.assertIsNotNone(configs)
         self.assertEqual(
             inductor_meta["combo_coordesc_field_order"],
             [
