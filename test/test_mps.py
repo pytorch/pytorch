@@ -13095,8 +13095,8 @@ class TestAdvancedIndexing(TestCaseMPS):
             y_cpu = x_cpu[1:4, [1, 2]]
             y_mps = x_mps[1:4, [1, 2]]
             self.assertEqual(y_cpu, y_mps, str(dtype))
-        # FIXME: use supported_dtypes once uint8 is fixed
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16]]
+        for dtype in self.supported_dtypes:
+            helper(dtype)
 
     def test_boolean_array_indexing(self):
         def helper(dtype):
