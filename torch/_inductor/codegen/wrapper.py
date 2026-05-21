@@ -4194,16 +4194,19 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"should_loop = {cond_outer_outputs[0]}")
         self.writeline("if not should_loop:")
-        if stack_output:
-            # Handle the case when loop never executes
-            for i, carried_input in enumerate(outer_carried_inputs):
-                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
-                self.writeline(ExitSubgraphLine(self))
+        if not outer_carried_inputs:
+            self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+            self.writeline("pass")
+            self.writeline(ExitSubgraphLine(self))
         else:
+            clone_line = (
+                "{name}[{i}] = {inp}.unsqueeze(0).clone()"
+                if stack_output
+                else "{name}[{i}] = {inp}.clone()"
+            )
             for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                self.writeline(clone_line.format(name=name, i=i, inp=carried_input))
                 self.writeline(ExitSubgraphLine(self))
 
         self.writeline("while should_loop:")
@@ -4217,8 +4220,11 @@ class PythonWrapperCodegen(CodeGen):
         # Collect outputs if enabled
         if stack_output:
             self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-            for i in range(len(outer_carried_inputs)):
-                self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
+            if not outer_carried_inputs:
+                self.writeline("pass")
+            else:
+                for i in range(len(outer_carried_inputs)):
+                    self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
             self.writeline(ExitSubgraphLine(self))
 
         # Condition check at end of loop
