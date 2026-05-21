@@ -2158,7 +2158,7 @@ def _compile(
                 # Rewrap for clarity
                 raise InternalTorchDynamoError(
                     f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
+                ).with_traceback(e.__traceback__) from e
         finally:
             # === WARNING WARNING WARNING ===
             # If you commit a bug here, it will suppress writing to

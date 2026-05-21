@@ -35,7 +35,7 @@ import typing
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
-from traceback import format_exc, format_list, FrameSummary, StackSummary
+from traceback import format_exception, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch._guards
@@ -891,7 +891,7 @@ def format_error_msg_verbose(
         f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
     )
     msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    msg += format_exc()
+    msg += "".join(format_exception(exc, chain=False))
     real_stack = get_real_stack(exc, frame)
     if real_stack is not None:
         msg += (
@@ -939,4 +939,4 @@ def format_error_msg(
     if config.verbose:
         return format_error_msg_verbose(exc, code, record_filename, frame)
     return f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc()}"
+ line {code.co_firstlineno} \ndue to: \n{''.join(format_exception(exc, chain=False))}"

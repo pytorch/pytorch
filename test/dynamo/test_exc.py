@@ -14,6 +14,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
+    InternalTorchDynamoError,
     TorchDynamoException,
     Unsupported,
     UserError,
@@ -182,6 +183,30 @@ from user code:
    File "test_exc.py", line N, in fn001
     comptime(f)""",
         )
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_exception_chaining_preserved(self):
+        def fn001(x):
+            def f(ctx):
+                try:
+                    config = {}
+                    _ = config["missing_key"]
+                except KeyError as e:
+                    raise RuntimeError("failed to load config") from e
+
+            for _ in range(3):
+                comptime(f)
+
+        with self.assertRaises(InternalTorchDynamoError) as cm:
+            torch.compile(fn001, backend="eager")(torch.randn(1))
+
+        e = cm.exception
+        self.assertIsNotNone(e.__cause__)
+        self.assertIsInstance(e.__cause__, RuntimeError)
+        self.assertIn("failed to load config", str(e.__cause__))
+        self.assertIsNotNone(e.__cause__.__cause__)
+        self.assertIsInstance(e.__cause__.__cause__, KeyError)
+        self.assertIn("missing_key", str(e.__cause__.__cause__))
 
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
     @make_logging_test(graph_breaks=True)
