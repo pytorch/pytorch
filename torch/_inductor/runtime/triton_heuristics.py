@@ -46,10 +46,13 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import (
     cache_dir,
@@ -2983,6 +2986,45 @@ def check_max_block(cfg: dict[str, int]):
             )
 
 
+def _check_native_matmul_block_numel(
+    kwargs: dict[str, int], r0_block: int | None = None
+) -> None:
+    block_numel = native_matmul_block_numel(kwargs, r0_block=r0_block)
+    if block_numel > TRITON_MAX_TENSOR_NUMEL:
+        raise AssertionError(
+            f"Block numel {block_numel} exceeds Triton maximum "
+            f"{TRITON_MAX_TENSOR_NUMEL}"
+        )
+
+
+def _native_matmul_config_under_numel_limit(
+    cfg: Config, r0_block: int | None = None
+) -> bool:
+    return (
+        native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        <= TRITON_MAX_TENSOR_NUMEL
+    )
+
+
+def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Config]:
+    capped_configs: list[Config] = []
+    for cfg in configs:
+        cfg = copy.deepcopy(cfg)
+        while not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            shrinkable_fields = [
+                field for field in ("XBLOCK", "YBLOCK") if cfg.kwargs.get(field, 1) > 16
+            ]
+            if not shrinkable_fields:
+                break
+            field = max(shrinkable_fields, key=lambda field: cfg.kwargs[field])
+            cfg.kwargs[field] //= 2
+
+        if _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            capped_configs.append(cfg)
+
+    return unique_configs(capped_configs)
+
+
 def _enforce_reduction_config_block_minimums(
     configs: list[Config],
     size_hints: dict[str, int],
@@ -3679,131 +3721,17 @@ def pointwise(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
 
-    configs = None
-    if len(size_hints) == 1:
-        if not inductor_meta.get("autotune_pointwise", True) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-        ):
-            configs = [triton_config_with_settings(size_hints, bs)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
-                triton_config_with_settings(
-                    size_hints, bs // 2, num_elements_per_warp=64
-                ),
-                *hinted_configs,
-            ]
-            # Additional configs appended for ROCm builds
-            if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            4096,  # wrt: better than the max_block for some kernel
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            2048,
-                            num_warps=8,
-                            num_stages=2,
-                            waves_per_eu=1,  # 20% improvement
-                        ),
-                    ]
-                )
-                if inductor_meta.get("atomic_add_found"):
-                    configs.extend(
-                        [
-                            triton_config_with_settings(
-                                size_hints,
-                                64,
-                                num_warps=1,
-                                num_stages=1,  # 250% improvement
-                            )
-                        ]
-                    )
-            if torch.xpu.is_available():
-                configs.extend(
-                    [  # intel-xpu-backend-for-triton #5133
-                        triton_config_with_settings(size_hints, 32),
-                    ]
-                )
-    if len(size_hints) == 2:
-        # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
-        # ROCm has observed improvement by diverging here
-        if (
-            not inductor_meta.get("autotune_pointwise", True)
-            or (
-                torch.version.hip is None
-                and tile_hint == TileHint.SQUARE
-                and torch.version.xpu is None
-            )
-        ) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-        ):
-            configs = [triton_config_with_settings(size_hints, 32, 32)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, 32, 32),
-                triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
-                triton_config_with_settings(size_hints, 256, 16),
-                triton_config_with_settings(size_hints, 16, 256),
-                triton_config_with_settings(size_hints, bs, 1),
-                triton_config_with_settings(size_hints, 1, bs),
-                *hinted_configs,
-            ]
-            # Additional configs appended for ROCm builds
-            if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, 64, 32
-                        ),  # better for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 16
-                        ),  # +10% for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 32
-                        ),  # additional 10% more
-                        triton_config_with_settings(
-                            size_hints, 32, 512
-                        ),  # +30% for some kernels
-                    ]
-                )
-            if torch.xpu.is_available():
-                configs.extend(
-                    [
-                        # intel-xpu-backend-for-triton #5198
-                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
-                        # intel-xpu-backend-for-triton #5199
-                        triton_config_with_settings(size_hints, 4, 256),
-                    ]
-                )
-    if len(size_hints) == 3:
-        if not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-            or torch.xpu.is_available()
-        ):
-            configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, 16, 16, 16),
-                triton_config_with_settings(size_hints, 64, 8, 8),
-                triton_config_with_settings(size_hints, 8, 64, 8),
-                triton_config_with_settings(size_hints, 8, 8, 64),
-                triton_config_with_settings(size_hints, bs, 1, 1),
-                triton_config_with_settings(size_hints, 1, bs, 1),
-                triton_config_with_settings(size_hints, 1, 1, bs),
-                *hinted_configs,
-            ]
+    from torch._inductor.heuristics.registry import get_codegen_heuristic
 
-    if not configs:
-        raise NotImplementedError(f"size_hints: {size_hints}")
+    pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
+    configs = pointwise_heuristic.get_configs(
+        size_hints,
+        bs,
+        triton_config_with_settings,
+        hinted_configs,
+        tile_hint=tile_hint,
+        inductor_meta=inductor_meta,
+    )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     if return_configs:
@@ -3828,6 +3756,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     }
     # Remove keys with None values (i.e., missing in sizes)
     config = {k: v for k, v in config.items() if v is not None}
+    _check_native_matmul_block_numel(config)
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -4421,12 +4350,13 @@ def _persistent_reduction_configs(
     inductor_meta=None,
     triton_meta=None,
 ):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
     # Under deterministic mode, canonicalize the batch-dim hint so the
     # candidate-config branching below (e.g. xnumel // 8 < 128) doesn't pick
     # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
     # change the bf16 reduction order and break batch invariance in
     # persistent reductions like LayerNorm.
-    if inductor_meta and inductor_meta.get("batch_invariant"):
+    if inductor_meta.get("batch_invariant"):
         size_hints = dict(size_hints)
         if "x" in size_hints:
             size_hints["x"] = max(size_hints["x"], 4096)
@@ -4437,16 +4367,22 @@ def _persistent_reduction_configs(
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
     if triton_meta.get("native_matmul"):
+        native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
+        if native_matmul_rblock is None:
+            native_matmul_rblock = native_matmul_persistent_rblock(rnumel)
+
         if len(size_hints) == 3:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         elif len(size_hints) == 4:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
