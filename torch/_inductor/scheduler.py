@@ -3040,6 +3040,12 @@ class FusedNestedReductions(FusedSchedulerNode):
 class UserTritonSchedulerNode(ExternKernelSchedulerNode):
     def __init__(self, scheduler: Scheduler, node: ir.UserDefinedTritonKernel) -> None:
         super().__init__(scheduler, node)
+        assert isinstance(self.node, ir.UserDefinedTritonKernel)
+
+        self.only_tt_stores = self.node.formal_accesses.only_tt_stores
+        self.formal_reads = self.node.formal_accesses.read_writes.reads
+        self.formal_writes = self.node.formal_accesses.read_writes.writes
+
         # TODO(JJVRAW)
         numel = math.prod(node.mutable_args[0].shape)
         rnumel = 1
@@ -7403,17 +7409,16 @@ class Scheduler:
             return False
 
         if isinstance(node1, UserTritonSchedulerNode):
-            if not node1.node.arg_accesses.only_tt_stores:
-                why("node1's triton kernel has non-store writes")
+            if not node1.only_tt_stores:
+                why("user Triton fusion only supports `tl.store`")
                 return False
 
-            write_deps = list(node1.node.arg_accesses.read_writes.writes)
-            if len(write_deps) != 1 or len(node1.node.mutable_args) != 1:
-                why("node1's triton kernel has multiple outputs")
+            if len(node1.node.mutable_args) != 1 or len(node1.formal_writes) != 1:
+                why("node1's triton kernel has multiple stores")
                 return False
 
-            assert isinstance(write_deps[0], UserTritonDep)
-            if write_deps[0].access_count != 1:
+            formal_writes = list(node1.formal_writes)
+            if formal_writes[0].access_count != 1:
                 why("node1's triton kernel writes to output more than once")
                 return False
 
@@ -7439,10 +7444,8 @@ class Scheduler:
                 why("node1's triton kernel output is not an empty tensor")
                 return False
 
-            if any(
-                dep.name == write_deps[0].name
-                for dep in node1.node.arg_accesses.read_writes.reads
-            ):
+            formal_arg_name = formal_writes[0].name
+            if any(dep.name == formal_arg_name for dep in node1.formal_reads):
                 why("node1's triton kernel reads from its output buffer")
                 return False
 
