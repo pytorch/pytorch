@@ -929,8 +929,11 @@ class MetalKernel(SIMDKernel):
                 )
             )
             # And loop codegen
-            while self.multistage_reduction_entry:
-                self.multistage_reduction_entry.pop().cache_clear()
+            roots = [e.root for e in self.multistage_reduction_entry]
+            self.multistage_reduction_entry.clear()
+            for node in self.range_tree_nodes.values():
+                if any(node.root is r for r in roots):
+                    node.cache_clear()
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
