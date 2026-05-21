@@ -589,6 +589,11 @@ class EventMetadata(NamedTuple):
     dst_rank: int | None
     seq: int | None
     is_async: bool | None
+    # CUPTI channel and channel type for the activity, when surfaced by
+    # kineto's per-event metadata. Optional so events that don't carry
+    # them deserialize without error.
+    channel: int | None = None
+    channel_type: int | None = None
 
 
 def _to_str(v: str) -> str:
