@@ -1738,6 +1738,76 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.size(), meta_out.size())
             self.assertEqual(ref_out.stride(), meta_out.stride())
 
+    @onlyCUDA
+    def test_cuda_mixed_dtype_binary_pointwise_fake_stride(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        complex_input = torch.randn(
+            1, 9, 17, device=device, dtype=torch.complex64
+        ).permute(0, 2, 1).squeeze(0)
+        double_input = torch.randn(
+            1, 9, 17, device=device, dtype=torch.float64
+        ).permute(0, 2, 1).squeeze(0)
+
+        cases = [
+            (
+                complex_input,
+                (
+                    torch.ops.aten.add.Tensor,
+                    torch.ops.aten.sub.Tensor,
+                    torch.ops.aten.mul.Tensor,
+                    torch.ops.aten.div.Tensor,
+                    torch.ops.aten.pow.Tensor_Tensor,
+                    torch.ops.aten.eq.Tensor,
+                    torch.ops.aten.ne.Tensor,
+                ),
+            ),
+            (
+                double_input,
+                (
+                    torch.ops.aten.pow.Tensor_Tensor,
+                    torch.ops.aten.atan2.default,
+                    torch.ops.aten.remainder.Tensor,
+                    torch.ops.aten.fmod.Tensor,
+                    torch.ops.aten.hypot.default,
+                    torch.ops.aten.maximum.default,
+                    torch.ops.aten.minimum.default,
+                    torch.ops.aten.fmax.default,
+                    torch.ops.aten.fmin.default,
+                    torch.ops.aten.logaddexp.default,
+                    torch.ops.aten.logaddexp2.default,
+                    torch.ops.aten.nextafter.default,
+                    torch.ops.aten.eq.Tensor,
+                    torch.ops.aten.ne.Tensor,
+                    torch.ops.aten.lt.Tensor,
+                    torch.ops.aten.le.Tensor,
+                    torch.ops.aten.gt.Tensor,
+                    torch.ops.aten.ge.Tensor,
+                ),
+            ),
+        ]
+
+        for input_tensor, ops in cases:
+            scalar = torch.ones((), device=device, dtype=torch.float32).expand_as(
+                input_tensor
+            )
+            for op in ops:
+                kwargs = (
+                    {"alpha": 1}
+                    if op in (torch.ops.aten.add.Tensor, torch.ops.aten.sub.Tensor)
+                    else {}
+                )
+                with self.subTest(dtype=input_tensor.dtype, op=op):
+                    ref_out = op(scalar, input_tensor, **kwargs)
+
+                    with FakeTensorMode() as mode:
+                        fake_input = mode.from_tensor(input_tensor)
+                        fake_scalar = mode.from_tensor(scalar)
+                        fake_out = op(fake_scalar, fake_input, **kwargs)
+
+                    self.assertEqual(ref_out.size(), fake_out.size())
+                    self.assertEqual(ref_out.stride(), fake_out.stride())
+
 
     def test_map_location_deserialize(self):
         import io

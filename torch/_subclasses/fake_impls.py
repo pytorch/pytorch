@@ -1007,6 +1007,100 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
+cuda_tensoriterator_binary_pointwise_ops = ordered_set(
+    aten.add.Tensor,
+    aten.atan2.default,
+    aten.div.Tensor,
+    aten.eq.Tensor,
+    aten.fmax.default,
+    aten.fmin.default,
+    aten.fmod.Tensor,
+    aten.ge.Tensor,
+    aten.gt.Tensor,
+    aten.hypot.default,
+    aten.le.Tensor,
+    aten.logaddexp.default,
+    aten.logaddexp2.default,
+    aten.lt.Tensor,
+    aten.maximum.default,
+    aten.minimum.default,
+    aten.mul.Tensor,
+    aten.ne.Tensor,
+    aten.nextafter.default,
+    aten.pow.Tensor_Tensor,
+    aten.remainder.Tensor,
+    aten.sub.Tensor,
+)
+
+
+def _compute_cuda_elementwise_output_strides(
+    fake_mode: FakeTensorMode, *args: Any
+) -> tuple[int, ...] | None:
+    if any(
+        isinstance(arg, torch.Tensor) and arg.layout != torch.strided for arg in args
+    ):
+        return None
+
+    # Keep torch._refs import lazy; fake_impls is imported during FakeTensor setup.
+    from torch._refs import _maybe_broadcast
+
+    with fake_mode:
+        broadcasted_args = _maybe_broadcast(*args)
+    try:
+        # CUDA TensorIterator keeps promotion inside the kernel, so output
+        # layout is chosen from the original operands.
+        return utils.compute_elementwise_output_strides(*broadcasted_args)
+    except ValueError:
+        return None
+
+
+@register_op_impl(cuda_tensoriterator_binary_pointwise_ops.__contains__)
+def binary_tensor_pointwise(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    other: FakeTensor,
+    *args: Any,
+    **kwargs: Any,
+) -> FakeTensor:
+    flat_args, _ = pytree.tree_flatten(((self, other, *args), kwargs))
+    common_device, _ = FakeTensor._find_common_device(func, flat_args)
+
+    with in_kernel_invocation_manager(fake_mode):
+        meta_out = func(self, other, *args, **kwargs)
+
+    if common_device.type != "cuda" or meta_out.layout != torch.strided:
+        return typing_cast(
+            FakeTensor,
+            fake_mode.wrap_meta_outputs_with_default_device_logic(
+                meta_out, func, flat_args, device=common_device
+            ),
+        )
+
+    strides = _compute_cuda_elementwise_output_strides(fake_mode, self, other)
+    if strides is None:
+        return typing_cast(
+            FakeTensor,
+            fake_mode.wrap_meta_outputs_with_default_device_logic(
+                meta_out, func, flat_args, device=common_device
+            ),
+        )
+
+    meta_out = torch.empty_strided(
+        meta_out.shape,
+        strides,
+        dtype=meta_out.dtype,
+        layout=meta_out.layout,
+        device="meta",
+    )
+    return typing_cast(
+        FakeTensor,
+        fake_mode.wrap_meta_outputs_with_default_device_logic(
+            meta_out, func, flat_args, device=common_device
+        ),
+    )
+
+
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(
@@ -1808,6 +1902,20 @@ def make_fast_binary_impl(
                 current_cpu_scalars_on_non_cpu += 1
             elif op.device != common_device:
                 return slow("error")
+
+        if common_device.type == "cuda":
+            strides = _compute_cuda_elementwise_output_strides(mode, *operands)
+            if strides is not None:
+                count_label("fast cuda tensoriterator strides")
+                if common_dtype is None:
+                    raise AssertionError("common_dtype must not be None")
+                return FakeTensor(
+                    mode,
+                    torch.empty_strided(
+                        final_shape, strides, dtype=common_dtype, device="meta"
+                    ),
+                    device=common_device,
+                )
 
         # compute_fast_setup_type
         definitely_contiguous = True
