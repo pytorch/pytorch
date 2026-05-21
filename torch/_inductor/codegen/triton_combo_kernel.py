@@ -22,7 +22,7 @@ from ..runtime.triton_heuristics import (
 )
 from ..scheduler import BaseSchedulerNode
 from ..stream_utils import get_raw_stream_name
-from ..utils import Placeholder, triton_version_uses_attrs_dict
+from ..utils import clear_on_fresh_cache, Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -104,6 +104,7 @@ def _log_partition_separation(
 
 
 # This diagnostic is otherwise repeated once per equivalent recompile.
+@clear_on_fresh_cache
 @cache
 def _log_partition_separation_once(
     log_message: str,
