@@ -3,13 +3,14 @@
 import copy
 import gc
 import inspect
+import logging
 import os
 import runpy
 import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -67,6 +68,8 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+log = logging.getLogger(__name__)
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -327,6 +330,34 @@ class DeviceTypeTestBase(TestCase):
     # device-generic and removing @onlyCUDA on tests that should be device-generic.
     bypass_device_restrictions: bool = False
 
+    # Decorators and skips to apply to tests that are parametrized by ops.
+    # Keys are OpInfo.full_name (e.g. "op" or "linalg.norm"), NOT OpInfo.name.
+    # Note that OpInfo.full_name and OpInfo.name have difference: OpInfo.full_name
+    # includes the variant suffix (e.g., "div.floor_rounding") if it has, otherwise,
+    # OpInfo.full_name identical to OpInfo.name.
+    # These are intentionally placed on DeviceTypeTestBase (rather than solely on
+    # PrivateUse1TestBase) so that in-tree backends can adopt the same mechanism
+    # in the future.
+    op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
+
+    # An optional mechanism to limit which ops generate test variants.
+    # When set, only ops whose full_name is in this collection will generate tests.
+    # This is useful for less mature backends that only implement a few operators.
+    # Keys are OpInfo.full_name (e.g. "add", "mul", "linalg.norm").
+    # If None (default), all ops in the @ops decorator's op_list generate variants.
+    op_allowlist = None  # type: Optional[Collection[str]]
+
+    # An optional skip mechanism built upon instantiate_device_type_tests(),
+    # designed to facilitate skipping either an entire class or specific test cases
+    # within a class.
+    #
+    # Format:
+    #   test_exclusions = {
+    #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
+    #       "TestClassB": "*",                    # Global: Skips the entire class
+    #   }
+    test_exclusions: ClassVar[dict[str, Collection[str]] | None] = None
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -351,11 +382,63 @@ class DeviceTypeTestBase(TestCase):
     def rel_tol(self, prec):
         self._tls.rel_tol = prec
 
+    @classmethod
+    def _apply_op_overrides(cls, ops, test=None):
+        class_overrides = cls.op_overrides or {}
+        test_overrides = {} if test is None else getattr(test, "_op_overrides", {})
+
+        if not class_overrides and not test_overrides:
+            return
+
+        op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
+
+        for op_name, decorators in class_overrides.items():
+            for decorator in decorators:
+                if cls.device_type == "privateuse1":
+                    decorator.device_type = torch._C._get_privateuse1_backend_name()
+                else:
+                    decorator.device_type = cls.device_type
+                # op_name may not be in op_dict if @ops() has restricted the
+                # OpInfo list to a smaller set than op_overrides covers.
+                if op_name in op_dict:
+                    op_dict[op_name].decorators += (decorator,)
+
+        for op_name, decorators in test_overrides.items():
+            for decorator in decorators:
+                if op_name in op_dict:
+                    op_dict[op_name].decorators += (decorator,)
+
+        ops.op_list = list(op_dict.values())
+
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def _get_test_exclusions(cls, test_class_name):
+        test_exclusions = getattr(cls, "test_exclusions", None)
+        if test_exclusions is not None and test_class_name in test_exclusions:
+            return test_exclusions[test_class_name]
+        return []
+
+    @classmethod
+    def _apply_op_allowlist(cls, ops):
+        """Filters ops.op_list to only include ops declared in op_allowlist.
+
+        If op_allowlist is None (default), no filtering is applied.
+        If op_allowlist is set, only ops whose full_name is in the collection
+        will generate test variants.
+
+        Args:
+            ops: The ops decorator instance whose op_list will be filtered.
+        """
+        if cls.op_allowlist is None:
+            return
+
+        supported_set = set(cls.op_allowlist)
+        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -407,6 +490,26 @@ class DeviceTypeTestBase(TestCase):
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
+
+    @classmethod
+    def set_test_configs(
+        cls,
+        *,
+        op_overrides=None,
+        op_allowlist=None,
+        test_exclusions=None,
+    ):
+        """
+        Sets or resets the test configuration fields.
+
+        WARNING: This method is designed to perform a FULL replacement of the
+        current configuration. Calling this method without any arguments will
+        act as a "reset", clearing all stored configurations back to their
+        default `None` state.
+        """
+        cls.op_overrides = op_overrides
+        cls.op_allowlist = op_allowlist
+        cls.test_exclusions = test_exclusions
 
     # Creates device-specific tests.
     @classmethod
@@ -915,6 +1018,11 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
+        skipped = base._get_test_exclusions(generic_test_class.__name__)
+        # Skip the entire class
+        if "*" in skipped:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupported runtime class:
@@ -946,6 +1054,9 @@ def instantiate_device_type_tests(
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
+                # Skip the specified methods.
+                if name in skipped:
+                    continue
                 test = getattr(generic_test_class, name)
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
@@ -1029,6 +1140,71 @@ def _serialize_sample(sample_input):
     return str(sample_input)
 
 
+SkipSpec = namedtuple(
+    "SkipSpec",
+    [
+        "op_name",
+        "variant_name",
+        "device_type",
+        "dtypes",
+        "expected_failure",
+    ],
+)
+
+
+def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, True)
+
+
+def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, False)
+
+
+def skipOps(to_skip):
+    def wrapped(fn):
+        from torch.testing._internal.opinfo.core import DecorateInfo
+
+        parts = fn.__qualname__.split(".")
+        test_name = parts[-1]
+        cls_name = parts[-2] if len(parts) >= 2 else ""
+        overrides = getattr(fn, "_op_overrides", {})
+        for skip_spec in to_skip:
+            if hasattr(skip_spec, "op_name"):
+                op_name = skip_spec.op_name
+                variant_name = skip_spec.variant_name
+                device_type = skip_spec.device_type
+                dtypes = skip_spec.dtypes
+                if hasattr(skip_spec, "decorator"):
+                    decorator_callable = skip_spec.decorator
+                else:
+                    expected_failure = skip_spec.expected_failure
+                    decorator_callable = (
+                        unittest.expectedFailure
+                        if expected_failure
+                        else unittest.skip("Skipped!")
+                    )
+            else:
+                op_name, variant_name, device_type, dtypes, expected_failure = skip_spec
+                decorator_callable = (
+                    unittest.expectedFailure
+                    if expected_failure
+                    else unittest.skip("Skipped!")
+                )
+            full_name = f"{op_name}.{variant_name}" if variant_name else op_name
+            decorator = DecorateInfo(
+                decorator_callable,
+                cls_name,
+                test_name,
+                device_type=device_type,
+                dtypes=dtypes,
+            )
+            overrides.setdefault(full_name, []).append(decorator)
+        fn._op_overrides = overrides
+        return fn
+
+    return wrapped
+
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -1094,6 +1270,10 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        # Order matters: op_allowlist filters first, then op_overrides adds decorators
+        # This ensures op_overrides only applies to ops that passed the op_allowlist filter
+        device_cls._apply_op_allowlist(self)
+        device_cls._apply_op_overrides(self, test)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
@@ -1213,9 +1393,13 @@ class ops(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print(f"Failed to instantiate {test_name} for op {op.name}!")
+                    log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
         if op is check_exhausted_iterator:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
             raise ValueError(
                 "An empty op_list was passed to @ops. "
                 "Note that this may result from reuse of a generator."
@@ -1349,7 +1533,7 @@ def _has_sufficient_memory(device, size):
     if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device_type != "cpu":
+    if device_type not in ["cpu", "mps"]:
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
@@ -1701,6 +1885,19 @@ def onlyPRIVATEUSE1(fn):
         reason = f"Skip as torch has no module of {device_type}"
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
+
+
+def onlyAccelerator(fn):
+    """Skip test if not running on an accelerator device (i.e., skip on CPU and meta)."""
+
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type in ("cpu", "meta"):
+            reason = "onlyAccelerator: doesn't run on CPU or meta devices"
+            raise unittest.SkipTest(reason)
+        return fn(self, *args, **kwargs)
+
+    return only_fn
 
 
 def onlyCUDAAndPRIVATEUSE1(fn):

@@ -2165,9 +2165,9 @@ static Tensor _compressed_to_block_compressed_cpu(
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
-                  input_compressed_indices.data_ptr<index_t>(),
-                  input_plain_indices.data_ptr<index_t>(),
-                  input_values.data_ptr<scalar_t>(),
+                  input_compressed_indices.const_data_ptr<index_t>(),
+                  input_plain_indices.const_data_ptr<index_t>(),
+                  input_values.const_data_ptr<scalar_t>(),
                   result_compressed_indices.data_ptr<index_t>(),
                   result_plain_indices.data_ptr<index_t>(),
                   result_values.data_ptr<scalar_t>());

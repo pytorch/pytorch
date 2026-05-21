@@ -116,7 +116,7 @@ class SymNode:
         self.pytype = pytype
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
-        self._expr_cache = None
+        self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
         #
@@ -690,7 +690,9 @@ class DynamicInt(_DynamicScalar, int):
     def __rfloordiv__(self, other: int) -> DynamicInt:
         return DynamicInt(other // self.real)
 
-    def __pow__(self, other, modulo=None):
+    def __pow__(  # pyrefly: ignore[bad-override]
+        self, other: int, modulo: int | None = None
+    ) -> DynamicInt | float:
         if modulo is not None:
             result = pow(self.real, other, modulo)
         else:
@@ -701,7 +703,7 @@ class DynamicInt(_DynamicScalar, int):
             return DynamicInt(result)
         return result
 
-    def __rpow__(self, other, modulo=None):
+    def __rpow__(self, other: int, modulo: int | None = None) -> DynamicInt | float:
         if modulo is not None:
             result = pow(other, self.real, modulo)
         else:
@@ -1885,6 +1887,8 @@ def _make_user_magic(method: str, user_type: type) -> None:
             """Implements True+True=2, which works in python but not sympy"""
             if isinstance(x, SymBool):
                 return SymInt(x.node.wrap_int(int(x)))
+            if type(x) is bool:
+                return int(x)
             return x
 
     else:

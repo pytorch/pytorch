@@ -895,7 +895,7 @@ class GraphModuleSerializer(metaclass=Final):
 
                 constexpr_keys = {p.name for p in kernel.params if p.is_constexpr}
                 found_constexpr = False
-                args_new = ()
+                inputs_new = []
                 i = 0
 
                 if not isinstance(node.kwargs["kwargs"], dict):
@@ -917,7 +917,13 @@ class GraphModuleSerializer(metaclass=Final):
 
                     if k in output_keys:
                         output_indices.append(i)
-                    args_new += (v,)  # type: ignore[assignment]
+                    inputs_new.append(
+                        NamedArgument(
+                            name=k,
+                            arg=self.serialize_input(v),
+                            kind=ArgumentKind.POSITIONAL,
+                        )
+                    )
                     i += 1
 
                 if not isinstance(node.kwargs["grid"], list):
@@ -982,7 +988,15 @@ class GraphModuleSerializer(metaclass=Final):
                 ex_node = Node(
                     name=node.name,
                     target=self.serialize_operator(node.target),
-                    inputs=self.serialize_hoo_inputs(args_new, kwargs_new),
+                    inputs=inputs_new
+                    + [
+                        NamedArgument(
+                            name=name,
+                            arg=self.serialize_input(a),
+                            kind=ArgumentKind.KEYWORD,
+                        )
+                        for name, a in kwargs_new.items()
+                    ],
                     outputs=self.serialize_hoo_outputs(node),
                     metadata=self.serialize_metadata(node),
                     is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
@@ -1019,6 +1033,16 @@ class GraphModuleSerializer(metaclass=Final):
                 target=f"#{namespace}:{op_name}",
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
+                metadata=self.serialize_metadata(node),
+            )
+        elif callable(node.target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
+            # as plain Python function call_function nodes in pre_dispatch graphs.
+            ex_node = Node(
+                name=node.name,
+                target=self.serialize_operator(node.target),
+                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
         else:
@@ -1277,7 +1301,7 @@ class GraphModuleSerializer(metaclass=Final):
                     )
                 elif type(attr).__name__ == "LoweredBackendModule":
                     # Special handling for executorch_call_delegate HOP
-                    # It's first argument is a LoweredBackendModule, for which we
+                    # Its first argument is a LoweredBackendModule, for which we
                     # serialize name and backend id of the lowered module
                     module_name = getattr(attr, "module_name", None)
                     backend_id = getattr(attr, "backend_id", None)
@@ -1963,7 +1987,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
-            elif isinstance(meta, FakeTensor):
+            elif isinstance(meta, torch.Tensor):
                 if not isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
                 ):
@@ -2578,11 +2602,21 @@ class GraphModuleDeserializer(metaclass=Final):
         output_node = self.graph.output(outputs)
 
         if serialized_graph.is_single_tensor_return:
-            output_node.meta["val"] = output_node.args[0].meta["val"]
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, torch.fx.Node):
+                raise AssertionError(
+                    f"Expected Node for single tensor return, got {type(first_arg)}"
+                )
+            output_node.meta["val"] = first_arg.meta["val"]
         else:
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, (tuple, list)):
+                raise AssertionError(
+                    f"Expected tuple/list for multi tensor return, got {type(first_arg)}"
+                )
             output_node.meta["val"] = tuple(
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in output_node.args[0]
+                for arg in first_arg
             )
 
         # recompute unbacked bindings
@@ -2686,6 +2720,14 @@ class GraphModuleDeserializer(metaclass=Final):
                 )
 
             args, kwargs = self.deserialize_inputs(target, serialized_node)
+            fx_node = self.graph.create_node(
+                "call_function", target, args, kwargs, name
+            )
+            self.deserialize_outputs(serialized_node, fx_node)
+        elif callable(target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.)
+            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
             )
@@ -3031,10 +3073,10 @@ class GraphModuleDeserializer(metaclass=Final):
         args = []
         kwargs = {}
         for input_ in inputs:
-            if input_.name != "":
-                kwargs[input_.name] = self.deserialize_input(input_.arg)
-            else:
+            if input_.kind == ArgumentKind.POSITIONAL or input_.name == "":
                 args.append(self.deserialize_input(input_.arg))
+            else:
+                kwargs[input_.name] = self.deserialize_input(input_.arg)
         return (tuple(args), kwargs)
 
     def deserialize_input(self, inp: Argument) -> Any:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import json
@@ -49,6 +50,7 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._inductor.output_code import OutputCode
+from torch._inductor.remote_cache import cache_stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
@@ -57,7 +59,7 @@ from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
@@ -79,7 +81,12 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta
+from .schemas import (
+    AOTAutogradCacheInfo,
+    AOTConfig,
+    CacheableAOTConfig,
+    ViewAndMutationMeta,
+)
 
 
 if TYPE_CHECKING:
@@ -295,7 +302,7 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     # Subgraphs are only used for caching logic.
     if hasattr(gm, "saved_tensors_hooks_pack_0"):
         check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
-        # We have guarantee of unpack sugraph existence if pack subgraph exists
+        # We have guarantee of unpack subgraph existence if pack subgraph exists
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
@@ -509,7 +516,13 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        self.disable_amp = torch._C._is_any_autocast_enabled()
+        # Include per-device autocast dtype in cache key to avoid reusing
+        # a graph compiled for one autocast dtype (e.g. bfloat16) when
+        # running under a different autocast dtype (e.g. float16).
+        self.autocast_state: dict[str, torch.dtype] = {}
+        for device_type in torch._C._autocast_supported_devices():
+            if torch.is_autocast_enabled(device_type):
+                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
@@ -525,7 +538,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
-            FxGraphCache._check_can_cache(gm)
+            FxGraphCache._check_can_cache(gm, example_inputs, fx_config)
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
@@ -558,8 +571,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
-        # Return NotImplemented to fall back to default behavior
-        return NotImplemented
+        # Fall back to parent class reducer which handles unpicklable types
+        return super().reducer_override(obj)
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
@@ -660,17 +673,22 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Reduce the config to a stable key for caching.
         """
+        cacheable = aot_config.to_cacheable()
         return (
+            # Cache entries persist the full CacheableAOTConfig, but cache keys
+            # intentionally ignore the debug-only aot_id so equivalent graphs can hit.
             _ident,
             (
-                aot_config.num_params_buffers,
-                aot_config.keep_inference_input_mutations,
-                aot_config.is_export,
-                aot_config.no_tangents,
-                aot_config.dynamic_shapes,
-                aot_config.aot_autograd_arg_pos_to_source,
-                aot_config.enable_log,
-                aot_config.pre_dispatch,
+                cacheable.num_params_buffers,
+                cacheable.keep_inference_input_mutations,
+                cacheable.is_export,
+                cacheable.no_tangents,
+                cacheable.dynamic_shapes,
+                cacheable.aot_autograd_arg_pos_to_source,
+                cacheable.static_input_indices,
+                cacheable.enable_log,
+                cacheable.pre_dispatch,
+                cacheable.precompile_backend_id,
             ),
         )
 
@@ -926,9 +944,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         local: bool,
         remote: bool,
         compile_region_name: str | None = None,
-    ) -> Callable[..., Any] | None:
+    ) -> tuple[Callable[..., Any] | None, AOTConfig]:
         """
-        Load a result from the cache, and reconstruct a runtime wrapper around the object
+        Load a result from the cache, and reconstruct a runtime wrapper around
+        the object. On a cache miss, return an updated config carrying the
+        cache metadata needed to save the eventual compile result.
         """
         compiled_fn = None
         cache_info: dict[str, Any] = {}
@@ -1023,10 +1043,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)
             if cache_key is not None:
-                aot_config.cache_info = AOTAutogradCacheInfo(
-                    cache_key,
-                    time.time_ns(),
-                    forward_symints=symints,
+                aot_config = dataclasses.replace(
+                    aot_config,
+                    cache_info=AOTAutogradCacheInfo(
+                        cache_key,
+                        time.time_ns(),
+                        forward_symints=symints,
+                    ),
                 )
 
         cache_info.update(
@@ -1062,7 +1085,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        return compiled_fn
+        return compiled_fn, aot_config
 
     @classmethod
     def generate_guards_expression(
@@ -1104,6 +1127,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_hit_count",
@@ -1114,6 +1138,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "aotautograd_remote_cache_hit_count",
             )
         if local_miss:
+            cache_stats.miss("LocalAOTAutogradCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "aotautograd_local_cache_miss_count",
@@ -1164,10 +1189,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if entry is None and guard_info["cache_status_detailed"] == "guard_miss":
                 counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             cache_info.update(guard_info)
+            CacheArtifactRecorder(
+                AOTAutogradCacheArtifact.type(), key
+            ).record_if_present(pickled_content)
             if pickled_content is not None:
-                CacheArtifactManager.record_artifact(
-                    AOTAutogradCacheArtifact.type(), key, pickled_content
-                )
                 if (
                     should_bundle_autograd_cache()
                     and aot_config is not None
@@ -1233,7 +1258,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     ) -> bytes | None:
         """Pickle entry, returning None on failure."""
         try:
-            return pickle.dumps(entry)
+            with torch.utils._python_dispatch._disable_current_modes():
+                return pickle.dumps(entry)
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
@@ -1278,9 +1304,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             content = AOTAutogradCache._pickle_entry(entry, remote)
             if content is None:
                 return None
-            CacheArtifactManager.record_artifact(
-                AOTAutogradCacheArtifact.type(), key, content
-            )
+            CacheArtifactRecorder(AOTAutogradCacheArtifact.type(), key).record(content)
             if (
                 should_bundle_autograd_cache()
                 and entry.sanitized_aot_config.precompile_backend_id is not None
@@ -1291,6 +1315,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
+            cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
@@ -1338,11 +1363,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         indices_of_inps_to_detach: list[int],
         forward_time_taken_ns: int,
         backward_time_taken_ns: int,
-        sanitized_aot_config: AOTConfig,
+        sanitized_aot_config: CacheableAOTConfig,
         guards_expr: str | None,
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
+        min_cut_info_str: str | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1373,6 +1399,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 aot_joint_graph_str=aot_joint_graph_str,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
                 runtime_metadata=runtime_metadata,
                 dispatch_wrappers=dispatch_wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
@@ -1422,6 +1449,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 aot_joint_graph_str=aot_joint_graph_str,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
                 runtime_metadata=runtime_metadata,
                 dispatch_wrappers=dispatch_wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
