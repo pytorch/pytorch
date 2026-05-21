@@ -61,6 +61,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
+from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -68,6 +69,7 @@ from torch.compiler._cache import (
     CacheArtifactRecorder,
     CacheInfo,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import (
     SM80OrLater,
     TEST_MULTIGPU,
@@ -2598,6 +2600,70 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
             x = torch.randn(5)
             (result,) = compiled_artifact(4, x)
+
+    def test_dynamic_shapes_from_example_inputs_fake_mode(self):
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_x = fake_mode.from_tensor(torch.ones(4), static_shapes=True)
+
+        seen_fake_modes = []
+        seen_ignore_shape_env = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+            seen_ignore_shape_env.append(kwargs["ignore_shape_env"])
+            self.assertIs(example_inputs[0], fake_x)
+            return lambda *args: args
+
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (fake_x,),
+                dynamic_shapes="from_example_inputs",
+                fake_mode=fake_mode,
+            )
+
+        self.assertEqual(seen_ignore_shape_env, [True])
+        self.assertIs(seen_fake_modes[0], fake_mode)
+
+        seen_fake_modes.clear()
+        seen_ignore_shape_env.clear()
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (fake_x,),
+                dynamic_shapes="from_example_inputs",
+            )
+
+        self.assertEqual(seen_ignore_shape_env, [True])
+        self.assertIsNot(seen_fake_modes[0], fake_mode)
+        self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
+        self.assertIsNotNone(seen_fake_modes[0].shape_env)
+
+    def test_standalone_compile_fake_mode_requires_from_example_inputs(self):
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'fake_mode.*dynamic_shapes="from_example_inputs"',
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (torch.ones(4),),
+                dynamic_shapes="from_graph",
+                fake_mode=fake_mode,
+            )
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
