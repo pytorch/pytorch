@@ -313,9 +313,9 @@ def pre_grad_passes(
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
+            numpy_compat_normalization(gm.graph)
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
-            numpy_compat_normalization(gm.graph)
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -726,11 +726,23 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
+                arg_not_provided = object()
 
-                def cat_args(tensors, dim=0):
-                    return tensors, dim
+                def cat_args(
+                    tensors,
+                    dim=arg_not_provided,
+                    axis=arg_not_provided,
+                    out=None,
+                ):
+                    if dim is arg_not_provided:
+                        dim = 0
+                    if axis is not arg_not_provided:
+                        dim = axis
+                    return tensors, dim, out
 
-                tensors, dim = cat_args(*node.args, **node.kwargs)
+                tensors, dim, out = cat_args(*node.args, **node.kwargs)
+                if out is not None or dim is None:
+                    continue
                 new_kwargs = {
                     name: val for name, val in user.kwargs.items() if name != "input"
                 }
