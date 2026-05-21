@@ -4563,6 +4563,76 @@ class numpy_operator_wrapper(Generic[_P, R]):
         return numpy_to_tensor(out)
 
 
+@functools.lru_cache(maxsize=1)
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any]]:
+    from torch._dynamo.variables.misc import get_tnp_to_np_map
+
+    return {
+        id(tnp_callable): (tnp_callable, np_callable)
+        for tnp_callable, np_callable in get_tnp_to_np_map().items()
+    }
+
+
+@functools.lru_cache(maxsize=1024)
+def _torch_numpy_callable_cache_key_by_id(
+    obj_id: int,
+) -> tuple[Callable[..., Any], str] | None:
+    tnp_callable, np_callable = _torch_numpy_callable_id_map()[obj_id]
+    if np_callable is None:
+        return None
+
+    module = getattr(np_callable, "__module__", None) or "numpy"
+    # Random functions depend on global RNG state, so they are not safe to
+    # identify only by their canonical NumPy path in an AOTAutograd cache key.
+    if module == "numpy.random" or module.startswith("numpy.random."):
+        return None
+
+    name = getattr(np_callable, "__name__", None)
+    if name is None:
+        return None
+
+    try:
+        if np_callable is not getattr(importlib.import_module(module), name):
+            return None
+    except (AttributeError, ImportError):
+        return None
+
+    return (tnp_callable, f"{module}.{name}")
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    obj_id = id(obj)
+    # Arbitrary Python callables can be short-lived, so do not cache misses by
+    # id; a later object may reuse the same id.
+    if obj_id not in _torch_numpy_callable_id_map():
+        return None
+
+    entry = _torch_numpy_callable_cache_key_by_id(obj_id)
+    if entry is None:
+        return None
+
+    tnp_callable, cache_key = entry
+    if obj is not tnp_callable:
+        return None
+
+    return cache_key
+
+
+def is_safe_numpy_wrapper(obj: Any) -> bool:
+    return numpy_wrapper_cache_key(obj) is not None
+
+
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
+    if type(obj) is not numpy_to_tensor_wrapper:
+        return None
+
+    key = _torch_numpy_callable_cache_key(obj.f)
+    if key is None:
+        return None
+
+    return (type(obj).__qualname__, key)
+
+
 def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
@@ -5509,6 +5579,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
