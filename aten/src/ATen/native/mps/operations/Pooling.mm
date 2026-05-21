@@ -595,6 +595,12 @@ static void max_unpool_out_mps_template(const Tensor& input,
     output_size[dim] = input.sizes()[dim];
   }
   for (int dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(output_size_[dim] > 0,
+                op_name,
+                ": output_size must contain positive spatial dimensions, but got output_size[",
+                dim,
+                "]=",
+                output_size_[dim]);
     output_size[leading_dims + dim] = output_size_[dim];
   }
 
