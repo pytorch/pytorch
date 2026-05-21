@@ -1570,6 +1570,7 @@ for t in threads:
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
 
+
 instantiate_parametrized_tests(FakeTensorTest)
 
 
