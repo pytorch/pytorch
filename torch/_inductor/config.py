@@ -531,6 +531,15 @@ incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
 
+# TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE: comma-separated list of
+# HeuristicType names (case-insensitive) restricting which kernel heuristic
+# types participate in incremental autotuning. Empty string = none enabled;
+# unset (None here) = default (all). Parsing and resolution against
+# HeuristicType lives in torch._inductor.runtime.fb.incremental.config.
+incremental_autotune_include: str | None = os.environ.get(
+    "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE"
+)
+
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
 )
