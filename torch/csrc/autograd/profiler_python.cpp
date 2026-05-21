@@ -934,8 +934,7 @@ static void unregisterMonitoringCallback() {
   if (strcmp(str, "PyTorch Profiler") != 0) {
     return;
   }
-  auto none = THPObjectPtr(Py_None);
-  Py_INCREF(Py_None);
+  auto none = THPObjectPtr(Py_NewRef(Py_None));
   auto result = THPObjectPtr(PyObject_CallMethod(
       monitoring,
       "register_callback",
@@ -1101,20 +1100,26 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
 void unregister_gc_callback() {
   PyGILState_STATE gstate = PyGILState_Ensure();
+  auto gil_guard =
+      c10::make_scope_exit([gstate]() { PyGILState_Release(gstate); });
+
   PyObject* gc_module = PyImport_ImportModule("gc");
   if (!gc_module) {
     PyErr_Print();
-    PyGILState_Release(gstate);
     return;
   }
+  auto module_guard =
+      c10::make_scope_exit([gc_module]() { Py_DECREF(gc_module); });
+
   PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
   if (!callbacks || !PyList_Check(callbacks)) {
     PyErr_Print();
-    Py_XDECREF(gc_module);
     Py_XDECREF(callbacks);
-    PyGILState_Release(gstate);
     return;
   }
+  auto callbacks_guard =
+      c10::make_scope_exit([callbacks]() { Py_DECREF(callbacks); });
+
   Py_ssize_t idx = PySequence_Index(callbacks, py_gc_callback);
   if (idx >= 0) {
     PySequence_DelItem(callbacks, idx);
@@ -1122,29 +1127,32 @@ void unregister_gc_callback() {
     // Not found, maybe already removed
     PyErr_Clear();
   }
-  Py_DECREF(callbacks);
-  Py_DECREF(gc_module);
   Py_XDECREF(py_gc_callback);
   py_gc_callback = nullptr;
-  PyGILState_Release(gstate);
 }
 
 void PythonTracer::register_gc_callback() {
   PyGILState_STATE gstate = PyGILState_Ensure();
+  auto gil_guard =
+      c10::make_scope_exit([gstate]() { PyGILState_Release(gstate); });
+
   PyObject* gc_module = PyImport_ImportModule("gc");
   if (!gc_module) {
     PyErr_Print();
-    PyGILState_Release(gstate);
     return;
   }
+  auto module_guard =
+      c10::make_scope_exit([gc_module]() { Py_DECREF(gc_module); });
+
   PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
   if (!callbacks || !PyList_Check(callbacks)) {
     PyErr_Print();
-    Py_XDECREF(gc_module);
     Py_XDECREF(callbacks);
-    PyGILState_Release(gstate);
     return;
   }
+  auto callbacks_guard =
+      c10::make_scope_exit([callbacks]() { Py_DECREF(callbacks); });
+
   static PyMethodDef method_def = {
       "gc_event_callback",
       (PyCFunction)gc_event_callback,
@@ -1157,9 +1165,6 @@ void PythonTracer::register_gc_callback() {
     PyErr_Print();
   }
   gc_callback_registered_ = true;
-  Py_DECREF(callbacks);
-  Py_DECREF(gc_module);
-  PyGILState_Release(gstate);
 }
 
 void PythonTracer::stop() {

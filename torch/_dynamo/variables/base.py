@@ -30,7 +30,12 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, format_source_range, istype
+from ..utils import format_source_range, istype
+
+
+_RICHCOMPARE_OPS = frozenset(
+    {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
+)
 
 
 if TYPE_CHECKING:
@@ -509,6 +514,34 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
+    def richcompare_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """Per-VT tp_richcompare slot. Subclasses must override.
+
+        Analogous to CPython's tp_richcompare function pointer on PyTypeObject.
+        Returns ConstantVariable(NotImplemented) when the type does not handle
+        the comparison (signaling do_richcompare to try the other operand).
+
+        Called from two paths:
+        - call_method("__eq__") calls richcompare_impl directly (like CPython's
+          a.__eq__(b) calling tp_richcompare without do_richcompare).
+        - generic_richcompare calls richcompare_impl as part of the 4-step
+          do_richcompare algorithm (subclass priority, forward, reflected,
+          fallback).
+        """
+        unimplemented(
+            gb_type="Missing richcompare_impl override",
+            context=f"richcompare_impl {self} {op}",
+            explanation=f"{type(self).__name__} does not implement "
+            f"richcompare_impl. Add a richcompare_impl override to "
+            f"{type(self).__name__}.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -729,7 +762,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
-        # https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L168-L181
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
         # Key has already been converted to int via nb_index_impl by vt_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
@@ -744,6 +777,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             gb_type="missing sq_contains",
             context=f"sq_contains not implemented for {self.python_type_name()}",
             explanation=f"Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """Sequence concatenation via + operator (sq_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_concat",
+            context=f"sq_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """In-place sequence concatenation via += operator (sq_inplace_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_inplace_concat",
+            context=f"sq_inplace_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
@@ -811,10 +870,33 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name in ("__mul__", "__rmul__", "__imul__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_imul, slot_wrapper_mul
+
+            if name == "__mul__":
+                return slot_wrapper_mul(tx, self, args[0])
+            if name == "__rmul__":
+                return slot_wrapper_mul(tx, self, args[0], reverse=True)
+            return slot_wrapper_imul(tx, self, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
+        elif name == "__add__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_add_impl(tx, args[0])
+        elif name == "__radd__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_add_impl(tx, args[0], reverse=True)
+        elif name == "__iadd__":
+            return self.nb_inplace_add_impl(tx, args[0])
         elif name == "__sub__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -824,45 +906,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_subtract_impl(tx, args[0], reverse=True)
         elif name == "__isub__":
             return self.nb_inplace_subtract_impl(tx, args[0])
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            other = args[0]
-            if not isinstance(self, type(other)) and not (
-                isinstance(self, variables.GetAttrVariable)
-                or isinstance(other, variables.GetAttrVariable)
-            ):
-                # NB: GetAttrVariable is a special case because sometimes an
-                # object can map to GetAttrVariable but other time as
-                # SkipFunctionVariable if it is an input to the compiled
-                # function, e.g. tensor.data_ptr
-                return variables.ConstantVariable.create(NotImplemented)
-            # NB : Checking for mutation is necessary because we compare
-            # constant values
-            if (
-                not self.is_python_constant()
-                or not other.is_python_constant()
-                or tx.output.side_effects.has_pending_mutation(self)
-                or tx.output.side_effects.has_pending_mutation(other)
-            ):
-                unimplemented(
-                    gb_type="Builtin `operator.*` comparison with constant `self` failed",
-                    context=f"call_method {self} {name} {args} {kwargs}",
-                    explanation=f"Failed to compare {self} with {other}, "
-                    + f"because {other} is not a Python constant or its mutation check fails.",
-                    hints=[],
-                )
-
-            try:
-                return variables.ConstantVariable.create(
-                    cmp_name_to_op_mapping[name](
-                        self.as_python_constant(), other.as_python_constant()
-                    )
-                )
-            except Exception as e:
+        elif name in _RICHCOMPARE_OPS and not kwargs:
+            if len(args) != 1:
                 raise_observed_exception(
-                    type(e),
+                    TypeError,
                     tx,
-                    args=list(e.args),
+                    args=[f"expected 1 argument, got {len(args)}"],
                 )
+            # a.__eq__(b) calls the type's tp_richcompare directly, without
+            # do_richcompare's reflected-operand protocol.  This matches
+            # CPython where a.__eq__(b) can return NotImplemented.
+            # See object_protocol.py for the full dispatch architecture.
+            return self.richcompare_impl(tx, args[0], name)
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
         # cannot trace into.  Constant-fold it for VTs backed by a real
         # Python object so that copy.deepcopy can trace through.
@@ -1237,6 +1292,61 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_multiply slot. Default: graph-breaks.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmul__`` instead of ``__mul__``).  The base default
+        graph-breaks so unmigrated VTs surface loudly; ``binary_op1`` only
+        invokes this on types whose CPython type advertises the slot.
+        """
+        return self._nb_slot_not_implemented("nb_multiply_impl", other, reverse=reverse)
+
+    def nb_inplace_multiply_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
+        return self._nb_slot_not_implemented("nb_inplace_multiply_impl", other)
+
+    def sq_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_repeat slot.
+
+        Implements sequence repetition (e.g. ``[1, 2] * 3``).  ``count`` is
+        an int VariableTracker already produced by ``nb_index_impl``.
+        """
+        unimplemented(
+            gb_type="sq_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_repeat slot but no sq_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_repeat_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: InstructionTranslator,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_sequence->sq_inplace_repeat slot."""
+        unimplemented(
+            gb_type="sq_inplace_repeat_impl not implemented",
+            context=f"{type(self).__name__} has sq_inplace_repeat slot but no sq_inplace_repeat_impl override",
+            explanation=f"The type {self.python_type_name()} has an sq_inplace_repeat C slot but "
+            "the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def nb_or_impl(
         self,
         tx: Any,
@@ -1292,6 +1402,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_add slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__radd__`` instead of ``__add__``).
+        """
+        # We need to return NotImplemented here because of sq_concat
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_add slot. Default: graph break."""
+        # We need to return NotImplemented here because of sq_inplace_concat
+        return variables.ConstantVariable(NotImplemented)
+
     def nb_subtract_impl(
         self,
         tx: Any,
@@ -1312,6 +1445,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
         return variables.ConstantVariable(NotImplemented)
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_absolute slot.
+
+        Called when type_implements_nb_absolute returns True for this type.
+        Subclasses override to provide the actual absolute value.
+        """
+        unimplemented(
+            gb_type="nb_absolute_impl not implemented",
+            context=f"{type(self).__name__} has nb_absolute slot but no nb_absolute_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_absolute C slot but "
+            "the corresponding VariableTracker doesn't implement nb_absolute_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def __init__(
         self,

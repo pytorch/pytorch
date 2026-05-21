@@ -338,6 +338,15 @@ DEFAULT_SLOW_TESTS_FILE = 'slow_tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+
+def resolve_sandcastle_slow_tests_file() -> str:
+    if not IS_SANDCASTLE:
+        return ""
+
+    filename = torch._utils_internal.get_file_path("test", DEFAULT_SLOW_TESTS_FILE)
+    return filename if os.path.isfile(filename) else ""
+
+
 def maybe_load_json(filename):
     if os.path.isfile(filename):
         with open(filename) as fp:
@@ -346,8 +355,10 @@ def maybe_load_json(filename):
     return {}
 
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
-if os.getenv("SLOW_TESTS_FILE", ""):
-    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
+slow_tests_file = os.getenv("SLOW_TESTS_FILE", "") or resolve_sandcastle_slow_tests_file()
+if slow_tests_file:
+    slow_tests_dict = maybe_load_json(slow_tests_file)
+    os.environ["SLOW_TESTS_FILE"] = slow_tests_file
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
@@ -2621,6 +2632,18 @@ def skip_if_pytest(fn):
 def skipIfNoXPU(fn):
     return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
 
+def skipIfCachingAllocatorDisabled(fn):
+    """Skip if the CUDA/HIP caching allocator is not active. Covers both the
+    runtime toggle (``torch.cuda.caching_allocator_enable(False)``) and the
+    env-var bypass (``PYTORCH_NO_CUDA_MEMORY_CACHING`` /
+    ``PYTORCH_NO_HIP_MEMORY_CACHING``). The CPU-only case (no CUDA built)
+    is treated as "allocator irrelevant", so the test is allowed to run."""
+    return lazy_skip_if(
+        lambda: torch.cuda.is_available()
+        and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
+        "requires the CUDA/HIP caching allocator (current allocator is uncached)",
+    )(fn)
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -4814,8 +4837,8 @@ class TestCase(expecttest.TestCase):
           fn (callable): Function to check for a nondeterministic alert
 
           caller_name (str): Name of the operation that produces the
-              nondeterministic alert. This name is expected to appear at the
-              beginning of the error/warning message.
+              nondeterministic alert. This name is expected to appear in
+              the error/warning message.
 
           should_alert (bool, optional): If True, then the check will only pass
               if calling `fn` produces a nondeterministic error/warning with the
@@ -4823,7 +4846,7 @@ class TestCase(expecttest.TestCase):
               calling `fn` does not produce an error. Default: `True`.
         '''
 
-        alert_message = '^' + caller_name + ' does not have a deterministic implementation, but you set'
+        alert_message = caller_name + ' does not have a deterministic implementation, but you set'
 
         # Check that errors are thrown correctly
         with DeterministicGuard(True):
@@ -6215,6 +6238,34 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+
+def with_ieee_matmul_precision(f):
+    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
+    the duration of the wrapped test. Save/restore across the call.
+
+    "ieee" is the default, so this decorator is defensive: it insulates
+    tests whose intent is FP32 numerical correctness of an algorithm
+    (e.g. a factorization) from any non-default matmul fp32_precision
+    left set in the process by the build, by global configuration, or
+    by a sibling test that didn't restore it.
+
+    Affects matmul only, not convolution. Tests that also need
+    reduced-precision conv disabled must additionally control the
+    relevant cudnn/mkldnn conv.fp32_precision knobs.
+    """
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        old_cuda = torch.backends.cuda.matmul.fp32_precision
+        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
+            return f(*args, **kwargs)
+        finally:
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda
+    return wrapped
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
