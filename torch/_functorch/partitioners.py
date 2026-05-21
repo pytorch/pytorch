@@ -3913,9 +3913,16 @@ def draw_graph(
         dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
-    write_method = getattr(x, "write_" + ext.lstrip("."))
     fname = f"{base}{ext}"
-    if prog is None:
+    graph_format = ext.lstrip(".")
+    if graph_format in {"dot", "raw"}:
+        # pydot's write_dot() invokes Graphviz with -Tdot.  For large FX graphs
+        # that layout step can dominate compile debugging, so write raw DOT
+        # source directly for text graph dumps.
+        x.write(fname)
+    elif prog is None:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname)
     else:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname, prog=prog)
