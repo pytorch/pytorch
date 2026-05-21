@@ -3120,31 +3120,23 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("epilogue of user's Triton kernel is not Pointwise")
             return False
 
+        # TODO(jjvraw): Remove this when we can handle, note this is testing in epilogue_requires_new_store
         written_buffer_name = self.node.mutation_outputs[0].name
-
-        # TODO(jjvraw): Gate this with whether we have block info & pid mapping.
-        # The epilogue can only read from the output buffer.
-        # Any other tensor/s would require additional load expressions.
         if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-            why(
-                "epilogue of user's Triton kernel reads from buffers other than the mutated output"
-            )
             return False
 
-        # The epilogue may depend on expressions which may not available in the user triton kernel
-        # (e.g. indexing exprs used not in a load)
-        # If the user has provided the dimensions of the output_tile, we may be able to attempt fusion.
+
+        # The epilogue require additional index expressions, if the user has provided the
+        # dimensions of the "output tile", we may be able to attempt fusion.
         if self.output_tile:
-            # TODO: is_compatible
+            # TODO(jjvraw): is_compatible
             pass
         else:
-            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
-            for symbol in node2_inner_fn_free_symbols:
-                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
-                if any(usage != "load" for usage in usages):
-                    why("node2 requires expressions not available in node1")
-                    return False
-
+            if self.epilogue_requires_new_store(node2):
+                why(
+                    "epilogue requires expressions not available in user's Triton kernel"
+                )
+                return False
 
         if self.node.mutable_args[0].layout != node2.node.layout:
             why("user's Triton kernel and epilogue have different buffer layouts")
@@ -3168,6 +3160,23 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         return self.scheduler.can_fuse_vertical(self, node2)
 
+    def epilogue_requires_new_store(self, node2: SchedulerNode) -> bool:
+        # The epilogue can only read from the output buffer.
+        # Any other tensor/s would require additional load expressions.
+        written_buffer_name = self.node.mutation_outputs[0].name
+        if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+            return True # TODO(jjvraw): This should be True when finished testing.
+
+        # The epilogue may depend on expressions which may not available in the user triton kernel
+        # (e.g. indexing exprs used not in a load)
+        node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+        for symbol in node2_inner_fn_free_symbols:
+            usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+            if any(usage != "load" for usage in usages):
+                return True 
+
+        return False 
+
 
 class FusedUserTritonSchedulerNode(FusedSchedulerNode):
     kernel_node: UserTritonSchedulerNode
@@ -3184,6 +3193,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
         self.outputs = epilogue.outputs
+        self.introduce_new_store = self.kernel_node.epilogue_requires_new_store(self.fused_epilogue)
 
     @classmethod
     def epilogue_fuse(
@@ -3225,7 +3235,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         if ir_node.output_tile:
 
             def _construct_block_aliases(mapping: dict[str, str]):
-                expected_keys = {"x", "y", "z"}
+                expected_keys = OrderedSet(["x", "y", "z"])
                 block_aliases = {}
                 for prefix, alias in mapping.items():
                     if prefix not in expected_keys:
@@ -3242,6 +3252,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             kernel_features,
             self,
             formal_out_arg_name,
+            self.introduce_new_store and ir_node.output_tile is not None,
             block_aliases=block_aliases,
             pid_cache=pid_cache,
         )
