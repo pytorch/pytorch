@@ -24,6 +24,7 @@ from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _iterate_exprs,
+    constrain_range,
     DimConstraints,
     DimDynamic,
     expect_true,
@@ -1086,6 +1087,16 @@ def forward(self, x_1):
 
         self.assertTrue(shape_env.evaluate_expr(test1))
         self.assertTrue(shape_env.evaluate_expr(test2))
+
+    def test_mod_less_than_positive_modulus_static(self):
+        shape_env = ShapeEnv()
+        x = shape_env.create_unbacked_symint()
+        y = shape_env.create_unbacked_symint()
+        constrain_range(x, min=0, max=None)
+        constrain_range(y, min=1, max=None)
+
+        expr = sympy.Lt(Mod(x.node.expr, y.node.expr), y.node.expr)
+        self.assertEqual(shape_env._maybe_evaluate_static(expr), sympy.true)
 
     def test_sympy_optimized_add(self):
         shape_env = ShapeEnv()
