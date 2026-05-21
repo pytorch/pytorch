@@ -807,7 +807,7 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
         set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)
       endif()
     endif()
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
+    pytorch_add_thirdparty_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
     set_property(TARGET sleef PROPERTY FOLDER "dependencies")
     list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
     link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
@@ -1012,7 +1012,8 @@ endforeach()
 install(FILES ${ops_h} ${ops_generated_headers}
   DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/ops)
 install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
+  DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen
+  COMPONENT torch)
 
 if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")

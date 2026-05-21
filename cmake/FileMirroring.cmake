@@ -21,14 +21,17 @@ install(FILES
   "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/native_functions.yaml"
   "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/tags.yaml"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torchgen/packaged/ATen/native"
+  COMPONENT torch
 )
 install(DIRECTORY
   "${PROJECT_SOURCE_DIR}/aten/src/ATen/templates/"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torchgen/packaged/ATen/templates"
+  COMPONENT torch
 )
 install(DIRECTORY
   "${PROJECT_SOURCE_DIR}/tools/autograd/"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torchgen/packaged/autograd"
+  COMPONENT torch
   PATTERN "BUILD.bazel" EXCLUDE
   PATTERN "*.bzl" EXCLUDE
 )
@@ -42,6 +45,7 @@ if(EXISTS "${_cutedsl_src}")
   set(_cutedsl_dest "${SKBUILD_PLATLIB_DIR}/torch/_inductor/kernel/vendored_templates/cutedsl/kernels")
   install(FILES "${_cutedsl_src}"
     DESTINATION "${_cutedsl_dest}"
+    COMPONENT torch
     RENAME "cutedsl_grouped_gemm.py"
   )
   # Only create __init__.py for cutedsl/kernels/ (the new directory).
@@ -50,6 +54,7 @@ if(EXISTS "${_cutedsl_src}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/_empty_init.py" "")
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/_empty_init.py"
     DESTINATION "${_cutedsl_dest}"
+    COMPONENT torch
     RENAME "__init__.py"
   )
 elseif(USE_CUDA)
@@ -65,6 +70,7 @@ endif()
 install(FILES
   "${PROJECT_SOURCE_DIR}/torch/_utils_internal.py"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/tools/shared"
+  COMPONENT torch
 )
 install(FILES
   "${PROJECT_SOURCE_DIR}/third_party/valgrind-headers/callgrind.h"

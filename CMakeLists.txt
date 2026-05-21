@@ -67,6 +67,12 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
+# Install components ("libtorch", "torch", "dev", "third_party") and the
+# pytorch_add_thirdparty_subdirectory() macro used below to scope vendored
+# subprojects' install rules out of the wheel. Must be included before any
+# install() calls or add_subdirectory(third_party/...) sites.
+include(cmake/InstallComponents.cmake)
+
 # check and set CMAKE_CXX_STANDARD
 string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
@@ -1344,7 +1350,7 @@ if(USE_MIMALLOC)
   set(MI_BUILD_OBJECT OFF)
   set(MI_BUILD_TESTS OFF)
   add_definitions(-DUSE_MIMALLOC)
-  add_subdirectory(third_party/mimalloc)
+  pytorch_add_thirdparty_subdirectory(third_party/mimalloc)
   include_directories(third_party/mimalloc/include)
 endif()
 
