@@ -968,8 +968,26 @@ class TensorVariable(VariableTracker):
         # after wrap_fx_proxy (which runs get_fake_value internally).
         # We only synchronize when there's a tensor argument, since that's when
         # metadata propagation is relevant.
+
+        # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
+        # and reasoning.
+        from .torch import methods_consuming_unbacked_scalars
+
+        ctx = (
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+            if tx.fake_mode
+            and tx.fake_mode.shape_env
+            and name in methods_consuming_unbacked_scalars
+            and any(
+                isinstance(v, TensorVariable) and v.ndim == 0
+                for v in chain(args, kwargs.values())
+            )
+            else nullcontext
+        )
+
         version_before = self._get_fake_version()
-        result = wrap_fx_proxy(tx, proxy)
+        with ctx():
+            result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(
             tx, version_before, any(arg.is_tensor() for arg in args)
         )
@@ -1623,6 +1641,25 @@ class TensorVariable(VariableTracker):
 
     def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.abs,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___abs__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def method___getitem__(
         self,
@@ -2537,6 +2574,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___abs__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
