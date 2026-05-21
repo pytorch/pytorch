@@ -6067,6 +6067,82 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_with_parameter_fill_value_matches_eager_error(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fill_value = torch.nn.Parameter(torch.tensor(1.0))
+
+            def forward(self, x):
+                return torch.full(
+                    (x.shape[0],),
+                    fill_value=self.fill_value,
+                    dtype=x.dtype,
+                    device=x.device,
+                )
+
+        mod = Mod()
+        x = torch.randn(2)
+
+        with self.assertRaisesRegex(TypeError, "full\\(\\) received an invalid"):
+            mod(x)
+
+        torch._dynamo.reset()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, "TypeError when making fake tensor call"
+        ):
+            opt_mod(x)
+
+    def test_full_with_custom_parameter_fill_value_matches_eager_error(self):
+        class MyTensor(torch.Tensor):
+            pass
+
+        def fn(fill_value):
+            return torch.full((2,), fill_value, dtype=torch.float32)
+
+        fill_value = torch.nn.Parameter(
+            torch.Tensor._make_subclass(MyTensor, torch.tensor(1.0), False)
+        )
+
+        with self.assertRaisesRegex(TypeError, "full\\(\\) received an invalid"):
+            fn(fill_value)
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, "TypeError when making fake tensor call"
+        ):
+            opt_fn(fill_value)
+
+    def test_full_with_non_scalar_tensor_fill_value_matches_eager_error(self):
+        def fn(fill_value):
+            return torch.full((2,), fill_value, dtype=torch.float32)
+
+        fill_value = torch.tensor([1.0])
+
+        with self.assertRaisesRegex(TypeError, "full\\(\\) received an invalid"):
+            fn(fill_value)
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, "TypeError when making fake tensor call"
+        ):
+            opt_fn(fill_value)
+
+    def test_full_with_buffer_fill_value(self):
+        def fn(fill_value):
+            return torch.full((2,), fill_value, dtype=torch.float32)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        for fill_value in (
+            torch.nn.Buffer(torch.tensor(3.0)),
+            torch.nn.Buffer(torch.tensor(4.0)),
+        ):
+            self.assertEqual(opt_fn(fill_value), fn(fill_value))
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
