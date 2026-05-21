@@ -96,7 +96,7 @@ class TestScatterGather(TestCase):
                 res = torch.gather(src, dim=dim, index=ind)
                 ref = src[ind0] if dim == 0 else src[:, ind0]
                 self.assertEqual(res, ref, atol=0, rtol=0)
-                if res.device.type == "cuda":
+                if device != 'cpu':
                     ref_cpu = src.cpu()[ind0.cpu()] if dim == 0 else src.cpu()[:, ind0.cpu()]
                     self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
                 res = torch.gather(src, dim=dim, index=ind_discontig)
@@ -125,7 +125,7 @@ class TestScatterGather(TestCase):
         src = make_tensor((16, 2, 16), device=device, dtype=dtype)
         ind = torch.randint(2, (16, 1), device=device).view(16, 1, 1).expand(16, 1, 16)
         res = torch.gather(src, dim=1, index=ind)
-        if res.device.type == "cuda":
+        if device != 'cpu':
             ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
             self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
 
