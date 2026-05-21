@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
     numpy_to_torch_dtype_dict,
+    parametrize,
     run_tests,
     skipIfNoSciPy,
     slowTest,
@@ -1937,6 +1938,29 @@ class TestUnaryUfuncs(TestCase):
         y = x.to(torch.float8_e5m2)
         ref = x.cpu().float().to(torch.float8_e5m2)
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [0.51, 0.9])
+    @parametrize("shape", [(4, 32), (8, 64)])
+    def test_logit_vectorized_matches_scalar(self, device, dtype, eps, shape):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177839.
+        # Non-contiguous input bypasses the contiguous MKL fast path and covers
+        # the vectorized TensorIterator kernel.
+        torch.manual_seed(0)
+        rows, cols = shape
+        base = torch.rand((rows, cols + 2), dtype=dtype, device=device) * 2 - 0.5
+        x = base[:, :cols]
+        self.assertFalse(x.is_contiguous())
+
+        actual = torch.special.logit(x, eps=eps)
+        ref = torch.empty_like(actual)
+        x_flat = x.flatten()
+        ref_flat = ref.view(-1)
+        for i in range(x_flat.numel()):
+            ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
+
+        self.assertEqual(actual, ref)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
