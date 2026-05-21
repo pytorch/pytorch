@@ -96,7 +96,6 @@ from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
-    normalize_as_list,
     partial_flatten_asdict,
     simple_wraps,
     strict_zip,
@@ -524,17 +523,21 @@ class _RuntimeCompiledFnInvoker:
                 # It's possible to have trace_joint inside user specified with no_grad() region,
                 # if there is a nested with enable_grad(), that forces some outputs to require gradients.
                 # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-                with (
-                    torch.autograd._force_original_view_tracking(True),
-                    torch.enable_grad(),
-                ):
-                    on_before_call()
-                    return call_func_at_runtime_with_args(
-                        self.compiled_fn,
-                        args_,
-                        disable_amp=self.disable_amp,
-                        steal_args=True,
-                    )
+                prev_view_replay_enabled = torch._C._is_view_replay_enabled()
+                try:
+                    if not prev_view_replay_enabled:
+                        torch._C._set_view_replay_enabled(True)
+                    with torch.enable_grad():
+                        on_before_call()
+                        return call_func_at_runtime_with_args(
+                            self.compiled_fn,
+                            args_,
+                            disable_amp=self.disable_amp,
+                            steal_args=True,
+                        )
+                finally:
+                    if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:
+                        torch._C._set_view_replay_enabled(prev_view_replay_enabled)
 
             # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
@@ -781,6 +784,16 @@ def _codegen_increment_mutation_versions(
         rw_lines.append(f"    _increment_version_(({gen_expr},))")
 
 
+def _codegen_normalize_as_list(
+    lines: list[str], var_name: str, *, indent_level: int
+) -> None:
+    indent = "    " * indent_level
+    lines.append(f"{indent}if isinstance({var_name}, tuple):")
+    lines.append(f"{indent}    {var_name} = list({var_name})")
+    lines.append(f"{indent}elif not isinstance({var_name}, list):")
+    lines.append(f"{indent}    {var_name} = [{var_name}]")
+
+
 def _codegen_compiled_fn_invocation(
     rw_lines: list[str],
     rw_globals: dict[str, object],
@@ -789,6 +802,8 @@ def _codegen_compiled_fn_invocation(
     disable_amp: bool,
 ) -> None:
     rw_lines.append("    with _first_ctx_():")
+    # trace_joint is known at codegen time. Only the joint/training path needs
+    # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
         rw_lines.append("        args_ = list(args)")
         for idx in indices_of_inps_to_detach:
@@ -796,23 +811,29 @@ def _codegen_compiled_fn_invocation(
                 f"        if isinstance(args_[{idx}], torch.Tensor): "
                 f"args_[{idx}] = args_[{idx}].detach()"
             )
-        rw_globals["_force_view_tracking_"] = (
-            torch.autograd._force_original_view_tracking
-        )
         rw_lines.append(
-            "        with _force_view_tracking_(True), torch.enable_grad():"
+            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
         )
-        rw_lines.append("            _on_before_call_()")
+        rw_lines.append("        try:")
+        rw_lines.append("            if not prev_view_replay_enabled:")
+        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
+        rw_lines.append("            with torch.enable_grad():")
+        rw_lines.append("                _on_before_call_()")
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append(
-                "                all_outs = _normalize_as_list_(_compiled_fn_(args_))"
-            )
+            rw_lines.append("                with _DisableAutocast_():")
+            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
         else:
-            rw_lines.append(
-                "            all_outs = _normalize_as_list_(_compiled_fn_(args_))"
-            )
+            rw_lines.append("                all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+        rw_lines.append("        finally:")
+        rw_lines.append(
+            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
+        )
+        rw_lines.append(
+            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
+        )
     else:
         rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
         rw_lines.append("        try:")
@@ -823,13 +844,11 @@ def _codegen_compiled_fn_invocation(
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
             rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append(
-                "                all_outs = _normalize_as_list_(_compiled_fn_(args))"
-            )
+            rw_lines.append("                all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
         else:
-            rw_lines.append(
-                "            all_outs = _normalize_as_list_(_compiled_fn_(args))"
-            )
+            rw_lines.append("            all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
         rw_lines.append("        finally:")
         rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
     rw_lines.append("    del args")
@@ -1077,10 +1096,7 @@ def _create_runtime_wrapper(
     )
 
     rw_lines: list[str] = []
-    rw_globals: dict[str, object] = {
-        "torch": torch,
-        "_normalize_as_list_": normalize_as_list,
-    }
+    rw_globals: dict[str, object] = {"torch": torch}
 
     rw_lines.append(
         "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):"
@@ -1655,10 +1671,9 @@ class AOTDedupeWrapper(CompilerWrapper):
             fw_metadata, keep_arg_mask, add_dupe_map
         )
 
-        if (
-            tracing_context := TracingContext.try_get()
-            and aot_config.aot_autograd_arg_pos_to_source
-        ):
+        tracing_context = TracingContext.try_get()
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if tracing_context is not None and sources:
             # TODO(voz): This structure is 1:1, we could consider an alternate structure like
             # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
             # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -1666,12 +1681,10 @@ class AOTDedupeWrapper(CompilerWrapper):
                 zip(add_dupe_map, keep_arg_mask)
             ):
                 if not keep_arg:
-                    dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        dupe_arg_pos
-                    ]
-                    kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        kept_pos
-                    ]
+                    dupe_arg_source = sources[dupe_arg_pos]
+                    kept_arg_source = sources[kept_pos]
+                    if dupe_arg_source is None or kept_arg_source is None:
+                        continue
                     tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
                         DuplicateInputs(kept_arg_source, dupe_arg_source)
                     )
@@ -2141,15 +2154,12 @@ def merge_view_inputs(
         return True
 
     def _format_input(idx: int) -> str:
-        if (
-            aot_config.aot_autograd_arg_pos_to_source is not None
-            and idx < len(aot_config.aot_autograd_arg_pos_to_source)
-            and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
-        ):
-            source = aot_config.aot_autograd_arg_pos_to_source[idx]
-            name = getattr(source, "local_name", source.name)
-        else:
-            name = fwd_inputs_descs[idx].expr()
+        name = fwd_inputs_descs[idx].expr()
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if sources is not None and idx < len(sources):
+            source = sources[idx]
+            if source is not None:
+                name = getattr(source, "local_name", source.name)
         return f"input {idx} ({name})"
 
     if len(fwd_inputs) != len(mutated_input_info):
@@ -2407,27 +2417,16 @@ class CachedAutogradLazyBackwardCompileInfo:
     bw_module_fn: Callable[..., Any]
 
 
-def _raise_if_functorch_active() -> None:
-    # not ideal but prevent the user from seeing a nasty traceback - See #138422
-    stack = torch._C._functorch.peek_interpreter_stack()
-    torch._check(
-        stack is None,
-        lambda: (
-            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
-            "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
-            "backward function."
-        ),
-    )
-
-
 def initialize_rng_states(
     num_rng: int,
     graphsafe_idx: int,
     fwd_rng_states: list[torch.Generator],
     bwd_rng_states: list[torch.Generator],
+    *,
+    device: torch.device,
 ) -> None:
     """
-    Initialize the cudagraph safe rng states.
+    Initialize the graphsafe rng states.
 
     Initialization of rng states should have a few properties:
     - the initialization for each rng state should be independent
@@ -2439,23 +2438,16 @@ def initialize_rng_states(
     with preserve_rng_states. Seed initialization should advance the rng states so consecutive compilations
     do not give equal randomness.
     """
+    from .utils import get_default_generator
+
     with torch.utils._python_dispatch._disable_current_modes():
         seeds = torch.randint(0, torch.iinfo(torch.int64).max, (num_rng,), device="cpu")
+        generator = get_default_generator(device)
         fwd_rng_states.extend(
-            [
-                torch.cuda.default_generators[graphsafe_idx]
-                .clone_state()
-                .manual_seed(int(seeds[i]))
-                for i in range(num_rng)
-            ]
+            [generator.clone_state().manual_seed(int(seeds[i])) for i in range(num_rng)]
         )
         bwd_rng_states.extend(
-            [
-                torch.cuda.default_generators[graphsafe_idx]
-                .clone_state()
-                .manual_seed(int(seeds[i]))
-                for i in range(num_rng)
-            ]
+            [generator.clone_state().manual_seed(int(seeds[i])) for i in range(num_rng)]
         )
 
 
@@ -2566,6 +2558,7 @@ class AOTDispatchAutogradCompileSpec:
     lazy_backward_info: (
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2718,6 +2711,7 @@ class _AutogradForwardEpilogue:
 class _AutogradRngStateTracker:
     num_rng: int
     graphsafe_idx: int | None
+    device: torch.device | None = None
     fwd_rng_states: list[torch.Generator] = field(default_factory=list)
     bwd_rng_states: list[torch.Generator] = field(default_factory=list)
     curr_fwd_iter: Any = field(default_factory=lambda: itertools.count(0))
@@ -2734,11 +2728,14 @@ class _AutogradRngStateTracker:
         if len(self.fwd_rng_states) == 0:
             if self.graphsafe_idx is None:
                 raise AssertionError("graphsafe_idx must not be None when num_rng > 0")
+            if self.device is None:
+                raise AssertionError("device must not be None when num_rng > 0")
             initialize_rng_states(
                 self.num_rng,
                 self.graphsafe_idx,
                 self.fwd_rng_states,
                 self.bwd_rng_states,
+                device=self.device,
             )
 
         curr_iter = next(self.curr_fwd_iter)
@@ -2802,6 +2799,7 @@ class _AutogradBackwardCompiler:
         AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
     )
     disable_amp: bool
+    bw_compiler: Callable[..., Any] | None
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
@@ -2848,9 +2846,9 @@ class _AutogradBackwardCompiler:
         ):
             CompileEventLogger.compilation_metric(is_forward=False)
             # See Note: [Backward graph lazy lowering]
-            if self.aot_config.bw_compiler is None:
-                raise AssertionError("aot_config.bw_compiler must not be None")
-            self.compiled_bw = self.aot_config.bw_compiler(
+            if self.bw_compiler is None:
+                raise AssertionError("bw_compiler must not be None")
+            self.compiled_bw = self.bw_compiler(
                 copy.deepcopy(bw_module), placeholder_list
             )
             # Maybe save cache entry
@@ -2980,12 +2978,23 @@ def _codegen_backward_prologue(
         "def _backward_prologue("
         "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
     ]
-    G: dict[str, object] = {
-        "_raise_if_functorch_active_": _raise_if_functorch_active,
-        "torch": torch,
-    }
+    G: dict[str, object] = {"torch": torch}
 
-    L.append("    _raise_if_functorch_active_()")
+    L.append("    stack = torch._C._functorch.peek_interpreter_stack()")
+    L.append("    torch._check(")
+    L.append("        stack is None,")
+    L.append("        lambda: (")
+    L.append(
+        "            \"It looks like you're trying to call a compiled backward "
+        'function within vmap/grad/vjp, "'
+    )
+    L.append(
+        "            \"which isn't supported. Try wrapping vmap inside "
+        'torch.compile, or skip compiling the "'
+    )
+    L.append('            "backward function."')
+    L.append("        ),")
+    L.append("    )")
 
     if deterministic is not None and not deterministic:
         L.append("    _gd = torch.are_deterministic_algorithms_enabled()")
@@ -3156,7 +3165,6 @@ def _codegen_compiled_forward(
     code_globals: dict[str, object] = {
         "torch": torch,
         "BackwardState": BackwardState,
-        "_normalize_as_list_": normalize_as_list,
     }
 
     if backward_state_indices:
@@ -3173,9 +3181,11 @@ def _codegen_compiled_forward(
     if disable_amp:
         code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
         lines.append("    with _DisableAutocast_():")
-        lines.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        lines.append("        fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=2)
     else:
-        lines.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        lines.append("    fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=1)
 
     lines.append("    _save_(ctx, fw_outs)")
     lines.append("    return _finalize_(ctx, fw_outs)")
@@ -3264,11 +3274,13 @@ class _AOTDispatchAutogradFunctionFactory:
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
+            device=self.spec.fw_metadata.graphsafe_rng_device,
         )
         backward_compiler = _AutogradBackwardCompiler(
             compiled_bw=self.spec.compiled_bw_func,
             lazy_backward_info=self.spec.lazy_backward_info,
             disable_amp=self.spec.disable_amp,
+            bw_compiler=self.spec.bw_compiler,
             aot_config=self.spec.aot_config,
             fw_metadata=self.spec.fw_metadata,
             try_save_cache_entry=self.spec.try_save_cache_entry,

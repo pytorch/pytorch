@@ -1636,38 +1636,22 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # A synthetic base reconstructs every input in the same-storage group,
         # including group members that do not overlap any other member.
 
-        base = torch.arange(20)
-        fwd_inputs = [base[0:4], base[10:14], base[12:16]]
-        aot_config = AOTConfig(
-            fw_compiler=None,
-            bw_compiler=None,
-            partition_fn=None,
-            decompositions={},
-            num_params_buffers=0,
-            aot_id=0,
-            keep_inference_input_mutations=False,
-            aot_autograd_arg_pos_to_source=[
-                LocalSource("a"),
-                LocalSource("b"),
-                LocalSource("c"),
-            ],
+        def f(a, b, c):
+            b.add_(1)
+            return a.clone() + c.clone()
+
+        def args_with_offset_0(x):
+            return x[0:4], x[10:14], x[12:16]
+
+        def args_with_offset_4(x):
+            return x[4:8], x[10:14], x[12:16]
+
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, args_with_offset_0, args_with_offset_4
         )
-        ctx = TracingContext(FakeTensorMode())
-
-        with torch._guards.tracing(ctx):
-            actual_aliased_indices = compute_overlapping_inputs(
-                aot_config, fwd_inputs, [0, 1, 2]
-            )
-
-        self.assertEqual(actual_aliased_indices, {1, 2})
-        storage_offsets = {
-            g.input_source.name: g.storage_offset
-            for g in ctx.guards_context.aotautograd_guards
-            if isinstance(g, StorageOffset)
-        }
-        self.assertEqual(
-            storage_offsets,
-            {"L['a']": 0, "L['b']": 10, "L['c']": 12},
+        self.assertExpectedInline(
+            guard_failure,
+            """0/0: a.storage_offset() == 0""",
         )
 
     def test_inputs_overlapping_with_mutation_recompile_on_storage_group_change(self):
@@ -1724,6 +1708,35 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             ],
             [["L['a']", "L['b']"]],
         )
+
+    def test_storage_overlap_guards_skip_source_less_groups(self):
+        base = torch.arange(20)
+        fwd_inputs = [base[0:4], base[10:14], base[12:16]]
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a"),
+                None,
+                LocalSource("c"),
+            ],
+        )
+        ctx = TracingContext(FakeTensorMode())
+
+        with torch._guards.tracing(ctx):
+            actual_aliased_indices = compute_overlapping_inputs(
+                aot_config, fwd_inputs, [0, 1, 2]
+            )
+
+        self.assertEqual(actual_aliased_indices, {1, 2})
+        for guard in ctx.guards_context.aotautograd_guards:
+            self.assertNotIsInstance(guard, StorageOverlap)
+            self.assertNotIsInstance(guard, StorageOffset)
 
     def _test_no_storage_overlap_guards(self, f, argsfn):
         # Compile f with aot_eager backend, and run it with the argument set returned by

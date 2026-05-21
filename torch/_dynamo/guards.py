@@ -761,21 +761,35 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
-def check_same_storage_groups(groups: list[list[torch.Tensor]]) -> bool:
-    storage_ids: list[int] = []
+def storage_id(tensor: torch.Tensor) -> int | None:
     try:
-        for group in groups:
-            if not group:
-                continue
-            group_storage_id = group[0].untyped_storage()._cdata
-            if any(
-                tensor.untyped_storage()._cdata != group_storage_id
-                for tensor in group[1:]
-            ):
-                return False
-            storage_ids.append(group_storage_id)
+        return tensor.untyped_storage()._cdata
     except (AttributeError, RuntimeError, TypeError):
-        return False
+        return None
+
+
+def check_same_storage_groups(groups: list[list[torch.Tensor]]) -> bool:
+    """
+    Check exact storage group topology.
+
+    Each group is expected to contain tensors sharing a storage, and distinct
+    groups are expected to have distinct storages.
+    """
+    storage_ids: list[int] = []
+    for group in groups:
+        if not group:
+            continue
+
+        group_storage_id = storage_id(group[0])
+        if group_storage_id is None:
+            return False
+
+        for tensor in group[1:]:
+            tensor_storage_id = storage_id(tensor)
+            if tensor_storage_id is None or tensor_storage_id != group_storage_id:
+                return False
+
+        storage_ids.append(group_storage_id)
 
     return len(storage_ids) == len(set(storage_ids))
 
@@ -907,7 +921,7 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
         return dim.node.maybe_as_int()
 
 
-def convert_to_concrete_values(size_or_stride: list[Any]) -> list[int | None]:
+def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 

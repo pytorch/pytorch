@@ -13,6 +13,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
+from numbers import Number
 from typing import (
     Any,
     cast,
@@ -1593,8 +1594,11 @@ class Reduction(Loops):
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
             ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
+                value = inner_fn(index, rindex)
+                if isinstance(value, tuple):
+                    return value
                 return (
-                    inner_fn(index, rindex),
+                    value,
                     ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
@@ -8544,14 +8548,25 @@ class FallbackKernel(ExternKernelAlloc):
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
+            def add_alias_if_graph_buffer(t: Any) -> None:
+                if t is None:
+                    return
+                if isinstance(t, (Number, Expr, *SymTypes)):
+                    # The dispatcher accepts Python scalars for some Tensor
+                    # schema arguments by boxing them into temporary scalar tensors.
+                    # Those temporaries cannot alias or mutate graph buffers.
+                    return
+                assert isinstance(t, IRNode), type(t)
+                add_alias(t)
+
             if library_utils.is_tensorlist_like_type(info.type):
                 if arg is not None:
                     for optional_tensor_arg in arg:
-                        add_alias(optional_tensor_arg)
+                        add_alias_if_graph_buffer(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
 
-                add_alias(arg)
+                add_alias_if_graph_buffer(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)

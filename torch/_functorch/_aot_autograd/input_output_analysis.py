@@ -12,7 +12,7 @@ In particular, the following analyses are provided:
 import contextlib
 import itertools
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -377,14 +377,20 @@ def compute_overlapping_inputs(
         and num_aliases > 1
         and aot_config.aot_autograd_arg_pos_to_source
     ):
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if any(i >= len(sources) or sources[i] is None for i in aliased_input_indices):
+            return actual_aliased_indices
+
         no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
 
-        overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
-        ]
-        non_overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
-        ]
+        overlapping_sources: list[Source] = []
+        for i in actual_aliased_indices:
+            source = cast(Source, sources[i])
+            overlapping_sources.append(source)
+        non_overlapping_sources: list[Source] = []
+        for i in no_overlap_indices:
+            source = cast(Source, sources[i])
+            non_overlapping_sources.append(source)
 
         tracing_context.guards_context.aotautograd_guards.append(
             StorageOverlap(overlapping_sources, non_overlapping_sources)
@@ -392,9 +398,10 @@ def compute_overlapping_inputs(
         for i in aliased_input_indices if len(actual_aliased_indices) > 1 else ():
             storage_offset = fwd_inputs[i].storage_offset()
             if not isinstance(storage_offset, torch.SymInt):
+                source = cast(Source, sources[i])
                 tracing_context.guards_context.aotautograd_guards.append(
                     StorageOffset(
-                        aot_config.aot_autograd_arg_pos_to_source[i],
+                        source,
                         int(storage_offset),
                     )
                 )
@@ -411,22 +418,26 @@ def add_storage_aliasing_guard(
     if tracing_context is None or not sources:
         return
 
-    source_groups: list[list[Source]] = []
+    source_groups: list[tuple[Source, ...]] = []
     for group in aliased_input_groups:
         source_group: list[Source] = []
         for i in group:
-            if i >= len(sources) or sources[i] is None:
+            if i >= len(sources):
                 source_group = []
                 break
-            source_group.append(sources[i])
+            source = sources[i]
+            if source is None:
+                source_group = []
+                break
+            source_group.append(source)
         if source_group:
-            source_groups.append(source_group)
+            source_groups.append(tuple(source_group))
 
     if not source_groups:
         return
 
     tracing_context.guards_context.aotautograd_guards.append(
-        StorageAliasing(source_groups)
+        StorageAliasing(tuple(source_groups))
     )
 
 

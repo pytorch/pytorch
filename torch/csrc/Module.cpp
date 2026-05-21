@@ -1853,7 +1853,7 @@ static PyObject* THPModule_set_override_stale_capture_stream(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setOverrideStaleCaptureStream(arg == Py_True);
+  at::globalContext().setOverrideStaleCaptureStream(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
