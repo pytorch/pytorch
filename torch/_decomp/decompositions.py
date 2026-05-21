@@ -3168,7 +3168,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -5217,12 +5217,12 @@ def _reflection_or_replication_pad(
     # produce non-standard strides — so suggest_memory_format(result) may
     # not reflect the desired output format.
     #
-    # CPU vs CUDA eager behavior differs:
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
     #   CPU:  allocates output via at::empty_like with suggest_memory_format,
     #         preserving the input's format (e.g. channels_last).
-    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
     #         always producing contiguous output regardless of input format.
-    if a.device.type in ("cuda", "mps"):
+    if a.device.type in ("cuda", "mps", "xpu"):
         memory_format = torch.contiguous_format
     else:
         memory_format = utils.suggest_memory_format(a)
@@ -5615,6 +5615,22 @@ def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
     )
 
 
+def _needs_scaled_dot_product_flash_attention_for_cpu_autograd(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Tensor | None,
+) -> bool:
+    if not torch.is_grad_enabled():
+        return False
+    return (
+        query.requires_grad
+        or key.requires_grad
+        or value.requires_grad
+        or (attn_mask is not None and attn_mask.requires_grad)
+    )
+
+
 # Keep this separate from the export decomposition above: direct callers can
 # observe the second output, so the Autograd impl must return logsumexp.
 @aten._scaled_dot_product_flash_attention_for_cpu.default.py_impl(DispatchKey.Autograd)
@@ -5628,6 +5644,20 @@ def scaled_dot_product_flash_attention_for_cpu_autograd(
     attn_mask: Tensor | None = None,
     scale: float | None = None,
 ) -> tuple[Tensor, Tensor]:
+    if not _needs_scaled_dot_product_flash_attention_for_cpu_autograd(
+        query, key, value, attn_mask
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return aten._scaled_dot_product_flash_attention_for_cpu.default(
+                query,
+                key,
+                value,
+                dropout_p,
+                is_causal,
+                attn_mask=attn_mask,
+                scale=scale,
+            )
+
     _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
     output, _ = scaled_dot_product_flash_attention_for_cpu(
         query,
