@@ -983,6 +983,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self, *args, **kwargs
             )
+        elif self.value is collections.defaultdict and name == "__copy__":
+            if not args:
+                raise_type_error(
+                    tx,
+                    "unbound method defaultdict.__copy__() needs an argument",
+                )
+            try:
+                receiver_type = args[0].python_type()
+            except NotImplementedError:
+                raise_type_error(
+                    tx,
+                    "descriptor '__copy__' for 'collections.defaultdict' "
+                    "objects doesn't apply to this object",
+                )
+            if not issubclass(receiver_type, collections.defaultdict):
+                raise_type_error(
+                    tx,
+                    "descriptor '__copy__' for 'collections.defaultdict' "
+                    f"objects doesn't apply to a '{receiver_type.__name__}' object",
+                )
+            return args[0].call_method(tx, name, args[1:], kwargs)
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
@@ -4537,11 +4558,18 @@ class DefaultDictVariable(UserDefinedDictVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.nb_inplace_or_impl(tx, args[0])
-        elif name == "copy":
+        elif name in ("copy", "__copy__"):
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
             from .builder import SourcelessBuilder
 
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None in copy")
             new_dd = tx.output.side_effects.track_new_user_defined_object(
