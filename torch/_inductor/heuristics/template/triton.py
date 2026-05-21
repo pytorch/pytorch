@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
@@ -36,11 +37,11 @@ from ...utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    triton_type,
     using_b200,
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 from .triton_addmm import AddMMConfigMixin
 
 
@@ -327,6 +328,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -2393,7 +2396,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     @staticmethod
     def _dtype_to_triton(dtype: torch.dtype) -> str:
         """Convert a torch dtype to a triton type string."""
-        return f"tl.{dtype}".replace("torch.", "")
+        return triton_type(dtype)
 
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
@@ -2634,6 +2637,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
@@ -2882,7 +2886,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,
+    ROCmConfigHeuristic,  # type: ignore[misc]
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
