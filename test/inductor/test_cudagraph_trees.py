@@ -408,6 +408,49 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertIsNotNone(self.get_manager())
 
+        def test_input_storage_mutation_skips_cudagraphs(self):
+            class Mod(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = nn.Parameter(torch.randn(4, 4, device="cuda"))
+                    self.register_buffer(
+                        "mask",
+                        torch.tril(torch.ones(4, 4, device="cuda")),
+                    )
+
+                def forward(self, x):
+                    with torch.no_grad():
+                        self.weight.data *= self.mask
+                    return x @ self.weight
+
+            torch.manual_seed(0)
+            model = Mod().eval()
+            x = torch.randn(4, 4, device="cuda")
+
+            with torch.no_grad():
+                expected = model(x)
+
+            counters.clear()
+            compiled_model = torch.compile(
+                model,
+                mode="reduce-overhead",
+                dynamic=True,
+            )
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx(), torch.no_grad():
+                actual = compiled_model(x)
+                actual_again = compiled_model(x)
+
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual_again)
+            FileCheck().check("skipping cudagraphs due to input storage mutation").run(
+                log_stream.getvalue()
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertIsNone(self.get_manager())
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", False)
@@ -1253,6 +1296,12 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
         def test_topk_skips_cudagraph_on_hip(self):
             # rocm workaround: topk kernels fault under cudagraph trees
             # on the 2nd replay of a recorded graph.
@@ -1862,6 +1911,8 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(x_grad, x_grad_clone)
 
         def test_backward_outputs_do_not_poison_grad_accumulation(self):
+            counters.clear()
+
             class MLP(nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -1886,6 +1937,43 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(model.lin.weight.grad, ref_model.lin.weight.grad)
             self.assertEqual(model.lin.bias.grad, ref_model.lin.bias.grad)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+            model.zero_grad(set_to_none=True)
+            ref_model.zero_grad(set_to_none=True)
+
+        @config.patch("triton.cudagraph_clone_graph_owned_leaf_grads", False)
+        def test_backward_outputs_skip_cudagraph_without_grad_clone(self):
+            counters.clear()
+
+            model = nn.Linear(4, 8).cuda().train()
+            ref_model = nn.Linear(4, 8).cuda().train()
+            ref_model.load_state_dict(model.state_dict())
+            compiled = torch.compile(
+                model, fullgraph=True, backend="inductor", mode="reduce-overhead"
+            )
+
+            x1 = torch.rand((1, 4), device="cuda")
+            compiled(x1).sum().backward()
+            ref_model(x1).sum().backward()
+            old_grad = model.weight.grad
+            if old_grad is None:
+                self.fail("expected weight grad after first backward")
+            old_data_ptr = old_grad.data_ptr()
+
+            x2 = torch.rand((1, 4), device="cuda")
+            y2 = compiled(x2)
+            current_grad = model.weight.grad
+            if current_grad is None:
+                self.fail("expected weight grad after second forward")
+            self.assertEqual(current_grad.data_ptr(), old_data_ptr)
+
+            y2.sum().backward()
+            ref_model(x2).sum().backward()
+
+            self.assertEqual(model.weight.grad, ref_model.weight.grad)
+            self.assertEqual(model.bias.grad, ref_model.bias.grad)
+            self.assertGreaterEqual(counters["inductor"]["cudagraph_skips"], 1)
 
             model.zero_grad(set_to_none=True)
             ref_model.zero_grad(set_to_none=True)

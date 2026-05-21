@@ -1850,6 +1850,12 @@ class triton:
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
 
+    # When CUDAGraph backward outputs have escaped into leaf .grad tensors,
+    # clone those grads before the next generation invalidates their backing
+    # storage. Disabling this skips CUDAGraphs until the user clears those
+    # grads instead.
+    cudagraph_clone_graph_owned_leaf_grads = True
+
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 
@@ -2107,7 +2113,7 @@ class triton:
     # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
     # by per-block amax over a small group dimension like FP8 block size)
     # into a single kernel with two sequential reduction passes.
-    nested_reduction = False
+    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
