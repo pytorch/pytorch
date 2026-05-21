@@ -1279,6 +1279,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return None
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        def track_hooks_dict(
+            hooks_dict: dict[Any, Any],
+            result: VariableTracker,
+        ) -> VariableTracker:
+            if hooks_dict in tx.output.side_effects:
+                return tx.output.side_effects[hooks_dict]
+            if result.source is None:
+                return result
+            return tx.output.side_effects.track_mutable(hooks_dict, result)
+
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
@@ -1293,6 +1303,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
+                    hooks_source = None
                     if self.source:
                         hooks_source = AttrSource(self.source, name)
                         install_guard(
@@ -1300,7 +1311,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({})
+                    return track_hooks_dict(
+                        hooks_dict,
+                        variables.NNModuleHooksDictVariable(
+                            {},
+                            type(hooks_dict),
+                            source=hooks_source,
+                        ),
+                    )
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1341,8 +1359,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return variables.NNModuleHooksDictVariable(
-                result, type(hooks_dict), source=hooks_dict_source
+            return track_hooks_dict(
+                hooks_dict,
+                variables.NNModuleHooksDictVariable(
+                    result, type(hooks_dict), source=hooks_dict_source
+                ),
             )
         return super().var_getattr(tx, name)
 

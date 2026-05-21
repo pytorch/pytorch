@@ -3454,6 +3454,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             obj,
             (
                 variables.DefaultDictVariable,
+                variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
