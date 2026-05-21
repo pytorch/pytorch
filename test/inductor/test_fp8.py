@@ -185,12 +185,6 @@ class TestFP8Types(TestCase):
         if not utils.is_triton_fp8_dtype_supported(torch.float8_e4m3fn, device):
             fp8_dtypes.append(torch.float8_e4m3fn)
 
-        unsupported_triton_dtypes = {
-            torch.float8_e4m3fn: "fp8e4nv",
-            torch.float8_e4m3fnuz: "fp8e4b8",
-            torch.float8_e5m2fnuz: "fp8e5b16",
-        }
-
         x = torch.tensor(
             [-32.0, -16.0, -1.0, -0.25, 0.0, 0.25, 1.0, 16.0],
             device=device,
@@ -205,7 +199,7 @@ class TestFP8Types(TestCase):
 
             self.assertEqual(actual.dtype, fp8_dtype)
             torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
-            self.assertNotIn(unsupported_triton_dtypes[fp8_dtype], "\n".join(code))
+            self.assertNotIn(utils.triton_type(fp8_dtype), "\n".join(code))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm
