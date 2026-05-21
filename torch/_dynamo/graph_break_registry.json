@@ -1,4 +1,14 @@
 {
+  "GB1356": [
+    {
+      "Gb_type": "metaclass data descriptor setattr",
+      "Context": "class={self}, name={name_str}, descriptor={meta_attr}",
+      "Explanation": "Dynamo does not trace class attribute mutation through metaclass data descriptor setters.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0000": [
     {
       "Gb_type": "All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
@@ -809,6 +819,36 @@
         "If you are attempting to call a logging function (e.g. `print`), ",
         "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
         "Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0965": [
+    {
+      "Gb_type": "custom metaclass setattr",
+      "Context": "class={self}, metaclass={type(self.value)}",
+      "Explanation": "Dynamo does not trace class attribute mutation through custom metaclass __setattr__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7402": [
+    {
+      "Gb_type": "non-const setattr name on user-defined class",
+      "Context": "class={self}, name={name}, value={value}",
+      "Explanation": "Detected a call to `setattr` of a user-defined class with a non-constant name.",
+      "Hints": [
+        "Ensure that the name is a string."
+      ]
+    }
+  ],
+  "GB9103": [
+    {
+      "Gb_type": "sourceless class attribute mutation",
+      "Context": "class={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo cannot replay attribute mutation on a class without a source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

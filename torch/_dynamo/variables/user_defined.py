@@ -446,6 +446,74 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.call_method(tx, "__bool__", [], {})
         return ConstantVariable.create(True)
 
+    def method_setattr_standard(
+        self,
+        tx: "InstructionTranslator",
+        name: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        try:
+            name_str = name.as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="non-const setattr name on user-defined class",
+                context=f"class={self}, name={name}, value={value}",
+                explanation="Detected a call to `setattr` of a user-defined class with a non-constant name.",
+                hints=["Ensure that the name is a string."],
+            )
+
+        if not isinstance(name_str, str):
+            raise_observed_exception(TypeError, tx)
+
+        metaclass_setattr = inspect.getattr_static(
+            type(self.value), "__setattr__", None
+        )
+        if metaclass_setattr is not type.__setattr__:
+            unimplemented(
+                gb_type="custom metaclass setattr",
+                context=f"class={self}, metaclass={type(self.value)}",
+                explanation="Dynamo does not trace class attribute mutation through custom metaclass __setattr__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        # type.__setattr__ invokes metaclass descriptors with tp_descr_set,
+        # including descriptors that define __set__ without __get__.
+        meta_attr = self.lookup_metaclass_attr(name_str)
+        if meta_attr is not NO_SUCH_SUBOBJ and (
+            hasattr(type(meta_attr), "__set__")
+            or hasattr(type(meta_attr), "__delete__")
+        ):
+            unimplemented(
+                gb_type="metaclass data descriptor setattr",
+                context=f"class={self}, name={name_str}, descriptor={meta_attr}",
+                explanation=(
+                    "Dynamo does not trace class attribute mutation through "
+                    "metaclass data descriptor setters."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        target = self
+        if not tx.output.side_effects.is_attribute_mutation(target):
+            if self.source is None:
+                unimplemented(
+                    gb_type="sourceless class attribute mutation",
+                    context=f"class={self}, name={name_str}, value={value}",
+                    explanation="Dynamo cannot replay attribute mutation on a class without a source.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if self.value not in tx.output.side_effects:
+                target = tx.output.side_effects.track_object_existing(self.value, self)
+            else:
+                target = tx.output.side_effects[self.value]
+                if not isinstance(target, UserDefinedClassVariable):
+                    raise AssertionError(
+                        f"Expected UserDefinedClassVariable, got {type(target)}"
+                    )
+
+        tx.output.side_effects.store_attr(target, name_str, value)
+        return variables.ConstantVariable.create(None)
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslator",
@@ -988,6 +1056,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             method, self, source=source
                         ).call_function(tx, args, kwargs)
                     break
+
+        if name == "__setattr__":
+            if len(args) != 2 or kwargs:
+                raise_observed_exception(TypeError, tx)
+            return self.method_setattr_standard(tx, *args, **kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
