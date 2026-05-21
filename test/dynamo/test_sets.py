@@ -4,6 +4,7 @@
 
 import math
 import unittest
+from collections import namedtuple
 from collections.abc import Iterable
 
 import torch
@@ -62,6 +63,133 @@ class CustomSetTests(_BaseSetTests):
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    def test_sourced_set_tuple_matches_eager_order(self):
+        def fn(s, expected):
+            return tuple(s) == expected
+
+        s = {"a", "b", "c", "d", "e"}
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(opt_fn(s, tuple(s)))
+
+    def test_namedtuple_fields_from_set_match_tuple_iteration(self):
+        def warm_namedtuple_descriptor_cache():
+            P = namedtuple("P", ["m", "n"])
+            Q = namedtuple("Q", ["o", "p"])
+            return P.m.__doc__ is Q.o.__doc__
+
+        def fn():
+            words = {
+                "Alias",
+                "At",
+                "AttributeError",
+                "Build",
+                "Bypass",
+                "Create",
+                "Encountered",
+                "Expected",
+                "Field",
+                "For",
+                "Got",
+                "Helper",
+                "IronPython",
+                "Jython",
+                "KeyError",
+                "Make",
+                "Modify",
+                "Note",
+                "OrderedDict",
+                "Point",
+                "Return",
+                "Returns",
+                "Type",
+                "TypeError",
+                "Used",
+                "Validate",
+                "ValueError",
+                "Variables",
+                "accessible",
+                "add",
+                "added",
+                "arguments",
+                "automatically",
+                "build",
+                "builtins",
+                "class_namespace",
+                "collections",
+                "convert",
+                "copy",
+                "created",
+                "creation",
+                "debugging",
+                "defined",
+                "dict",
+                "dictionary",
+                "doc",
+                "docstring",
+                "docstrings",
+                "duplicate",
+                "effect",
+                "enumerate",
+                "environments",
+                "error",
+                "example",
+                "exec",
+                "f_globals",
+                "field_names",
+                "fields",
+                "formatted",
+                "frame",
+                "function",
+                "generate",
+                "getter",
+                "identifiers",
+                "indexable",
+                "instantiate",
+                "interning",
+                "introspection",
+                "isidentifier",
+                "itemgetter",
+                "iterable",
+                "keyword",
+                "keywords",
+                "metadata",
+                "methods",
+                "module_name",
+                "namedtuple",
+                "namespace",
+                "num_fields",
+                "operator",
+                "particular",
+                "pickling",
+                "positional",
+                "property",
+                "rename",
+                "replace",
+                "repr_fmt",
+                "representation",
+                "reuse_itemgetter",
+                "sequence",
+                "startswith",
+                "strings",
+                "subclass",
+                "tuple_new",
+                "typename",
+                "underscore",
+                "unexpected",
+                "variable",
+                "verbose",
+            }
+            T = namedtuple("T", words)
+            return T._fields == tuple(words)
+
+        opt_warm = torch.compile(
+            warm_namedtuple_descriptor_cache, backend="eager", fullgraph=True
+        )
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(opt_warm())
+        self.assertTrue(fn())
+        self.assertTrue(opt_fn())
+
     def test_isdisjoint_with_generator(self):
         n = 0
 

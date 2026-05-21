@@ -3631,6 +3631,11 @@ class ListBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .user_defined import UserDefinedObjectVariable
 
+        if kwargs:
+            raise_type_error(tx, "list() takes no keyword arguments")
+        if len(args) > 1:
+            raise_type_error(tx, f"list expected at most 1 argument, got {len(args)}")
+
         obj = args[0] if args else None
 
         if isinstance(
@@ -3668,6 +3673,13 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                         )
             return ListVariable(
                 list(obj.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
+
+        iterator = generic_getiter(tx, obj)
+        if iterator.has_force_unpack_var_sequence(tx):
+            return ListVariable(
+                list(iterator.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
 
