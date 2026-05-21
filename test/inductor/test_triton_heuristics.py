@@ -18,7 +18,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     runOnRocm,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -384,9 +383,6 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(
-        msg="lack _get_exceeding_shared_memory_checker support - torch-xpu-ops: 2331"
-    )
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):

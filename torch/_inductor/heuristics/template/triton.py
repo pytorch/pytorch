@@ -1031,8 +1031,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 return None
 
         except Exception:
-            # If CUDA is not available or properties cannot be queried, return None
-            return None
+            try:
+                device = torch.xpu.current_device()
+                props = torch.xpu.get_device_properties(device)
+                if hasattr(props, "local_mem_size"):
+                    sm_available = int(props.local_mem_size)
+                else:
+                    return None
+            except Exception:
+                # If device properties cannot be queried, return None
+                return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
         def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:
