@@ -735,6 +735,96 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
+// Cast-variant registrations: one kernel per output dtype, runtime-casting the
+// input via val_at_offs<T>(ptr, offs, ScalarType). Selected by
+// exec_unary_kernel when the direct per-(out,in) kernel isn't registered. Only
+// registered for dtypes where the functor's natural output equals its input, so
+// the static_assert in REGISTER_UNARY_OP_CAST holds.
+#define INSTANTIATE_UNARY_CAST_FLOAT(DTYPE)  \
+  REGISTER_UNARY_OP_CAST(angle, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(erf, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(erfc, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(erfcx, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(erfinv, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(exp, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(expm1, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(sigmoid, DTYPE);    \
+  REGISTER_UNARY_OP_CAST(exp2, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(log, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(log10, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(log1p, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(log2, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(lgamma, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(digamma, DTYPE);    \
+  REGISTER_UNARY_OP_CAST(trigamma, DTYPE);   \
+  REGISTER_UNARY_OP_CAST(sinc, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(sqrt, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(reciprocal, DTYPE); \
+  REGISTER_UNARY_OP_CAST(rsqrt, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(sinh, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(cosh, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(tanh, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(sin, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(cos, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(tan, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(asin, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(acos, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(atan, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(neg, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(round, DTYPE);      \
+  REGISTER_UNARY_OP_CAST(abs, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(sqr, DTYPE)
+
+INSTANTIATE_UNARY_CAST_FLOAT(bfloat);
+INSTANTIATE_UNARY_CAST_FLOAT(half);
+INSTANTIATE_UNARY_CAST_FLOAT(float);
+
+#define INSTANTIATE_UNARY_CAST_COMPLEX(DTYPE) \
+  REGISTER_UNARY_OP_CAST(angle, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(neg, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(exp, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(expm1, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(sigmoid, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(abs, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(exp2, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(log, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(log10, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(log1p, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(log2, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(sinh, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(cosh, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(tanh, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(sqrt, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(reciprocal, DTYPE);  \
+  REGISTER_UNARY_OP_CAST(rsqrt, DTYPE);       \
+  REGISTER_UNARY_OP_CAST(sinc, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(sin, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(cos, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(tan, DTYPE);         \
+  REGISTER_UNARY_OP_CAST(asin, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(acos, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(atan, DTYPE);        \
+  REGISTER_UNARY_OP_CAST(sqr, DTYPE)
+
+INSTANTIATE_UNARY_CAST_COMPLEX(float2);
+INSTANTIATE_UNARY_CAST_COMPLEX(half2);
+
+// Integer-dtype cast registrations for ops that preserve T for integral T (i.e.
+// functor returns T when given T).
+#define INSTANTIATE_UNARY_CAST_INT(DTYPE) \
+  REGISTER_UNARY_OP_CAST(neg, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(round, DTYPE);   \
+  REGISTER_UNARY_OP_CAST(abs, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(sqr, DTYPE);     \
+  REGISTER_UNARY_OP_CAST(bitwise_not, DTYPE)
+
+INSTANTIATE_UNARY_CAST_INT(int);
+INSTANTIATE_UNARY_CAST_INT(long);
+INSTANTIATE_UNARY_CAST_INT(short);
+INSTANTIATE_UNARY_CAST_INT(char);
+INSTANTIATE_UNARY_CAST_INT(uchar);
+REGISTER_UNARY_OP_CAST(bitwise_not, bool);
+
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);

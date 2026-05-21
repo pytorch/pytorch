@@ -897,6 +897,18 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   return cplMap[key];
 }
 
+bool MetalShaderLibrary::hasFunction(const std::string& fname) {
+  // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
+  // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
+  // kernel or fall back to the `_dense_cast_` cast variant.
+  if (C10_UNLIKELY(!functionNamesPopulated)) {
+    auto names = getFunctionNames();
+    functionNames.insert(names.begin(), names.end());
+    functionNamesPopulated = true;
+  }
+  return functionNames.count(fname) > 0;
+}
+
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   if (C10_UNLIKELY(!library && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
@@ -1041,6 +1053,22 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
+  // Cast-fallback path: if the direct per-(out,in) kernel isn't registered, swap to the `_dense_cast_<out>_<out>` /
+  // `_strided_cast_<out>_<out>` variant. The cast kernel is templated on the output dtype; the input dtype is
+  // runtime-switched on load via val_at_offs<T>(ptr, offs, ScalarType), so one kernel per output dtype covers every
+  // input dtype. Cast variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
+  // TORCH_CHECK still fires for missing direct kernel).
+  bool cast_needed = false;
+  if (!alpha.has_value() && !hasFunction(kernel_name)) {
+    cast_needed = true;
+    dense_suffix = is_contiguous ? "dense_cast" : "strided_cast";
+    dense_ilp = false;
+    kernel_name = fmt::format("{}_{}_{}_{}",
+                              name,
+                              dense_suffix,
+                              scalarToMetalTypeString(outputTensor),
+                              scalarToMetalTypeString(outputTensor));
+  }
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
 
@@ -1052,7 +1080,19 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (dense_ilp) {
+      if (cast_needed) {
+        // {dense,strided}_cast take the input dtype at runtime via the ScalarType in the trailing constant buffer.
+        const auto in_type = static_cast<uint32_t>(inputTensor.scalar_type());
+        if (is_contiguous) {
+          std::array<uint32_t, 2> size_type = {static_cast<uint32_t>(c10::elementSize(inputTensor.scalar_type())),
+                                               in_type};
+          mtl_setBytes(computeEncoder, size_type, 2);
+        } else {
+          std::array<uint32_t, 2> ndim_type = {static_cast<uint32_t>(iter.ndim()), in_type};
+          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_type);
+        }
+        mtl_dispatch1DJob(computeEncoder, cplState, length);
+      } else if (dense_ilp) {
         mtl_setBytes(computeEncoder, length, 2);
         mtl_dispatch1DJob(
             computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);

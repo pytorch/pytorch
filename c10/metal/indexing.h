@@ -150,6 +150,70 @@ kernel void unary_strided(
           constant uint& ndim,                                                 \
           uint index)
 
+// Cast-on-load variants of the unary kernels. Mirror binary_dense_cast /
+// binary_strided_cast: the kernel is templated on the compute dtype T (= the
+// kernel-natural output, exposed via result_of<F, T>), and the input dtype is
+// passed at runtime via a ScalarType in the constant args. The input is loaded
+// through val_at_offs<T>(ptr, offs, type), which switches on type and casts.
+// One kernel per output dtype handles every input dtype the runtime switch
+// covers (currently every entry in C10_METAL_ALL_TYPES_FUNCTOR).
+template <typename T, typename F>
+kernel void unary_dense_cast(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant uint2& size_type [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T>;
+  const auto a = val_at_offs<T>(
+      input, long(index) * size_type.x, static_cast<ScalarType>(size_type.y));
+  output[index] = static_cast<res_t>(f(a));
+}
+
+template <typename T, typename F>
+kernel void unary_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint2& ndim_type [[buffer(5)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_type.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_type.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_type.x);
+  const auto a =
+      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_type.y));
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a));
+}
+
+// Registers the cast variants for a (NAME, DTYPE) pair. DTYPE is the kernel's
+// compute / natural-output dtype; the input dtype is runtime-dispatched. The
+// kernel naming mirrors REGISTER_UNARY_OP's `_<DTYPEO>_<DTYPEI>` template,
+// fixing both halves to DTYPE since the input read precision is also DTYPE
+// (post-cast). This matches binary_dense_cast / binary_strided_cast naming.
+#define REGISTER_UNARY_OP_CAST(NAME, DTYPE)                                   \
+  template                                                                    \
+      [[host_name(#NAME "_dense_cast_" #DTYPE "_" #DTYPE)]] kernel void ::    \
+          c10::metal::unary_dense_cast<DTYPE, NAME##_functor>(                \
+              device ::c10::metal::result_of<NAME##_functor, DTYPE> * output, \
+              constant void* input,                                           \
+              constant uint2& size_type,                                      \
+              uint index);                                                    \
+  template                                                                    \
+      [[host_name(#NAME "_strided_cast_" #DTYPE "_" #DTYPE)]] kernel void ::  \
+          c10::metal::unary_strided_cast<DTYPE, NAME##_functor>(              \
+              device void* output,                                            \
+              constant void* input,                                           \
+              constant long* sizes,                                           \
+              constant long* input_strides,                                   \
+              constant long* output_strides,                                  \
+              constant uint2& ndim_type,                                      \
+              uint index)
+
 #define DEFINE_UNARY_FLOATING_FUNCTOR(NAME)                                     \
   struct NAME##_functor {                                                       \
     template <typename T>                                                       \
