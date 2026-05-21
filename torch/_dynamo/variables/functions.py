@@ -86,7 +86,6 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
-    raise_args_mismatch,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -395,6 +394,11 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.dict_vt: DunderDictVariable | None = dict_vt
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def get_source(self) -> Source | None:
         return self.source
@@ -2171,6 +2175,11 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2237,20 +2246,6 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return VariableTracker.build(tx, result)
-
-        if self.value is functools.cmp_to_key:
-            if len(args) == 1 and not kwargs:
-                return CmpToKeyVariable(args[0])
-            elif not args and set(kwargs) == {"mycmp"}:
-                return CmpToKeyVariable(kwargs["mycmp"])
-            else:
-                raise_args_mismatch(
-                    tx,
-                    "cmp_to_key",
-                    "1 arg or 1 mycmp kwarg",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-                raise AssertionError("raise_args_mismatch should not return")
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
@@ -2442,20 +2437,6 @@ class SkipFunctionVariable(VariableTracker):
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
-
-
-class CmpToKeyVariable(VariableTracker):
-    def __init__(self, cmp_fn: VariableTracker, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.cmp_fn = cmp_fn
-
-    def compare(
-        self,
-        tx: "InstructionTranslator",
-        left: VariableTracker,
-        right: VariableTracker,
-    ) -> VariableTracker:
-        return self.cmp_fn.call_function(tx, [left, right], {})
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
@@ -2891,6 +2872,11 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return functools.partial
 
@@ -2934,7 +2920,7 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "func":
             return self.func
         if name == "args":
-            return variables.ListVariable(self.args, source=source)
+            return variables.TupleVariable(self.args, source=source)
         if name == "keywords":
             items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
@@ -3966,6 +3952,13 @@ class MethodWrapperVariable(VariableTracker):
         except NotImplementedError:
             return super().hash_impl(tx)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
             return False
@@ -4411,6 +4404,13 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def tp_descr_get_impl(
         self,
