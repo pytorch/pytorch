@@ -1021,26 +1021,27 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
 
         try:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
-                sm_available = int(props.shared_memory_per_block_optin)
-            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
-                sm_available = int(props.shared_memory_per_block)
-            else:
-                return None
-
-        except Exception:
-            try:
+            if torch.cuda.is_available():
+                device = torch.cuda.current_device()
+                props = torch.cuda.get_device_properties(device)
+                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                    sm_available = int(props.shared_memory_per_block_optin)
+                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                    sm_available = int(props.shared_memory_per_block)
+                else:
+                    return None
+            elif torch.xpu.is_available():
                 device = torch.xpu.current_device()
                 props = torch.xpu.get_device_properties(device)
                 if hasattr(props, "local_mem_size"):
                     sm_available = int(props.local_mem_size)
                 else:
                     return None
-            except Exception:
-                # If device properties cannot be queried, return None
+            else:
                 return None
+        except Exception:
+            # If device properties cannot be queried, return None
+            return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
         def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:

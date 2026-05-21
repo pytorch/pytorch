@@ -390,6 +390,7 @@ class TestTritonHeuristics(TestCase):
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
+            XPUConfigHeuristic,
         )
 
         expected_count = 1 if do_pruning else 2
@@ -402,7 +403,9 @@ class TestTritonHeuristics(TestCase):
         with config.patch(
             {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
         ):
-            if torch.version.hip:
+            if GPU_TYPE == "xpu":
+                config_heuristic = XPUConfigHeuristic()
+            elif torch.version.hip:
                 config_heuristic = ROCmConfigHeuristic()
             else:
                 config_heuristic = CUDAConfigHeuristic()
