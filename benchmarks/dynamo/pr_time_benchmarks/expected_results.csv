@@ -38,15 +38,15 @@ update_hint_regression,compile_time_instruction_count,1609000000,0.1
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,3641000000,0.1
+sum_floordiv_regression,compile_time_instruction_count,3779000000,0.1
 
 
 
-symint_sum,compile_time_instruction_count,3125000000,0.1
+symint_sum,compile_time_instruction_count,3219000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,4448000000,0.1
+symint_sum_loop,compile_time_instruction_count,8250000000,0.1
 
 
 
@@ -74,7 +74,7 @@ aotdispatcher_training_subclass_cpu,compile_time_instruction_count,8317000000,0.
 
 
 
-mm_loop_inductor_gpu,compile_time_instruction_count,4707000000,0.1
+mm_loop_inductor_gpu,compile_time_instruction_count,4526000000,0.1
 
 
 
@@ -82,7 +82,7 @@ mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,9270000000,0.1
 
 
 
-basic_NestedModule_eager,compile_time_instruction_count,5866000000,0.1
+basic_NestedModule_eager,compile_time_instruction_count,5470000000,0.1
 
 
 
@@ -106,7 +106,7 @@ dtensor_dispatch_add_backward,instruction_count,360100,0.1
 
 
 
-dtensor_dispatch_inplace,instruction_count,61490,0.1
+dtensor_dispatch_inplace,instruction_count,58770,0.1
 
 
 
@@ -114,7 +114,7 @@ dtensor_dispatch_view,instruction_count,66300,0.1
 
 
 
-dtensor_dispatch_random,instruction_count,592800,0.1
+dtensor_dispatch_random,instruction_count,554600,0.1
 
 
 
