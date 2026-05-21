@@ -3618,6 +3618,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             0,
         )
 
+    def test_numpy_wrapper_accepts_torch_numpy_alias_target(self):
+        import torch._numpy as tnp
+
+        for target in (tnp.abs, tnp.absolute):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            gm = torch.fx.GraphModule({}, graph)
+
+            check_cacheable(gm)
+            self.assertIsNotNone(torch._dynamo.utils.numpy_wrapper_cache_key(wrapper))
+
     def test_numpy_wrapper_rejects_spoofed_torch_numpy_target(self):
         def spoofed_round(x):
             return x.sin()

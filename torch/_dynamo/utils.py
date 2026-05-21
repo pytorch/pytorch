@@ -1298,6 +1298,51 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.SetVariable,
+            variables.TupleVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -4564,31 +4609,36 @@ class numpy_operator_wrapper(Generic[_P, R]):
 
 
 @functools.lru_cache(maxsize=1)
-def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any]]:
-    from torch._dynamo.variables.misc import get_tnp_to_np_map
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any, str]]:
+    result: dict[int, tuple[Callable[..., Any], Any, str]] = {}
+    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
+        module = np_mod.__name__
+        for name, tnp_callable in tnp_mod.__dict__.items():
+            if not callable(tnp_callable):
+                continue
 
-    return {
-        id(tnp_callable): (tnp_callable, np_callable)
-        for tnp_callable, np_callable in get_tnp_to_np_map().items()
-    }
+            np_callable = getattr(np_mod, name, None)
+            if not callable(np_callable):
+                continue
+
+            result[id(tnp_callable)] = (
+                tnp_callable,
+                np_callable,
+                f"{module}.{name}",
+            )
+    return result
 
 
 @functools.lru_cache(maxsize=1024)
 def _torch_numpy_callable_cache_key_by_id(
     obj_id: int,
 ) -> tuple[Callable[..., Any], str] | None:
-    tnp_callable, np_callable = _torch_numpy_callable_id_map()[obj_id]
-    if np_callable is None:
-        return None
+    tnp_callable, np_callable, cache_key = _torch_numpy_callable_id_map()[obj_id]
 
-    module = getattr(np_callable, "__module__", None) or "numpy"
+    module, _, name = cache_key.rpartition(".")
     # Random functions depend on global RNG state, so they are not safe to
     # identify only by their canonical NumPy path in an AOTAutograd cache key.
     if module == "numpy.random" or module.startswith("numpy.random."):
-        return None
-
-    name = getattr(np_callable, "__name__", None)
-    if name is None:
         return None
 
     try:
@@ -4597,7 +4647,7 @@ def _torch_numpy_callable_cache_key_by_id(
     except (AttributeError, ImportError):
         return None
 
-    return (tnp_callable, f"{module}.{name}")
+    return (tnp_callable, cache_key)
 
 
 def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
@@ -5579,6 +5629,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
