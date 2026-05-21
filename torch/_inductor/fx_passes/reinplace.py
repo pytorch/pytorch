@@ -415,7 +415,7 @@ META_ONLY_OPS = OrderedSet(
 
 def _is_node_reachable_from(target: torch.fx.Node, source: torch.fx.Node) -> bool:
     """Check if target is reachable from source through view ops."""
-    visited: set[torch.fx.Node] = set()
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
     queue = [source]
     while queue:
         current = queue.pop()
@@ -728,7 +728,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         replace_dict[copy_node] = copy_node.args[0]
-                    else:
+                    elif isinstance(mutated_arg, torch.fx.Node):
                         # mutated_arg is a view of a placeholder; eliminate the
                         # base's copy_ epilogue since the inplace op already
                         # mutates the storage through the view.
