@@ -401,6 +401,12 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
+            for dict_key, dict_value in list(self.items.items()):
+                if getattr(dict_key, "_hash", None) != getattr(key, "_hash", None):
+                    continue
+                eq_result = dict_key.vt.call_method(tx, "__eq__", [arg], {})
+                if eq_result.is_python_constant() and eq_result.as_python_constant():
+                    return dict_value
             raise_observed_exception(KeyError, tx, args=[arg])
         return self.items[key]
 
@@ -705,13 +711,36 @@ class ConstDictVariable(VariableTracker):
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 arg and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
                 self.install_dict_keys_match_guard()
+                key = Hashable(args[0])
+                if key not in self.items:
+                    for dict_key in list(self.items):
+                        if getattr(dict_key, "_hash", None) != getattr(
+                            key, "_hash", None
+                        ):
+                            continue
+                        eq_result = dict_key.vt.call_method(tx, "__eq__", [args[0]], {})
+                        if (
+                            eq_result.is_python_constant()
+                            and eq_result.as_python_constant()
+                        ):
+                            key = dict_key
+                            break
+                    else:
+                        raise_observed_exception(KeyError, tx, args=[args[0]])
                 self.should_reconstruct_all = True
                 self.was_mutated = True
                 tx.output.side_effects.mutation(self)
-                self.items.__delitem__(Hashable(args[0]))
+                self.items.__delitem__(key)
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
