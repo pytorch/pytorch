@@ -1233,18 +1233,14 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 def _softmax_compatible_amax(x: Tensor, dim: int) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if x.ndim == 0:
-        return torch.amax(x, dim, keepdim=True)
-
-    dim = utils.canonicalize_dim(x.ndim, dim)
-    if statically_known_true(x.shape[dim] > 0):
-        return torch.amax(x, dim, keepdim=True)
-
-    # amax has no identity, but softmax is defined on empty reduction dims.
-    pad_shape = list(x.shape)
-    pad_shape[dim] = 1
-    pad = torch.full(pad_shape, float("-inf"), dtype=x.dtype, device=x.device)
-    return torch.amax(torch.cat((x, pad), dim=dim), dim, keepdim=True)
+    if x.ndim != 0:
+        dim = utils.canonicalize_dim(x.ndim, dim)
+        if not statically_known_true(x.shape[dim] > 0):
+            # amax has no identity, but softmax is defined on empty reduction dims.
+            pad_shape = list(x.shape)
+            pad_shape[dim] = 1
+            x = torch.cat((x, x.new_full(pad_shape, float("-inf"))), dim=dim)
+    return torch.amax(x, dim, keepdim=True)
 
 
 @register_decomposition(aten._log_softmax)
@@ -3185,7 +3181,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -5234,12 +5230,12 @@ def _reflection_or_replication_pad(
     # produce non-standard strides — so suggest_memory_format(result) may
     # not reflect the desired output format.
     #
-    # CPU vs CUDA eager behavior differs:
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
     #   CPU:  allocates output via at::empty_like with suggest_memory_format,
     #         preserving the input's format (e.g. channels_last).
-    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
     #         always producing contiguous output regardless of input format.
-    if a.device.type in ("cuda", "mps"):
+    if a.device.type in ("cuda", "mps", "xpu"):
         memory_format = torch.contiguous_format
     else:
         memory_format = utils.suggest_memory_format(a)
