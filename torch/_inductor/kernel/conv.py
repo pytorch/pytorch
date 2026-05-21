@@ -624,9 +624,7 @@ def convolution(
         and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
-            # conv1x1_via_mm is a Python extern helper without C++ wrapper codegen.
-            not V.graph.cpp_wrapper
-            and is_ones(kernel_shape)
+            is_ones(kernel_shape)
             and is_ones(stride)
             and is_zeros(padding)
             and groups == 1
@@ -986,8 +984,13 @@ def convolution_backward_lowering(
 
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
+    # The Triton bwd templates substitute DILATION_H/W into the generated
+    # kernel source, so they must be concrete Python ints. The fwd template
+    # gates on is_ones(dilation) and hard-codes dilation=1, so it can skip
+    # this guard.
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
 
     input.realize()
     weight.realize()

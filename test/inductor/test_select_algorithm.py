@@ -3,6 +3,7 @@ import contextlib
 import functools
 import unittest.mock
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -78,6 +79,73 @@ def patches(fn):
         return fn(*args, **kwargs)
 
     return wrapped
+
+
+class TestAlgorithmSelectorChoiceTypes(TestCase):
+    def _extern_kernel_caller(self, name):
+        choice = ExternKernelChoice.lookup(name)
+        if choice is None:
+            self.fail(f"missing extern kernel choice: {name}")
+        return choice.bind(input_nodes=[], layout=None)
+
+    def test_pick_deterministic_choice_prefers_extern_kernel_caller(self):
+        first_choice = select_algorithm.ChoiceCaller("not_extern", [], None, "")
+        extern_choice = self._extern_kernel_caller("mm")
+
+        picked = select_algorithm.AlgorithmSelectorCache().pick_deterministic_choice(
+            [first_choice, extern_choice]
+        )
+
+        self.assertIs(picked, extern_choice)
+
+    def test_classify_kernel_operation_uses_extern_kernel_caller_name(self):
+        cases = (
+            ("mm", "mm"),
+            ("addmm", "mm"),
+            ("convolution", "conv"),
+        )
+        for choice_name, expected in cases:
+            with self.subTest(choice_name=choice_name):
+                extern_choice = self._extern_kernel_caller(choice_name)
+
+                self.assertEqual(
+                    select_algorithm._classify_kernel_operation(
+                        "unclassified_name", [extern_choice], []
+                    ),
+                    expected,
+                )
+
+    def test_cpp_wrapper_filters_python_only_extern_choices(self):
+        def python_only_choice_for_cpp_wrapper_filter(*args, out=None):
+            return out
+
+        python_only_choice = ExternKernelChoice.lookup(
+            "python_only_choice_for_cpp_wrapper_filter"
+        )
+        if python_only_choice is None:
+            python_only_choice = ExternKernelChoice(
+                python_only_choice_for_cpp_wrapper_filter
+            )
+
+        unsupported_extern = python_only_choice.bind(input_nodes=[], layout=None)
+        supported_extern = self._extern_kernel_caller("mm")
+        non_extern = select_algorithm.ChoiceCaller("not_extern", [], None, "")
+
+        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
+            self.assertEqual(
+                select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                    [unsupported_extern, supported_extern, non_extern]
+                ),
+                [supported_extern, non_extern],
+            )
+
+        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=False)):
+            self.assertEqual(
+                select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                    [unsupported_extern]
+                ),
+                [unsupported_extern],
+            )
 
 
 class TestSelectAlgorithm(TestCase):
