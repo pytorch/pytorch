@@ -86,6 +86,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    raise_args_mismatch,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -2237,6 +2238,20 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
+        if self.value is functools.cmp_to_key:
+            if len(args) == 1 and not kwargs:
+                return CmpToKeyVariable(args[0])
+            elif not args and set(kwargs) == {"mycmp"}:
+                return CmpToKeyVariable(kwargs["mycmp"])
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "cmp_to_key",
+                    "1 arg or 1 mycmp kwarg",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+                raise AssertionError("raise_args_mismatch should not return")
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
@@ -2427,6 +2442,20 @@ class SkipFunctionVariable(VariableTracker):
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+
+class CmpToKeyVariable(VariableTracker):
+    def __init__(self, cmp_fn: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.cmp_fn = cmp_fn
+
+    def compare(
+        self,
+        tx: "InstructionTranslator",
+        left: VariableTracker,
+        right: VariableTracker,
+    ) -> VariableTracker:
+        return self.cmp_fn.call_function(tx, [left, right], {})
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):

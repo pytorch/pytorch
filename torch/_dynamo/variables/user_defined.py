@@ -929,12 +929,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
+        elif name == "fromkeys" and (
             self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
+            or issubclass(self.value, dict)
         ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -4033,6 +4033,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            name == "fromkeys"
+            and self._maybe_get_baseclass_method(name) in self._base_methods
+        ):
+            cls_vt = VariableTracker.build(tx, self.python_type(), self.cls_source)
+            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, cls_vt, *args, **kwargs
+            )
+
         # Dict subclasses can override __missing__ to provide fallback
         # behavior instead of raising a KeyError. This is used, for example,
         # by collections.Counter.
@@ -4348,6 +4357,16 @@ class DefaultDictVariable(UserDefinedDictVariable):
         new.call_method(tx, "update", [right], {})
         return new
 
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in nb_inplace_or_impl")
+        self._base_vt.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -4388,6 +4407,15 @@ class DefaultDictVariable(UserDefinedDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self._missing_impl(tx, args[0])
+        elif name == "__ior__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.nb_inplace_or_impl(tx, args[0])
         elif name == "copy":
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
@@ -4428,9 +4456,13 @@ class DefaultDictVariable(UserDefinedDictVariable):
         elif name == "__eq__":
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
-                tx, [self, args[0]], {}
-            )
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in __eq__")
+            if not isinstance(self._base_vt, ConstDictVariable):
+                raise AssertionError(
+                    f"Expected ConstDictVariable, got {type(self._base_vt)}"
+                )
+            return self._base_vt.call_dict_eq(tx, args[0])
         return super().call_method(tx, name, args, kwargs)
 
 
