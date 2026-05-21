@@ -88,6 +88,9 @@ class ConstDictVariable(VariableTracker):
 
     _nonvar_fields = {
         "user_cls",
+        "_dict_keys_match_guarded",
+        "_setitem_mutation_keys",
+        "_cleared",
         *VariableTracker._nonvar_fields,
     }
 
@@ -103,6 +106,9 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        dict_keys_match_guarded = kwargs.pop("_dict_keys_match_guarded", False)
+        setitem_mutation_keys = kwargs.pop("_setitem_mutation_keys", None)
+        cleared = kwargs.pop("_cleared", False)
 
         super().__init__(**kwargs)
 
@@ -133,6 +139,11 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         self.user_cls = user_cls
+        self._dict_keys_match_guarded = dict_keys_match_guarded
+        self._setitem_mutation_keys = (
+            set() if setitem_mutation_keys is None else set(setitem_mutation_keys)
+        )
+        self._cleared = cleared
 
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
@@ -424,14 +435,17 @@ class ConstDictVariable(VariableTracker):
 
     def install_dict_keys_match_guard(self) -> None:
         if self.source:
+            self._dict_keys_match_guarded = True
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
     ) -> None:
         # Key guarding - These are the cases to consider
-        # 1) The dict has been mutated. In this case, we would have already
-        # inserted a DICT_KEYS_MATCH guard, so we can skip.
+        # 1) The dict has been mutated. If a previous mutation installed a
+        # DICT_KEYS_MATCH guard, or if the mutation itself determines the
+        # queried key's membership, we can skip. Otherwise, fall through and
+        # install a per-key guard.
         #
         # 2) args[0].source is None. This happens for const keys. Here, we
         # have to insert the DICT_CONTAINS guard.
@@ -447,7 +461,14 @@ class ConstDictVariable(VariableTracker):
             return
 
         if tx.output.side_effects.is_modified(self):
-            return
+            if self._dict_keys_match_guarded or self._cleared:
+                return
+
+            if (
+                is_hashable(args[0])
+                and HashableTracker(args[0]) in self._setitem_mutation_keys
+            ):
+                return
 
         contains = args[0] in self
         if args[0].source is None and args[0].is_python_constant():
@@ -491,7 +512,7 @@ class ConstDictVariable(VariableTracker):
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
 
@@ -567,7 +588,6 @@ class ConstDictVariable(VariableTracker):
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__setitem__" and self.is_mutable():
-            self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -575,8 +595,10 @@ class ConstDictVariable(VariableTracker):
                     "2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            key = Hashable(args[0])
             tx.output.side_effects.mutation(self)
-            self.items[Hashable(args[0])] = args[1]
+            self.items[key] = args[1]
+            self._setitem_mutation_keys.add(key)
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
@@ -612,6 +634,7 @@ class ConstDictVariable(VariableTracker):
                     raise_observed_exception(KeyError, tx)
                 return args[1]
 
+            self.install_dict_keys_match_guard()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
@@ -630,6 +653,9 @@ class ConstDictVariable(VariableTracker):
                     ],
                 )
 
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
             k, v = self.items.popitem()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
@@ -644,6 +670,8 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.should_reconstruct_all = True
+            self._cleared = True
+            self._setitem_mutation_keys.clear()
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
