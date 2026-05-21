@@ -10,6 +10,7 @@ from enum import Enum
 from typing import cast, Literal, overload, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
+import torch.distributed as dist
 from torch import fx
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor import DTensor
@@ -252,8 +253,89 @@ class _DTensorMeta(_TensorMeta):
         return diffs
 
 
+@dataclass(frozen=True, slots=True)
+class _SPMDTensorMeta(_TensorMeta):
+    """SPMD tensor metadata extending :class:`_TensorMeta` with spmd_types annotations.
+
+    Stores ``local_type`` and ``partition_spec`` as string-keyed dicts/tuples
+    so they are safe to pickle across PP ranks.
+    """
+
+    local_type: dict[str, object] = field(default_factory=dict)
+    partition_spec: tuple[str | tuple[str, ...] | None, ...] | None = field(
+        default=None
+    )
+
+    @staticmethod
+    def from_tensor(tensor: torch.Tensor) -> _SPMDTensorMeta:
+        import spmd_types as spmd  # pyrefly: ignore
+        from spmd_types._mesh_axis import _mesh_axis_names
+
+        lt = spmd.get_local_type(tensor)
+        ps = spmd._checker.get_partition_spec(tensor)
+
+        axis_to_name = {
+            axis: next(iter(names)) for axis, names in _mesh_axis_names.items() if names
+        }
+
+        def to_str(a: object) -> str:
+            return axis_to_name.get(a, str(a))
+
+        str_lt = {to_str(k): v for k, v in lt.items()}
+        str_ps = None
+        if ps is not None:
+            str_ps = tuple(
+                tuple(to_str(a) for a in e)
+                if isinstance(e, tuple)
+                else to_str(e)
+                if e is not None
+                else None
+                for e in ps
+            )
+
+        return _SPMDTensorMeta(
+            shape=tensor.shape,
+            stride=tensor.stride(),
+            dtype=tensor.dtype,
+            requires_grad=tensor.requires_grad,
+            local_type=str_lt,
+            partition_spec=str_ps,
+        )
+
+    def to_tensor(self, device: torch.device | str) -> torch.Tensor:
+        import spmd_types as spmd  # pyrefly: ignore
+
+        t = _make_tensor_from_meta(self, device)
+        t.requires_grad_(self.requires_grad)
+        if self.local_type:
+            ps = (
+                spmd.PartitionSpec(*self.partition_spec)
+                if self.partition_spec
+                else None
+            )
+            spmd.assert_type(t, self.local_type, partition_spec=ps)
+        return t
+
+    def get_diff(self, other: _TensorMeta) -> list[str]:
+        if self == other:
+            return []
+        diffs = _TensorMeta.get_diff(self, other)
+        if isinstance(other, _SPMDTensorMeta):
+            if self.local_type != other.local_type:
+                diffs.append(
+                    f"local_type mismatch: {self.local_type} vs {other.local_type}"
+                )
+            if self.partition_spec != other.partition_spec:
+                diffs.append(
+                    f"partition_spec mismatch: {self.partition_spec} vs {other.partition_spec}"
+                )
+        else:
+            diffs.append("type: _SPMDTensorMeta vs _TensorMeta")
+        return diffs
+
+
 # Type alias for union of tensor metadata types
-TensorMeta: TypeAlias = _TensorMeta | _DTensorMeta
+TensorMeta: TypeAlias = _TensorMeta | _DTensorMeta | _SPMDTensorMeta
 
 
 # Not frozen: fields are populated incrementally during forward and
@@ -327,6 +409,27 @@ def _make_tensor_from_meta(
     )
 
 
+def _derive_grad_meta(m: TensorMeta) -> _TensorMeta | None:
+    if not m.requires_grad:
+        return None
+    base = _TensorMeta(
+        shape=m.shape, stride=m.stride, dtype=m.dtype, requires_grad=False
+    )
+    if isinstance(m, _SPMDTensorMeta) and dist._is_spmd_types_available():
+        return _SPMDTensorMeta(
+            shape=m.shape,
+            stride=m.stride,
+            dtype=m.dtype,
+            requires_grad=False,
+            local_type={
+                axis: lt.backward_type()  # pyrefly: ignore[missing-attribute]
+                for axis, lt in m.local_type.items()
+            },
+            partition_spec=m.partition_spec,
+        )
+    return base
+
+
 def _derive_grad_metas(
     tensor_metas: tuple[TensorMeta, ...],
 ) -> tuple[_TensorMeta | None, ...]:
@@ -334,13 +437,9 @@ def _derive_grad_metas(
 
     Returns metadata with the same shape/stride/dtype but ``requires_grad=False``.
     Entries where the source has ``requires_grad=False`` become ``None``.
+    For ``_SPMDTensorMeta``, derives gradient local types (R->P, P->R, I->I, V->V).
     """
-    return tuple(
-        _TensorMeta(shape=m.shape, stride=m.stride, dtype=m.dtype, requires_grad=False)
-        if m.requires_grad
-        else None
-        for m in tensor_metas
-    )
+    return tuple(_derive_grad_meta(m) for m in tensor_metas)
 
 
 class _MeshCache:
@@ -582,21 +681,24 @@ class PipeInfo:
 def extract_tensor_meta(tensor: torch.Tensor) -> TensorMeta:
     """Extract metadata from a tensor.
 
-    Handles both plain Tensor and DTensor correctly: DTensors are
-    dispatched to ``_DTensorMeta.from_dtensor`` which captures local
-    shard attributes plus global shape/placement info, while plain
-    tensors use ``_TensorMeta.from_tensor``.
+    Handles DTensor, SPMD-annotated plain tensors, and plain tensors.
 
     Args:
-        tensor: A plain tensor or DTensor.
+        tensor: A plain tensor, SPMD-annotated tensor, or DTensor.
 
     Returns:
-        ``_TensorMeta`` for plain tensors, ``_DTensorMeta`` for DTensors.
+        The appropriate metadata subclass.
     """
     if isinstance(tensor, DTensor):
         return _DTensorMeta.from_dtensor(tensor)
-    else:
-        return _TensorMeta.from_tensor(tensor)
+
+    if dist._is_spmd_types_available():
+        import spmd_types as spmd
+
+        if spmd.runtime.has_local_type(tensor):
+            return _SPMDTensorMeta.from_tensor(tensor)
+
+    return _TensorMeta.from_tensor(tensor)
 
 
 @overload
