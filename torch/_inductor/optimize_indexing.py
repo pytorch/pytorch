@@ -6,7 +6,7 @@ from typing import Any
 import sympy
 
 import torch
-from torch.fx.node import map_arg
+from torch.fx.node import map_aggregate, map_arg
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
@@ -162,10 +162,8 @@ class _IndexValueRule:
     # Inputs in the LoopBody FX node that act as terminal sinks.
     indexing_sinks: tuple[Any, ...] = ()
     value_sinks: tuple[Any, ...] = ()
-    # During backward value-use analysis, whether a value use of this op's
-    # result propagates through all inputs.
-    value_propagates: bool = False
-    value_propagates_to: tuple[Any, ...] = ()
+    # Inputs that receive value use from this op's result. None means all inputs.
+    value_inputs: tuple[Any, ...] | None = ()
 
 
 @dataclass(frozen=True)
@@ -173,7 +171,6 @@ class _BoundIndexValueRule:
     rule: _IndexValueRule
     args: tuple[_RuleArg, ...]
     kwargs: dict[str, _RuleArg]
-    has_call_method_receiver: bool = False
 
 
 class _IndexValueOpsHandler:
@@ -182,151 +179,61 @@ class _IndexValueOpsHandler:
     """
 
     _VALUE_PROPAGATING_OPS = (
-        "abs",
-        "acos",
-        "acosh",
-        "add",
-        "airy_ai",
-        "and_",
-        "asin",
-        "asinh",
-        "atan",
-        "atan2",
-        "atanh",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "bitwise_and",
-        "bitwise_left_shift",
-        "bitwise_not",
-        "bitwise_or",
-        "bitwise_right_shift",
-        "bitwise_xor",
-        "ceil",
-        "ceil_to_int",
-        "chebyshev_polynomial_t",
-        "chebyshev_polynomial_u",
-        "chebyshev_polynomial_v",
-        "chebyshev_polynomial_w",
-        "constant",
-        "copysign",
-        "cos",
-        "cosh",
-        "digamma",
-        "div_rn",
-        "dot",
-        "eq",
-        "erf",
-        "erfc",
-        "erfcx",
-        "erfinv",
-        "exp",
-        "exp2",
-        "expm1",
-        "floor",
-        "floor_to_int",
-        "floordiv",
-        "fma",
-        "fmod",
-        "frexp",
-        "gammainc",
-        "gammaincc",
-        "ge",
-        "gt",
-        "halide_clamp",
-        "hermite_polynomial_h",
-        "hermite_polynomial_he",
-        "hypot",
-        "i0",
-        "i0e",
-        "i1",
-        "i1e",
-        "identity",
-        "igamma",
-        "igammac",
-        "index_expr",
-        "inline_asm_elementwise",
-        "int_truediv",
-        "isinf",
-        "isnan",
-        "laguerre_polynomial_l",
-        "ldexp",
-        "le",
-        "legendre_polynomial_p",
-        "lgamma",
-        "log",
-        "log10",
-        "log1p",
-        "log2",
-        "log_ndtr",
-        "logical_and",
-        "logical_not",
-        "logical_or",
-        "logical_xor",
-        "lshift",
-        "lt",
-        "maximum",
-        "minimum",
-        "mod",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "mul",
-        "mul_rn",
-        "ndtr",
-        "ndtri",
-        "ne",
-        "neg",
-        "nextafter",
-        "or_",
-        "polygamma",
-        "pow",
-        "rand",
-        "rand_eager",
-        "randint64",
-        "randn",
-        "reciprocal",
-        "relu",
-        "remainder",
-        "round",
-        "round_to_int",
-        "rshift",
-        "rsqrt",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "shifted_chebyshev_polynomial_t",
-        "shifted_chebyshev_polynomial_u",
-        "shifted_chebyshev_polynomial_v",
-        "shifted_chebyshev_polynomial_w",
-        "sigmoid",
-        "sign",
-        "signbit",
-        "sin",
-        "sinh",
-        "spherical_bessel_j0",
-        "sqrt",
-        "square",
-        "sub",
-        "tan",
-        "tanh",
-        "to_dtype",
-        "to_dtype_bitcast",
-        "truediv",
-        "trunc",
-        "trunc_to_int",
-        "truncdiv",
-        "value_expr",
-        "where",
-        "xor",
-        "zeta",
+        "abs", "acos", "acosh", "add", "airy_ai", "and_", "asin", "asinh", "atan",
+        "atan2", "atanh", "bessel_j0", "bessel_j1", "bessel_y0", "bessel_y1",
+        "bitwise_and", "bitwise_left_shift", "bitwise_not", "bitwise_or",
+        "bitwise_right_shift", "bitwise_xor", "ceil", "ceil_to_int",
+        "chebyshev_polynomial_t", "chebyshev_polynomial_u",
+        "chebyshev_polynomial_v", "chebyshev_polynomial_w", "constant", "copysign",
+        "cos", "cosh", "digamma", "div_rn", "dot", "eq", "erf", "erfc", "erfcx",
+        "erfinv", "exp", "exp2", "expm1", "floor", "floor_to_int", "floordiv",
+        "fma", "fmod", "frexp", "gammainc", "gammaincc", "ge", "gt",
+        "halide_clamp", "hermite_polynomial_h", "hermite_polynomial_he", "hypot",
+        "i0", "i0e", "i1", "i1e", "identity", "igamma", "igammac", "index_expr",
+        "inline_asm_elementwise", "int_truediv", "isinf", "isnan",
+        "laguerre_polynomial_l", "ldexp", "le", "legendre_polynomial_p", "lgamma",
+        "log", "log10", "log1p", "log2", "log_ndtr", "logical_and", "logical_not",
+        "logical_or", "logical_xor", "lshift", "lt", "maximum", "minimum", "mod",
+        "modified_bessel_i0", "modified_bessel_i1", "modified_bessel_k0",
+        "modified_bessel_k1", "mul", "mul_rn", "ndtr", "ndtri", "ne", "neg",
+        "nextafter", "or_", "polygamma", "pow", "rand", "rand_eager", "randint64",
+        "randn", "reciprocal", "relu", "remainder", "round", "round_to_int",
+        "rshift", "rsqrt", "scaled_modified_bessel_k0", "scaled_modified_bessel_k1",
+        "shifted_chebyshev_polynomial_t", "shifted_chebyshev_polynomial_u",
+        "shifted_chebyshev_polynomial_v", "shifted_chebyshev_polynomial_w",
+        "sigmoid", "sign", "signbit", "sin", "sinh", "spherical_bessel_j0", "sqrt",
+        "square", "sub", "tan", "tanh", "to_dtype", "to_dtype_bitcast", "truediv",
+        "trunc", "trunc_to_int", "truncdiv", "value_expr", "where", "xor", "zeta",
+    )
+    _EXPLICIT_RULE_OPS = (
+        "bucketize",
+        "check_bounds",
+        "device_assert_async",
+        "indirect_indexing",
+        "load",
+        "load_seed",
+        "masked",
+        "output",
+        "partial_accumulate",
+        "placeholder",
+        "reduction",
+        "scan",
+        "sort",
+        "store",
+        "store_reduction",
     )
 
     def __init__(self) -> None:
         self._install_bulk_rules()
-        self._check_bulk_rule_names()
-        unimplemented_ops = OP_NAMES - OrderedSet(dir(self))
+        classified_ops = OrderedSet(self._VALUE_PROPAGATING_OPS) | OrderedSet(
+            self._EXPLICIT_RULE_OPS
+        )
+        unknown_ops = classified_ops - OP_NAMES
+        torch._check(
+            len(unknown_ops) == 0,
+            lambda: f"Value/index rules for unknown ops: {unknown_ops}",
+        )
+        unimplemented_ops = OP_NAMES - classified_ops
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented value/index rule for ops: {unimplemented_ops}",
@@ -354,14 +261,12 @@ class _IndexValueOpsHandler:
             return None
 
         args = node.args
-        has_call_method_receiver = node.op == "call_method"
-        if has_call_method_receiver:
+        if node.op == "call_method":
             args = args[1:]
         return self._bind_rule(
             getattr(self, target),
             args,
             node.kwargs,
-            has_call_method_receiver=has_call_method_receiver,
         )
 
     def _bind_rule(
@@ -369,34 +274,23 @@ class _IndexValueOpsHandler:
         rule_fn: Any,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        *,
-        has_call_method_receiver: bool = False,
     ) -> _BoundIndexValueRule:
         rule_args = tuple(_RuleArg(arg) for arg in args)
         rule_kwargs = {name: _RuleArg(arg) for name, arg in kwargs.items()}
         rule = rule_fn(*rule_args, **rule_kwargs)
-        return _BoundIndexValueRule(
-            rule, rule_args, rule_kwargs, has_call_method_receiver
-        )
+        return _BoundIndexValueRule(rule, rule_args, rule_kwargs)
 
     def _install_bulk_rules(self) -> None:
+        value_propagating_ops = OrderedSet(self._VALUE_PROPAGATING_OPS)
+        torch._check(
+            len(value_propagating_ops) == len(self._VALUE_PROPAGATING_OPS),
+            lambda: "Duplicate value-propagating op classification",
+        )
         for name in self._VALUE_PROPAGATING_OPS:
             setattr(self, name, self.value_propagating)
 
-    def _check_bulk_rule_names(self) -> None:
-        torch._check(
-            len(self._VALUE_PROPAGATING_OPS)
-            == len(OrderedSet(self._VALUE_PROPAGATING_OPS)),
-            lambda: "Duplicate value-propagating op classification",
-        )
-        unknown_ops = OrderedSet(self._VALUE_PROPAGATING_OPS) - OP_NAMES
-        torch._check(
-            len(unknown_ops) == 0,
-            lambda: f"Value-propagating rules for unknown ops: {unknown_ops}",
-        )
-
     def value_propagating(self, *args: Any, **kwargs: Any) -> _IndexValueRule:
-        return _IndexValueRule(value_propagates=True)
+        return _IndexValueRule(value_inputs=None)
 
     # op rules
 
@@ -421,7 +315,7 @@ class _IndexValueOpsHandler:
         )
 
     def getitem(self, value: Any, index: Any) -> _IndexValueRule:
-        return _IndexValueRule(value_propagates_to=(value,))
+        return _IndexValueRule(value_inputs=(value,))
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -445,7 +339,7 @@ class _IndexValueOpsHandler:
     def masked(self, mask: Any, body: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
             indexing_sinks=(mask,),
-            value_propagates_to=(other,),
+            value_inputs=(other,),
         )
 
     def output(self, *args: Any) -> _IndexValueRule:
@@ -493,17 +387,14 @@ class _IndexValueOpsHandler:
     def store_reduction(
         self, name: str, index: sympy.Expr, value: Any
     ) -> _IndexValueRule:
-        return _IndexValueRule(
-            indexing_sinks=(index,),
-            value_sinks=(value,),
-        )
+        return self.store(name, index, value)
 
     # LoopBody pseudo call_module rules.
 
     def masked_subblock(self, mask: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
             indexing_sinks=(mask,),
-            value_propagates_to=(other,),
+            value_inputs=(other,),
         )
 
     def scan_subblock(
@@ -526,33 +417,28 @@ def _is_masked_subblock(node: torch.fx.Node) -> bool:
     )
 
 
-def _loop_body_graphs(loop_body: LoopBody) -> list[torch.fx.Graph]:
-    return [
-        loop_body.root_block.graph,
-        *(block.graph for block in getattr(loop_body, "subblocks", {}).values()),
-    ]
-
-
-def _subblock_graphs(loop_body: LoopBody) -> dict[str, torch.fx.Graph]:
-    return {
-        name: block.graph for name, block in getattr(loop_body, "subblocks", {}).items()
-    }
-
-
 def _map_rule_arg(arg: Any, fn: Any) -> None:
-    if isinstance(arg, _RuleArg):
-        map_arg(arg.value, fn)
-    elif isinstance(arg, tuple):
-        for elem in arg:
-            _map_rule_arg(elem, fn)
-    elif isinstance(arg, list):
-        for elem in arg:
-            _map_rule_arg(elem, fn)
-    elif isinstance(arg, dict):
-        for elem in arg.values():
-            _map_rule_arg(elem, fn)
-    else:
-        map_arg(arg, fn)
+    def visit_node(node: torch.fx.Node) -> torch.fx.Node:
+        fn(node)
+        return node
+
+    def visit(elem: Any) -> Any:
+        if isinstance(elem, _RuleArg):
+            map_arg(elem.value, visit_node)
+        elif isinstance(elem, torch.fx.Node):
+            fn(elem)
+        return elem
+
+    map_aggregate(arg, visit)
+
+
+def _rewrite_rule_arg(arg: Any, fn: Any) -> None:
+    def visit(elem: Any) -> Any:
+        if isinstance(elem, _RuleArg):
+            elem.value = fn(elem.value)
+        return elem
+
+    map_aggregate(arg, visit)
 
 
 def _lint_loop_body_graph(graph: torch.fx.Graph) -> None:
@@ -564,28 +450,17 @@ def _lint_loop_body_graph(graph: torch.fx.Graph) -> None:
         graph.owning_module = owning_module
 
 
-def _collect_index_value_sinks(
+def _compute_graph_uses(
     graph: torch.fx.Graph,
     *,
     output_is_indexing: bool = False,
     output_is_value: bool = True,
 ) -> tuple[OrderedSet[torch.fx.Node], OrderedSet[torch.fx.Node]]:
-    """
-    Classify the FX node arguments by usage at terminal sinks.
-
-    Returns (indexing_sinks, value_sinks): nodes whose result feeds an indexing
-    position (load/store index, check_bounds, indirect indexing) vs. a value
-    position (store value, reduction value, output).
-    """
     indexing_sinks: OrderedSet[torch.fx.Node] = OrderedSet()
     value_sinks: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def _add(target: OrderedSet[torch.fx.Node], arg: Any) -> None:
-        def add_node(n: torch.fx.Node) -> torch.fx.Node:
-            target.add(n)
-            return n
-
-        _map_rule_arg(arg, add_node)
+        _map_rule_arg(arg, target.add)
 
     for node in graph.nodes:
         if node.op == "output":
@@ -604,20 +479,6 @@ def _collect_index_value_sinks(
         for arg in node_rule.rule.value_sinks:
             _add(value_sinks, arg)
 
-    return indexing_sinks, value_sinks
-
-
-def _compute_graph_uses(
-    graph: torch.fx.Graph,
-    *,
-    output_is_indexing: bool = False,
-    output_is_value: bool = True,
-) -> tuple[OrderedSet[torch.fx.Node], OrderedSet[torch.fx.Node]]:
-    indexing_sinks, value_sinks = _collect_index_value_sinks(
-        graph,
-        output_is_indexing=output_is_indexing,
-        output_is_value=output_is_value,
-    )
     indexing_use = _mark_indexing_ancestors(indexing_sinks)
     value_use = _mark_value_ancestors(value_sinks, indexing_use)
     return indexing_use, value_use
@@ -626,7 +487,9 @@ def _compute_graph_uses(
 def _graph_output_contexts(
     loop_body: LoopBody,
 ) -> dict[torch.fx.Graph, tuple[bool, bool]]:
-    subblocks = _subblock_graphs(loop_body)
+    subblocks = {
+        name: block.graph for name, block in getattr(loop_body, "subblocks", {}).items()
+    }
     contexts = {loop_body.root_block.graph: (False, True)}
     worklist = [loop_body.root_block.graph]
 
@@ -646,19 +509,19 @@ def _graph_output_contexts(
             if subblock_graph is None:
                 continue
 
-            output_is_indexing = node in indexing_use
+            child_is_indexing = node in indexing_use
             # Policy choice for this pass: if the same masked-subblock result
             # is both index-used and value-used, keep its body on the indexing
             # path instead of cloning the subblock for a separate value result.
-            output_is_value = node in value_use and not output_is_indexing
-            old_context = contexts.get(subblock_graph, (False, False))
-            merged_output_is_indexing = old_context[0] or output_is_indexing
-            merged_output_is_value = (
-                old_context[1] or output_is_value
-            ) and not merged_output_is_indexing
-            merged_context = (merged_output_is_indexing, merged_output_is_value)
-            if merged_context != old_context:
-                contexts[subblock_graph] = merged_context
+            child_is_value = node in value_use and not child_is_indexing
+            old_is_indexing, old_is_value = contexts.get(subblock_graph, (False, False))
+            new_is_indexing = old_is_indexing or child_is_indexing
+            new_context = (
+                new_is_indexing,
+                (old_is_value or child_is_value) and not new_is_indexing,
+            )
+            if new_context != (old_is_indexing, old_is_value):
+                contexts[subblock_graph] = new_context
                 worklist.append(subblock_graph)
 
     for graph in subblocks.values():
@@ -692,7 +555,9 @@ def _mark_indexing_ancestors(
         if _is_masked_subblock(node):
             node_rule = _INDEX_VALUE_OPS.rule_for_node(node)
             if node_rule is not None:
-                for arg in node_rule.rule.value_propagates_to:
+                value_inputs = node_rule.rule.value_inputs
+                assert value_inputs is not None
+                for arg in value_inputs:
                     _map_rule_arg(arg, append_node)
             continue
 
@@ -734,8 +599,8 @@ def _mark_value_ancestors(
             continue
         if _is_masked_subblock(node) and node in indexing_use:
             continue
-        if not node_rule.rule.value_propagates:
-            for arg in node_rule.rule.value_propagates_to:
+        if node_rule.rule.value_inputs is not None:
+            for arg in node_rule.rule.value_inputs:
                 _map_rule_arg(arg, append_node)
             continue
 
@@ -795,22 +660,6 @@ def _compute_value_expr_dtype(
     return dtype
 
 
-def _rewrite_value_expr_dtype(
-    loop_body: LoopBody,
-    node: torch.fx.Node,
-    bounds: dict[torch.fx.Node, ValueRanges[Any]],
-    replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
-    value_use: OrderedSet[torch.fx.Node],
-) -> None:
-    dtype = _compute_value_expr_dtype(
-        loop_body, node, bounds, replacement_vals, value_use
-    )
-    if dtype is not None:
-        args = list(node.args)
-        args[2] = dtype
-        node.args = tuple(args)
-
-
 def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     """
     Rewrite value uses of ``index_expr`` FX nodes to ``value_expr``. This lets
@@ -833,7 +682,10 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     ``index_expr`` for value uses. New lowerings should prefer to emit
     ``value_expr`` directly when their intent is a value computation.
     """
-    graphs = _loop_body_graphs(loop_body)
+    graphs = [
+        loop_body.root_block.graph,
+        *(block.graph for block in getattr(loop_body, "subblocks", {}).values()),
+    ]
     if not any(
         graph.find_nodes(op="call_method", target="index_expr", sort=False)
         for graph in graphs
@@ -877,11 +729,15 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 return value_clones[node]
 
             node_rule = _INDEX_VALUE_OPS.rule_for_node(node)
-            if node_rule is not None and node_rule.rule.value_propagates_to:
+            if node_rule is None:
+                return node
+
+            value_inputs = node_rule.rule.value_inputs
+            if value_inputs is not None:
+                if not value_inputs:
+                    return node
                 if node not in indexing_use:
-                    rewrite_rule_args(
-                        node, node_rule, node_rule.rule.value_propagates_to
-                    )
+                    rewrite_rule_args(node, node_rule, value_inputs)
                     return node
 
                 if node not in value_clones:
@@ -890,9 +746,9 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                     clone.meta = node.meta.copy()
                     clone_rule = _INDEX_VALUE_OPS.rule_for_node(clone)
                     assert clone_rule is not None
-                    rewrite_rule_args(
-                        clone, clone_rule, clone_rule.rule.value_propagates_to
-                    )
+                    clone_value_inputs = clone_rule.rule.value_inputs
+                    assert clone_value_inputs is not None
+                    rewrite_rule_args(clone, clone_rule, clone_value_inputs)
                     rewritten_value_use.add(clone)
                     value_clones[node] = clone
                 return value_clones[node]
@@ -918,30 +774,11 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             node_rule: _BoundIndexValueRule,
             sinks: tuple[Any, ...],
         ) -> None:
-            if node.op == "output":
-                node.args = rewrite_value_arg(node.args, node)
-                return
-
-            def rewrite_sink(arg: Any) -> None:
-                if isinstance(arg, _RuleArg):
-                    arg.value = rewrite_value_arg(arg.value, node)
-                elif isinstance(arg, tuple):
-                    for elem in arg:
-                        rewrite_sink(elem)
-                elif isinstance(arg, list):
-                    for elem in arg:
-                        rewrite_sink(elem)
-                elif isinstance(arg, dict):
-                    for elem in arg.values():
-                        rewrite_sink(elem)
-
             for arg in sinks:
-                rewrite_sink(arg)
+                _rewrite_rule_arg(arg, lambda value: rewrite_value_arg(value, node))
 
-            args = tuple(arg.value for arg in node_rule.args)
-            if node_rule.has_call_method_receiver:
-                args = (node.args[0], *args)
-            node.args = tuple(args)
+            arg_prefix = node.args[:1] if node.op == "call_method" else ()
+            node.args = (*arg_prefix, *(arg.value for arg in node_rule.args))
             node.kwargs = {name: arg.value for name, arg in node_rule.kwargs.items()}
 
         for node in graph.nodes:
@@ -956,11 +793,15 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             if node_rule.rule.value_sinks:
                 rewrite_rule_args(node, node_rule, node_rule.rule.value_sinks)
             if (
-                node in value_use
-                and node_rule.rule.value_propagates_to
-                and not (_is_masked_subblock(node) and node in indexing_use)
+                _is_masked_subblock(node)
+                and node in value_use
+                and node not in indexing_use
             ):
-                rewrite_rule_args(node, node_rule, node_rule.rule.value_propagates_to)
+                value_inputs = node_rule.rule.value_inputs
+                assert value_inputs is not None
+                rewrite_rule_args(
+                    node, node_rule, value_inputs
+                )
 
         graph_value_uses[graph] = rewritten_value_use
         _lint_loop_body_graph(graph)
@@ -972,9 +813,16 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     bounds = bound_vars.get_bounds()
     for graph in graphs:
         value_use = graph_value_uses[graph]
-        for node in graph.nodes:
-            if node.target == "value_expr" and node in value_use:
-                _rewrite_value_expr_dtype(
-                    loop_body, node, bounds, bound_vars.replacement_vals, value_use
-                )
+        for node in graph.find_nodes(
+            op="call_method", target="value_expr", sort=False
+        ):
+            if node not in value_use:
+                continue
+            dtype = _compute_value_expr_dtype(
+                loop_body, node, bounds, bound_vars.replacement_vals, value_use
+            )
+            if dtype is not None:
+                args = list(node.args)
+                args[2] = dtype
+                node.args = tuple(args)
         _lint_loop_body_graph(graph)
