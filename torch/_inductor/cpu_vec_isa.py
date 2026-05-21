@@ -237,62 +237,33 @@ class VecNEON(VecISA):
 
 
 @dataclasses.dataclass
-class VecSVE256(VecISA):
-    # Repurposable for SVE targets with variable vector length.
-    _bit_width = 256
-    _macro = [
-        "CPU_CAPABILITY_SVE",
-        "CPU_CAPABILITY_SVE256",
-        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-        "__ARM_FEATURE_BF16",
-    ]
-    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
-    _armv9a_arch_flags = (
-        "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm -msve-vector-bits=256"
+class VecSVE(VecISA):
+    _bit_width: int = 256
+    _armv9a_supported: bool | None = dataclasses.field(
+        default=None, init=False, compare=False
     )
 
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
-    _armv9a_supported: bool | None = None
-
-    def __str__(self) -> str:
-        if config.is_fbcode():
-            return "neon"
-        return "asimd"
-
-    def _has_armv9a(self) -> bool:
-        # Return True when torch.cpu.get_capabilities() reports
-        # Armv9-A + SVE2 support.
-        if self._armv9a_supported is None:
-            try:
-                self._armv9a_supported = bool(torch.cpu.get_capabilities()["sve2"])
-            except Exception:
-                self._armv9a_supported = False
-        return self._armv9a_supported
-
-    def build_arch_flags(self) -> str:
-        if self._has_armv9a():
-            return self._armv9a_arch_flags
-        return self._arch_flags
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
-
-@dataclasses.dataclass
-class VecSVE128(VecISA):
-    _bit_width = 128
-    _macro = [
-        "CPU_CAPABILITY_SVE",
-        "CPU_CAPABILITY_SVE128",
-        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-        "__ARM_FEATURE_BF16",
-    ]
-    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=128"
-    _armv9a_arch_flags = (
-        "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm -msve-vector-bits=128"
-    )
-
-    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
-    _armv9a_supported: bool | None = None
+    def __post_init__(self) -> None:
+        assert self._bit_width in (128, 256)
+        nelements = self._bit_width // 32
+        self._macro = [
+            "CPU_CAPABILITY_SVE",
+            f"CPU_CAPABILITY_SVE{self._bit_width}",
+            "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+            "__ARM_FEATURE_BF16",
+        ]
+        self._arch_flags = (
+            f"-march=armv8-a+sve+bf16 -msve-vector-bits={self._bit_width}"
+        )
+        self._armv9a_arch_flags = (
+            "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm "
+            f"-msve-vector-bits={self._bit_width}"
+        )
+        self._dtype_nelements = {
+            torch.float: nelements,
+            torch.bfloat16: nelements * 2,
+            torch.float16: nelements * 2,
+        }
 
     def __str__(self) -> str:
         if config.is_fbcode():
@@ -302,7 +273,9 @@ class VecSVE128(VecISA):
     def _has_armv9a(self) -> bool:
         if self._armv9a_supported is None:
             try:
-                self._armv9a_supported = bool(torch.cpu.get_capabilities()["sve2"])
+                self._armv9a_supported = bool(
+                    torch.cpu.get_capabilities().get("sve2", False)
+                )
             except Exception:
                 self._armv9a_supported = False
         return self._armv9a_supported
@@ -585,8 +558,7 @@ supported_vec_isa_list = [
     VecAVX512(),
     VecAVX2(),
     VecNEON(),
-    VecSVE256(),
-    VecSVE128(),
+    VecSVE(256),
 ]
 
 
@@ -650,11 +622,13 @@ def valid_vec_isa_list() -> list[VecISA]:
         isa_list.append(VecVSX())
     elif arch == "aarch64":
         caps = torch.cpu.get_capabilities()
-        if caps["sve2"] or caps["sve"]:
+        if (caps.get("sve2", False) or caps.get("sve", False)) and caps.get(
+            "bf16", False
+        ):
             if caps.get("sve_max_length") == 128:
-                isa_list.append(VecSVE128())
+                isa_list.append(VecSVE(128))
             else:
-                isa_list.append(VecSVE256())
+                isa_list.append(VecSVE(256))
         else:
             isa_list.append(VecNEON())
 

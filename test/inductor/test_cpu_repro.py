@@ -2401,16 +2401,14 @@ class CPUReproTests(TestCase):
         timed(lambda: torch.randn(10), ())
 
     def test_vec_sve_armv9_arch_flags(self):
-        for isa_cls, vector_bits in (
-            (cpu_vec_isa.VecSVE128, 128),
-            (cpu_vec_isa.VecSVE256, 256),
-        ):
-            isa = isa_cls()
+        for vector_bits in (128, 256):
+            isa = cpu_vec_isa.VecSVE(vector_bits)
 
             # Armv9-A + SVE2 path should switch to the Armv9 flag set with bf16/i8mm
             with patch(
                 "torch.cpu.get_capabilities",
                 return_value={
+                    "bf16": True,
                     "sve": True,
                     "sve2": True,
                     "sve_max_length": vector_bits,
@@ -2427,6 +2425,7 @@ class CPUReproTests(TestCase):
             with patch(
                 "torch.cpu.get_capabilities",
                 return_value={
+                    "bf16": True,
                     "sve": True,
                     "sve2": False,
                     "sve_max_length": vector_bits,
@@ -2437,26 +2436,35 @@ class CPUReproTests(TestCase):
                 self.assertEqual(flags, isa._arch_flags)
 
         try:
-            for isa_cls, vector_bits in (
-                (cpu_vec_isa.VecSVE128, 128),
-                (cpu_vec_isa.VecSVE256, 256),
+            for sve2 in (False, True):
+                for vector_bits in (128, 256):
+                    cpu_vec_isa.valid_vec_isa_list.cache_clear()
+                    with (
+                        patch("sys.platform", "linux"),
+                        patch("platform.machine", return_value="aarch64"),
+                        patch(
+                            "torch.cpu.get_capabilities",
+                            return_value={
+                                "bf16": True,
+                                "sve": True,
+                                "sve2": sve2,
+                                "sve_max_length": vector_bits,
+                            },
+                        ),
+                    ):
+                        selected_isa = cpu_vec_isa.valid_vec_isa_list()[0]
+                        self.assertIsInstance(selected_isa, cpu_vec_isa.VecSVE)
+                        self.assertEqual(selected_isa.bit_width(), vector_bits)
+
+            cpu_vec_isa.valid_vec_isa_list.cache_clear()
+            with (
+                patch("sys.platform", "linux"),
+                patch("platform.machine", return_value="aarch64"),
+                patch("torch.cpu.get_capabilities", return_value={}),
             ):
-                cpu_vec_isa.valid_vec_isa_list.cache_clear()
-                with (
-                    patch("sys.platform", "linux"),
-                    patch("platform.machine", return_value="aarch64"),
-                    patch(
-                        "torch.cpu.get_capabilities",
-                        return_value={
-                            "sve": True,
-                            "sve2": True,
-                            "sve_max_length": vector_bits,
-                        },
-                    ),
-                ):
-                    selected_isa = cpu_vec_isa.valid_vec_isa_list()[0]
-                    self.assertIsInstance(selected_isa, isa_cls)
-                    self.assertEqual(selected_isa.bit_width(), vector_bits)
+                self.assertIsInstance(
+                    cpu_vec_isa.valid_vec_isa_list()[0], cpu_vec_isa.VecNEON
+                )
         finally:
             cpu_vec_isa.valid_vec_isa_list.cache_clear()
 
