@@ -109,11 +109,14 @@ from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
     binary_op,
+    generic_abs,
     generic_bool,
     generic_float,
     generic_getiter,
+    generic_inplace_multiply,
     generic_int,
     generic_len,
+    generic_multiply,
     generic_neg,
     generic_pos,
     vt_add,
@@ -123,7 +126,6 @@ from .object_protocol import (
 )
 from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
-    DataPtrVariable,
     FakeItemVariable,
     supported_comparison_ops,
     SymNodeVariable,
@@ -174,14 +176,15 @@ _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
 _TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
-polyfill_fn_mapping = {
-    operator.eq: polyfills.cmp_eq,
-    operator.ne: polyfills.cmp_ne,
-    operator.lt: polyfills.cmp_lt,
-    operator.le: polyfills.cmp_le,
-    operator.gt: polyfills.cmp_gt,
-    operator.ge: polyfills.cmp_ge,
+_OPERATOR_TO_DUNDER: dict[Callable[..., Any], str] = {
+    operator.eq: "__eq__",
+    operator.ne: "__ne__",
+    operator.lt: "__lt__",
+    operator.le: "__le__",
+    operator.gt: "__gt__",
+    operator.ge: "__ge__",
 }
+
 
 bin_ops = (
     operator.pow,
@@ -368,6 +371,16 @@ class BaseBuiltinVariable(VariableTracker):
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, BaseBuiltinVariable) and (
             self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
@@ -525,7 +538,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
-            operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
             operator.truediv: (
                 ["__truediv__", "__rtruediv__", "__itruediv__"],
                 operator.itruediv,
@@ -537,14 +549,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.lshift: (
-                ["__lshift__", "__rlshift__", "__ilshift__"],
-                operator.ilshift,
-            ),
-            operator.rshift: (
-                ["__rshift__", "__rrshift__", "__irshift__"],
-                operator.irshift,
-            ),
             operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
@@ -686,39 +690,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
-        # List-like expansion (e.g. [1, 2, 3] * 3)
-        def expand_list_like(
-            tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
-        ) -> VariableTracker:
-            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
-                lst, const = const, lst
-            try:
-                if not isinstance(lst, BaseListVariable):
-                    raise AssertionError(f"Expected BaseListVariable, got {type(lst)}")
-                return lst.__class__(
-                    items=lst.items * const.as_python_constant(),
-                    mutation_type=ValueMutationNew(),
-                )
-            except MemoryError as exc:
-                raise_observed_exception(
-                    type(exc),
-                    tx,
-                    args=list(exc.args),
-                )
-
-        list_like_expansion_handlers: list[
-            tuple[
-                tuple[type[VariableTracker], type[VariableTracker]],
-                _HandlerCallback,
-            ]
-        ] = [
-            ((ListVariable, ConstantVariable), expand_list_like),
-            ((TupleVariable, ConstantVariable), expand_list_like),
-            ((ConstantVariable, ListVariable), expand_list_like),
-            ((ConstantVariable, TupleVariable), expand_list_like),
-        ]
-        op_handlers[operator.mul].extend(list_like_expansion_handlers)
-
         def create_cmp_op_handlers(
             op: Callable[..., Any],
         ) -> list[tuple[tuple[_TrackersType, _TrackersType], _HandlerCallback]]:
@@ -744,10 +715,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ]
             ] = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
-            if op in polyfill_fn_mapping:
-                # For constants, speedup the comparison instead of using
-                # polyfill. Removing this line causes major regression for pr
-                # time benchmark - add_loop_eager.
+            if op in _OPERATOR_TO_DUNDER:
+                # For constants, speedup the comparison instead of going
+                # through generic_richcompare. Removing this line causes
+                # major regression for pr time benchmark - add_loop_eager.
                 result = [
                     ((ConstantVariable, ConstantVariable), compare_by_value),
                 ]
@@ -767,26 +738,19 @@ class BuiltinVariable(BaseBuiltinVariable):
                     ]
                 )
 
-                if op in (operator.eq, operator.ne):
-
-                    def compare_by_method(
-                        tx: "InstructionTranslator",
-                        a: VariableTracker,
-                        b: VariableTracker,
-                    ) -> VariableTracker:
-                        method_name = "__eq__" if op is operator.eq else "__ne__"
-                        return a.call_method(tx, method_name, [b], {})
-
-                    result.append(
-                        ((DataPtrVariable, VariableTracker), compare_by_method)
-                    )
+                # COMPARE_OP (a == b) dispatches through generic_richcompare,
+                # which implements do_richcompare via richcompare_impl slots.
+                # See object_protocol.py for details.
+                dunder = _OPERATOR_TO_DUNDER[op]
 
                 def handler(
-                    tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+                    tx: "InstructionTranslator",
+                    a: VariableTracker,
+                    b: VariableTracker,
                 ) -> VariableTracker:
-                    return tx.inline_user_function_return(
-                        VariableTracker.build(tx, polyfill_fn_mapping[op]), [a, b], {}
-                    )
+                    from .object_protocol import generic_richcompare
+
+                    return generic_richcompare(tx, a, b, dunder)
 
                 result.append(((VariableTracker, VariableTracker), handler))
                 return result
@@ -1723,6 +1687,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__pos__(4) → pos(4)
             return generic_pos(tx, args[0])
 
+        if name == "__abs__" and len(args) == 1 and not kwargs:
+            # type.__abs__(instance) → abs(instance)
+            # e.g., int.__abs__(-4) → abs(-4)
+            return generic_abs(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -2042,13 +2011,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_abs(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        # Call arg.__abs__()
-        abs_method = SourcelessBuilder.create(tx, getattr).call_function(
-            tx, [arg, VariableTracker.build(tx, "__abs__")], {}
-        )
-        return abs_method.call_function(tx, [], {})
+        return generic_abs(tx, arg)
 
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2347,8 +2310,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2822-L2887
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
                 raise_args_mismatch(
@@ -2358,10 +2320,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        iter_args = [
-            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
-            for arg in args
-        ]
+        items = []
+        for arg in args:
+            items.append(generic_getiter(tx, arg))
+        iter_args = TupleVariable(items, mutation_type=ValueMutationNew())
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
@@ -2544,6 +2506,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if len(seqs) == 0:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["map() must have at least two arguments."],
+            )
+
         strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
@@ -2563,13 +2532,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
 
-        seq_list = [
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-            for seq in seqs
-        ]
+        iterables = [generic_getiter(tx, seq) for seq in seqs]
+        iter_args = TupleVariable(iterables, mutation_type=ValueMutationNew())
         return variables.MapVariable(
             fn,
-            seq_list,  # type: ignore[arg-type]
+            iter_args,
             strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
@@ -2577,12 +2544,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_filter(
         self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
-        seq_or_list = (
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-        )
         return variables.FilterVariable(
             fn,
-            seq_or_list,  # type: ignore[arg-type]
+            generic_getiter(tx, seq),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2829,6 +2793,16 @@ class BuiltinVariable(BaseBuiltinVariable):
             return a.call_method(tx, "__ixor__", [b], {})
         return None
 
+    def call_mul(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_multiply(tx, a, b)
+
+    def call_imul(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_inplace_multiply(tx, a, b)
+
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
@@ -2895,6 +2869,26 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_or", "nb_or", "|=")
+
+    def call_lshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_op(tx, a, b, "nb_lshift", "<<")
+
+    def call_ilshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_lshift", "nb_lshift", "<<=")
+
+    def call_rshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_op(tx, a, b, "nb_rshift", ">>")
+
+    def call_irshift(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
 
     def call_not_(
         self, tx: "InstructionTranslator", a: VariableTracker
