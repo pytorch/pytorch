@@ -1836,19 +1836,28 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "This platform doesn't support efficient attention",
     )
     def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
-        @torch.compile(mode="reduce-overhead")
-        def attn(x):
+        def eager_attn(x):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(
                 x, x, x, None, True, dropout_p=0.0
             )[0]
 
+        @torch.compile(mode="reduce-overhead")
+        def attn(x):
+            return eager_attn(x)
+
         def block(x):
             return x + attn(x)
 
-        x = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        ref = x_ref + eager_attn(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
         y = checkpoint(block, x, use_reentrant=False)
         y.sum().backward()
-        self.assertIsNotNone(x.grad)
+
+        self.assertEqual(ref, y)
+        self.assertEqual(x_ref.grad, x.grad)
 
     @requires_cuda_and_triton
     def test_error_msg(self, device):
