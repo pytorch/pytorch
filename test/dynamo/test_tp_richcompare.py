@@ -2,6 +2,7 @@
 """Tests for richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
+import unittest
 
 import torch
 import torch._dynamo
@@ -1335,6 +1336,138 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             return copy.data_ptr == dp
 
         self.assertTrue(fn(t, data_ptr))
+
+    # =====================================================================
+    # Higher-order operator comparison (TorchHigherOrderOperatorVariable)
+    # =====================================================================
+
+    def test_hop_eq(self):
+        def fn():
+            return (
+                torch._higher_order_ops.flex_attention
+                == torch._higher_order_ops.flex_attention
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_hop_ne(self):
+        def fn():
+            return (
+                torch._higher_order_ops.flex_attention != torch._higher_order_ops.cond
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # Context manager comparison (ContextWrappingVariable)
+    # =====================================================================
+
+    def test_grad_mode_eq_self(self):
+        a = torch.no_grad()
+        self._assert_all_cmp_equals(a, a, error_ops=self._ORDERING_OPS)
+
+    def test_inference_mode_eq_self(self):
+        a = torch.inference_mode()
+        self._assert_all_cmp_equals(a, a, error_ops=self._ORDERING_OPS)
+
+    def test_grad_mode_eq_different_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn():
+            a = torch.no_grad()
+            b = torch.no_grad()
+            return a == b
+
+        with self.assertRaisesRegex(Unsupported, "richcompare identity fallback"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_inference_mode_ne_different_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn():
+            a = torch.inference_mode()
+            b = torch.inference_mode()
+            return a != b
+
+        with self.assertRaisesRegex(Unsupported, "richcompare identity fallback"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    # =====================================================================
+    # Iterator comparison (IteratorVariable)
+    # =====================================================================
+
+    def test_zip_iterator_eq_self(self):
+        def fn(a, b):
+            z1 = zip(a, b)
+            return z1 == z1, z1 != z1
+
+        expected = fn([1, 2], [3, 4])
+        result = torch.compile(fn, backend="eager", fullgraph=True)([1, 2], [3, 4])
+        self.assertEqual(result, expected)
+
+    def test_map_iterator_eq_self(self):
+        def fn(a):
+            m1 = map(lambda x: x + 1, a)  # noqa: C417
+            return m1 == m1, m1 != m1
+
+        expected = fn([1, 2])
+        result = torch.compile(fn, backend="eager", fullgraph=True)([1, 2])
+        self.assertEqual(result, expected)
+
+    def test_zip_iterator_eq_different_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(a, b):
+            z1 = zip(a, b)
+            z2 = zip(a, b)
+            return z1 == z2
+
+        with self.assertRaisesRegex(Unsupported, "richcompare identity fallback"):
+            torch.compile(fn, backend="eager", fullgraph=True)([1, 2], [3, 4])
+
+    def test_map_iterator_ne_different_graph_breaks(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(a):
+            m1 = map(lambda x: x + 1, a)  # noqa: C417
+            m2 = map(lambda x: x + 1, a)  # noqa: C417
+            return m1 != m2
+
+        with self.assertRaisesRegex(Unsupported, "richcompare identity fallback"):
+            torch.compile(fn, backend="eager", fullgraph=True)([1, 2])
+
+    # =====================================================================
+    # Event comparison (EventVariable)
+    # =====================================================================
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    def test_cuda_event_eq(self):
+        def fn(e1, e2):
+            return e1 == e2, e1 != e2, e1 == e1
+
+        e1 = torch.cuda.Event()
+        e2 = torch.cuda.Event()
+        expected = fn(e1, e2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # itertools module comparison (ItertoolsVariable)
+    # =====================================================================
+
+    def test_itertools_eq(self):
+        import itertools
+
+        def fn():
+            return itertools == itertools
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
 
 
 if __name__ == "__main__":
