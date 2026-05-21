@@ -33,6 +33,29 @@ Particularly, {class}`torch.distributed.GradBucket` represents a bucket of gradi
 .. autofunction:: torch.distributed.GradBucket.parameters
 ```
 
+## Register Communication Hook
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks
+.. autofunction:: register_ddp_comm_hook
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
+.. autofunction:: post_localSGD_hook
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
+.. autofunction:: hook_with_zero_step
+.. autofunction:: hook_with_zero_step_interleaved
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
+.. autofunction:: quantization_perchannel_hook
+.. autofunction:: quantization_pertensor_hook
+```
 ## Default Communication Hooks
 
 Default communication hooks are simple **stateless** hooks, so the input state

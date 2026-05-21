@@ -22,13 +22,31 @@ struct simd_type<bfloat> {
 } // namespace detail
 
 template <typename T>
-inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_sum(T val) {
   return T(::metal::simd_sum(detail::simd_type_t<T>(val)));
 }
 
+inline float2 simd_sum(float2 val) {
+  return float2(::metal::simd_sum(val.x), ::metal::simd_sum(val.y));
+}
+
 template <typename T>
-inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_prod(T val) {
   return T(::metal::simd_product(detail::simd_type_t<T>(val)));
+}
+
+// Complex product reduction via shuffle, using c10::metal::mul for (a+bi)(c+di)
+// Uses simd_shuffle_and_fill_down with identity (1+0i) for inactive lanes.
+inline float2 simd_prod(float2 val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = c10::metal::mul(
+        val, ::metal::simd_shuffle_and_fill_down(val, float2(1, 0), i));
+  }
+  return val;
 }
 
 // Extend simd_broadcast to 64-bit integral types using int2 trick
@@ -109,24 +127,34 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
   return simd_broadcast(val, 0);
 }
 
+// Fill value for shuffle_and_fill_down must be the op's identity (the fill
+// is contributed by lanes whose shuffle target is past simdgroup_size).
+//
+// NOTE: callers with fewer than simdgroup_size active lanes still risk
+// corruption -- an active lane reading from an in-range but inactive lane
+// gets undefined data (0 in practice on Apple Silicon), not the fill.
+// Round up the dispatched thread count to a multiple of simdgroup_size
+// and have padding threads load the op identity before calling this.
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::lowest());
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val = ::metal::max(
         val,
-        as_type<T>(::metal::simd_shuffle_and_fill_down(
-            as_type<int2>(val), int2(0), i)));
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
   }
   return simd_broadcast(val, 0);
 }
 
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  const auto fill = as_type<int2>(::metal::numeric_limits<long>::max());
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val = ::metal::min(
         val,
-        as_type<T>(::metal::simd_shuffle_and_fill_down(
-            as_type<int2>(val), int2(0), i)));
+        as_type<T>(
+            ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i)));
   }
   return simd_broadcast(val, 0);
 }
@@ -276,6 +304,7 @@ float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
     m += delta / (idx + 1);
     m2 += delta * (data[idx] - m);
   }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return float3(m, m2, size);
 }
 
@@ -298,6 +327,7 @@ float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
   for (unsigned idx = 1; idx < size; ++idx) {
     rc = welford_combine(rc, data[idx]);
   }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return rc;
 }
 

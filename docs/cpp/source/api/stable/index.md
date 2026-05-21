@@ -51,8 +51,8 @@ For more information on the stable ABI, see the
 
 - `torch/csrc/stable/library.h` - Stable library registration
 - `torch/csrc/stable/ops.h` - Stable operator definitions
-- `torch/csrc/stable/tensor_struct.h` - Stable tensor structures
-- `torch/csrc/stable/device_struct.h` - Stable device structures
+- `torch/csrc/stable/tensor.h` - Stable tensor structures
+- `torch/csrc/stable/device.h` - Stable device structures
 - `torch/csrc/stable/accelerator.h` - Accelerator support
 - `torch/csrc/stable/macros.h` - Stable API macros
 

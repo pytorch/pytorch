@@ -251,6 +251,7 @@ def _codegen_subclass_wrapper_source(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
+    act_input_indices: list[int] | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Generate source and globals for a subclass wrapper.
 
@@ -260,6 +261,14 @@ def _codegen_subclass_wrapper_source(
     state = _CodegenState()
 
     state.emit("def inner_fn(args):", indent=0)
+
+    # --- Resolve AsyncCollectiveTensors ---
+    # ACTs are transient eager-mode wrappers for async collective overlap.
+    # Inductor triton kernels bypass __torch_dispatch__, so we must call
+    # trigger_wait() before the compiled graph uses the data.
+    if act_input_indices:
+        for i in act_input_indices:
+            state.emit(f"args[{i}] = args[{i}].trigger_wait()")
 
     # --- Input unwrapping ---
     state.emit("unwrapped_args = []")
@@ -330,9 +339,14 @@ def _compile_and_exec_source(
         payload_fn=lambda: source,
     )
 
-    code = compile(source, f"<{artifact_name}>", "exec")
+    # Use a path under torch/_functorch/ so the code object is recognized by
+    # dynamo's MOD_SKIPLIST. The eval frame hook stays active during the entire
+    # torch.compile(fn)(*args) call (to handle graph breaks and resume functions),
+    # so codegen'd functions called during backward get intercepted even though
+    # no tracing is active. A real path makes them skip automatically.
+    code = compile(source, f"{__file__}:codegen({artifact_name})", "exec")
     local_dict: dict[str, object] = {}
-    exec(code, globals_dict, local_dict)  # noqa: S102
+    exec(code, globals_dict, local_dict)
     fn = local_dict[fn_name]
     if wrapped_fn is not None:
         functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
@@ -372,6 +386,7 @@ def codegen_subclass_wrapper(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
+    act_input_indices: list[int] | None = None,
 ) -> Callable[..., object]:
     """Generate a specialized wrapper function for subclass unwrap/wrap."""
     source, globals_dict = _codegen_subclass_wrapper_source(
@@ -379,6 +394,7 @@ def codegen_subclass_wrapper(
         out_metas,
         num_fw_outs_saved_for_bw,
         frozen_inp_indices,
+        act_input_indices=act_input_indices,
     )
     globals_dict["compiled_fn"] = compiled_fn
     return _compile_and_exec_source(

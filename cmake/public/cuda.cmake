@@ -307,6 +307,14 @@ else()
 endif()
 
 # nvrtc
+# cuDNN frontend needs libnvrtc symbols, but linking through CUDA::nvrtc pulls
+# CUDA::cuda_driver transitively. Keep a driver-free target for cuDNN users and
+# reserve caffe2::nvrtc for the stub library that actually needs the driver API.
+add_library(caffe2::nvrtc_runtime INTERFACE IMPORTED)
+set_property(
+    TARGET caffe2::nvrtc_runtime PROPERTY INTERFACE_LINK_LIBRARIES
+    "${CUDA_NVRTC_LIB}")
+
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES

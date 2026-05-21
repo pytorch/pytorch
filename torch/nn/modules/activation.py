@@ -266,14 +266,14 @@ class Hardtanh(Module):
         super().__init__()
         if min_value is not None:
             warnings.warn(
-                "keyword argument `min_value` is deprecated and rename to `min_val`",
+                "keyword argument `min_value` is deprecated and renamed to `min_val`",
                 FutureWarning,
                 stacklevel=2,
             )
             min_val = min_value
         if max_value is not None:
             warnings.warn(
-                "keyword argument `max_value` is deprecated and rename to `max_val`",
+                "keyword argument `max_value` is deprecated and renamed to `max_val`",
                 FutureWarning,
                 stacklevel=2,
             )
@@ -1322,7 +1322,7 @@ class MultiheadAttention(Module):
 
             .. note::
                 `batch_first` argument is ignored for unbatched inputs.
-        """  # noqa: B950
+        """
         why_not_fast_path = ""
         if (
             (attn_mask is not None and torch.is_floating_point(attn_mask))

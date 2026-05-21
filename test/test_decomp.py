@@ -22,13 +22,11 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
-)
-from torch.testing._internal.common_methods_invocations import (
-    op_db,
     skip,
     skipOps,
     xfail,
 )
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -575,7 +573,7 @@ class TestDecomp(TestCase):
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
-    @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
+    @skipOps(core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -605,7 +603,7 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    @skipOps("TestDecomp", "test_comprehensive", comprehensive_failures)
+    @skipOps(comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
@@ -1232,14 +1230,12 @@ class DecompOneOffTests(TestCase):
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
-        "DecompOneOffTests",
-        "test_sdpa",
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
                 dtypes=[torch.half],
             ),
-        ],
+        ]
     )
     @ops(_sdpa_op_info)
     def test_sdpa(self, device, dtype, op):
@@ -1326,6 +1322,27 @@ class DecompOneOffTests(TestCase):
             "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
             in generated_codes[1]
         )
+
+    @onlyCUDA
+    @skipIfCrossRef
+    def test_addmm_out_dtype_decomp(self, device):
+        cases = [
+            {"beta": 1, "alpha": 1},
+            {"beta": 0, "alpha": 1},
+            {"beta": 2, "alpha": 3},
+        ]
+        for kwargs in cases:
+            a = torch.randn(4, 8, dtype=torch.bfloat16, device=device)
+            b = torch.randn(8, 4, dtype=torch.bfloat16, device=device)
+            c = torch.randn(4, 4, dtype=torch.float32, device=device)
+
+            ref = torch.ops.aten.addmm.dtype(c, a, b, torch.float32, **kwargs)
+            res = torch._decomp.decompositions.addmm_dtype(
+                c, a, b, out_dtype=torch.float32, **kwargs
+            )
+
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res, ref)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

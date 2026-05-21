@@ -26,7 +26,6 @@ for more information on the design.
 
 import collections
 import contextlib
-import functools
 import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
@@ -57,7 +56,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE
+from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -131,13 +130,6 @@ banned_attrs = [
 ]
 
 
-@functools.cache
-def get_prev_stack_var_name() -> str:
-    from ..bytecode_transformation import unique_id
-
-    return unique_id("___prev_torch_function_mode_stack")
-
-
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
     @staticmethod
     def is_supported_torch_function_mode(ty: type[TorchFunctionMode]) -> bool:
@@ -170,7 +162,10 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
-        assert self.source
+        if not self.source:
+            raise AssertionError(
+                "TorchFunctionModeVariable requires a source for reconstruct"
+            )
         self.source.reconstruct(codegen)
 
     def module_name(self) -> str:
@@ -203,12 +198,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
@@ -216,7 +211,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
@@ -266,7 +261,7 @@ torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
-    def __init__(self, py_stack: Iterable[Any]) -> None:
+    def __init__(self, py_stack: Iterable[Any], skip_next: bool) -> None:
         # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
         # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
         # These are their definitions:
@@ -281,6 +276,13 @@ class SymbolicTorchFunctionState:
         # This is important because now if a mode is pushed while dynamo is tracing, we know whether
         # or not torch function modes are enabled and whether we should trace it.
         self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
+
+        # Mirrors PythonTorchFunctionTLS::skip_next in C++.
+        # Set by _skip_one_hop_torch_function, consumed by has_torch_function.
+        # The real TLS flag is consumed by save_global_state in
+        # OutputGraph.__init__ (which runs before this) and passed in here.
+        # On tracing failure, restore_graphstate restores the real TLS.
+        self.skip_next = skip_next
 
         # This differs from the C API of the same name
         # this will only be false iff we have entered torch._C.DisableTorchFunction
@@ -441,7 +443,8 @@ def _flatten_vts(vts: Iterable[VariableTracker]) -> list[VariableTracker]:
 
 
 def _get_subclass_type(var: VariableTracker) -> type:
-    assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
+    if not isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable)):
+        raise AssertionError(f"Unexpected type {type(var)}")
     return var.python_type()
 
 
@@ -489,7 +492,7 @@ def call_torch_function(
     #
     # Also notice the `cls` is not explicitly passed in the reference
     # implementations:
-    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374
     # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
     tf_args = [
         fn,
@@ -576,7 +579,7 @@ def dispatch_torch_function(
     unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
-        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        explanation=f"All __torch_function__ overrides for function {fn} returned NotImplemented",
         hints=[
             *graph_break_hints.USER_ERROR,
         ],
@@ -600,14 +603,17 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
+        tensor_var = tensor_var.realize()
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
-        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter) or issubclass(
-            input_tensor_type, torch.Tensor
-        ), (
-            f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
-        )
+        if not (
+            input_tensor_type in (torch.Tensor, torch.nn.Parameter)
+            or issubclass(input_tensor_type, torch.Tensor)
+        ):
+            raise AssertionError(
+                f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
+            )
         var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
         return var

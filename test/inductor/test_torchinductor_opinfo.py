@@ -27,9 +27,10 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
+    skipOps,
     skipXPUIf,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skipOps
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
@@ -38,7 +39,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_MKL,
@@ -197,6 +197,7 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if IS_MACOS and IS_X86:
@@ -222,6 +223,7 @@ inductor_skips["cuda"] = {
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     "_batch_norm_with_update": {f16, f32, f64},
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if not SM80OrLater:
@@ -232,11 +234,14 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {}
+inductor_skips["xpu"] = {
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
+}
 
 # torch-xpu-ops: #2956
 inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -247,7 +252,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "multinomial": {f16, f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -265,7 +269,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -285,7 +288,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -1224,9 +1226,8 @@ class TestInductorOpInfo(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
-    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     @_ops(op_db[START:END])
-    @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
+    @skipOps(test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
@@ -1271,7 +1272,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1283,7 +1284,7 @@ class TestInductorOpInfo(TestCase):
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 

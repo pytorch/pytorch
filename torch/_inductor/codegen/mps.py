@@ -19,7 +19,7 @@ from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import NullHandler, ops, OpsWrapper, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -93,23 +93,25 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
-    def _print_Min(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::min only supported for 2 args")
+    def _print_min_max(self, expr: sympy.Expr, fn: str) -> str:
         # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
+        args = list(map(self._print, expr.args))
+        result = args[0]
+        for arg in args[1:]:
+            result = self._print_binary_min_max(result, arg, fn)
+        return result
+
+    @staticmethod
+    def _print_binary_min_max(a: str, b: str, fn: str) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::min({typecast_a}, {typecast_b})"
+        return f"metal::{fn}({typecast_a}, {typecast_b})"
+
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        return self._print_min_max(expr, "min")
 
     def _print_Max(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::max only supported for 2 args")
-        # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
-        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
-        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::max({typecast_a}, {typecast_b})"
+        return self._print_min_max(expr, "max")
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -674,6 +676,14 @@ class MetalKernel(SIMDKernel):
 
         acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
         acc_buf_size_str = self.sexpr(acc_buf_size)
+        # metal threadgroup arrays need a compile time constant size, so
+        # fall back to the static upper bound when acc buf size is symbolic
+        # happens when dynamic=True
+        acc_buf_alloc_size = (
+            acc_buf_size
+            if isinstance(acc_buf_size, sympy.Integer)
+            else self.max_threadgroup_size
+        )
         shmem_buf_size = (
             ceildiv(acc_buf_size, self.simd_group_size)
             if isinstance(acc_buf_size, sympy.Integer)
@@ -777,7 +787,7 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
+                acc_buf = self._new_idxvar(src_dtype, acc_buf_alloc_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
                     self.compute,
@@ -785,7 +795,7 @@ class MetalKernel(SIMDKernel):
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
-            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             self.compute.writeline(
@@ -793,13 +803,13 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
-            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -929,10 +939,11 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
-    def codegen_kernel(self, name: str | None = None) -> str:
+    def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
+        fn_name = name
 
         if V.graph.cpp_wrapper:
             code.writeline('(R"MTL(')
@@ -969,7 +980,7 @@ class MetalKernel(SIMDKernel):
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline("kernel void generated_kernel(")
+            code.writeline(f"kernel void {fn_name}(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
@@ -1180,38 +1191,55 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+    _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        if isinstance(V.graph, NullHandler):
-            return
-        wrapper = V.graph.wrapper_code
-        if wrapper is not None:
-            if not V.graph.cpp_wrapper:
-                wrapper.header.splice(
-                    "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-                )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code]
-        else:
-            # TODO: Merge multiple kernels into a single library
-            # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
+            return wrapper.src_to_kernel[src_code]
+
+        if V.graph.cpp_wrapper:
+            # C++ path: one library per kernel (each has a single "generated_kernel" function)
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
-
-            kernel_name = f"{mps_lib_name}"
+            kernel_name = mps_lib_name
             wrapper.src_to_kernel[src_code] = kernel_name
-
-            if V.graph.cpp_wrapper:
-                # For shimified version, generate source constant instead of direct instantiation
-                src_code = f"const char* {mps_lib_name}_source = " + src_code
-
+            src_code = f"const char* {mps_lib_name}_source = " + src_code
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)
+            wrapper.define_kernel(
+                mps_lib_name, src_code, f"{origins}\n{detailed_origins}", gpu=False
+            )
+            return kernel_name
 
-        return kernel_name
+        # Python path: register kernel with async_compile; wait() will compile all
+        # accumulated Metal kernels into a single library and replace each placeholder.
+        fn_name = f"generated_kernel_{self._kernel_fn_counter}"
+        self._kernel_fn_counter += 1
+        wrapper.src_to_kernel[src_code] = fn_name
+
+        # Extract Metal source from compile_mps_shader('''...''') call
+        metal_src_start = "compile_mps_shader('''"
+        start = src_code.index(metal_src_start) + len(metal_src_start)
+        end = src_code.rindex("''')")
+        metal_src = src_code[start:end]
+
+        # Strip #include lines and rename the kernel function
+        body_lines = []
+        for line in metal_src.split("\n"):
+            if line.strip().startswith("#include"):
+                continue
+            body_lines.append(
+                line.replace("kernel void generated_kernel(", f"kernel void {fn_name}(")
+            )
+
+        headers_repr = repr(sorted(kernel.headers))
+        wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
+        for line in body_lines:
+            wrapper.header.writeline(line)
+        wrapper.header.writeline(f"''', {headers_repr})")
+
+        return fn_name

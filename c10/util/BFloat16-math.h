@@ -181,7 +181,7 @@ template <
     typename T,
     typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T rsqrt(T a) {
-  return 1.0 / std::sqrt(float(a));
+  return 1.0f / std::sqrt(float(a));
 }
 template <
     typename T,

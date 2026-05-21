@@ -8,9 +8,6 @@
 
 ## PyTorch
 
-agent_space/
-.coverage
-coverage.xml
 .dmypy.json
 .gradle
 .hypothesis
@@ -52,7 +49,6 @@ usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
-test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
@@ -305,6 +301,9 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Scratch space for agent-authored throwaway files
+agent_space/
+
 # Downloaded bazel
 tools/bazel
 
@@ -367,7 +366,13 @@ xla/
 pr.diff
 
 # coverage files
-*/**/.coverage.*
+.coverage.*
+.coverage
+coverage.xml
+*.profdata
+*.profraw
+coverage-html
+coverage.lcov
 
 # buck generated files
 .buckd/

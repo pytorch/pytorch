@@ -261,7 +261,12 @@ def get_pw_red_splits(
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
 ) -> tuple[VarsAndRanges, VarsAndRanges] | None:
-    if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+    # nb: use statically_known_equals here to mimic scheduler.
+    # TODO : store type of split/broadcast on fused node itself,
+    # instead of re-deriving it.
+    if n.is_reduction() or V.graph.sizevars.statically_known_equals(
+        sympy_product(n._body.sizes[0]), pointwise_numel
+    ):
         # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
@@ -322,7 +327,7 @@ class NodeSplitGetter:
                 continue
 
             # if we can't split the pw ranges into a (pw, red) split,
-            # dont add as a split option, but do make sure we check that this size
+            # don't add as a split option, but do make sure we check that this size
             # is splittable
             maybe_splits = get_pw_red_splits(
                 n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
@@ -675,10 +680,13 @@ class CoalesceVarAnalysis:
     suggested_split: VarTiling | None = None
 
 
-def analyze_memory_coalescing(
+def _analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> CoalesceVarAnalysis | None:
     """
+    Implementation for BaseSchedulerNode.get_coalesce_analysis().
+    Call that node method so loop-transform cache invalidation is honored.
+
     Find variables that coalesce the reads and writes and score the total size.
 
     If uncoalesced memory expressions are found, look for additionally tiling of variables
@@ -702,6 +710,13 @@ def analyze_memory_coalescing(
 
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
+
+    # Only check pointwise-only kernels
+    index_vars = norm_read_writes.index_vars
+    reduce_vars = norm_read_writes.reduce_vars
+    innermost_var = (
+        next(reversed(index_vars)) if index_vars and not reduce_vars else None
+    )
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
@@ -738,7 +753,32 @@ def analyze_memory_coalescing(
         total_score *= 1 if is_read else 2
 
         if maybe_coalesced_var:
-            coalesced_by_var[maybe_coalesced_var] += total_score
+            # Check if the coalescing is already achieved in 1D iteration.
+            # Skip the innermost variable: it always varies across threads,
+            # so its coalescing is always real.
+            already_coalesced_1d = False
+            if innermost_var is not None and maybe_coalesced_var != innermost_var:
+                # Evaluate stride at two points (0->1 and 1->2) to catch
+                # non-linear expressions that only look coalesced at the origin.
+                subs = dict.fromkeys(var_ranges, 0)
+                try:
+                    val_0 = sympy_subs(memory_expr, subs)
+                    subs[innermost_var] = 1
+                    val_1 = sympy_subs(memory_expr, subs)
+                    stride_01 = val_1 - val_0
+                    if stride_01 in (0, 1):
+                        subs[innermost_var] = 2
+                        val_2 = sympy_subs(memory_expr, subs)
+                        stride_12 = val_2 - val_1
+                        if stride_12 in (0, 1):
+                            already_coalesced_1d = True
+                except (ZeroDivisionError, TypeError):
+                    pass
+
+            if not already_coalesced_1d:
+                coalesced_by_var[maybe_coalesced_var] += total_score
+            else:
+                coalesced_by_var[innermost_var] += total_score
         else:
             uncoalesced_addrs[memory_expr] += total_score
 
@@ -786,7 +826,7 @@ def analyze_memory_coalescing(
                 continue
 
             # TODO - if a var is in the middle, such as [n0, n1, n2]
-            # n1 can can be split beyond range
+            # n1 can be split beyond range
 
             MIN_TILING_BLOCK = 8
             if not all(

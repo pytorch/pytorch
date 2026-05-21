@@ -21,9 +21,9 @@ from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
 )
+from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -114,6 +114,10 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
+
+        from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+        _ensure_fp4_dtype_registered()
 
         args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
 
@@ -284,7 +288,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
         }
 
 
-def _create_dummy_tensor_from_layout(layout: Layout) -> torch.Tensor | None:
+def _create_dummy_tensor_from_layout(
+    layout: Layout, dtype_override: torch.dtype | None = None
+) -> torch.Tensor | None:
     """
     Create a FakeTensor from a Layout for kernel filtering.
 
@@ -293,7 +299,10 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> torch.Tensor | None:
     metadata for its supports() checks.
     """
     try:
-        return layout.get_example()
+        result = layout.get_example()
+        if dtype_override is not None and result.dtype != dtype_override:
+            result = result.view(dtype_override)
+        return result
     except Exception:
         return None
 
@@ -339,13 +348,21 @@ def _add_nv_gemm_choices_impl(
     """
     import cutlass_api
 
+    from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+    _ensure_fp4_dtype_registered()
+
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_compatible_kernels,
     )
 
-    # Create dummy tensors for cutlass_api's supports() checks
+    # Create dummy tensors for cutlass_api's supports() checks.
+    # Pass node dtype to handle FP4 ReinterpretView (uint8 storage viewed as float4_e2m1fn_x2).
     dummy_tensors = [
-        _create_dummy_tensor_from_layout(node.get_layout()) for node in input_nodes
+        _create_dummy_tensor_from_layout(
+            node.get_layout(), dtype_override=node.get_dtype()
+        )
+        for node in input_nodes
     ]
     out_tensor = _create_dummy_tensor_from_layout(layout)
 

@@ -129,7 +129,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     constexpr auto _size_suffix = "_t";
     constexpr auto _size_n_len = 9; // strlen("_size_X_t")
     constexpr auto _size_prefix_len = 6; // strlen("_size_");
-    if (name.find(_size_prefix) == 0 && name.length() == _size_n_len &&
+    if (name.starts_with(_size_prefix) && name.length() == _size_n_len &&
         name.find(_size_suffix) == _size_prefix_len + 1 &&
         ::isdigit(name[_size_prefix_len])) {
       int n = name[_size_prefix_len] - '0';
@@ -154,7 +154,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     } else {
       return std::nullopt;
     }
-  } else if (var.name().name().find("BroadcastingList") != 0) {
+  } else if (!var.name().name().starts_with("BroadcastingList")) {
     return std::nullopt;
   }
 
@@ -266,7 +266,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
 
     // Check if the type is a custom class. This is done by checking
     // if type_name starts with "torch.classes."
-    if (type_name.find("torch.classes.") == 0) {
+    if (type_name.starts_with("torch.classes.")) {
       auto custom_class_type = getCustomClass("__torch__." + type_name);
       return custom_class_type;
     }
@@ -275,13 +275,13 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     // custom classes of type torch.classes.cuda.Stream and
     // torch.classes.cuda.Event respectively. Return the respective
     // custom class types for these two cases.
-    if (type_name.find("torch.cuda.Stream") == 0) {
+    if (type_name.starts_with("torch.cuda.Stream")) {
       auto custom_class_type =
           getCustomClass("__torch__.torch.classes.cuda.Stream");
       return custom_class_type;
     }
 
-    if (type_name.find("torch.cuda.Event") == 0) {
+    if (type_name.starts_with("torch.cuda.Event")) {
       auto custom_class_type =
           getCustomClass("__torch__.torch.classes.cuda.Event");
       return custom_class_type;
@@ -370,8 +370,8 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // we are going to log all the calls for GraphFunction::run. The logging was
   // noisy we also call GraphFunction::run for the default value evaluation
   // which generates a lot of useless log samples. Therefore as a workaround we
-  // just directly use the executor API which avoids this placing producing
-  // un-necessary log entries.
+  // just directly use the executor API which avoids producing
+  // unnecessary log entries.
   gf->get_executor().run(stack);
   return stack.at(0).toTupleRef().elements().vec();
 }

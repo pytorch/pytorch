@@ -178,7 +178,7 @@ Attempted to wrap a set with tensors
 
 from user code:
    File "test_sets.py", line N, in fn
-    for i in s:""",  # noqa: B950
+    for i in s:""",
         )
 
     def test_set_multiple_types(self):
@@ -447,7 +447,7 @@ class _FrozensetBase:
     @make_dynamo_test
     def test_in_frozenset(self):
         item = self.thetype("abc")
-        container = self.thetype([frozenset("abc")])  # noqa: C405
+        container = self.thetype([frozenset("abc")])
         self.assertIn(item, container)
 
     @make_dynamo_test

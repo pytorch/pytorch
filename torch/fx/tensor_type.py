@@ -1,8 +1,16 @@
-from collections.abc import Sequence
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
 
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch.fx.experimental.migrate_gradual_types.constraint import DVar
 
 
 __all__ = ["Dyn", "TensorType", "is_consistent", "is_more_precise"]
@@ -18,21 +26,25 @@ class TensorType:
                 return torch.add(x, y)
     """
 
-    def __init__(self, dim: Sequence[object]) -> None:
+    def __init__(self, dim: Sequence[Any]) -> None:
         self.__origin__ = TensorType
         self.__args__ = dim
 
+    @property
+    def dims(self) -> Sequence[DVar | int | _DynType]:
+        return self.__args__
+
     def __repr__(self) -> str:
-        return f"TensorType[{self.__args__}]"
+        return f"TensorType[{self.dims}]"
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, self.__class__):
-            return list(self.__args__) == list(other.__args__)
+            return list(self.dims) == list(other.dims)
         else:
             return False
 
     @staticmethod
-    def __class_getitem__(*args: object) -> "TensorType":
+    def __class_getitem__(*args: object) -> TensorType:
         if len(args) == 1 and isinstance(args[0], tuple):
             args = args[0]
         return TensorType(tuple(args))
@@ -79,9 +91,8 @@ def is_consistent(t1: object, t2: object) -> bool:
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
-            is_consistent(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        return len(t1.dims) == len(t2.dims) and all(
+            is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.dims, t2.dims)
         )
     else:
         return False
@@ -106,9 +117,8 @@ def is_more_precise(t1: object, t2: object) -> bool:
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
-            is_more_precise(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        return len(t1.dims) == len(t2.dims) and all(
+            is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.dims, t2.dims)
         )
 
     else:

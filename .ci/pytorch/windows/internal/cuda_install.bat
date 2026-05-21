@@ -59,7 +59,7 @@ set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
 goto cuda_download
 
 :cuda132
-set CUDA_INSTALL_EXE=cuda_13.2.0_windows.exe
+set CUDA_INSTALL_EXE=cuda_13.2.1_windows.exe
 set "ARGS="
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
 goto cuda_download

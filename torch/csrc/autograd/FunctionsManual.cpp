@@ -226,6 +226,67 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+// Builds the dims vector for aminmax: all dims when dim is nullopt,
+// or the single wrapped dim otherwise.
+static std::vector<int64_t> _aminmax_dims(
+    const Tensor& self,
+    std::optional<int64_t> dim_opt) {
+  if (dim_opt.has_value()) {
+    return {at::maybe_wrap_dim(*dim_opt, self.dim())};
+  }
+  std::vector<int64_t> dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
+  return dims;
+}
+
+Tensor aminmax_backward(
+    const Tensor& self,
+    std::optional<int64_t> dim,
+    bool keepdim,
+    const Tensor& grad_min,
+    const Tensor& grad_max,
+    const Tensor& min,
+    const Tensor& max) {
+  auto dims_vec = _aminmax_dims(self, dim);
+  IntArrayRef dims(dims_vec);
+  Tensor result;
+
+  if (grad_min.defined()) {
+    auto grad_min_expanded = restore_reduced_dims(grad_min, dims, keepdim);
+    auto min_mask = (self == restore_reduced_dims(min, dims, keepdim));
+    result = scale_grad_by_count(grad_min_expanded, min_mask, dims);
+  }
+
+  if (grad_max.defined()) {
+    auto grad_max_expanded = restore_reduced_dims(grad_max, dims, keepdim);
+    auto max_mask = (self == restore_reduced_dims(max, dims, keepdim));
+    auto grad_max_result =
+        scale_grad_by_count(grad_max_expanded, max_mask, dims);
+
+    if (result.defined()) {
+      if (!areAnyTensorSubclassLike({result, grad_max_result})) {
+        result.add_(grad_max_result);
+      } else {
+        result = result + grad_max_result;
+      }
+    } else {
+      result = grad_max_result;
+    }
+  }
+
+  return result;
+}
+
+Tensor aminmax_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Tensor& result,
+    std::optional<int64_t> dim,
+    bool keepdim) {
+  auto dims_vec = _aminmax_dims(self_p, dim);
+  return amaxamin_jvp(self_p, self_t, result, IntArrayRef(dims_vec), keepdim);
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
@@ -999,7 +1060,7 @@ Tensor unbind_backward_nested(
     } else {
       const auto component_size = nt_sizes[i].contiguous();
       const c10::IntArrayRef grad_size(
-          component_size.data_ptr<int64_t>(), component_size.size(0));
+          component_size.const_data_ptr<int64_t>(), component_size.size(0));
       grads_tensors.push_back(at::zeros(grad_size, options));
     }
   }
@@ -2256,7 +2317,6 @@ Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
       "max_pool2d with `return_indices=False` is not infinitely differentiable.",
       " If you want to calculate higher order derivatives, e.g. second order,",
       " set `return_indices=True`.");
-  return Tensor();
 }
 
 Tensor glu_double_backward(
@@ -3637,7 +3697,7 @@ Tensor svd_backward(
   // canonical (real) inner product in C^{n x k} we get that the function is
   // invariant under action of U(1)^k iff Im(diag(U^H gU + V^H gV)) = 0
   //
-  // Using this in the derviaton for the forward AD, one sees that, with the
+  // Using this in the derivation for the forward AD, one sees that, with the
   // notation from those notes Using this and writing sym(X) = X + X^H, we get
   // that the forward AD for SVD in the complex case is given by dU = U (sym(dX
   // S) / E + i Im(diag(dX)) / (2S)) if m > n
@@ -7178,7 +7238,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled; this also avoids having the item() call in the usual case.
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});
@@ -7275,7 +7335,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled this also avoids having the item() call in the usual case
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});

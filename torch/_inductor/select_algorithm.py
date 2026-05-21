@@ -27,7 +27,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
@@ -502,6 +502,7 @@ class TritonTemplateKernel(TritonKernel):
         num_buffers_warp_spec=0,
         use_jit=False,
         tma_store=False,
+        tma_load_for_template_epilogue=False,
         transpose_discontiguous_tensor_descriptors_override=None,
         prefix_args=0,
         suffix_args=0,
@@ -514,12 +515,13 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
+        tma_2d = tma_store or tma_load_for_template_epilogue
         if tma_store:
             pass
         numel = sympy_product(output_node.get_size())
-        if tma_store:
+        if tma_2d:
             assert len(output_node.get_size()) == 2, (
-                "TMA store only supported for 2D with templates"
+                "TMA load/store only supported for 2D with templates"
             )
             tiling = {
                 "x": output_node.get_size()[0],
@@ -536,7 +538,7 @@ class TritonTemplateKernel(TritonKernel):
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
-        if tma_store:
+        if tma_2d:
             # By default `construct_range_trees` will return the range_trees in the order
             # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
@@ -566,6 +568,7 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
         )
@@ -1195,7 +1198,7 @@ class TritonTemplateKernel(TritonKernel):
                     V.kernel.cse.store_cache[name] = value
                     if name in V.kernel.prologue_fused_inputs:
                         # We load masked out values with 0, then apply a prologue.
-                        # The masked out values may not necessariliy be 0 any more
+                        # The masked out values may not necessarily be 0 any more
                         # so we need to reapply the mask.
                         value_dtype = value.dtype
                         value_str = str(value)
@@ -1372,9 +1375,8 @@ class TritonTemplateKernel(TritonKernel):
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
         """
-        subgraph_name = self._get_store_output_subgraph_name(
-            next(self.store_output_ctr)
-        )
+        subgraph_idx = next(self.store_output_ctr)
+        subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
         with self.create_subgraph_body(subgraph_name, clear_cse=True):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
@@ -1399,7 +1401,7 @@ class TritonTemplateKernel(TritonKernel):
                 assert not mask, "Mask is not supported with blocking indexing"
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
-                if self.tma_store:
+                if self.tma_store or self.tma_load_for_template_epilogue:
                     val_shape_copy = list(val_shape)
                     for i, range_tree in enumerate(self.range_trees[:-1]):
                         name = range_tree.name
@@ -1475,7 +1477,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.template_mask = final_mask_var
                 index_symbols = epilogue_index_symbols
                 contiguous_index = sympy_dot(output_layout.stride, index_symbols)
-                if not self.tma_store:
+                if not (self.tma_store or self.tma_load_for_template_epilogue):
                     # Convert to just use xindex.
                     contiguous_index = self.rename_indexing(contiguous_index)
                     intermediate_lines.append(f"xindex = {texpr(contiguous_index)}")
@@ -1505,9 +1507,19 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
+            output_dtype = self.output_node.get_dtype()
+
             epilogue_args = [
                 V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
             ]
+            epilogue_nodes_by_subgraph = getattr(
+                self, "_epilogue_nodes_by_subgraph", None
+            )
+            has_epilogue_fusion = bool(
+                epilogue_nodes_by_subgraph[subgraph_idx]
+                if epilogue_nodes_by_subgraph is not None
+                else False
+            )
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1523,10 +1535,27 @@ class TritonTemplateKernel(TritonKernel):
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
+            # Apply the template's manual epilogue (e.g., bias add for addmm)
+            epilogue_result = self.epilogue_fn(*epilogue_args)
+
+            # When acc_dtype differs from output_dtype and there are fused
+            # epilogue ops, emulate unfused numerics by truncating AFTER the
+            # manual epilogue (so bias add happens in full precision)
+            if acc_dtype != output_dtype and has_epilogue_fusion:
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result,
+                    output_dtype,
+                    src_dtype=acc_dtype,
+                    use_compute_types=False,
+                )
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result, acc_dtype, src_dtype=output_dtype
+                )
+
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
-                self.epilogue_fn(*epilogue_args),
+                epilogue_result,
                 mode="tma" if self.tma_store else None,
             )
             self.codegen_body()
@@ -1631,6 +1660,7 @@ class TritonTemplateKernel(TritonKernel):
         override_mask=None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
+        mask_constant_index=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1645,6 +1675,7 @@ class TritonTemplateKernel(TritonKernel):
             override_mask=self.template_mask,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
+            mask_constant_index=mask_constant_index,
         )
 
     def codegen_range_tree(self):
@@ -1725,19 +1756,19 @@ class TritonTemplateKernel(TritonKernel):
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.
         """
-        # For ReinterpretView, the view's strides are already determined by its layout.
-        # We skip constraint tracking because node.get_name() returns the underlying
-        # buffer name, not the view's identity, so constraints would be incorrectly
-        # associated with the underlying buffer rather than the view.
-        if isinstance(node, ir.ReinterpretView):
-            return list(node.get_stride())
 
         # realizing for safety
         ir.ExternKernel.realize_input(node)
         layout = node.data.layout
         node_name = node.get_name()
 
-        if isinstance(layout, ir.FlexibleLayout):
+        # For ReinterpretView, the view's strides are already determined by its layout.
+        # We skip constraint tracking because node.get_name() returns the underlying
+        # buffer name, not the view's identity, so constraints would be incorrectly
+        # associated with the underlying buffer rather than the view.
+        if isinstance(layout, ir.FlexibleLayout) and not isinstance(
+            node, ir.ReinterpretView
+        ):
             if not use_aten_gemm_kernels() or self.always_freeze_layout:
                 # No ExternKernel fallback available, or always_freeze_layout is set
                 # (e.g., for FlexAttention templates), freeze immediately
@@ -2371,6 +2402,7 @@ class GeneratedCodeCache:
         epilogue_fn: Callable[..., Any] | None,
         epilogue_fn_hash: str | None,
         tma_store: bool,
+        tma_load_for_template_epilogue: bool,
         transpose_discontiguous_tensor_descriptors_override: bool | None,
         subgraphs: list[ir.Buffer] | None,  # has to be none to cache
         workspace_arg: WorkspaceArg | None,  # has to be none to cache
@@ -2430,6 +2462,7 @@ class GeneratedCodeCache:
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "tma_store": tma_store,
+                "tma_load_for_template_epilogue": tma_load_for_template_epilogue,
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
@@ -2524,7 +2557,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2552,6 +2585,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching,
         hint_override: int | None = None,
         tma_store: bool = False,
+        tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
         triton_meta: dict[str, Any] | None = None,
     ) -> GenerateAndLoadResult | None:
@@ -2573,6 +2607,7 @@ class TritonTemplate(KernelTemplate):
                 epilogue_fn,
                 epilogue_fn_hash,
                 tma_store,
+                tma_load_for_template_epilogue,
                 transpose_discontiguous_tensor_descriptors_override,
                 subgraphs,
                 workspace_arg,
@@ -2638,6 +2673,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                tma_load_for_template_epilogue=tma_load_for_template_epilogue,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 triton_meta=triton_meta,
                 **kernel_options,
@@ -2760,6 +2796,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching=False,
         hint_override: int | None = None,
         tma_store: bool = False,
+        tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
         triton_meta: dict[str, Any] | None = None,
         **kwargs,
@@ -2808,6 +2845,7 @@ class TritonTemplate(KernelTemplate):
             generate_with_caching and self._cache_codegen_enabled_for_template,
             hint_override=hint_override,
             tma_store=tma_store,
+            tma_load_for_template_epilogue=tma_load_for_template_epilogue,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
             triton_meta=triton_meta,
         )
@@ -2885,6 +2923,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                tma_load_for_template_epilogue=tma_load_for_template_epilogue,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 triton_meta=triton_meta,
                 **options,
@@ -3608,7 +3647,7 @@ def _classify_kernel_operation(
                 elif template_name.startswith("flex_"):
                     return "flex"
 
-            elif isinstance(choice, ExternKernelChoice):
+            elif isinstance(choice, ExternKernelCaller):
                 # Check extern kernel names
                 choice_name = choice.name
                 if choice_name in (
@@ -3732,7 +3771,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
         assert len(choices) >= 2
         externs = [
-            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+            choice for choice in choices if isinstance(choice, ExternKernelCaller)
         ]
         if len(externs) > 0:
             return externs[0]
@@ -4469,7 +4508,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.exception(  # noqa: G202
+                        log.exception(
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
@@ -4899,7 +4938,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)  # noqa: G200
+                        log.warning(e)
                         timing = float("inf")
                     else:
                         raise e
@@ -5320,9 +5359,32 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
+    def _flex_attention_log_dim(dim: int | torch.SymInt | sympy.Expr) -> int:
+        if isinstance(dim, torch.SymInt):
+            dim = dim.node.expr
+
+        if type(dim) is int or isinstance(dim, sympy.Integer):
+            return int(dim)
+
+        if isinstance(dim, sympy.Expr):
+            return V.graph.sizevars.optimization_hint(dim)
+
+        raise TypeError(
+            f"Unexpected flex attention log dimension type {type(dim).__name__}: {dim}"
+        )
+
+    @staticmethod
+    def _flex_attention_log_shape(
+        size: Sequence[int | torch.SymInt | sympy.Expr],
+    ) -> str:
+        dims = [AlgorithmSelectorCache._flex_attention_log_dim(dim) for dim in size]
+        return f"[{', '.join(map(str, dims))}]"
+
+    @staticmethod
     def maybe_log_flex_attention_results(
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
+        """Log flex attention autotuning choices when logging is enabled."""
         flex_attention_filename = get_flex_attention_log_filename()
         # Support both flex_attention and flex_decoding
         if not flex_attention_filename or (
@@ -5369,13 +5431,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Create shape info dictionary
         shape_info = {
             "kernel_type": kernel_type,
-            "B": int(B),
-            "Hq": int(Hq),
-            "Hkv": int(Hkv),
-            "seq_len_q": int(seq_len_q),
-            "seq_len_kv": int(seq_len_kv),
-            "qk_head_dim": int(qk_head_dim),
-            "v_head_dim": int(v_head_dim),
+            "B": AlgorithmSelectorCache._flex_attention_log_dim(B),
+            "Hq": AlgorithmSelectorCache._flex_attention_log_dim(Hq),
+            "Hkv": AlgorithmSelectorCache._flex_attention_log_dim(Hkv),
+            "seq_len_q": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_q),
+            "seq_len_kv": AlgorithmSelectorCache._flex_attention_log_dim(seq_len_kv),
+            "qk_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(qk_head_dim),
+            "v_head_dim": AlgorithmSelectorCache._flex_attention_log_dim(v_head_dim),
         }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
@@ -5391,9 +5453,9 @@ class AlgorithmSelectorCache(PersistentCache):
             choices_with_shapes.append(choice_info)
 
         out_dict = {
-            "query_shape": str(query_size),
-            "key_shape": str(key_size),
-            "value_shape": str(value_size),
+            "query_shape": AlgorithmSelectorCache._flex_attention_log_shape(query_size),
+            "key_shape": AlgorithmSelectorCache._flex_attention_log_shape(key_size),
+            "value_shape": AlgorithmSelectorCache._flex_attention_log_shape(value_size),
             "kernel_type": kernel_type,
             "choices": choices_with_shapes,
         }
@@ -5429,7 +5491,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
 
         V.debug.log_autotuning_results(
-            name, input_nodes, timings, elapse, precompile_elapse
+            name, input_nodes, timings, elapse, precompile_elapse, prescreening_elapse
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
@@ -5687,11 +5749,20 @@ def realize_inputs(*args):
     return [realize_inputs(x) for x in args]
 
 
-def get_strides_with_layout_constraints(node):
+def should_use_layout_constraints(node):
+    # View has its own fixed layout that is not constrained
     if (
-        not isinstance(node, ir.ReinterpretView)
+        getattr(node, "layout", None) is not None
+        and not isinstance(node, ir.ReinterpretView)
+        and not isinstance(node.get_layout(), ir.NonOwningLayout)
         and node.get_name() in V.graph.buffer_layout_constraints
     ):
+        return True
+    return False
+
+
+def get_strides_with_layout_constraints(node):
+    if should_use_layout_constraints(node):
         return V.graph.buffer_layout_constraints[node.get_name()].stride
     return node.get_stride()
 
