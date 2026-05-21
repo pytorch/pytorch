@@ -7,7 +7,14 @@ from enum import auto, Enum
 from typing import Any, cast
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    import spmd_types._checker
+
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
@@ -261,6 +268,13 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        self.is_spmd_types = (
+            dist._is_spmd_types_available()
+            and spmd._checker.has_local_type(param)
+            and not isinstance(param, DTensor)
+        )
+        if self.is_spmd_types:
+            param = self._spmd_types_to_dtensor(param, mesh_info)
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
@@ -326,6 +340,70 @@ class FSDPParam:
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+
+    def _spmd_types_to_dtensor(
+        self,
+        param: nn.Parameter,
+        mesh_info: DataParallelMeshInfo,
+    ) -> nn.Parameter:
+        """Translate an spmd_types-annotated plain tensor to a DTensor.
+
+        Saves the original spmd_types annotation so it can be restored after
+        FSDP unshards the parameter for compute.
+        """
+        spmd_mesh = mesh_info.spmd_mesh
+        if spmd_mesh is None or spmd_mesh.mesh_dim_names is None:
+            raise ValueError(
+                "spmd_types parameters require a named SPMD mesh "
+                "(pass dp_mesh_dims to fully_shard)"
+            )
+
+        local_type = spmd.get_local_type(param)
+        self._spmd_types_orig_type = dict(local_type)
+
+        placements: list[Placement] = []
+        for name in spmd_mesh.mesh_dim_names:
+            axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
+            axis_type = local_type.get(axis)
+            if axis_type is None or axis_type is spmd.I or axis_type is spmd.R:
+                placements.append(Replicate())
+            elif isinstance(axis_type, spmd.S):
+                placements.append(Shard(axis_type.dim))
+            elif axis_type is spmd.V:
+                spec = spmd.get_partition_spec(param)
+                if spec is not None:
+                    from spmd_types.types import (  # pyrefly: ignore[missing-import]
+                        partition_spec_get_shard,
+                    )
+
+                    shard_info = partition_spec_get_shard(spec, axis)
+                    if shard_info is not None:
+                        placements.append(Shard(shard_info.dim))
+                        continue
+                raise ValueError(
+                    f"Parameter '{self._module_info.param_name}' has V type "
+                    f"on axis {axis} but no PartitionSpec shard info. "
+                    f"Use S(dim) instead of V for sharded parameters."
+                )
+            else:
+                raise ValueError(
+                    f"Unexpected spmd_types type {axis_type} on axis {axis} "
+                    f"for parameter '{self._module_info.param_name}'"
+                )
+
+        dtensor_param = nn.Parameter(
+            DTensor.from_local(param.data, spmd_mesh, placements, run_check=False),
+            requires_grad=param.requires_grad,
+        )
+        return dtensor_param
+
+    def _restore_spmd_types(self, tensor: torch.Tensor) -> None:
+        """Restore the saved spmd_types annotation onto a tensor."""
+        if not self.is_spmd_types:
+            return
+        orig_type = self._spmd_types_orig_type
+        if orig_type:
+            spmd.assert_type(tensor, orig_type)
 
     def _init_sharding_spec(
         self,
@@ -610,7 +688,9 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        if self._unsharded_dtensor_spec is not None:
+        if self.is_spmd_types:
+            pass  # keep as plain tensor; spmd_types restored in to_unsharded()
+        elif self._unsharded_dtensor_spec is not None:
             unsharded_param = _from_local_no_grad(
                 unsharded_param, self._unsharded_dtensor_spec
             )
@@ -673,6 +753,9 @@ class FSDPParam:
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        if self.is_spmd_types:
+            self._restore_spmd_types(self._unsharded_param)
+            self._restore_spmd_types(self._unsharded_param.data)
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
@@ -857,6 +940,8 @@ class FSDPParam:
         return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.is_spmd_types:
+            return grad
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
