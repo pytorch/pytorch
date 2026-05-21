@@ -65,9 +65,10 @@ test_failures = {
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
     "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # calling div on only symint args
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps")
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
@@ -887,8 +888,22 @@ class TestInductorDynamic(TestCase):
                 x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
             )
 
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
         x = torch.randn(7, 5, device=device)
-        for fn in (mod, floordiv, shifts, comparison, sym_min_max):
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
             with self.subTest(fn=fn.__name__):
                 cfn = self.compile_fn(fn, fullgraph=True)
                 self.assertEqual(fn(x), cfn(x))

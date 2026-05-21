@@ -8008,8 +8008,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
@@ -8172,7 +8172,9 @@ def _make_magic_method_lowering(func: Callable[_P, _R]) -> Callable[_P, _R]:
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         node = V.graph.current_node
         meta_val = node.meta.get("val") if node is not None else None
-        has_symbolic_value = isinstance(meta_val, SymTypes) or any(
+        if isinstance(meta_val, SymTypes):
+            return cast(_R, meta_val.node.expr)
+        has_symbolic_value = any(
             _is_symbolic_magic_arg(x) for x in itertools.chain(args, kwargs.values())
         )
         if has_symbolic_value:
