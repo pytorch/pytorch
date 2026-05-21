@@ -2,10 +2,12 @@
 
 import io
 import os
+import pickle
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import (
@@ -27,6 +29,93 @@ def strip_trailing_whitespace(r):
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_save_args_dynamic_shapes(self):
+        import torch._functorch.config as functorch_config
+        from torch._inductor import config as inductor_config
+        from torch._inductor.debug import load_args_and_run_compile_fx_inner
+
+        torch._dynamo.reset()
+
+        def fn(x):
+            output = torch.zeros_like(x)
+            _ = output.numel()
+            return output
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+            inductor_config.patch(
+                {
+                    "save_args": True,
+                    "force_disable_caches": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+            functorch_config.patch({"enable_autograd_cache": False}),
+        ):
+            opt_fn = torch.compile(fn, dynamic=True)
+            inp = torch.randn(4)
+            self.assertEqual(opt_fn(inp), fn(inp))
+
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            self.assertTrue(os.path.isdir(saved_args_dir))
+            saved_args_paths = os.listdir(saved_args_dir)
+            self.assertGreater(len(saved_args_paths), 0)
+
+            compiled = load_args_and_run_compile_fx_inner(
+                os.path.join(saved_args_dir, saved_args_paths[0])
+            )
+            self.assertIsNotNone(compiled)
+
+    def test_save_args_custom_sympy_expr(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.debug import (
+            load_args_and_run_compile_fx_inner,
+            save_args_for_compile_fx_inner,
+            SymExprMetadataHolder,
+        )
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+        from torch.utils._sympy.functions import ModularIndexing
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(
+            17,
+            ConstantSource("custom_symbol"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        expr = ModularIndexing(symbol + 3, 2, 5)
+        symint = shape_env.create_symintnode(expr, hint=0)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+        ):
+            save_args_for_compile_fx_inner(symint)
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            saved_path = os.path.join(saved_args_dir, os.listdir(saved_args_dir)[0])
+
+            with open(saved_path, "rb") as f:
+                saved_args, _ = pickle.load(f)
+            self.assertIsInstance(saved_args[0], SymExprMetadataHolder)
+            self.assertTrue(saved_args[0].expr.has(ModularIndexing))
+
+            def fake_compile_fx_inner(restored_symint):
+                self.assertIsInstance(restored_symint, torch.SymInt)
+                self.assertTrue(restored_symint.node.expr.has(ModularIndexing))
+                self.assertEqual(restored_symint.node.hint, 0)
+                return restored_symint
+
+            with patch(
+                "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+            ):
+                restored = load_args_and_run_compile_fx_inner(saved_path)
+
+            self.assertIsInstance(restored, torch.SymInt)
+            self.assertTrue(restored.node.expr.has(ModularIndexing))
+
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
         # TODO: This triggers CUDA context initialization, even though

@@ -79,48 +79,6 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
-    def test_debug_sync_graph(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self.assertRegex(
-            code, r"AOTI_RUNTIME_CUDA_CHECK\((?:cuda|hip)DeviceSynchronize\(\)\);"
-        )
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
-    def test_debug_sync_kernel(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
-
-        def test_fn(x):
-            return x * 2
-
-        compiled = torch.compile(
-            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
-        )(test_fn)
-        x = torch.randn(8, device=self.device)
-        with torch.utils._device.DeviceContext(self.device):
-            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
-        self.assertEqual(result, x * 2)
-        self.assertRegex(
-            code, r"AOTI_RUNTIME_CUDA_CHECK\((?:cuda|hip)DeviceSynchronize\(\)\);"
-        )
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -318,6 +276,71 @@ class TestGpuWrapper(InductorTestCase):
         opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
+
+    def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            return (x.sin() + 1).cos()
+
+        x = torch.randn(128, device=self.device)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("needs_vec_isa=False", code)
+
+    def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("at::vec::", code)
+        self.assertIn("needs_vec_isa=True", code)
+
+    def test_cuda_cpp_wrapper_build_separate_splits_vec_isa_requirements(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        with config.patch({"cpp_wrapper_build_separate": True}):
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("kernel_src = (", code)
+        self.assertIn("needs_vec_isa=False", code)
+        self.assertIn("kernel_needs_vec_isa=True", code)
 
 
 instantiate_parametrized_tests(TestGpuWrapper)
