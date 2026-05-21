@@ -189,27 +189,33 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_cuda_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
-        for op, indexed_helper, value_helper in (
-            (torch.max, "max_with_index", "max2"),
-            (torch.min, "min_with_index", "min2"),
+        dtypes = [torch.float32, torch.float16]
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            dtypes.append(torch.bfloat16)
+
+        for op, indexed_helper, value_helper, selected_value in (
+            (torch.max, "max_with_index", "max2", 100.0),
+            (torch.min, "min_with_index", "min2", -100.0),
         ):
             torch._dynamo.reset()
 
             def fn(x):
                 return op(x, -1)
 
-            x = torch.randn(8, 2048, device=GPU_TYPE)
-            expected_values, expected_indices = fn(x)
-            with fresh_cache():
-                actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
-            actual_values, actual_indices = actual
+            for dtype in dtypes:
+                x = torch.randn(8, 4097, dtype=dtype, device=GPU_TYPE)
+                x[:, 4095] = selected_value
+                expected_values, expected_indices = fn(x)
+                with fresh_cache():
+                    actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+                actual_values, actual_indices = actual
 
-            self.assertEqual(actual_values, expected_values)
-            self.assertEqual(actual_indices, expected_indices)
+                self.assertEqual(actual_values, expected_values)
+                self.assertEqual(actual_indices, expected_indices)
 
-            source = "\n".join(codes)
-            self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
-            self.assertNotIn(f"triton_helpers.{value_helper}", source)
+                source = "\n".join(codes)
+                self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
+                self.assertNotIn(f"triton_helpers.{value_helper}", source)
 
         x = torch.tensor([[0.0, -0.0], [-0.0, 0.0]], device=GPU_TYPE)
         for op in (torch.max, torch.min):
