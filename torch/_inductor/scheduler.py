@@ -2141,13 +2141,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self._init_from_node(node)
         self.set_read_writes(node.get_read_writes())
 
-        if isinstance(node, ir.UserDefinedTritonKernel):
-            numel = math.prod(node.mutable_args[0].shape)
-            rnumel = 1
-            device = node.get_device_or_error()
-            # pyrefly: ignore [bad-assignment]
-            self.group = (device, (numel, rnumel))
-
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
@@ -3044,14 +3037,24 @@ class FusedNestedReductions(FusedSchedulerNode):
         return FusedNestedReductions(self.node1, new_node2)
 
 
-class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
+class UserTritonSchedulerNode(ExternKernelSchedulerNode):
+    def __init__(self, scheduler: Scheduler, node: ir.UserDefinedTritonKernel) -> None:
+        super().__init__(scheduler, node)
+        # TODO(JJVRAW)
+        numel = math.prod(node.mutable_args[0].shape)
+        rnumel = 1
+        device = node.get_device_or_error()
+        # pyrefly: ignore [bad-assignment]
+        self.group = (device, (numel, rnumel))
+
+
+class FusedUserTritonSchedulerNode(FusedSchedulerNode):
     def __init__(
         self,
         scheduler: Scheduler,
-        kernel_node: ExternKernelSchedulerNode,
+        kernel_node: UserTritonSchedulerNode,
         fused_epilogue: SchedulerNode,
     ) -> None:
-        assert isinstance(kernel_node.node, ir.UserDefinedTritonKernel)
         snodes = typing.cast(list[BaseSchedulerNode], [kernel_node, fused_epilogue])
         super().__init__(scheduler, snodes)
         self.kernel_node = kernel_node
@@ -3062,10 +3065,9 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
     @classmethod
     def epilogue_fuse(
         cls,
-        node1: ExternKernelSchedulerNode,
+        node1: UserTritonSchedulerNode,
         node2: SchedulerNode,
     ) -> FusedSchedulerNode:
-        assert isinstance(node1.node, ir.UserDefinedTritonKernel)
         scheduler = node1.scheduler
 
         assert len(node1.node.mutation_outputs) == 1
@@ -3080,7 +3082,6 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
-        assert isinstance(self.kernel_node.node, ir.UserDefinedTritonKernel)
         numel = math.prod(self.kernel_node.node.mutable_args[0].shape)
         from torch._inductor.codegen.simd import SIMDScheduling
 
@@ -4127,10 +4128,7 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
-        if any(
-            isinstance(node, FusedExternTritonKernelSchedulerNode)
-            for node in self.nodes
-        ):
+        if any(isinstance(node, FusedUserTritonSchedulerNode) for node in self.nodes):
             # if a user triton kernel has been epilogue-fused,
             # there is likely an opportunity to prune an NopKernel
             # (which is originally used to generate the buffer which the triton kernel writes to)
@@ -4371,6 +4369,8 @@ class Scheduler:
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             return SchedulerNode(self, node)
+        elif isinstance(node, ir.UserDefinedTritonKernel):
+            return UserTritonSchedulerNode(self, node)
         elif isinstance(node, ir.ExternKernel):
             return ExternKernelSchedulerNode(self, node)
         else:
@@ -7078,9 +7078,9 @@ class Scheduler:
             return not node.is_template() and not is_output_of_multi_outputs_template(
                 node.node
             )
+        if isinstance(node, UserTritonSchedulerNode):
+            return not config.epilogue_fusion_user_defined_triton_kernel
         if isinstance(node, ExternKernelSchedulerNode):
-            if isinstance(node.node, ir.UserDefinedTritonKernel):
-                return not config.epilogue_fusion_user_defined_triton_kernel
             return not node.is_template() and not is_output_of_multi_outputs_template(
                 node.node
             )
@@ -7402,11 +7402,7 @@ class Scheduler:
             why("node1 is nop")
             return False
 
-        if isinstance(node1, ExternKernelSchedulerNode):
-            if not isinstance(node1.node, ir.UserDefinedTritonKernel):
-                why("node1 is extern but not a triton kernel")
-                return False
-
+        if isinstance(node1, UserTritonSchedulerNode):
             if not node1.node.arg_accesses.only_tt_stores:
                 why("node1's triton kernel has non-store writes")
                 return False
@@ -8141,14 +8137,14 @@ class Scheduler:
             score = MixOrderReduction.get_fusion_score(node1, node2)
             return _construct_return_value(score, 0, True)
 
-        # For UserDefinedTritonKernel, the write deps are UserTritonDep that won't
+        # For UserTritonSchedulerNode, the write deps are UserTritonDep that won't
         # match the epilogue's MemoryDep via set intersection.  For templates,
         # view/reshape between the template output and epilogue can produce
         # different index expressions that don't match via set intersection.
         # Fall back to name-based matching so that the fusion score reflects
         # the actual shared buffers.
         if (
-            isinstance(node1.node, ir.UserDefinedTritonKernel)
+            isinstance(node1, UserTritonSchedulerNode)
             or node1.is_template()
             or node2.is_template()
         ):
@@ -8468,7 +8464,7 @@ class Scheduler:
     ) -> None:
         assert isinstance(
             scheduler_node,
-            (ExternKernelSchedulerNode, FusedExternTritonKernelSchedulerNode),
+            (ExternKernelSchedulerNode, FusedUserTritonSchedulerNode),
         )
         # 'decide_inplace_update' stores the inplace update decisions in
         # the current kernel from where 'allocate' retrieve those decisions.
@@ -9794,11 +9790,10 @@ class BaseScheduling:  # noqa: docstring_linter
             return node1.fuse_with(node2)
         elif isinstance(node1, FusedMixOrderReductions):
             return node1.fuse_with(node2)
-        elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
+        elif isinstance(node1, UserTritonSchedulerNode) and isinstance(
             node2, SchedulerNode
         ):
-            assert isinstance(node1.node, ir.UserDefinedTritonKernel)
-            return FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
+            return FusedUserTritonSchedulerNode.epilogue_fuse(node1, node2)
         else:
             return FusedSchedulerNode.fuse(node1, node2)
 

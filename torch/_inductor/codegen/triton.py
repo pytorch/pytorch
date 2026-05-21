@@ -61,8 +61,8 @@ from ..runtime.hints import (
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import (
     BaseSchedulerNode,
-    FusedExternTritonKernelSchedulerNode,
     FusedSchedulerNode,
+    FusedUserTritonSchedulerNode,
     Scheduler,
     SchedulerNode,
 )
@@ -7003,7 +7003,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         self,
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
-        scheduler_node: FusedExternTritonKernelSchedulerNode,
+        scheduler_node: FusedUserTritonSchedulerNode,
     ) -> None:
         from torch._higher_order_ops.triton_kernel_wrap import (
             identify_triton_stores_from_ast,
