@@ -26,6 +26,9 @@ inline namespace CPU_CAPABILITY {
 // Implementation copied from Arm Optimized Routines:
 // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
 static inline svfloat32_t exp_u20_fast_path(svfloat32_t values) {
+  // For |x| >= 0x1.5d5e2ap+6f (~87.34), exp(x) may overflow or become
+  // subnormal, which FEXPA does not handle accurately; callers should handle
+  // those inputs separately.
   const svfloat32_t ln2_hi = svdup_n_f32(0x1.62e4p-1f);
   const svfloat32_t ln2_lo = svdup_n_f32(0x1.7f7d1cp-20f);
   const svfloat32_t c1 = svdup_n_f32(0.5f);
