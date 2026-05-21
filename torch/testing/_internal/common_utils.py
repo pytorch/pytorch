@@ -1430,6 +1430,7 @@ IS_ARM64 = platform.machine() in ('arm64', 'aarch64', 'ARM64')
 IS_S390X = platform.machine() == "s390x"
 IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
 IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
+IS_CPU_CAPABILITY_SVE = torch._C._get_cpu_capability() in ("SVE128", "SVE256")
 IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
@@ -2619,6 +2620,18 @@ def skip_if_pytest(fn):
 
 def skipIfNoXPU(fn):
     return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
+
+def skipIfCachingAllocatorDisabled(fn):
+    """Skip if the CUDA/HIP caching allocator is not active. Covers both the
+    runtime toggle (``torch.cuda.caching_allocator_enable(False)``) and the
+    env-var bypass (``PYTORCH_NO_CUDA_MEMORY_CACHING`` /
+    ``PYTORCH_NO_HIP_MEMORY_CACHING``). The CPU-only case (no CUDA built)
+    is treated as "allocator irrelevant", so the test is allowed to run."""
+    return lazy_skip_if(
+        lambda: torch.cuda.is_available()
+        and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
+        "requires the CUDA/HIP caching allocator (current allocator is uncached)",
+    )(fn)
 
 def slowTest(fn):
     @wraps(fn)
@@ -4813,8 +4826,8 @@ class TestCase(expecttest.TestCase):
           fn (callable): Function to check for a nondeterministic alert
 
           caller_name (str): Name of the operation that produces the
-              nondeterministic alert. This name is expected to appear at the
-              beginning of the error/warning message.
+              nondeterministic alert. This name is expected to appear in
+              the error/warning message.
 
           should_alert (bool, optional): If True, then the check will only pass
               if calling `fn` produces a nondeterministic error/warning with the
@@ -4822,7 +4835,7 @@ class TestCase(expecttest.TestCase):
               calling `fn` does not produce an error. Default: `True`.
         '''
 
-        alert_message = '^' + caller_name + ' does not have a deterministic implementation, but you set'
+        alert_message = caller_name + ' does not have a deterministic implementation, but you set'
 
         # Check that errors are thrown correctly
         with DeterministicGuard(True):
@@ -6214,6 +6227,34 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+
+def with_ieee_matmul_precision(f):
+    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
+    the duration of the wrapped test. Save/restore across the call.
+
+    "ieee" is the default, so this decorator is defensive: it insulates
+    tests whose intent is FP32 numerical correctness of an algorithm
+    (e.g. a factorization) from any non-default matmul fp32_precision
+    left set in the process by the build, by global configuration, or
+    by a sibling test that didn't restore it.
+
+    Affects matmul only, not convolution. Tests that also need
+    reduced-precision conv disabled must additionally control the
+    relevant cudnn/mkldnn conv.fp32_precision knobs.
+    """
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        old_cuda = torch.backends.cuda.matmul.fp32_precision
+        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
+            return f(*args, **kwargs)
+        finally:
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda
+    return wrapped
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
