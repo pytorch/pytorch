@@ -181,9 +181,6 @@ class SubprocPool:
             cmd,
             env={
                 **python_subprocess_env(),
-                # Triton/libtriton is not declared free-threading safe yet.
-                # Run compile workers with the GIL enabled on free-threaded Python.
-                "PYTHON_GIL": "1",
                 # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
@@ -493,10 +490,6 @@ def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
 
 class TestException(RuntimeError):
     pass
-
-
-def get_python_gil_env() -> str | None:
-    return os.environ.get("PYTHON_GIL")
 
 
 def raise_testexc() -> Never:

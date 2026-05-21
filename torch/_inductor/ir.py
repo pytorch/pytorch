@@ -37,6 +37,7 @@ import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
@@ -1257,7 +1258,14 @@ def get_reduction_combine_fn(
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
-            delta = b_mean - a_mean
+            # Guard against inf - inf = NaN when both means are infinite and
+            # equal. This occurs during FP16/BF16 LayerNorm when inputs
+            # overflow to inf.
+            delta = ops.where(
+                ops.logical_and(ops.isinf(a_mean), ops.eq(a_mean, b_mean)),
+                ops.constant(0.0, torch.float32),
+                b_mean - a_mean,
+            )
             new_weight = a_weight + b_weight
             w2_over_w = b_weight / new_weight
             return (
@@ -1354,6 +1362,9 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: IRNode | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
+        """
+        Choose the reduction hint and split count from shape and input stride information.
+        """
         # Use optimization_hint when all unbacked symbols have explicit hints,
         # otherwise fall back conservatively.
         exprs = [reduction_numel, sympy_product(ranges)]
@@ -1477,22 +1488,42 @@ class Reduction(Loops):
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
             assert read_writes.range_vars is not None
             range_vars = [
-                r
-                for r in read_writes.range_vars
-                if isinstance(r, Expr) and not isinstance(r, sympy.Number)
+                var
+                for var in read_writes.range_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
+            ]
+            (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+                r.get_size(), r.get_reduction_size()
+            )
+            reduction_vars = [
+                var
+                for var in reduction_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
             indices = []
+            broadcasted_reduction_indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all(r in md.index.free_symbols for r in range_vars):
+                free_symbols = md.index.free_symbols
+                is_full_size_read = all(var in free_symbols for var in range_vars)
+                # Prefer full-size reads, but fall back to reads that still
+                # vary across the reduction.  Missing reduction vars are
+                # zero-stride broadcasts, not proof of an inner reduction.
+                is_broadcasted_reduction_read = not is_full_size_read and any(
+                    var in free_symbols for var in reduction_vars
+                )
+                if is_full_size_read:
                     indices.append(md.index)
+                elif is_broadcasted_reduction_read:
+                    broadcasted_reduction_indices.append(md.index)
+                if is_full_size_read or is_broadcasted_reduction_read:
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
                         original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
                         if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
-            return indices, changed
+            return indices or broadcasted_reduction_indices, changed
 
         indices, changed = get_read_indices(r)
         if changed:
@@ -1562,8 +1593,11 @@ class Reduction(Loops):
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
             ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
+                value = inner_fn(index, rindex)
+                if isinstance(value, tuple):
+                    return value
                 return (
-                    inner_fn(index, rindex),
+                    value,
                     ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
@@ -5620,7 +5654,7 @@ class ChoiceCaller:
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(lambda: algo(*args))
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
+            return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
         return benchmarker.benchmark(algo, args, {"out": out}, device=None)
 
     def call_name(self) -> str:
@@ -6578,7 +6612,8 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs)
+        with enable_python_dispatcher():
+            example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
         if shape_env := V.fake_mode.shape_env:
@@ -8745,7 +8780,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(
-                    return_schema.real_type,
+                    return_schema.real_type,  # type: ignore[attr-defined]
                     output,
                 )
                 for return_schema, output in zip(returns, self.outputs)
@@ -9243,7 +9278,7 @@ class OpaqueMultiOutput(MultiOutput):
         super().__init__(layout, input, indices, skip_size_stride_alignment_checks=True)
         self.opaque_example_value = opaque_value
 
-    @property
+    @property  # type: ignore[override]
     def dtype(self) -> Never:
         raise AttributeError("OpaqueMultiOutput has no dtype")
 
@@ -9390,7 +9425,7 @@ class ExternKernelMultiOut(FallbackKernel):
         packed.outputs = outputs
 
         if isinstance(example_output, tuple):
-            return tuple(outputs)
+            return tuple(outputs)  # type: ignore[return-value]
         return list(outputs)
 
 
@@ -9813,13 +9848,13 @@ class InvokeSubgraph(ExternKernel):
                         offset=output.get_layout().offset,
                         is_pinned=output.get_layout().is_pinned,
                     ),
-                    invoke_subgraph,
+                    invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
                     skip_size_stride_alignment_checks=True,
                 )
 
         outs = [create_output(output, i) for i, output in enumerate(outputs)]
-        invoke_subgraph.outputs = outs
+        invoke_subgraph.outputs = outs  # type: ignore[assignment]
         return outs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -10017,7 +10052,7 @@ class Conditional(ExternKernel):
             )
         ]
 
-        conditional.outputs = outputs
+        conditional.outputs = outputs  # type: ignore[assignment]
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
@@ -10036,7 +10071,7 @@ class Conditional(ExternKernel):
 
         # Create MutationOutput for each mutated operand (for scheduler dependencies)
         conditional.mutation_outputs = [
-            MutationOutput(operands[idx].layout, operands[idx], conditional)
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)
         ]
 
@@ -10242,7 +10277,7 @@ class WhileLoop(ExternKernel):
                         assert len(subgraph.graph.graph_outputs) == len(
                             fake_carried_inputs
                         )
-                        subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs = _require_exact_strides(  # type: ignore[assignment]
                             subgraph.graph.graph_outputs,
                             fake_carried_inputs,
                         )
@@ -10335,7 +10370,7 @@ class WhileLoop(ExternKernel):
                 # Create MultiOutput for regular outputs
                 multi_out = MultiOutput(
                     FixedLayout(
-                        device=output.device,
+                        device=output.device,  # type: ignore[arg-type]
                         dtype=output.dtype,
                         size=[Conditional._maybe_expr(sz) for sz in output.size()],
                         stride=[Conditional._maybe_expr(st) for st in output.stride()],
@@ -10686,7 +10721,7 @@ class _CollectiveKernel(FallbackKernel):
                 if config.assume_unaligned_fallback_output or not tensor_is_aligned(
                     tensor
                 ):
-                    V.graph.unaligned_buffers.add(buf.name)
+                    V.graph.unaligned_buffers.add(buf.name)  # type: ignore[arg-type]
             return packed.outputs
         else:
             packed = cls(
