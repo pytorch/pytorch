@@ -104,10 +104,11 @@ def _normalize_dim(dim: int, ndim: int) -> int:
 
 
 def _scatter_add_eligibility(
-    self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
+    self: torch.Tensor, d: int, index: torch.Tensor, src: torch.Tensor
 ) -> TensorIterator | None:
-    """Return the analysis TensorIterator if (self, dim, index, src) fits
-    the kernel's expected layout, else ``None``.
+    """Return the analysis TensorIterator if (self, d, index, src) fits the
+    kernel's expected layout, else ``None``. ``d`` is the already-normalized
+    scatter axis.
 
     Mirrors aten's ``fast_scatter_add_kernel_eligible`` (IndexKernelUtils.h):
     restride ``self`` so its scatter-axis stride is 0 (shape = ``index.shape``),
@@ -121,7 +122,6 @@ def _scatter_add_eligibility(
         return None
     if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim == 0:
         return None
-    d = _normalize_dim(dim, self.ndim)
     if not 0 <= d < self.ndim:
         return None
 
@@ -200,10 +200,10 @@ def _is_tma_supported(
 ) -> bool:
     if not _has_sm90_plus():
         return False
-    it = _scatter_add_eligibility(self, dim, index, src)
+    d = _normalize_dim(dim, self.ndim)
+    it = _scatter_add_eligibility(self, d, index, src)
     if it is None:
         return False
-    d = _normalize_dim(dim, self.ndim)
     if not _alignment_contract_ok(self, src, d, dst_ptr_align=_TMA_DST_ALIGN_BYTES):
         return False
     # TMA chunk_bytes = min(row_bytes, 512); row_bytes must evenly divide
@@ -220,10 +220,10 @@ def _is_vec_scatter_supported(
     # scalar fp32 atomicAdd (sm_60+) work everywhere we care about.
     if self.dtype is torch.bfloat16 and not _has_sm90_plus():
         return False
-    it = _scatter_add_eligibility(self, dim, index, src)
+    d = _normalize_dim(dim, self.ndim)
+    it = _scatter_add_eligibility(self, d, index, src)
     if it is None:
         return False
-    d = _normalize_dim(dim, self.ndim)
     if not _alignment_contract_ok(self, src, d, dst_ptr_align=_VEC_DST_ALIGN_BYTES):
         return False
     # Each lane owns vec_elems consecutive elements; loop is either
@@ -243,7 +243,7 @@ def _is_vec_scatter_supported(
 
 def _prepare_kernel_inputs(
     self: torch.Tensor,
-    dim: int,
+    d: int,
     index: torch.Tensor,
     src: torch.Tensor,
     it: TensorIterator,
@@ -251,33 +251,23 @@ def _prepare_kernel_inputs(
     """Build (self_2d, index_1d, src_2d) for the kernel host functions.
 
     Caller has verified eligibility via ``_scatter_add_eligibility``.
-    ``it.shape[0]`` is the coalesced slice extent (product of every
-    non-scatter dim of ``self``). The 2D views preserve the user's
-    original stride along ``dim`` (used by the kernel for the row stride).
+    ``d`` is the already-normalized scatter axis. ``it.shape[0]`` is the
+    coalesced slice extent (product of every non-scatter dim of ``self``).
+    The 2D views preserve the user's original stride along ``d`` (used by
+    the kernel for the row stride).
     """
-    d = _normalize_dim(dim, self.ndim)
     N, M_src = it.shape[0], it.shape[1]
     M_self = self.shape[d]
     self_2d = self.as_strided((M_self, N), (self.stride(d), 1))
     src_2d = src.as_strided((M_src, N), (src.stride(d), 1))
-    # ``index`` may be nD with broadcast (stride-0) axes alongside one
-    # data axis. Drop every broadcast axis by selecting position 0 to
-    # land on the 1D view the kernels want.
-    index_1d = index
-    while index_1d.ndim > 1:
-        ax = next(
-            (a for a in range(index_1d.ndim) if index_1d.stride(a) == 0),
-            None,
-        )
-        if ax is None:
-            raise RuntimeError(
-                "scatter_add cutedsl: index lacks a broadcast axis to collapse"
-            )
-        index_1d = index_1d.select(ax, 0)
+    # Eligibility verified the iter has post-coalesce strides
+    # ``s_idx = (0, idx_elem)`` on ``index``; that means ``index`` carries
+    # M_src consecutive elements at offset 0 with element stride 1, padded
+    # by stride-0 broadcast axes. A single ``as_strided`` collapses that
+    # to the 1D view the kernels expect.
+    index_1d = index.as_strided((M_src,), (1,))
     if index_1d.dtype != torch.int64:
         index_1d = index_1d.to(torch.int64)
-    if not index_1d.is_contiguous():
-        index_1d = index_1d.contiguous()
     return self_2d, index_1d, src_2d
 
 
@@ -355,7 +345,8 @@ def _make_impls(kernel_getter):
     """
 
     def _run(dst: torch.Tensor, dim: int, index, src) -> torch.Tensor:
-        it = _scatter_add_eligibility(dst, dim, index, src)
+        d = _normalize_dim(dim, dst.ndim)
+        it = _scatter_add_eligibility(dst, d, index, src)
         if it is None:
             raise RuntimeError(
                 "scatter_add cutedsl: cond approved but iter rebuild failed"
@@ -365,7 +356,7 @@ def _make_impls(kernel_getter):
         # layout-shaped, so empty inputs satisfy it but have no work.
         if it.numel == 0:
             return dst
-        dst_2d, index_1d, src_2d = _prepare_kernel_inputs(dst, dim, index, src, it)
+        dst_2d, index_1d, src_2d = _prepare_kernel_inputs(dst, d, index, src, it)
         kernel_getter()(dst_2d, index_1d, src_2d)
         return dst
 
