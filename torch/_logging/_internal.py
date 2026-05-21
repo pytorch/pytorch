@@ -1204,22 +1204,28 @@ class LazyTraceHandler(logging.StreamHandler):
         self.root_dir = root_dir
         logging.Handler.__init__(self)
         self.stream = None
+        self._pid: int | None = None
         self._builtin_open = open
         self._pending_log_version = False
+
+    def _close_stream(self) -> None:
+        if self.stream:
+            try:
+                self.flush()
+            finally:
+                stream = self.stream
+                self.stream = None
+                self._pid = None
+                self._pending_log_version = False
+                if hasattr(stream, "close"):
+                    stream.close()
 
     # cloned from FileHandler in cpython
     def close(self) -> None:
         self.acquire()
         try:
             try:
-                if self.stream:
-                    try:
-                        self.flush()
-                    finally:
-                        stream = self.stream
-                        self.stream = None
-                        if hasattr(stream, "close"):
-                            stream.close()
+                self._close_stream()
             finally:
                 # Issue #19523: call unconditionally to
                 # prevent a handler leak when delay is set
@@ -1230,6 +1236,10 @@ class LazyTraceHandler(logging.StreamHandler):
             self.release()
 
     def emit(self, record) -> None:
+        current_pid = os.getpid()
+        if self.stream is not None and self._pid != current_pid:
+            self._close_stream()
+
         if self.stream is None:
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
@@ -1272,6 +1282,7 @@ class LazyTraceHandler(logging.StreamHandler):
                     dir=self.root_dir,
                     delete=False,
                 )
+                self._pid = current_pid
                 log.info("LazyTraceHandler: logging to %s", self.stream.name)
                 # Log tlparse path via inductor logger so it shows when
                 # TORCH_LOGS="inductor" is enabled
