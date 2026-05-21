@@ -4536,7 +4536,9 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.save(sd, f)
             f.seek(0)
             with safe_globals([TwoTensor]):
-                sd_loaded = torch.load(f, weights_only=True)
+                # validate_sparse=False: skip_data leaves indices uninitialized
+                # so invariant checks aren't meaningful here.
+                sd_loaded = torch.load(f, weights_only=True, validate_sparse=False)
             self.assertEqual(sd_loaded, sd_expected, exact_device=True)
             self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
             self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
@@ -5011,6 +5013,62 @@ class TestSerialization(TestCase, SerializationMixin):
                  torch.zeros(99, dtype=torch.long), 0),
                 False, None,
             )
+
+    def test_weights_only_validate_sparse(self):
+        # torch.load(validate_sparse=...) controls whether sparse invariants
+        # are checked after unpickling. In weights_only mode the default
+        # (None) refuses to load sparse content silently and forces the
+        # caller to opt in (True, run the O(nnz) check) or out (False).
+        good = torch.sparse_coo_tensor(
+            torch.tensor([[0, 1]]), torch.tensor([1.0, 2.0]), (2,),
+        )
+        bad = torch.sparse_coo_tensor(
+            torch.tensor([[0, 999]]), torch.tensor([1.0, 2.0]), (2,),
+            check_invariants=False,
+        )
+        good_buf = io.BytesIO()
+        torch.save({"s": good}, good_buf)
+        bad_buf = io.BytesIO()
+        torch.save({"s": bad}, bad_buf)
+
+        # weights_only + sparse + validate_sparse=None must raise
+        bad_buf.seek(0)
+        with self.assertRaisesRegex(
+            RuntimeError, "weights_only=True will not silently accept them"
+        ):
+            torch.load(bad_buf, weights_only=True)
+
+        # validate_sparse=False loads without running checks (invariants
+        # left broken; user has explicitly opted out)
+        bad_buf.seek(0)
+        out = torch.load(bad_buf, weights_only=True, validate_sparse=False)
+        self.assertEqual(out["s"]._nnz(), 2)
+
+        # validate_sparse=True catches the OOB index
+        bad_buf.seek(0)
+        with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
+            torch.load(bad_buf, weights_only=True, validate_sparse=True)
+
+        # validate_sparse=True on a well-formed checkpoint round-trips
+        good_buf.seek(0)
+        out = torch.load(good_buf, weights_only=True, validate_sparse=True)
+        self.assertEqual(out["s"].to_dense(), good.to_dense())
+
+        # weights_only=False keeps today's behaviour: no opt-in required,
+        # falls back to the global check_sparse_tensor_invariants setting.
+        # The test framework force-enables that global, so explicitly
+        # disable it to exercise the "global off" path.
+        bad_buf.seek(0)
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            out = torch.load(bad_buf, weights_only=False)
+        self.assertEqual(out["s"]._nnz(), 2)
+
+        # And with the global on, weights_only=False does validate by
+        # default (today's behaviour, preserved).
+        bad_buf.seek(0)
+        with torch.sparse.check_sparse_tensor_invariants(True):
+            with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
+                torch.load(bad_buf, weights_only=False)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
