@@ -3122,6 +3122,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         written_buffer_name = self.node.mutation_outputs[0].name
 
+        # TODO(jjvraw): Gate this with whether we have block info & pid mapping.
         # The epilogue can only read from the output buffer.
         # Any other tensor/s would require additional load expressions.
         if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
@@ -3130,16 +3131,20 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             )
             return False
 
-        # the epilogue depends on expressions which may not available in the user's Triton kernel
+        # The epilogue may depend on expressions which may not available in the user triton kernel
         # (e.g. indexing exprs used not in a load)
-        node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
-        for symbol in node2_inner_fn_free_symbols:
-            usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
-            if any(usage != "load" for usage in usages):
-                why(
-                    "epilogue requires expressions not available in user's Triton kernel"
-                )
-                return False
+        # If the user has provided the dimensions of the output_tile, we may be able to attempt fusion.
+        if self.output_tile:
+            # TODO: is_compatible
+            pass
+        else:
+            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+            for symbol in node2_inner_fn_free_symbols:
+                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+                if any(usage != "load" for usage in usages):
+                    why("node2 requires expressions not available in node1")
+                    return False
+
 
         if self.node.mutable_args[0].layout != node2.node.layout:
             why("user's Triton kernel and epilogue have different buffer layouts")
@@ -7550,29 +7555,6 @@ class Scheduler:
 
         if isinstance(node1, UserTritonSchedulerNode):
             return node1.can_fuse_with(node2)
-
-            # # TODO(JJVRAW): Gate this with whether we have block info & pid mapping.
-            #
-            # # The epilogue can only read from the output buffer.
-            # # Any other tensor/s would require additional load expressions.
-            # if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-            #     why("node2 reads from buffers other than the mutated output")
-            #     return False
-
-            # # The epilogue may depend on expressions which may not available in the user triton kernel
-            # # (e.g. indexing exprs used not in a load)
-            # # If the user has provided the dimensions of the output_tile, we may be able to attempt fusion.
-            # if node1.output_tile:
-            #     # TODO: is_compatible
-            #     pass
-            # else:
-            #     node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
-            #     for symbol in node2_inner_fn_free_symbols:
-            #         usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
-            #         if any(usage != "load" for usage in usages):
-            #             why("node2 requires expressions not available in node1")
-            #             return False
-
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node2.is_template()
