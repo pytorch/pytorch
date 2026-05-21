@@ -6,7 +6,10 @@ import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import SDPAParams
 from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 
 
 @contextlib.contextmanager
@@ -101,7 +104,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             self.assert_ref_equals_params(o, expected)
             self.assertEqual(counter.frame_count, 1)
 
-    def test_sdpa_c_functions_no_graph_break(self, device):
+    def test_sdpa_c_functions_no_graph_break(self):
         counter = CompileCounter()
 
         @torch.compile(fullgraph=True, backend=counter)
@@ -113,6 +116,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, list)
         self.assertEqual(counter.frame_count, 1)
 
+    @onlyCUDA
     def test_sdpa_kernel_decorator_with_compile(self, device):
         SDPA_BACKEND_PRIORITY = [
             SDPBackend.MATH,
