@@ -65,7 +65,7 @@ def regenerate_version():
         "tools.generate_torch_version",
         "--is-debug=false",
     ]
-    spin.util.run(cmd)
+    spin.util.run(cmd, cwd=CWD)
 
 
 TYPE_STUBS = [
