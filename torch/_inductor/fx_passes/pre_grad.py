@@ -8,6 +8,7 @@ from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
+from torch._dynamo.graph_utils import remove_noop_sdpa_masks
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.optimization import (
@@ -357,6 +358,10 @@ def pre_grad_passes(
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
             config.pre_grad_custom_pass
         )
+
+    GraphTransformObserver(gm, "remove_noop_sdpa_masks").apply_gm_pass(
+        remove_noop_sdpa_masks
+    )
 
     stable_topological_sort(gm.graph)
 
