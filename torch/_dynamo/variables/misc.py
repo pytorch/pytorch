@@ -1474,6 +1474,21 @@ class GetAttrVariable(VariableTracker):
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__name__":
+            try:
+                owner_type = self.obj.python_type()
+                descriptor = inspect.getattr_static(owner_type, self.name)
+            except (AttributeError, NotImplementedError):
+                pass
+            else:
+                if hasattr(descriptor, "__name__"):
+                    source = self.source and AttrSource(self.source, name)
+                    return variables.ConstantVariable.create(
+                        descriptor.__name__, source=source
+                    )
+        return super().var_getattr(tx, name)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))

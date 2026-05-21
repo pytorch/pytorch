@@ -3172,14 +3172,6 @@ def iter_contains(
 ) -> Any:
     from .variables import ConstantVariable
 
-    if search.is_python_constant():
-        found_const = any(
-            x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
-            for x in items
-        )
-        return ConstantVariable.create(found_const)
-
     must_check_tensor_id = False
     if check_tensor_identity and search.is_tensor():
         must_check_tensor_id = True
@@ -3198,6 +3190,11 @@ def iter_contains(
             check = SourcelessBuilder.create(tx, operator.eq).call_function(
                 tx, [x, search], {}
             )
+            if check.is_python_constant():
+                if not check.as_python_constant():
+                    continue
+                if found is None:
+                    return ConstantVariable.create(True)
             if found is None:
                 found = check
             else:
