@@ -369,6 +369,27 @@ class FakeTensorConverter:
 
         del self.constant_storage_mapping[weak_st]
 
+    def clear_non_cpu_constants(self) -> None:
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                if ten.constant.device.type == "cpu":
+                    live_tensor_refs.append(weak_tensor_ref)
+                    continue
+
+                # pyrefly: ignore [missing-attribute]
+                ten._fix_weakref()
+                ten.constant = None
+
+            if live_tensor_refs:
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                del self.constant_storage_mapping[weak_st]
+
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
