@@ -11,10 +11,6 @@
 #include <tuple>
 #include <optional>
 
-#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
-#define AOTRITON_V2_API_FLASH_ATTN_H  // Suppress the include of deprecated flash/v2.h
-#endif
-
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
 ////////////////////////////////////////////////////////////////////////////////
@@ -131,17 +127,8 @@ struct LazyTensorContext {
 
 template<int kRank, bool kRequireZeros>
 struct LazyTensorFunctions : public LazyTensorContext {
-#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
-  using HolderType = aotriton::LazyTensor<kRank>;
-#else
-  using HolderType = void;
-#endif
-  static aotriton::TensorView<kRank> acquire(HolderType* self) {
-#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
-    auto ctx = (LazyTensorContext*)self->cookie;
-#else
+  static aotriton::TensorView<kRank> acquire(void* cookie) {
     auto ctx = (LazyTensorContext*)cookie;
-#endif
     if (!ctx->tensor.defined()) {
       auto q = ctx->like_tensor;
       if constexpr (kRequireZeros) {
@@ -154,7 +141,7 @@ struct LazyTensorFunctions : public LazyTensorContext {
     return mk_aotensor<kRank>(ctx->tensor, ctx->tensor_name);
   }
 
-  static void dispose(HolderType* cookie) {
+  static void dispose(void* cookie) {
   }
 };
 
