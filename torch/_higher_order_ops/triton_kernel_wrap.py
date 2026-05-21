@@ -151,6 +151,7 @@ class KernelSideTable:
     id_to_kernel: dict[int, "TritonKernelType"] = {}
     kernel_to_id: dict["TritonKernelType", int] = {}
     constant_args: dict[int, dict[str, Any]] = {}
+    output_tiles: dict[int, dict[str, str]] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -188,12 +189,20 @@ class KernelSideTable:
             )
         return self.constant_args[idx]
 
+    def set_output_tile(self, kernel_idx: int, output_tile: dict[str, str]) -> None:
+        with self.lock:
+            self.output_tiles[kernel_idx] = output_tile
+
+    def get_output_tile(self, kernel_idx: int) -> "dict[str, str] | None":
+        return self.output_tiles.get(kernel_idx)
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        self.output_tiles = {}
 
 
 kernel_side_table = KernelSideTable()
@@ -2339,6 +2348,7 @@ class TraceableTritonKernelWrapper:
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
     kernel_source: "Source | None"
+    output_tile: dict[str, str] | None
 
     def __init__(
         self,
@@ -2346,13 +2356,17 @@ class TraceableTritonKernelWrapper:
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
         kernel_source: "Source | None" = None,
+        output_tile: dict[str, str] | None = None,
     ) -> None:
         self.kernel = None
         self.grid = None
         self.kernel_source = kernel_source
+        self.output_tile = output_tile
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         if self.kernel is None:
             raise AssertionError("kernel was not initialized properly")
+        if output_tile is not None:
+            kernel_side_table.set_output_tile(self.kernel_idx, output_tile)
 
     def __getitem__(self, *args: Sequence[Any]) -> "TraceableTritonKernelWrapper":
         return tracing_triton_hopifier_singleton.call_getitem(self, args)  # type: ignore[return-value]

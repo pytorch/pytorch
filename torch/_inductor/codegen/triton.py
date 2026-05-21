@@ -7067,6 +7067,9 @@ class FusedUserTritonKernel(TritonKernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         scheduler_node: FusedUserTritonSchedulerNode,
+        out_arg_name: str,
+        block_aliases: dict[str, str] | None = None,
+        pid_cache: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             tiling,
@@ -7076,12 +7079,12 @@ class FusedUserTritonKernel(TritonKernel):
             fixed_config=None,
             hint_override=None,
             is_combo_kernel=False,
+            pid_cache=pid_cache,
         )
         self.scheduler_node = scheduler_node
-        assert isinstance(
-            self.scheduler_node.kernel_node.node, ir.UserDefinedTritonKernel
-        )
         self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
+        self.out_arg_name = out_arg_name
+        self.block_aliases = block_aliases
 
         self.kernel_ast = ast.parse(self.ir_node.kernel_src)
         self.kernel_stores = identify_triton_stores_from_ast(self.kernel_ast)
@@ -7089,6 +7092,9 @@ class FusedUserTritonKernel(TritonKernel):
         self.original_stored_expr = ast.unparse(
             self.kernel_stores.stores[0].store_value_node
         ).replace("\n", "")
+
+        self.new_store_cse_var: CSEVariable | None = None
+        self.new_store_index: sympy.Expr | None = None
 
     def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
         assert len(self.ir_node.mutable_args) == 1
@@ -7117,63 +7123,113 @@ class FusedUserTritonKernel(TritonKernel):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
-        if name == self.scheduler_node.epilogue.node.get_name():
-            # when the fused epilogue nodes tries to store to its destination buffer
-            # we remember this expr and then later replace it into the `tl.store` call of the original kernel
+        if name == self.scheduler_node.fused_epilogue.node.get_name():
             self.new_store_cse_var = value
+            indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
+            self.new_store_index_str = indexing.index_str
+            self.new_store_mask_str = indexing.mask_str
         else:
             super().store(name, index, value, mode)
 
-    # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
+    def codegen_aliases(self) -> list[str]:
+        assert self.block_aliases
+
+        aliases = []
+        indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
+        for varname, alias in self.block_aliases.items():
+            aliases.append(f"{indentations}{varname}: tl.constexpr = {alias}")
+
+        return aliases
+
     def codegen(self) -> str:
+        """
+        Returns a string which is the source code of a modified version of the user kernel that includes
+        the epilogue.
+
+        In general, epilogue fusion is gated on pointwise operations, there are then two paths depending on
+        whether the epilogue requires additional new index expressions:
+
+            1. The user has wrapped the kernel (using torch.library.wrap_triton), annotating the output
+               tile dimensions. This enables inductor to generate new index expressions which the epilogue
+               may require. It follows, appropriate constraints on epilogue fusion are loosened.
+            2. Without these annotations, epilogues are strictly unary pointwise operations with no additional
+               load expressions. In this path, the pointwise instructions are code-generated and, subsequently,
+               appropriately replacing the value operand of the user kernel's stroe while preserving the original
+               index expression.
+        """
         with self:
             index_vars = self.split_and_set_ranges(
                 self.scheduler_node.epilogue.get_ranges()
             )
             self.scheduler_node.epilogue.codegen(index_vars)
 
-        new_store_value_node = ast.Name(self.new_store_cse_var.name)
-
-        def _replace_arg(
-            call_node: ast.Call,
-            arg_name: str,
-            positional_index: int,
-            new_arg,
-        ):
-            if len(call_node.args) > positional_index:
-                call_node.args[positional_index] = new_arg
-
-            # Check keyword args
-            for keyword in call_node.keywords:
-                if keyword.arg == arg_name:
-                    keyword.value = new_arg
-
-        _replace_arg(
-            self.kernel_stores.stores[0].store_node, "value", 1, new_store_value_node
-        )
-
-        src_with_store_replaced = ast.unparse(self.kernel_ast)
-
-        # then, we need to inject the additional `load` and `compute` lines generated when we `codegen` the epilogue nodes
-
-        src_lines = src_with_store_replaced.splitlines()
-        kernel_stores = identify_triton_stores(src_with_store_replaced)
-
-        # identify the store again, because the previous parse-modify-unparse could've change its location
-        # python ast lineno is 1-indexed
-        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
-
         indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
-
         load_lines = [indentations + l for l in self.loads.get_lines_ref()]
         compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
 
-        new_src_lines = (
-            src_lines[:store_line_index]
-            + load_lines
-            + compute_lines
-            + src_lines[store_line_index:]
-        )
+        # TODO(JJVRAW): Should we gate on pid_remap as well?
+        if self.block_aliases is not None:
+            src_lines = ast.unparse(self.kernel_ast).splitlines()
+            store_line_index = self.kernel_stores.stores[0].store_node.lineno - 1
+
+            # TODO(JJVRAW): User AST rewriting for this.
+            new_store = (
+                f"{indentations}tl.store("
+                f"{self.out_arg_name} + ({self.new_store_index_str}), "
+                f"{self.new_store_cse_var.name}, "
+                f"{self.new_store_mask_str})"
+            )
+            numel_buf = IndentedBuffer()
+            self.codegen_static_numels(numel_buf)
+            numel_lines = [indentations + l for l in numel_buf.get_lines_ref()]
+            body_lines = [indentations + l for l in self.body.get_lines_ref()]
+            indexing_lines = [
+                indentations + l for l in self.indexing_code.get_lines_ref()
+            ]
+            # TODO(JJVRAW) CLEAN THIS UP, again, we should use AST parsing for this.
+            def_line_index = next(
+                i for i, line in enumerate(src_lines) if line.strip().startswith("def ")
+            )
+
+            new_src_lines = (
+                src_lines[: def_line_index + 1]
+                + self.codegen_aliases()
+                + src_lines[def_line_index + 1 : store_line_index]
+                + numel_lines
+                + body_lines
+                + indexing_lines
+                + load_lines
+                + compute_lines
+                + [new_store]
+                + src_lines[store_line_index + 1 :]
+            )
+        else:
+
+            def _replace_arg(call_node, arg_name, positional_index, new_arg):
+                if len(call_node.args) > positional_index:
+                    call_node.args[positional_index] = new_arg
+                for keyword in call_node.keywords:
+                    if keyword.arg == arg_name:
+                        keyword.value = new_arg
+
+            _replace_arg(
+                self.kernel_stores.stores[0].store_node,
+                "value",
+                1,
+                ast.Name(self.new_store_cse_var.name),
+            )
+            src_with_store_replaced = ast.unparse(self.kernel_ast)
+            src_lines = src_with_store_replaced.splitlines()
+            kernel_stores = identify_triton_stores(src_with_store_replaced)
+            # identify the store again — parse-modify-unparse may shift its line
+            store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+            new_src_lines = (
+                src_lines[:store_line_index]
+                + load_lines
+                + compute_lines
+                + src_lines[store_line_index:]
+            )
+
         return "\n".join(new_src_lines)
 
 

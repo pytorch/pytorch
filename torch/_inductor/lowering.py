@@ -8565,6 +8565,7 @@ def triton_kernel_wrap_(
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
+        output_tile=kernel_side_table.get_output_tile(kernel_idx),
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 

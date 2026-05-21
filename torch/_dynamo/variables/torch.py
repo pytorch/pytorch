@@ -1183,20 +1183,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            if len(args) == 1:
-                # wrap_triton / capture_triton is a no-op in dynamo
-                return args[0]
+            if len(args) != 1:
+                unimplemented(
+                    gb_type="torch.library.wrap_triton call with > 1 args",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Attempted to call `wrap_triton`/`capture_triton`"
+                    " with > 1 args. Dynamo does not support this.",
+                    hints=[
+                        "Remove the wrap_triton/capture_triton call or its additional args.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            kernel_var = args[0]
+            output_tile_var = kwargs.get("output_tile")
+            if output_tile_var is not None:
+                from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-            unimplemented(
-                gb_type="torch.library.wrap_triton call with > 1 args",
-                context=f"args={args}, kwargs={kwargs}",
-                explanation="Attempted to call `wrap_triton`/`capture_triton`"
-                " with > 1 args. Dynamo does not support this.",
-                hints=[
-                    "Remove the wrap_triton/capture_triton call or its additional args.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+                output_tile = output_tile_var.as_python_constant()
+                kernel_side_table.set_output_tile(kernel_var.kernel_idx, output_tile)
+            # wrap_triton / capture_triton is a no-op in dynamo
+            return kernel_var
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(
