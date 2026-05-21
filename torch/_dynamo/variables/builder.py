@@ -504,6 +504,21 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
+def _is_dim_dynamic_from_source_dynamism(
+    source: Source, normalized_source_name: str, dim: int
+) -> bool:
+    if isinstance(source, ChainedSource):
+        source = source.get_base()
+    if not isinstance(source, LocalSource) or source.dynamism is None:
+        return False
+
+    source_dynamism: dict[str, tuple[bool, ...]] = dict(
+        typing.cast(Any, source.dynamism)
+    )
+    dim_dynamism = source_dynamism.get(normalized_source_name)
+    return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -2853,9 +2868,6 @@ class VariableBuilder:
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
             normalized_source_name = normalize_source_name(self.source.name)
-            base_source = self.source
-            if isinstance(base_source, ChainedSource):
-                base_source = base_source.get_base()
 
             if dynamism is not None:
                 dynamic_dim = dynamism
@@ -2866,12 +2878,9 @@ class VariableBuilder:
                 set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
-                isinstance(base_source, LocalSource)
-                and base_source.dynamism is not None
-                # pyrefly: ignore[no-matching-overload]
-                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
-                    0
-                ]
+                _is_dim_dynamic_from_source_dynamism(
+                    self.source, normalized_source_name, 0
+                )
             ) or not config.assume_static_by_default:
                 symbolic_shape_log.info(
                     "marking %s as dynamic (from assume_static_by_default = False)",
@@ -4101,15 +4110,9 @@ def _automatic_dynamic(
         # For dynamic, apply None always
 
         normalized_source_name = normalize_source_name(source.name)
-        base_source = source
-        if isinstance(base_source, ChainedSource):
-            base_source = base_source.get_base()
 
         if marked_dynamic or (
-            isinstance(base_source, LocalSource)
-            and base_source.dynamism is not None
-            # pyrefly: ignore[no-matching-overload]
-            and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+            _is_dim_dynamic_from_source_dynamism(source, normalized_source_name, i)
         ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
