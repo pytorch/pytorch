@@ -412,6 +412,8 @@ class ShardingPropagator:
             aten._upsample_nearest_exact2d_backward.default: 2,
             aten._upsample_nearest_exact3d_backward.default: 2,
             aten._upsample_bilinear2d_aa_backward.default: 2,
+            aten._upsample_bicubic2d_aa_backward.default: 2,
+            aten._upsample_lanczos2d_aa_backward.default: 2,
             aten.upsample_bicubic2d_backward.default: 2,
             aten.upsample_bilinear2d_backward.default: 2,
             aten.upsample_linear1d_backward.default: 2,
