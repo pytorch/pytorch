@@ -28,6 +28,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
+    skipOps,
     tol1,
     xfail,
     xfailIf,
@@ -58,7 +59,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     OpDTypes,
     ops,
-    skipOps,
     tol,
     toleranceOverride,
 )
@@ -4413,6 +4413,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
+        "TestVmapOperatorsOpInfo",
+        "test_vmap_exhaustive",
         vmap_fail.union(
             {
                 # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -4475,6 +4477,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
+        "TestVmapOperatorsOpInfo",
+        "test_op_has_batch_rule",
         vmap_fail.union(
             {
                 xfail("as_strided", "partial_views"),
@@ -4512,6 +4516,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("__getitem__", ""),
+                xfail("count_nonzero"),
                 xfail(
                     "nn.functional.dropout"
                 ),  # works, can't check against for loop because of randomness inconsistency
@@ -5279,6 +5284,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     @skipOps(
+        "TestVmapOperatorsOpInfo",
+        "test_vmap_linalg_failure_1D_input",
         {
             xfail("linalg.vector_norm"),  # can accept vector inputs
             xfail("linalg.norm"),  # can accept vector inputs

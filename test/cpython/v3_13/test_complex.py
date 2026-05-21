@@ -915,8 +915,7 @@ class ComplexTest(__TestCase):
         for x in vals:
             for y in vals:
                 z = complex(x, y)
-                with torch._dynamo.error_on_graph_break(False):
-                    roundtrip = eval(repr(z))
+                roundtrip = eval(repr(z))
                 # adding 0.0 has no effect beside changing -0.0 to 0.0
                 self.assertFloatsAreIdentical(0.0 + z.real,
                                               0.0 + roundtrip.real)

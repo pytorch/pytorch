@@ -187,7 +187,6 @@ class BuiltinTest(CPythonTestCase):
         it = pickle.loads(d)
         self.assertEqual(list(it), seq[1:])
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_import(self):
         __import__('sys')
         __import__('time')
@@ -361,7 +360,6 @@ class BuiltinTest(CPythonTestCase):
     def test_cmp(self):
         self.assertTrue(not hasattr(builtins, "cmp"))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile(self):
         compile('print(1)\n', '', 'exec')
         bom = b'\xef\xbb\xbf'
@@ -411,7 +409,6 @@ class BuiltinTest(CPythonTestCase):
                     rv = ns['f']()
                     self.assertEqual(rv, tuple(expected))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile_top_level_await_no_coro(self):
         """Make sure top level non-await codes get the correct coroutine flags"""
         modes = ('single', 'exec')
@@ -437,7 +434,6 @@ class BuiltinTest(CPythonTestCase):
         support.is_emscripten or support.is_wasi,
         "socket.accept is broken"
     )
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile_top_level_await(self):
         """Test whether code some top level await can be compiled.
 
@@ -496,7 +492,6 @@ class BuiltinTest(CPythonTestCase):
         finally:
             asyncio.set_event_loop_policy(policy)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile_top_level_await_invalid_cases(self):
          # helper function just to check we can run top=level async-for
         async def arange(n):
@@ -535,7 +530,6 @@ class BuiltinTest(CPythonTestCase):
             asyncio.set_event_loop_policy(policy)
 
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile_async_generator(self):
         """
         With the PyCF_ALLOW_TOP_LEVEL_AWAIT flag added in 3.8, we want to
@@ -552,7 +546,6 @@ class BuiltinTest(CPythonTestCase):
         exec(co, glob)
         self.assertEqual(type(glob['ticker']()), AsyncGeneratorType)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_compile_ast(self):
         args = ("a*(1+2)", "f.py", "exec")
         raw = compile(*args, flags = ast.PyCF_ONLY_AST).body[0]
@@ -693,7 +686,6 @@ class BuiltinTest(CPythonTestCase):
 
         self.assertRaises(TypeError, divmod)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_eval(self):
         self.assertEqual(eval('1+1'), 2)
         self.assertEqual(eval(' 1+1\n'), 2)
@@ -717,13 +709,11 @@ class BuiltinTest(CPythonTestCase):
                 raise ValueError
         self.assertRaises(ValueError, eval, "foo", {}, X())
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_eval_kwargs(self):
         data = {"A_GLOBAL_VALUE": 456}
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", globals=data), 456)
         self.assertEqual(eval("globals()['A_GLOBAL_VALUE']", locals=data), 123)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_general_eval(self):
         # Tests that general mappings can be used for the locals argument
 
@@ -793,7 +783,6 @@ class BuiltinTest(CPythonTestCase):
                 return 1 # used to be 'a' but that's no longer an error
         self.assertRaises(TypeError, eval, 'dir()', globals(), C())
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec(self):
         g = {}
         exec('z = 1', g)
@@ -818,7 +807,6 @@ class BuiltinTest(CPythonTestCase):
             del l['__builtins__']
         self.assertEqual((g, l), ({'a': 1}, {'b': 2}))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_kwargs(self):
         g = {}
         exec('global z\nz = 1', globals=g)
@@ -832,7 +820,6 @@ class BuiltinTest(CPythonTestCase):
         exec('global z\nz = 1', locals=g)
         self.assertEqual(g, {})
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_globals(self):
         code = compile("print('Hello World!')", "", "exec")
         # no builtin function
@@ -842,7 +829,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError,
                           exec, code, {'__builtins__': 123})
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_globals_frozen(self):
         class frozendict_error(Exception):
             pass
@@ -875,7 +861,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(frozendict_error,
                           exec, code, namespace)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_globals_error_on_get(self):
         # custom `globals` or `builtins` can raise errors on item access
         class setonlyerror(Exception):
@@ -895,7 +880,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(setonlyerror, exec, code,
                           {'__builtins__': setonlydict({'superglobal': 1})})
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_globals_dict_subclass(self):
         class customdict(dict):  # this one should not do anything fancy
             pass
@@ -907,7 +891,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaisesRegex(NameError, "name 'superglobal' is not defined",
                                exec, code, {'__builtins__': customdict()})
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_eval_builtins_mapping(self):
         code = compile("superglobal", "test", "eval")
         # works correctly
@@ -918,7 +901,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaisesRegex(NameError, "name 'superglobal' is not defined",
                                eval, code, ns)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_builtins_mapping_import(self):
         code = compile("import foo.bar", "test", "exec")
         ns = {'__builtins__': types.MappingProxyType({})}
@@ -927,7 +909,6 @@ class BuiltinTest(CPythonTestCase):
         exec(code, ns)
         self.assertEqual(ns['foo'], ('foo.bar', ns, ns, None, 0))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_eval_builtins_mapping_reduce(self):
         # list_iterator.__reduce__() calls _PyEval_GetBuiltin("iter")
         code = compile("x.__reduce__()", "test", "eval")
@@ -936,7 +917,6 @@ class BuiltinTest(CPythonTestCase):
         ns = {'__builtins__': types.MappingProxyType({'iter': iter}), 'x': iter([1, 2])}
         self.assertEqual(eval(code, ns), (iter, ([1, 2],), 0))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_exec_redirected(self):
         savestdout = sys.stdout
         sys.stdout = None # Whatever that cannot flush()
@@ -1467,7 +1447,6 @@ class BuiltinTest(CPythonTestCase):
             fp.write('XXX'*100)
             fp.write('YYY'*100)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_open(self):
         self.write_testfile()
         fp = open(TESTFN, encoding="utf-8")
@@ -1484,7 +1463,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(ValueError, open, b'a\x00b')
 
     @unittest.skipIf(sys.flags.utf8_mode, "utf-8 mode is enabled")
-    @torch._dynamo.error_on_graph_break(False)
     def test_open_default_encoding(self):
         old_environ = dict(os.environ)
         try:
@@ -1507,7 +1485,6 @@ class BuiltinTest(CPythonTestCase):
             os.environ.update(old_environ)
 
     @support.requires_subprocess()
-    @torch._dynamo.error_on_graph_break(False)
     def test_open_non_inheritable(self):
         fileobj = open(__file__, encoding="utf-8")
         with fileobj:
@@ -1602,7 +1579,6 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(mod10(2, 6), 4)
         self.assertEqual(mod10(exp=6, base=2), 4)
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_input(self):
         self.write_testfile()
         fp = open(TESTFN, encoding="utf-8")
@@ -1638,7 +1614,6 @@ class BuiltinTest(CPythonTestCase):
             sys.stdout = savestdout
             fp.close()
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_input_gh130163(self):
         class X(io.StringIO):
             def __getattribute__(self, name):
@@ -2258,7 +2233,6 @@ class TestBreakpoint(CPythonTestCase):
         self.resources.enter_context(
             swap_attr(sys, 'breakpointhook', sys.__breakpointhook__))
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_breakpoint(self):
         with patch('pdb.set_trace') as mock:
             breakpoint()
@@ -2302,7 +2276,6 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with('7')
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
-    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_other(self):
         self.env['PYTHONBREAKPOINT'] = 'sys.exit'
         with patch('sys.exit') as mock:
@@ -2310,14 +2283,12 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with()
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
-    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_noop_0(self):
         self.env['PYTHONBREAKPOINT'] = '0'
         with patch('pdb.set_trace') as mock:
             breakpoint()
             mock.assert_not_called()
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_envar_good_path_empty_string(self):
         # PYTHONBREAKPOINT='' is the same as it not being set.
         self.env['PYTHONBREAKPOINT'] = ''
@@ -2326,7 +2297,6 @@ class TestBreakpoint(CPythonTestCase):
             mock.assert_called_once_with()
 
     @unittest.skipIf(sys.flags.ignore_environment, '-E was given')
-    @torch._dynamo.error_on_graph_break(False)
     def test_envar_unimportable(self):
         for envar in (
                 '.', '..', '.foo', 'foo.', '.int', 'int.',
@@ -2345,7 +2315,6 @@ class TestBreakpoint(CPythonTestCase):
                 self.assertEqual(w.category, RuntimeWarning)
                 mock.assert_not_called()
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_envar_ignored_when_hook_is_set(self):
         self.env['PYTHONBREAKPOINT'] = 'sys.exit'
         with patch('sys.exit') as mock:
@@ -2353,7 +2322,6 @@ class TestBreakpoint(CPythonTestCase):
             breakpoint()
             mock.assert_not_called()
 
-    @torch._dynamo.error_on_graph_break(False)
     def test_runtime_error_when_hook_is_lost(self):
         del sys.breakpointhook
         with self.assertRaises(RuntimeError):

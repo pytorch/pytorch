@@ -50,7 +50,10 @@ Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
     cp.reduce.async.bulk gmem operand)
 """
 
+import math
+
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
+
 import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
@@ -66,12 +69,6 @@ from ._ptx import cvta_smem, make_bulk_reduce_add
 
 _MAX_CHUNK_BYTES = 512
 _THREADS_PER_CTA = 32  # one warp per CTA
-# cp.async.bulk requires 128B-aligned smem destinations.
-_SMEM_ALIGN_BYTES = 128
-
-
-def _round_up(x: int, m: int) -> int:
-    return (x + m - 1) // m * m
 
 
 _TORCH_TO_CUTE = {
@@ -127,14 +124,6 @@ def _make_kernel(
     # partial final chunk handled by TMA OOB clamp.
     num_chunks = (N + chunk_elems - 1) // chunk_elems
 
-    # 2-stage pipeline buffer is laid out column-major; stage i starts
-    # at offset i * stage_stride_elems * elem_bytes, so the stride must
-    # round chunk_bytes up to a multiple of _SMEM_ALIGN_BYTES. Otherwise
-    # stage 1 is misaligned and the kernel faults the first time a CTA
-    # writes it. Bites both chunk_bytes < 128 (small D) and chunk_bytes
-    # not a multiple of 128 (e.g. fp32 N=36 -> 144 B).
-    stage_stride_elems = _round_up(chunk_elems, _SMEM_ALIGN_BYTES // elem_bytes)
-
     @cute.kernel
     def _kernel(
         tma_atom: cute.CopyAtom,
@@ -170,8 +159,8 @@ def _make_kernel(
         smem = cutlass.utils.SmemAllocator()
         sBuf = smem.allocate_tensor(
             dtype,
-            cute.make_layout((chunk_elems, 2), stride=(1, stage_stride_elems)),
-            _SMEM_ALIGN_BYTES,
+            cute.make_layout((chunk_elems, 2)),
+            128,
         )
         mbar_storage = smem.allocate_array(cutlass.Uint64, num_elems=2 * 2)
 
@@ -244,7 +233,9 @@ def _make_kernel(
 
                     if pair_count > Int32(0):
                         pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf[None, consumer_state.index].iterator
+                        cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
+                            chunk_elems
+                        )
 
                         # Partial-chunk handling: actual valid element
                         # count is min(chunk_elems, N - off). TMA
@@ -276,7 +267,7 @@ def _make_kernel(
         if tidx == Int32(0):
             if pair_count > Int32(0):
                 pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf[None, consumer_state.index].iterator
+                cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
 
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
@@ -333,7 +324,7 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     Rounded down to a multiple of ``16 / elem_bytes`` so the final
     partial chunk (if any) still satisfies the 16-byte reduce
     alignment."""
-    elem_bytes = torch_dtype.itemsize
+    elem_bytes = torch.tensor([], dtype=torch_dtype).element_size()
     row_bytes = N * elem_bytes
     chunk_bytes = min(row_bytes, _MAX_CHUNK_BYTES)
     # Ensure chunk_bytes itself is 16-aligned (true for 512, true for
@@ -380,10 +371,11 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
 def min_d_divisor_for(dtype: torch.dtype) -> int:
     """Smallest value D must be divisible by so ``cp.reduce.async.bulk``
     gmem operands stay 16-byte aligned: ``D * sizeof(dtype) % 16 == 0``,
-    i.e. ``D % (16 / sizeof(dtype)) == 0``. fp32: %4, bf16/fp16: %8.
-    Supported dtypes' itemsize divides 16, so plain // suffices.
+    i.e. ``D % (16 / gcd(16, sizeof(dtype))) == 0``. fp32: %4,
+    bf16/fp16: %8.
     """
-    return 16 // dtype.itemsize
+    esize = torch.tensor([], dtype=dtype).element_size()
+    return 16 // math.gcd(16, esize)
 
 
 def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
@@ -396,7 +388,8 @@ def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
     16-aligned). Rows that aren't multiples of ``chunk_elems`` are
     handled via the TMA descriptor's OOB-clamp-to-zero behavior.
     """
-    return (N * dtype.itemsize) % 16 == 0
+    esize = torch.tensor([], dtype=dtype).element_size()
+    return (N * esize) % 16 == 0
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:

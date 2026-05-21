@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.guards import GuardCheckSpec
-    from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1048,7 +1047,7 @@ class InlinedCodeCache:
 
     instructions: list[Any]
     indexof: dict[Any, int]
-    code_options: CodeOptions
+    code_options: dict[str, Any]
 
 
 class TracingContext:

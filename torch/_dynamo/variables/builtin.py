@@ -19,7 +19,6 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
-import ast
 import builtins
 import contextlib
 import functools
@@ -81,13 +80,7 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    AttrMutationKind,
-    NO_SUCH_SUBOBJ,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -109,20 +102,15 @@ from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
     binary_op,
-    generic_abs,
     generic_bool,
     generic_float,
     generic_getiter,
-    generic_inplace_multiply,
     generic_int,
     generic_len,
-    generic_multiply,
     generic_neg,
     generic_pos,
-    vt_add,
     vt_getitem,
     vt_identity_compare,
-    vt_inplace_add,
 )
 from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
@@ -133,11 +121,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import (
-    is_data_descriptor,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
@@ -528,6 +512,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
+            operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
+            operator.sub: (["__sub__", "__rsub__", "__isub__"], operator.isub),
+            operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
             operator.truediv: (
                 ["__truediv__", "__rtruediv__", "__itruediv__"],
                 operator.itruediv,
@@ -687,6 +674,130 @@ class BuiltinVariable(BaseBuiltinVariable):
             tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
+
+        list_like_addition_handlers: list[
+            tuple[
+                tuple[
+                    type[VariableTracker],
+                    _TrackersType,
+                ],
+                _HandlerCallback,
+            ]
+        ] = [
+            # NB: Prefer the tuple-specific logic over base logic because of
+            # some SizeVariable weirdness. Specifically, the tuple-specific logic
+            # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
+            (
+                (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
+                (SizeVariable, TupleVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, TupleVariable),
+                tuple_add_handler,
+            ),
+            (
+                (TupleVariable, ConstantVariable),
+                tuple_add_handler,
+            ),
+            (
+                (ConstantVariable, TupleVariable),
+                lambda tx, a, b: TupleVariable(
+                    [
+                        *a.unpack_var_sequence(tx),
+                        *b.items,
+                    ],
+                ),
+            ),
+            (
+                (
+                    ListVariable,
+                    (BaseListVariable, ConstantVariable, ListIteratorVariable),
+                ),
+                lambda tx, a, b: ListVariable(
+                    [*a.items, *b.unpack_var_sequence(tx)],
+                    mutation_type=ValueMutationNew(),
+                ),
+            ),
+            (
+                (BaseListVariable, BaseListVariable),
+                lambda tx, a, b: type(a)(
+                    [
+                        *a.items,
+                        *b.items,
+                    ]
+                ),
+            ),
+        ]
+        op_handlers[operator.add].extend(list_like_addition_handlers)
+
+        def list_iadd_handler(
+            tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
+        ) -> Any:
+            if a.is_immutable() or not b.has_unpack_var_sequence(tx):
+                # Handler doesn't apply
+                return None
+
+            seq = b.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
+            return a
+
+        list_like_iadd_handlers: list[Any] = [
+            (
+                (ListVariable, VariableTracker),
+                list_iadd_handler,
+            ),
+            (
+                (TupleVariable, TupleVariable),
+                tuple_add_handler,
+            ),
+            (
+                (TupleVariable, ConstantVariable),
+                tuple_add_handler,
+            ),
+        ]
+        op_handlers[operator.iadd].extend(list_like_iadd_handlers)
+
+        # List-like expansion (e.g. [1, 2, 3] * 3)
+        def expand_list_like(
+            tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
+        ) -> VariableTracker:
+            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
+                lst, const = const, lst
+            try:
+                if not isinstance(lst, BaseListVariable):
+                    raise AssertionError(f"Expected BaseListVariable, got {type(lst)}")
+                return lst.__class__(
+                    items=lst.items * const.as_python_constant(),
+                    mutation_type=ValueMutationNew(),
+                )
+            except MemoryError as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(exc.args),
+                )
+
+        list_like_expansion_handlers: list[
+            tuple[
+                tuple[type[VariableTracker], type[VariableTracker]],
+                _HandlerCallback,
+            ]
+        ] = [
+            ((ListVariable, ConstantVariable), expand_list_like),
+            ((TupleVariable, ConstantVariable), expand_list_like),
+            ((ConstantVariable, ListVariable), expand_list_like),
+            ((ConstantVariable, TupleVariable), expand_list_like),
+        ]
+        op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
         def create_cmp_op_handlers(
             op: Callable[..., Any],
@@ -1275,79 +1386,6 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return builtin_dispatch
 
-    @staticmethod
-    def _constant_eval_numeric_expr(node: ast.AST) -> bool:
-        allowed_nodes = (
-            ast.Expression,
-            ast.Constant,
-            ast.UnaryOp,
-            ast.BinOp,
-            ast.UAdd,
-            ast.USub,
-            ast.Invert,
-            ast.Add,
-            ast.Sub,
-            ast.Mult,
-            ast.Div,
-            ast.FloorDiv,
-            ast.Mod,
-            ast.BitOr,
-            ast.BitXor,
-            ast.BitAnd,
-        )
-        return all(
-            isinstance(child, allowed_nodes)
-            and (
-                not isinstance(child, ast.Constant)
-                or isinstance(child.value, (bool, int, float, complex))
-            )
-            for child in ast.walk(node)
-        )
-
-    @staticmethod
-    def _constant_eval_result(
-        tx: "InstructionTranslator", tree: ast.Expression, filename: str
-    ) -> VariableTracker | None:
-        if any(isinstance(child, ast.Call) for child in ast.walk(tree)):
-            return None
-        ast.fix_missing_locations(tree)
-        try:
-            result = ast.literal_eval(tree)
-        except ValueError:
-            if not BuiltinVariable._constant_eval_numeric_expr(tree):
-                return None
-            try:
-                result = eval(
-                    compile(tree, filename, "eval"),
-                    {"__builtins__": {}},
-                    {},
-                )
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-        return VariableTracker.build(tx, result)
-
-    def call_eval(
-        self,
-        tx: "InstructionTranslator",
-        source: VariableTracker,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        if args or kwargs:
-            return None
-        if not source.is_python_constant():
-            return None
-        source_str = source.as_python_constant()
-        if not isinstance(source_str, str):
-            return None
-
-        try:
-            tree = ast.parse(source_str.strip(), mode="eval")
-        except SyntaxError as exc:
-            raise_observed_exception(SyntaxError, tx, args=[exc.msg])
-
-        return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
-
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
@@ -1692,11 +1730,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__pos__(4) → pos(4)
             return generic_pos(tx, args[0])
 
-        if name == "__abs__" and len(args) == 1 and not kwargs:
-            # type.__abs__(instance) → abs(instance)
-            # e.g., int.__abs__(-4) → abs(-4)
-            return generic_abs(tx, args[0])
-
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -2016,7 +2049,13 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_abs(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        return generic_abs(tx, arg)
+        from .builder import SourcelessBuilder
+
+        # Call arg.__abs__()
+        abs_method = SourcelessBuilder.create(tx, getattr).call_function(
+            tx, [arg, VariableTracker.build(tx, "__abs__")], {}
+        )
+        return abs_method.call_function(tx, [], {})
 
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2315,7 +2354,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2822-L2887
+        from .builder import SourcelessBuilder
+
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
                 raise_args_mismatch(
@@ -2325,10 +2365,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        items = []
-        for arg in args:
-            items.append(generic_getiter(tx, arg))
-        iter_args = TupleVariable(items, mutation_type=ValueMutationNew())
+        iter_args = [
+            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
+            for arg in args
+        ]
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
@@ -2511,13 +2551,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if len(seqs) == 0:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=["map() must have at least two arguments."],
-            )
-
         strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
@@ -2537,11 +2570,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
 
-        iterables = [generic_getiter(tx, seq) for seq in seqs]
-        iter_args = TupleVariable(iterables, mutation_type=ValueMutationNew())
+        seq_list = [
+            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
+            for seq in seqs
+        ]
         return variables.MapVariable(
             fn,
-            iter_args,
+            seq_list,  # type: ignore[arg-type]
             strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
@@ -2549,9 +2584,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_filter(
         self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
+        seq_or_list = (
+            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
+        )
         return variables.FilterVariable(
             fn,
-            generic_getiter(tx, seq),
+            seq_or_list,  # type: ignore[arg-type]
             mutation_type=ValueMutationNew(),
         )
 
@@ -2798,35 +2836,19 @@ class BuiltinVariable(BaseBuiltinVariable):
             return a.call_method(tx, "__ixor__", [b], {})
         return None
 
-    def call_mul(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker | None:
-        return generic_multiply(tx, a, b)
-
-    def call_imul(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker | None:
-        return generic_inplace_multiply(tx, a, b)
-
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_op(tx, a, b, "nb_subtract", "-")
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__sub__", [b], {})
+        return None
 
     def call_isub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_iop(tx, a, b, "nb_inplace_subtract", "nb_subtract", "-=")
-
-    def call_add(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker | None:
-        return vt_add(tx, a, b)
-
-    def call_iadd(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker | None:
-        return vt_inplace_add(tx, a, b)
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__isub__", [b], {})
+        return None
 
     def call_and_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
@@ -3228,18 +3250,13 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                         hints=[],
                     )
 
-        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            if not isinstance(obj, variables.UserDefinedObjectVariable):
-                return tx.output.side_effects.load_attr(obj, name)
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                obj, name, AttrMutationKind.INSTANCE_DICT
-            ):
-                value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
-                type_attr = obj.lookup_class_mro_attr(name)
-                if not isinstance(value, variables.DeletedVariable) and (
-                    type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr)
-                ):
-                    return value
+        # UDOV pending mutations may target slots, descriptors, or the instance
+        # dict. Route them through var_getattr so descriptor precedence matches
+        # CPython instead of returning a pending value too early.
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            obj, name
+        ) and not isinstance(obj, variables.UserDefinedObjectVariable):
+            return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
             hasattr_var = obj.call_obj_hasattr(tx, name)
