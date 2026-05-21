@@ -92,6 +92,66 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(mod(inp), opt_f(inp))
 
+    def test_defaultdict_ne_non_dict_returns_not_implemented(self):
+        def direct_ne():
+            return defaultdict().__ne__([])
+
+        def operator_ne():
+            return defaultdict() != []
+
+        self.assertIs(
+            torch.compile(direct_ne, backend="eager", fullgraph=True)(),
+            NotImplemented,
+        )
+        self.assertTrue(torch.compile(operator_ne, backend="eager", fullgraph=True)())
+
+    def test_defaultdict_eq_custom_key_lookup_semantics(self):
+        class Base:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class Sub(Base):
+            __hash__ = Base.__hash__
+
+            def __eq__(self, other):
+                return True
+
+        class VolatileHash:
+            def __init__(self):
+                self.fail_hash = False
+
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                if self.fail_hash:
+                    raise RuntimeError("rehash")
+                return 1
+
+        def key_comparison_uses_subtype_priority():
+            return defaultdict(int, {Sub(): 1}) == defaultdict(int, {Base(): 1})
+
+        def does_not_rehash_during_eq():
+            key = VolatileHash()
+            left = defaultdict(int, {key: 1})
+            right = defaultdict(int, {key: 1})
+            key.fail_hash = True
+            return left == right
+
+        self.assertTrue(
+            torch.compile(
+                key_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+        self.assertTrue(
+            torch.compile(does_not_rehash_during_eq, backend="eager", fullgraph=True)()
+        )
+
     def test_dict_subclass_local_with_non_dict_method(self):
         # Checks that add_1 method is inlined
         class MethodDict(dict):
@@ -2690,6 +2750,169 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertTrue(same(opt_fn(x), fn(x)))
 
+    def test_dict_eq_custom_key_lookup_semantics(self):
+        dict_type = self.thetype
+
+        class ExpectedDirection(Exception):
+            pass
+
+        class WrongDirection(Exception):
+            pass
+
+        class Rehash(Exception):
+            pass
+
+        class WrongValueNe(Exception):
+            pass
+
+        class BadCmp:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        class NonCollidingCmp(BadCmp):
+            def __hash__(self):
+                return 2
+
+        class LeftKey:
+            def __eq__(self, other):
+                raise WrongDirection
+
+            def __hash__(self):
+                return 1
+
+        class RightKey:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        class VolatileHash:
+            def __init__(self):
+                self.fail_hash = False
+
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                if self.fail_hash:
+                    raise Rehash
+                return 1
+
+        class Value:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                raise WrongValueNe
+
+        class Base:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class Sub(Base):
+            __hash__ = Base.__hash__
+
+            def __eq__(self, other):
+                return True
+
+        def catches_hash_collision():
+            try:
+                if dict_type({BadCmp(): 1}) == dict_type({1: 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            return False
+
+        def uses_right_key_eq_for_lookup():
+            try:
+                if dict_type({LeftKey(): 1}) == dict_type({RightKey(): 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            except WrongDirection:
+                return False
+            return False
+
+        def ignores_hash_mismatch():
+            return dict_type({NonCollidingCmp(): 1}) == dict_type({1: 1})
+
+        def uses_identity_before_eq():
+            key = BadCmp()
+            return dict_type({key: 1}) == dict_type({key: 1})
+
+        def does_not_rehash_during_eq():
+            key = VolatileHash()
+            left = dict_type({key: 1})
+            right = dict_type({key: 1})
+            key.fail_hash = True
+            return left == right
+
+        def value_comparison_uses_eq():
+            return dict_type({1: Value()}) == dict_type({1: Value()})
+
+        def key_comparison_uses_subtype_priority():
+            return dict_type({Sub(): 1}) == dict_type({Base(): 1})
+
+        def value_comparison_uses_subtype_priority():
+            return dict_type({"k": Base()}) == dict_type({"k": Sub()})
+
+        self.assertTrue(
+            torch.compile(catches_hash_collision, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(
+                uses_right_key_eq_for_lookup, backend="eager", fullgraph=True
+            )()
+        )
+        self.assertFalse(
+            torch.compile(ignores_hash_mismatch, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(uses_identity_before_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(does_not_rehash_during_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(value_comparison_uses_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(
+                key_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+        self.assertTrue(
+            torch.compile(
+                value_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+
+    def test_dict_ne_non_dict_returns_not_implemented(self):
+        dict_type = self.thetype
+
+        def direct_ne():
+            return dict_type().__ne__([])
+
+        def operator_ne():
+            return dict_type() != []
+
+        self.assertIs(
+            torch.compile(direct_ne, backend="eager", fullgraph=True)(),
+            NotImplemented,
+        )
+        self.assertTrue(torch.compile(operator_ne, backend="eager", fullgraph=True)())
+
     def test_user_defined_object(self):
         class A:
             def __init__(self):
@@ -2757,6 +2980,34 @@ class OrderedDictMethodsTests(DictMethodsTests):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
         self.assertFalse(a == b)
+
+    def test_cmp_eq_mapping_lookup_precedes_order_check(self):
+        class ExpectedDirection(Exception):
+            pass
+
+        class LeftKey:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class RightKey:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        def fn():
+            try:
+                if OrderedDict({LeftKey(): 1}) == OrderedDict({RightKey(): 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            return False
+
+        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)())
 
     @make_dynamo_test
     def test_binop_or_return_type(self):
