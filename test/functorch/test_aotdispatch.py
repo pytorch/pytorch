@@ -10806,6 +10806,34 @@ Expected a .* tangent but got a plain Tensor.""",
             self.assertEqual(ref_x.grad, x.grad)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_expanded_output_tangent_uses_memory_format(self):
+        from torch._functorch._aot_autograd.schemas import MemoryFormatMeta
+
+        def fn(x):
+            return x.sin().sum(1, keepdim=True).expand(x.shape[0], x.shape[1])
+
+        ref_x = torch.randn(4, 3, requires_grad=True)
+        x = ref_x.detach().clone().requires_grad_()
+
+        ref_y = fn(ref_x)
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertNotEqual(torch._debug_has_internal_overlap(y), 0)
+        self.assertEqual(ref_y, y)
+
+        ref_y.sum().backward()
+        y.sum().backward()
+
+        self.assertEqual(ref_x.grad, x.grad)
+
+        too_hard_overlap = torch.empty(4).as_strided((2, 2), (1, 1))
+        self.assertEqual(torch._debug_has_internal_overlap(too_hard_overlap), 2)
+        self.assertEqual(
+            MemoryFormatMeta.from_tensor(too_hard_overlap).memory_format,
+            torch.contiguous_format,
+        )
+
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:

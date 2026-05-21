@@ -203,6 +203,9 @@ class MemoryFormatMeta:
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
 
+        if not use_memory_format and t.layout == torch.strided:
+            use_memory_format = torch._debug_has_internal_overlap(t) != 0
+
         if use_memory_format:
             return MemoryFormatMeta(
                 # pyrefly: ignore [unbound-name]
