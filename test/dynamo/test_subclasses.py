@@ -2153,6 +2153,40 @@ s50 > 3""",
         _check_recompiles(self, fn, (x,), (same_metadata,), False)
         _check_recompiles(self, fn, (x,), (different_metadata,), True)
 
+    def test_tensor_subclass_registered_pytree_metadata_without_key_flatten(self):
+        class MetadataWithoutKeyFlatten:
+            def __init__(self, value):
+                self.value = value
+
+            def __eq__(self, other):
+                return (
+                    isinstance(other, MetadataWithoutKeyFlatten)
+                    and self.value == other.value
+                )
+
+        pytree.register_pytree_node(
+            MetadataWithoutKeyFlatten,
+            lambda x: ([x.value], None),
+            lambda values, _: MetadataWithoutKeyFlatten(values[0]),
+        )
+
+        try:
+            x = TensorMetadataSubclass(torch.randn(4), MetadataWithoutKeyFlatten(5))
+            same_metadata = TensorMetadataSubclass(
+                torch.randn(4), MetadataWithoutKeyFlatten(5)
+            )
+            different_metadata = TensorMetadataSubclass(
+                torch.randn(4), MetadataWithoutKeyFlatten(6)
+            )
+
+            def fn(x):
+                return x * 2
+
+            _check_recompiles(self, fn, (x,), (same_metadata,), False)
+            _check_recompiles(self, fn, (x,), (different_metadata,), True)
+        finally:
+            pytree._deregister_pytree_node(MetadataWithoutKeyFlatten)
+
     def test_tensor_subclass_metadata_with_symint(self):
         # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
         # _AnyCompare sentinels so that (a) deepcopy doesn't pull in the

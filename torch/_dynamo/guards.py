@@ -885,7 +885,7 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
         return dim.node.maybe_as_int()
 
 
-def convert_to_concrete_values(size_or_stride: list[Any]) -> list[int | None]:
+def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
@@ -1062,16 +1062,22 @@ def extract_tensor_metadata(t: torch.Tensor) -> tuple[Any, ...]:
 
 
 def _subclass_metadata_contains_tensor(metadata: Any) -> bool:
-    leaves, _ = pytree.tree_flatten_with_path(metadata)
-    for key_path, leaf in leaves:
-        if isinstance(leaf, torch.Tensor):
-            return True
-        for entry in key_path:
-            mapping_key = getattr(entry, "key", None)
-            if mapping_key is not None and _subclass_metadata_contains_tensor(
-                mapping_key
-            ):
+    if isinstance(metadata, torch.Tensor):
+        return True
+
+    node_type = pytree._get_node_type(metadata)
+    if node_type not in pytree.SUPPORTED_NODES:
+        return False
+
+    if isinstance(metadata, collections.abc.Mapping):
+        for key in metadata:
+            if _subclass_metadata_contains_tensor(key):
                 return True
+
+    children, _ = pytree.SUPPORTED_NODES[node_type].flatten_fn(metadata)
+    for child in children:
+        if _subclass_metadata_contains_tensor(child):
+            return True
     return False
 
 
@@ -2604,7 +2610,6 @@ class GuardBuilder(GuardBuilderBase):
         if has_custom_guard:
             verify_guard_fn_signature(value)
             cls = type(value)
-
         else:
             _validate_default_subclass_metadata_guard(metadata, type(value))
 
