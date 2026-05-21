@@ -151,6 +151,7 @@ _DecompTable: TypeAlias = dict[torch._ops.OpOverload, Callable[..., Any]]
 _DecompFn: TypeAlias = Callable[..., _DecompTable]
 _ExternNodeSerializer: TypeAlias = Callable[[list[ExternKernelNode]], str]
 _AotCompileOptions: TypeAlias = dict[str, _ConfigPatchValue | _ExternNodeSerializer]
+# select_decomp_table returns dict[Any, ...] today; narrow it at this boundary.
 _DEFAULT_DECOMP_FN: _DecompFn = cast(_DecompFn, select_decomp_table)
 
 if TYPE_CHECKING or not config.is_fbcode():
@@ -2071,11 +2072,12 @@ def compile_fx_aot(
         # If fx_wrapper is not set, then set cpp_wrapper
         config_only_patches["cpp_wrapper"] = True
 
-    output_path = cast(
-        str | None,
-        config_only_patches.get(
-            "aot_inductor.output_path", config.aot_inductor.output_path
-        ),
+    output_path = config_only_patches.get(
+        "aot_inductor.output_path", config.aot_inductor.output_path
+    )
+    assert output_path is None or isinstance(output_path, str), (
+        "aot_inductor.output_path must be a string or None, "
+        f"got {type(output_path).__name__}"
     )
 
     if output_path:
