@@ -6710,6 +6710,11 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @unittest.skip(
+        "Skipped on PR #184439 branch: removing FakeTensor constant propagation "
+        "breaks complex python literal backward; skipping per branch operator "
+        "instructions to gauge other test impact."
+    )
     def test_complex_python_literal_backward(self):
         dtypes = [
             dtype
