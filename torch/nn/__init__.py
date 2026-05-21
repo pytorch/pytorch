@@ -1,7 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import TYPE_CHECKING
-
-
 from torch.nn.parameter import (  # usort: skip
     Buffer as Buffer,
     Parameter as Parameter,
@@ -19,25 +16,6 @@ from torch.nn import (
     utils as utils,
 )
 from torch.nn.parallel import DataParallel as DataParallel
-
-
-# LinearCrossEntropyOptions is exposed lazily: linear_cross_entropy.py
-# uses @torch.library.custom_op at module level, and an eager import
-# here would run before torch.library is initialized.
-if TYPE_CHECKING:
-    from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
-
-
-def __getattr__(name: str):
-    if name == "LinearCrossEntropyOptions":
-        from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
-
-        return LinearCrossEntropyOptions
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def __dir__():
-    return [*globals(), "LinearCrossEntropyOptions"]
 
 
 def factory_kwargs(kwargs):
