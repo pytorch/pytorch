@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import pickle
 import unittest
 from copy import deepcopy
 from functools import partial
@@ -132,6 +133,49 @@ class CheckpointWrapperTest(TestCase):
         )
         m(torch.randn(2, 1)).sum().backward()
         self.assertEqual(2, count)
+
+    def test_checkpoint_wrapper_pickle(self):
+        model = checkpoint_wrapper(nn.Linear(2, 2))
+        loaded = pickle.loads(pickle.dumps(model))
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out = loaded(inp)
+        out.sum().backward()
+        self.assertIsNotNone(inp.grad)
+
+    def test_checkpoint_wrapper_custom_torch_utils_kwarg_collision(self):
+        class Model(nn.Module):
+            def forward(self, x, *, use_reentrant):
+                return x.sin() * use_reentrant
+
+        model = checkpoint_wrapper(
+            Model(),
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+        )
+
+        inp = torch.ones(4, 10, requires_grad=True)
+        out = model(inp, use_reentrant=3)
+        out.sum().backward()
+        self.assertEqual(inp.grad, 3 * inp.cos())
+
+    def test_checkpoint_wrapper_custom_torch_utils_reentrant_kwargs(self):
+        class ModelEnforceKwarg(nn.Module):
+            def forward(self, *, a=None, b=None):
+                return (a.sin(), b.cos())
+
+        model = checkpoint_wrapper(
+            ModelEnforceKwarg(),
+            checkpoint_impl=CheckpointImpl.REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=True,
+        )
+
+        inp = torch.ones(4, 10, requires_grad=True)
+        out = model(a=inp, b=inp)
+        self.assertEqual(2, len(out))
+        sum(t.sum() for t in out).backward()
+        self.assertIsNotNone(inp.grad)
 
     @unittest.skip
     def test_checkpoint_wrapper_parity(self):

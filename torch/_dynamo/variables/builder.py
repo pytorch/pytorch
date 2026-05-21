@@ -157,6 +157,7 @@ from ..utils import (
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    is_checkpoint_factory,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -168,6 +169,7 @@ from ..utils import (
     is_torch_class,
     is_typing,
     is_utils_checkpoint,
+    is_utils_checkpoint_wrapped,
     is_wrapper_or_member_descriptor,
     istype,
     namedtuple_fields,
@@ -1053,6 +1055,52 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_checkpoint_factory(value):
+            from .higher_order_ops import CheckpointDecoratorVariable
+
+            kwargs_source = AttrSource(self.get_source(), "_torch_checkpoint_kwargs")
+            checkpoint_kwargs = {}
+            for k, v in value._torch_checkpoint_kwargs.items():
+                checkpoint_kwargs[k] = VariableBuilder(
+                    self.tx, DictGetItemSource(kwargs_source, k)
+                )(v)
+
+            install_guard(
+                self.get_source().make_guard(GuardBuilder.CLOSURE_MATCH),
+                kwargs_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+            )
+            return CheckpointDecoratorVariable(
+                build_checkpoint_variable(source=self.source),
+                checkpoint_kwargs,
+                source=self.source,
+            )
+        elif is_utils_checkpoint_wrapped(value):
+            from .higher_order_ops import CheckpointFunctionVariable
+
+            fn_source = AttrSource(
+                self.get_source(), "_torch_checkpoint_wrapped_function"
+            )
+            fn = VariableBuilder(self.tx, fn_source)(
+                value._torch_checkpoint_wrapped_function
+            )
+
+            kwargs_source = AttrSource(self.get_source(), "_torch_checkpoint_kwargs")
+            checkpoint_kwargs = {}
+            for k, v in value._torch_checkpoint_kwargs.items():
+                checkpoint_kwargs[k] = VariableBuilder(
+                    self.tx, DictGetItemSource(kwargs_source, k)
+                )(v)
+
+            install_guard(
+                self.get_source().make_guard(GuardBuilder.CLOSURE_MATCH),
+                kwargs_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+            )
+            return CheckpointFunctionVariable(
+                build_checkpoint_variable(source=self.source),
+                fn,
+                checkpoint_kwargs,
+                source=self.source,
+            )
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
         elif LocalMapWrappedHigherOrderVariable.should_wrap_in_hop(value):
