@@ -2456,6 +2456,7 @@ class SIMDScheduling(BaseScheduling):
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> list[tuple[str | None, Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
@@ -2478,7 +2479,7 @@ class SIMDScheduling(BaseScheduling):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling_scores = None
-            if config.combo_kernel_per_subkernel_blocks:
+            if per_subkernel_blocks:
                 if torch._inductor.config.triton.coalesce_tiling_analysis:
                     assert isinstance(
                         pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
@@ -2555,6 +2556,7 @@ class SIMDScheduling(BaseScheduling):
                     triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
+                    per_subkernel_blocks=per_subkernel_blocks,
                 )
                 for pn in node_group:
                     node_info = node_schedule_map[pn]
@@ -2564,6 +2566,7 @@ class SIMDScheduling(BaseScheduling):
                         optimize_mask=not mixed_sizes,
                         triton_kernel_cls=self.kernel_type,
                         tiling_scores=node_info.tiling_scores,
+                        per_subkernel_blocks=per_subkernel_blocks,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -2585,8 +2588,14 @@ class SIMDScheduling(BaseScheduling):
             config.combo_kernel_allow_mixed_sizes == 1 and custom_part_algorithm
         )
 
+        per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
+
         kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes, custom_part_algorithm, enable_autotune, mixed_sizes
+            subkernel_nodes,
+            custom_part_algorithm,
+            enable_autotune,
+            mixed_sizes,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
 
         for src_code, kernel, _ in kernel_code_list:
