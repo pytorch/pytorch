@@ -1357,16 +1357,27 @@ def decompose_auto_functionalized(graph):
     """
     graph_pass = PatternMatcherPass()
 
+    def is_flex_ep_router_op(op):
+        return isinstance(op, torch._ops.OpOverload) and op.name().startswith(
+            "_flex_ep::"
+        )
+
     @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        CallFunctionVarArgs(
+            torch.ops.higher_order.auto_functionalized,
+            users=MULTIPLE,
+        ),
         # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        mutable_op = args[0]
+        only_clone_these_tensors = (
+            ()
+            if is_flex_ep_router_op(mutable_op)
+            else tuple(match.nodes[0].meta.get("only_clone_these_tensors", []))
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -1384,7 +1395,10 @@ def decompose_auto_functionalized(graph):
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        CallFunctionVarArgs(
+            torch.ops.higher_order.auto_functionalized_v2,
+            users=MULTIPLE,
+        ),
         # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
@@ -1393,8 +1407,11 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        mutable_op = args[0]
+        only_clone_these_bases = (
+            ()
+            if is_flex_ep_router_op(mutable_op)
+            else tuple(match.nodes[0].meta.get("only_clone_these_tensors", []))
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -1480,7 +1497,9 @@ def decompose_auto_functionalized(graph):
     for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
-        raise AssertionError("auto_functionalized_v2 was not removed")
+        raise AssertionError(
+            f"auto_functionalized_v2 was not removed: {_.format_node()}"
+        )
 
 
 @register_lowering_pattern(

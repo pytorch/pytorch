@@ -3146,6 +3146,14 @@
       ]
     }
   ],
+  "GB6571": [
+    {
+      "Gb_type": "flex_ep_backward: Dynamo tracing unsupported",
+      "Context": "torch.ops.higher_order.flex_ep_backward",
+      "Explanation": "flex_ep_backward is an internal autograd HOP and should only be captured by AOTAutograd/proxy tracing.",
+      "Hints": []
+    }
+  ],
   "GB6025": [
     {
       "Gb_type": "Failed to trace list()",
@@ -3287,6 +3295,14 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB8806": [
+    {
+      "Gb_type": "flex_ep: invalid TokenMappingInfo",
+      "Context": "dispatch output {idx}: {item}",
+      "Explanation": "flex_ep dispatch_fn must return tensor TokenMappingInfo values except for the final B.",
+      "Hints": []
     }
   ],
   "GB0811": [
@@ -3897,6 +3913,38 @@
       ]
     }
   ],
+  "GB6574": [
+    {
+      "Gb_type": "flex_ep_backward: missing arguments",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "flex_ep_backward expects dy, saved activations and weights, two callables, and flat TokenMappingInfo values.",
+      "Hints": []
+    }
+  ],
+  "GB8661": [
+    {
+      "Gb_type": "flex_ep_backward: unexpected kwargs",
+      "Context": "kwargs: {kwargs}",
+      "Explanation": "flex_ep_backward received unsupported keyword arguments.",
+      "Hints": []
+    }
+  ],
+  "GB2954": [
+    {
+      "Gb_type": "flex_ep_backward: invalid combine_bwd output",
+      "Context": "str(combine_bwd_out)",
+      "Explanation": "flex_ep combine_bwd_fn must return a tensor.",
+      "Hints": []
+    }
+  ],
+  "GB2640": [
+    {
+      "Gb_type": "flex_ep_backward: invalid dispatch_bwd output",
+      "Context": "str(dispatch_bwd_out)",
+      "Explanation": "flex_ep dispatch_bwd_fn must return a tensor.",
+      "Hints": []
+    }
+  ],
   "GB0285": [
     {
       "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
@@ -4283,6 +4331,70 @@
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
+    }
+  ],
+  "GB4970": [
+    {
+      "Gb_type": "flex_ep: non-constant config",
+      "Context": "{name}: {value}",
+      "Explanation": "flex_ep expects {name} to be a compile-time int.",
+      "Hints": []
+    }
+  ],
+  "GB4719": [
+    {
+      "Gb_type": "flex_ep: non-int config",
+      "Context": "{name}: {type(result).__name__}",
+      "Explanation": "flex_ep expects {name} to be an int.",
+      "Hints": []
+    }
+  ],
+  "GB3880": [
+    {
+      "Gb_type": "flex_ep: invalid callable output",
+      "Context": "{name}: {output}",
+      "Explanation": "flex_ep expects {name} to return a tuple/list.",
+      "Hints": []
+    }
+  ],
+  "GB3542": [
+    {
+      "Gb_type": "flex_ep: missing arguments",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "flex_ep expects x, topk_idx, w13, w2, and four callables.",
+      "Hints": []
+    }
+  ],
+  "GB9766": [
+    {
+      "Gb_type": "flex_ep: missing config",
+      "Context": "missing kwargs: {missing}",
+      "Explanation": "flex_ep requires keyword-only expert-parallel config.",
+      "Hints": []
+    }
+  ],
+  "GB7729": [
+    {
+      "Gb_type": "flex_ep: unexpected kwargs",
+      "Context": "kwargs: {kwargs}",
+      "Explanation": "flex_ep received unsupported keyword arguments.",
+      "Hints": []
+    }
+  ],
+  "GB3141": [
+    {
+      "Gb_type": "flex_ep: invalid dispatch output",
+      "Context": "num outputs: {len(dispatch_items)}",
+      "Explanation": "flex_ep dispatch_fn must return recv_x plus 8 flat TokenMappingInfo values.",
+      "Hints": []
+    }
+  ],
+  "GB2673": [
+    {
+      "Gb_type": "flex_ep: invalid combine output",
+      "Context": "str(combine_out)",
+      "Explanation": "flex_ep combine_fn must return a tensor.",
+      "Hints": []
     }
   ],
   "GB0312": [

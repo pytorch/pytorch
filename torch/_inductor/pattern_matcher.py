@@ -2118,7 +2118,13 @@ class PatternMatcherPass:
                 # conservatively not applying pattern for cpu input,
                 # since some of the patterns induce codegen and split nodes.
                 # Note: we will only skip cpu compute if disable_cpp_codegen=True
-                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                if node.target not in (
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ) and fallback_node_due_to_unsupported_type(
+                    node,
+                    allow_cpu_inputs=False,
+                ):
                     continue
 
                 for entry in self.patterns[(node.op, target)]:

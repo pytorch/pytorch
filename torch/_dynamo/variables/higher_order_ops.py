@@ -4505,6 +4505,399 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
+class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_ep"
+
+    @staticmethod
+    def _as_python_int(value: VariableTracker, name: str) -> int:
+        if not value.is_python_constant():
+            unimplemented(
+                gb_type="flex_ep: non-constant config",
+                context=f"{name}: {value}",
+                explanation=f"flex_ep expects {name} to be a compile-time int.",
+                hints=[],
+            )
+        result = value.as_python_constant()
+        if not isinstance(result, int):
+            unimplemented(
+                gb_type="flex_ep: non-int config",
+                context=f"{name}: {type(result).__name__}",
+                explanation=f"flex_ep expects {name} to be an int.",
+                hints=[],
+            )
+        return result
+
+    @staticmethod
+    def _buildable_dim(dim: Any) -> Any:
+        if isinstance(dim, torch.SymInt):
+            try:
+                return int(dim)
+            except (TypeError, RuntimeError):
+                return dim
+        return dim
+
+    @staticmethod
+    def _static_dim_or(dim: Any, fallback: Any) -> Any:
+        if isinstance(dim, torch.SymInt):
+            try:
+                return int(dim)
+            except (TypeError, RuntimeError):
+                return fallback
+        return dim
+
+    @classmethod
+    def _new_empty(
+        cls,
+        tx: "InstructionTranslator",
+        ref: VariableTracker,
+        shape: Sequence[Any],
+        dtype: torch.dtype,
+        requires_grad: bool = False,
+    ) -> VariableTracker:
+        kwargs: dict[str, VariableTracker] = {
+            "dtype": VariableTracker.build(tx, dtype),
+        }
+        if dtype.is_floating_point or dtype.is_complex:
+            kwargs["requires_grad"] = VariableTracker.build(tx, requires_grad)
+        return ref.call_method(
+            tx,
+            "new_empty",
+            [VariableTracker.build(tx, [cls._buildable_dim(dim) for dim in shape])],
+            kwargs,
+        )
+
+    def _trace_flat_callable(
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        fn_args: Sequence[VariableTracker],
+        name: str,
+    ) -> tuple[Proxy, VariableTracker]:
+        _check_supported_callable_arg(tx, fn, name)
+        (
+            (body_r, _body_spec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            fn,
+            fn_args,
+            {},
+            description=f"{self._HOP_NAME}: {name}",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+        if body_lifted_freevars:
+            unimplemented(
+                gb_type="flex_ep: subgraph captures tensor",
+                context=f"{name}: {len(body_lifted_freevars)} lifted freevars",
+                explanation=(
+                    f"flex_ep {name} captured tensor(s) from outer scope. All "
+                    "tensors needed by router subgraphs must flow through "
+                    "router_operands."
+                ),
+                hints=[],
+            )
+        body_name = tx.output.install_subgraph(
+            name,
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+        )
+        return make_attr(tx, body_name), body_r
+
+    @staticmethod
+    def _require_tuple_output(
+        output: VariableTracker,
+        name: str,
+    ) -> Sequence[VariableTracker]:
+        output = output.realize()
+        if not isinstance(output, (TupleVariable, ListVariable)):
+            unimplemented(
+                gb_type="flex_ep: invalid callable output",
+                context=f"{name}: {output}",
+                explanation=f"flex_ep expects {name} to return a tuple/list.",
+                hints=[],
+            )
+        return output.items
+
+    @staticmethod
+    def _require_dispatch_plan_output(
+        tx: "InstructionTranslator",
+        output: VariableTracker,
+        name: str,
+    ) -> tuple[VariableTracker, tuple[VariableTracker, ...]]:
+        from torch._higher_order_ops.flex_ep import FLEX_EP_PLAN_FIELDS
+
+        output = output.realize()
+        items: list[VariableTracker] = []
+        for field_name in FLEX_EP_PLAN_FIELDS:
+            try:
+                item = output.var_getattr(tx, field_name)
+            except Exception as exc:
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch-plan output",
+                    context=f"{name}: missing {field_name}: {exc}",
+                    explanation=(
+                        "flex_ep build_dispatch_plan_fn must return a "
+                        "FlexEPDispatchPlan-compatible dataclass."
+                    ),
+                    hints=[],
+                )
+            if not item.is_tensor():
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch-plan field",
+                    context=f"{name}.{field_name}: {item}",
+                    explanation=(
+                        "flex_ep dispatch-plan dataclass fields must all be "
+                        "tensors."
+                    ),
+                    hints=[],
+                )
+            items.append(item)
+        return output, tuple(items)
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) < 9:
+            unimplemented(
+                gb_type="flex_ep: missing arguments",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="flex_ep expects x, topk_idx, w13, w2, and five callables.",
+                hints=[],
+            )
+
+        unimplemented(
+            gb_type="flex_ep: Dynamo unsupported",
+            context="FlexEPDispatchPlan dataclass callback API",
+            explanation=(
+                "FlexEP with Python dataclass dispatch plans is intentionally "
+                "eager-only for now. Dynamo/Inductor support will need a "
+                "separate structured-plan tracing implementation."
+            ),
+            hints=[],
+        )
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        kwargs = dict(kwargs)
+        required_kwargs = (
+            "num_experts",
+            "ep_rank",
+            "ep_size",
+            "max_tokens",
+            "topk",
+        )
+        missing = [name for name in required_kwargs if name not in kwargs]
+        if missing:
+            unimplemented(
+                gb_type="flex_ep: missing config",
+                context=f"missing kwargs: {missing}",
+                explanation="flex_ep requires keyword-only expert-parallel config.",
+                hints=[],
+            )
+        num_experts = self._as_python_int(kwargs.pop("num_experts"), "num_experts")
+        ep_rank = self._as_python_int(kwargs.pop("ep_rank"), "ep_rank")
+        ep_size = self._as_python_int(kwargs.pop("ep_size"), "ep_size")
+        max_tokens = self._as_python_int(kwargs.pop("max_tokens"), "max_tokens")
+        topk = self._as_python_int(kwargs.pop("topk"), "topk")
+        num_ctas = self._as_python_int(
+            kwargs.pop("num_ctas", ConstantVariable.create(152)), "num_ctas"
+        )
+        if kwargs:
+            unimplemented(
+                gb_type="flex_ep: unexpected kwargs",
+                context=f"kwargs: {kwargs}",
+                explanation="flex_ep received unsupported keyword arguments.",
+                hints=[],
+            )
+
+        (
+            x,
+            topk_idx,
+            w13,
+            w2,
+            build_dispatch_plan_fn,
+            dispatch_fn,
+            combine_fn,
+            combine_bwd_fn,
+            dispatch_bwd_fn,
+            *router_operands,
+        ) = args
+
+        x_fake = _get_fake_value(x)
+        max_routed_tokens = max_tokens * topk
+        x_batch = self._static_dim_or(x_fake.shape[0], max_tokens)
+        hidden_dim = self._static_dim_or(x_fake.shape[1], 1)
+        requires_grad = any(
+            getattr(_get_fake_value(v), "requires_grad", False) for v in (x, w13, w2)
+        )
+
+        with discard_graph_changes(tx):
+            x_expanded = self._new_empty(
+                tx,
+                x,
+                (x_batch, topk, hidden_dim),
+                x_fake.dtype,
+                x_fake.requires_grad,
+            )
+        build_dispatch_plan_node, build_dispatch_plan_out = self._trace_flat_callable(
+            tx,
+            build_dispatch_plan_fn,
+            (topk_idx, *router_operands),
+            "flex_ep_build_dispatch_plan",
+        )
+        _, build_dispatch_plan_items = self._require_dispatch_plan_output(
+            tx, build_dispatch_plan_out, "build_dispatch_plan_fn"
+        )
+
+        def static_shape(shape: Sequence[Any]) -> tuple[Any, ...]:
+            return tuple(self._static_dim_or(dim, max_routed_tokens) for dim in shape)
+
+        with discard_graph_changes(tx):
+            from torch._dynamo.variables.user_defined import FrozenDataClassVariable
+            from torch._higher_order_ops.flex_ep import FlexEPDispatchPlan
+
+            fake_plan = FlexEPDispatchPlan(
+                *(_get_fake_value(item) for item in build_dispatch_plan_items)
+            )
+            plan_arg = FrozenDataClassVariable(fake_plan)
+
+        dispatch_node, dispatch_out = self._trace_flat_callable(
+            tx,
+            dispatch_fn,
+            (x_expanded, plan_arg, *router_operands),
+            "flex_ep_dispatch",
+        )
+        dispatch_out = dispatch_out.realize()
+        if isinstance(dispatch_out, (TupleVariable, ListVariable)):
+            dispatch_items = dispatch_out.items
+            if len(dispatch_items) != 1:
+                unimplemented(
+                    gb_type="flex_ep: invalid dispatch output",
+                    context=f"num outputs: {len(dispatch_items)}",
+                    explanation=(
+                        "flex_ep dispatch_fn must return recv_x or a "
+                        "single-item tuple/list."
+                    ),
+                    hints=[],
+                )
+            recv = dispatch_items[0]
+        elif dispatch_out.is_tensor():
+            recv = dispatch_out
+        else:
+            unimplemented(
+                gb_type="flex_ep: invalid dispatch output",
+                context=str(dispatch_out),
+                explanation=(
+                    "flex_ep dispatch_fn must return recv_x or a single-item "
+                    "tuple/list."
+                ),
+                hints=[],
+            )
+
+        recv_fake = _get_fake_value(recv)
+        with discard_graph_changes(tx):
+            y3 = self._new_empty(
+                tx,
+                x,
+                (*static_shape(recv_fake.shape[:-1]), hidden_dim),
+                x_fake.dtype,
+                requires_grad,
+            )
+            dy = self._new_empty(
+                tx,
+                x,
+                (x_batch, hidden_dim),
+                x_fake.dtype,
+                False,
+            )
+            dx_recv = self._new_empty(
+                tx,
+                x,
+                static_shape(recv_fake.shape),
+                recv_fake.dtype,
+                False,
+            )
+
+        combine_node, combine_out = self._trace_flat_callable(
+            tx,
+            combine_fn,
+            (y3, plan_arg, *router_operands),
+            "flex_ep_combine",
+        )
+        combine_bwd_node, _ = self._trace_flat_callable(
+            tx,
+            combine_bwd_fn,
+            (dy, plan_arg, *router_operands),
+            "flex_ep_combine_bwd",
+        )
+        dispatch_bwd_node, _ = self._trace_flat_callable(
+            tx,
+            dispatch_bwd_fn,
+            (dx_recv, plan_arg, *router_operands),
+            "flex_ep_dispatch_bwd",
+        )
+
+        if not combine_out.is_tensor():
+            unimplemented(
+                gb_type="flex_ep: invalid combine output",
+                context=str(combine_out),
+                explanation="flex_ep combine_fn must return a tensor.",
+                hints=[],
+            )
+
+        proxied_args, _ = proxy_args_kwargs(
+            [x, topk_idx, w13, w2, *router_operands], {}
+        )
+        hop_args = (
+            *proxied_args[:4],
+            build_dispatch_plan_node,
+            dispatch_node,
+            combine_node,
+            combine_bwd_node,
+            dispatch_bwd_node,
+            *proxied_args[4:],
+        )
+        hop_kwargs = {
+            "num_experts": num_experts,
+            "ep_rank": ep_rank,
+            "ep_size": ep_size,
+            "max_tokens": max_tokens,
+            "topk": topk,
+            "num_ctas": num_ctas,
+        }
+        example_value = combine_out.as_proxy().node.meta["example_value"]
+        return add_call_function(
+            tx,
+            self.value,
+            hop_args,
+            hop_kwargs,
+            example_value,
+        )
+
+
+class FlexEpBackwardHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_ep_backward"
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="flex_ep_backward: Dynamo tracing unsupported",
+            context="torch.ops.higher_order.flex_ep_backward",
+            explanation=(
+                "flex_ep_backward is an internal autograd HOP and should only "
+                "be captured by AOTAutograd/proxy tracing."
+            ),
+            hints=[],
+        )
+
+
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention"
 
@@ -5875,6 +6268,8 @@ _hop_name_to_variable_class = {
     "hints_wrapper": HintsWrapperHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
+    "flex_ep": FlexEpHigherOrderVariable,
+    "flex_ep_backward": FlexEpBackwardHigherOrderVariable,
     "wrap_activation_checkpoint": CheckpointHigherOrderVariable,
     "tag_activation_checkpoint": CheckpointHigherOrderVariable,
     "_export_tracepoint": ExportTracepointHigherOrderVariable,

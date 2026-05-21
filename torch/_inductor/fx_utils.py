@@ -125,6 +125,30 @@ def _extract_subgraphs_and_args(
 
         yield score_subgraph, (*score_subgraph_args[:5], *args[7])
         yield args[4][-1], (*mask_subgraph_args[:4], *args[8])
+    elif node.target is torch.ops.higher_order.flex_ep:
+
+        def get_subgraph_args(
+            subgraph: torch.fx.GraphModule,
+        ) -> tuple[torch.Tensor, ...]:
+            return tuple(
+                get_fake(n, subgraph)
+                for n in subgraph.graph.find_nodes(op="placeholder")
+            )
+
+        for subgraph in args[4:9]:
+            yield subgraph, get_subgraph_args(subgraph)
+    elif node.target is torch.ops.higher_order.flex_ep_backward:
+
+        def get_subgraph_args(
+            subgraph: torch.fx.GraphModule,
+        ) -> tuple[torch.Tensor, ...]:
+            return tuple(
+                get_fake(n, subgraph)
+                for n in subgraph.graph.find_nodes(op="placeholder")
+            )
+
+        for subgraph in args[8:10]:
+            yield subgraph, get_subgraph_args(subgraph)
     elif node.target in (
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
