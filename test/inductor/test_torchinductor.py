@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 import unittest.mock
+import warnings
 import weakref
 from collections.abc import Callable
 from pathlib import Path
@@ -3058,6 +3059,35 @@ class CommonTemplate:
             self.assertEqual(y, y_ref, atol=1e-4, rtol=1e-4)
             self.assertEqual(x.grad, x_ref.grad, atol=1e-4, rtol=1e-4)
 
+    @skip_if_gpu_halide
+    def test_cumprod_backward_split_scan_reduction_fusion(self):
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("split scan only supported on GPU")
+
+        seq_len = 8193
+        channels = 64
+
+        def fn(x, gamma):
+            decay = gamma.view(1, 1, channels).expand_as(x)
+            retention = torch.cumprod(decay, dim=1)
+            return (x * retention).sum()
+
+        x = torch.randn(2, seq_len, channels, device=self.device, requires_grad=True)
+        gamma = torch.full((channels,), 0.999, device=self.device).requires_grad_()
+        x_ref = x.clone().detach().requires_grad_(True)
+        gamma_ref = gamma.clone().detach().requires_grad_(True)
+
+        y_ref = fn(x_ref, gamma_ref)
+        y_ref.backward()
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        y = compiled_fn(x, gamma)
+        y.backward()
+
+        self.assertEqual(y, y_ref, atol=1e-3, rtol=1e-3)
+        self.assertEqual(x.grad, x_ref.grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(gamma.grad, gamma_ref.grad, atol=1e-2, rtol=2e-3)
+
     def test_view_dtype_bool(self):
         # Regression test for boolean dtype handling in view.dtype lowering
         # torch.iinfo doesn't support bool, so we need special handling
@@ -4823,7 +4853,6 @@ class CommonTemplate:
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
 
-    @xfail_if_mps_unimplemented  # Sparse not supported
     def test_gather3(self):
         def fn(a, b):
             return torch.gather(a, 1, b, sparse_grad=True)
@@ -6316,6 +6345,50 @@ class CommonTemplate:
             (torch.randint(10, [2, 8]),),
         )
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_embedding_out_of_bounds_indices(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU bounds check regression")
+
+        def fn(indices, weight):
+            return F.embedding(indices, weight)
+
+        weight = torch.tensor(
+            [
+                [10.0, 20.0],
+                [30.0, 40.0],
+                [50.0, 60.0],
+                [70.0, 80.0],
+                [90.0, 100.0],
+            ],
+            device=self.device,
+        )
+        valid_indices = torch.tensor([0, 2, 4], device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(valid_indices, weight), fn(valid_indices, weight))
+
+        for bad_index in (-1, -2, -5, 5):
+            indices = torch.tensor([2, bad_index, 4], device=self.device)
+            with self.assertRaisesRegex(IndexError, "index out of range in self"):
+                fn(indices, weight)
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                compiled_fn(indices, weight)
+
+        def computed_negative_fn(weight):
+            indices = torch.arange(3, device=weight.device) - 1
+            return F.embedding(indices, weight)
+
+        compiled_computed_negative_fn = torch.compile(
+            computed_negative_fn, backend="inductor", fullgraph=True
+        )
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            computed_negative_fn(weight)
+        with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+            compiled_computed_negative_fn(weight)
+
     def test_embedding_sparse(self):
         # Fix https://github.com/pytorch/pytorch/issues/150656
         def fn(weight, indices):
@@ -6328,6 +6401,34 @@ class CommonTemplate:
             fn,
             (weight, indices),
         )
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_grad_embedding_renorm_negative_indices(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires cuda")
+
+        def fn(weight, indices):
+            return torch.ops.aten._no_grad_embedding_renorm_(
+                weight, indices, max_norm=1.0, norm_type=1.0
+            )
+
+        dtype = (
+            torch.bfloat16 if self.is_dtype_supported(torch.bfloat16) else torch.float32
+        )
+        indices = (
+            torch.arange(-32, 32, dtype=torch.int32, device=self.device)
+            .repeat(8)
+            .reshape(32, 16)
+        )
+        weight = torch.randn((1000, 512), dtype=dtype, device=self.device) * 0.1
+        expected_weight = weight.clone()
+        actual_weight = weight.clone()
+
+        expected = fn(expected_weight, indices)
+        actual = torch.compile(fn, backend="inductor")(actual_weight, indices)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_weight, expected_weight)
 
     @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
@@ -6831,7 +6932,6 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
-    @xfail_if_mps
     def test_complex_real_imag_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that extracting real/imag from conjugated tensors works when compiled.
@@ -6993,6 +7093,26 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([16, 16]),),
+        )
+
+    def test_infinitely_differentiable_gelu_backward_bfloat16(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        if not SM80OrLater:
+            raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
+
+        def fn(grad, self):
+            return aten.infinitely_differentiable_gelu_backward(grad, self)
+
+        torch.manual_seed(0)
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+                torch.randn([2, 3, 5], dtype=torch.bfloat16),
+            ),
+            check_lowp=False,
+            reference_in_float=False,
         )
 
     def test_clone(self):
@@ -7971,6 +8091,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    def test_frac_signed_zero(self):
+        def fn(x):
+            y = torch.frac(x)
+            return y, 1.0 / y
+
+        x = torch.tensor([-0.0, -1.0, -1.5, 0.0, 1.5], device=self.device)
+        expected_frac, expected_recip = fn(x)
+        actual_frac, actual_recip = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(
+            actual_frac.cpu().view(torch.int32),
+            expected_frac.cpu().view(torch.int32),
+        )
+        self.assertEqual(
+            actual_recip.cpu().view(torch.int32),
+            expected_recip.cpu().view(torch.int32),
+        )
+        self.assertFalse(torch.signbit(actual_frac.cpu()[0]).item())
+        self.assertEqual(actual_recip.cpu()[0].item(), float("inf"))
+
     @xfail_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
@@ -8522,6 +8662,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    def test_reflection_pad2d_channels_last(self):
+        def fn(a):
+            return (aten.reflection_pad2d(a, [1, 2, 2, 1]),)
+
+        # channels_last input: stride order should be preserved in compiled output
+        self.common(
+            fn,
+            (torch.randn([2, 8, 4, 5]).to(memory_format=torch.channels_last),),
+            exact_stride=True,
+        )
+
     def test_reflection_pad2d_backward(self):
         def template(size, padding):
             def fn(grad_output, x):
@@ -8879,6 +9030,86 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(
             fn, (torch.empty_strided((2, 4, 5), (20, 1, 4), dtype=torch.float32),)
         )
+
+    def test_constant_pad_nd_fallback_python_dispatch_stride(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("compile_fx_inner repro is CPU-only")
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest(
+                "process-local Python dispatch registrations are not inherited by "
+                "the compile subprocess"
+            )
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        op = aten.constant_pad_nd.default
+        calls = {"fake": 0, "runtime": 0}
+
+        class ConstantPadRuntimeMode(TorchDispatchMode):
+            pass
+
+        def contiguous_strides(shape):
+            strides = []
+            running = 1
+            for dim in reversed(shape):
+                strides.insert(0, running)
+                running *= int(dim)
+            return tuple(strides)
+
+        def custom_constant_pad_nd(x, pad, value=0):
+            shape = list(x.shape)
+            for dim, (low, high) in enumerate(
+                reversed(list(zip(pad[::2], pad[1::2]))),
+                start=len(shape) - len(pad) // 2,
+            ):
+                shape[dim] += low + high
+            return torch.empty_strided(
+                shape,
+                contiguous_strides(shape),
+                dtype=x.dtype,
+                device=x.device,
+            )
+
+        def fake_constant_pad_nd(mode, x, pad, value=0):
+            calls["fake"] += 1
+            return custom_constant_pad_nd(x, pad, value)
+
+        def runtime_constant_pad_nd(mode, x, pad, value=0):
+            calls["runtime"] += 1
+            return custom_constant_pad_nd(x, pad, value)
+
+        def fn(x):
+            return (op(x, [0, -1, 0, 0], 0),)
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.empty_strided((1, 4, 5, 7), (140, 1, 28, 4))
+        expected_stride = (120, 30, 6, 1)
+        original_python_key_table = dict(op.python_key_table)
+
+        try:
+            op.python_key_table[FakeTensorMode] = fake_constant_pad_nd
+            op.python_key_table[ConstantPadRuntimeMode] = runtime_constant_pad_nd
+            op._dispatch_cache.clear()
+
+            with (
+                patch.dict(
+                    lowering.lowerings,
+                    {op: lowering.fallback_handler(op, add_to_fallback_set=False)},
+                ),
+                config.patch(size_asserts=True, fx_graph_cache=False),
+            ):
+                compiled = compile_fx_inner(gm, [x])
+
+            with ConstantPadRuntimeMode(), enable_python_dispatcher():
+                result = compiled([x])
+
+            self.assertEqual(tuple(result[0].stride()), expected_stride)
+            self.assertGreater(calls["fake"], 0)
+            self.assertEqual(calls["runtime"], 1)
+        finally:
+            op.python_key_table.clear()
+            op.python_key_table.update(original_python_key_table)
+            op._dispatch_cache.clear()
 
     @skip_if_gpu_halide  # misaligned address
     def test_constant_pad_3d(self):
@@ -9780,6 +10011,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @skip_if_triton_cpu
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -13637,6 +13869,109 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # because bucketize is computationally expensive.
         FileCheck().check("def triton").check("def triton").run(code[0])
 
+    def test_searchsorted_sliced_computed_boundaries(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[:-1], values + 10, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[1:], values, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence, values, out_int32=True, right=True, sorter=sorter[1:]
+            )
+
+        sequence = torch.tensor([4, 0, 8, 2, 6])
+        sorter = torch.tensor([0, 1, 3, 0, 4, 2])
+        values = torch.arange(10, 20)
+
+        self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_boundaries_offset(self):
+        def fn(sequence, values):
+            sequence = sequence + 10
+            return torch.searchsorted(
+                sequence[1:, 1:], values, out_int32=True, right=True
+            )
+
+        sequence = torch.arange(24).reshape(4, 6)
+        values = torch.tensor(
+            [[16, 17, 19, 21, 22], [22, 23, 25, 27, 28], [28, 29, 31, 33, 34]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence[1:, 1:],
+                values,
+                out_int32=True,
+                right=True,
+                sorter=sorter[1:, 1:],
+            )
+
+        sequence = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [99, 5, 1, 4, 2, 3],
+                [99, 15, 11, 14, 12, 13],
+                [99, 25, 21, 24, 22, 23],
+            ]
+        )
+        sorter = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+            ]
+        )
+        values = torch.tensor(
+            [[10, 11, 13, 15, 16], [20, 21, 23, 25, 26], [30, 31, 33, 35, 36]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.searchsorted(
+                base.expand(5), values, out_int32=True, right=True
+            )
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -13709,6 +14044,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries(self):
+        def fn(boundaries, count: int):
+            boundaries = boundaries + 10
+            values = torch.arange(count, device=boundaries.device)
+            return (
+                torch.bucketize(values, boundaries[:-1], out_int32=True, right=True) - 1
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+
+        self.common(fn, (boundaries, 10), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.bucketize(values, boundaries[1:], out_int32=True, right=True)
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_bucketize_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.bucketize(values, base.expand(5), out_int32=True, right=True)
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
 
     def test_bucketize_scalar_various_values(self):
         def fn(boundaries, scalar_val):
@@ -16480,6 +16848,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
 
+    @config.patch(force_disable_caches=True)
+    @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
+    def test_broadcasted_inner_reduction_detection(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+
+        x = torch.randn(2000000, 1, 2, device=self.device).expand(-1, 2, -1)
+
+        @torch.compile
+        def f(x):
+            return x.sum(dim=(0, 1))
+
+        code = run_and_get_triton_code(f, x)
+        self.assertTrue("ReductionHint.OUTER" in code)
+        self.assertFalse("ReductionHint.INNER" in code)
+
     @skip_if_halide
     @requires_gpu_and_triton
     def test_triton_argmin_argmax_transpose_logical_index(self):
@@ -16612,7 +16996,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager_result2, compiled_result2, atol=atol, rtol=rtol)
 
     @xfail_if_triton_cpu
-    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_uses_fma_instruction(self):
@@ -17964,7 +18347,17 @@ if RUN_GPU:
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
-            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+            fns = (
+                "first_arg",
+                "store",
+                "second_arg",
+                "same_pm_one",
+                "same_pp_one",
+                "gather",
+                "gather_generated_index",
+                "cross_entropy_loss",
+                "cross_entropy_loss_generated_target",
+            )
 
             def test(fn, ndims, dyn_shape, one_size=False):
                 proc = subprocess.Popen(

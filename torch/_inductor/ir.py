@@ -37,6 +37,7 @@ import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
@@ -1215,7 +1216,12 @@ def get_reduction_combine_fn(
     if reduction_type in REDUCTION_COMBINE_FN:
         return REDUCTION_COMBINE_FN[reduction_type]
 
-    elif reduction_type in ("argmax", "argmin", "argmax_value", "argmin_value"):
+    elif reduction_type in (
+        "argmax",
+        "argmin",
+        "argmax_with_value",
+        "argmin_with_value",
+    ):
 
         def argmax_combine_fn(
             a: tuple[object, object], b: tuple[object, object]
@@ -1223,7 +1229,7 @@ def get_reduction_combine_fn(
             a_value, a_index = a
             b_value, b_index = b
 
-            if reduction_type in ("argmin", "argmin_value"):
+            if reduction_type in ("argmin", "argmin_with_value"):
                 mask = ops.lt(a_value, b_value)
             else:
                 mask = ops.gt(a_value, b_value)
@@ -1257,7 +1263,14 @@ def get_reduction_combine_fn(
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
-            delta = b_mean - a_mean
+            # Guard against inf - inf = NaN when both means are infinite and
+            # equal. This occurs during FP16/BF16 LayerNorm when inputs
+            # overflow to inf.
+            delta = ops.where(
+                ops.logical_and(ops.isinf(a_mean), ops.eq(a_mean, b_mean)),
+                ops.constant(0.0, torch.float32),
+                b_mean - a_mean,
+            )
             new_weight = a_weight + b_weight
             w2_over_w = b_weight / new_weight
             return (
@@ -1354,6 +1367,9 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: IRNode | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
+        """
+        Choose the reduction hint and split count from shape and input stride information.
+        """
         # Use optimization_hint when all unbacked symbols have explicit hints,
         # otherwise fall back conservatively.
         exprs = [reduction_numel, sympy_product(ranges)]
@@ -1374,7 +1390,12 @@ class Reduction(Loops):
                 device, numel, reduction_numel
             )
         )
-        arg_reduction_types = ("argmax", "argmin", "argmax_value", "argmin_value")
+        arg_reduction_types = (
+            "argmax",
+            "argmin",
+            "argmax_with_value",
+            "argmin_with_value",
+        )
 
         should_split = reduction_type == "scan" or (
             not should_reduce_to_single_element
@@ -1474,22 +1495,42 @@ class Reduction(Loops):
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
             assert read_writes.range_vars is not None
             range_vars = [
-                r
-                for r in read_writes.range_vars
-                if isinstance(r, Expr) and not isinstance(r, sympy.Number)
+                var
+                for var in read_writes.range_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
+            ]
+            (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+                r.get_size(), r.get_reduction_size()
+            )
+            reduction_vars = [
+                var
+                for var in reduction_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
             indices = []
+            broadcasted_reduction_indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all(r in md.index.free_symbols for r in range_vars):
+                free_symbols = md.index.free_symbols
+                is_full_size_read = all(var in free_symbols for var in range_vars)
+                # Prefer full-size reads, but fall back to reads that still
+                # vary across the reduction.  Missing reduction vars are
+                # zero-stride broadcasts, not proof of an inner reduction.
+                is_broadcasted_reduction_read = not is_full_size_read and any(
+                    var in free_symbols for var in reduction_vars
+                )
+                if is_full_size_read:
                     indices.append(md.index)
+                elif is_broadcasted_reduction_read:
+                    broadcasted_reduction_indices.append(md.index)
+                if is_full_size_read or is_broadcasted_reduction_read:
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
                         original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
                         if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
-            return indices, changed
+            return indices or broadcasted_reduction_indices, changed
 
         indices, changed = get_read_indices(r)
         if changed:
@@ -1549,7 +1590,12 @@ class Reduction(Loops):
             )
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
-        if reduction_type in ("argmin", "argmax", "argmin_value", "argmax_value"):
+        if reduction_type in (
+            "argmin",
+            "argmax",
+            "argmin_with_value",
+            "argmax_with_value",
+        ):
             flatten_index = _fixed_indexer(
                 reduction_ranges,
                 FlexibleLayout.contiguous_strides(reduction_ranges),
@@ -1559,13 +1605,16 @@ class Reduction(Loops):
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
             ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
+                value = inner_fn(index, rindex)
+                if isinstance(value, tuple):
+                    return value
                 return (
-                    inner_fn(index, rindex),
+                    value,
                     ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
-            if reduction_type in ("argmin_value", "argmax_value"):
-                return lambda index: fn(index)[0]
+            if reduction_type in ("argmin_with_value", "argmax_with_value"):
+                return fn
             return lambda index: fn(index)[1]
         else:
             value_fn = inner_fn
@@ -1785,14 +1834,14 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax", "argmax_value"):
+        if reduction_type in ("max", "argmax", "argmax_with_value"):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return False
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin", "argmin_value"):
+        if reduction_type in ("min", "argmin", "argmin_with_value"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
@@ -2170,6 +2219,116 @@ class MultiOutputReduction(Reduction):
         assert isinstance(values, (tuple, list)), type(values)
         value = values[self.output_index]
         return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+
+
+class ArgReduction(MultiOutputReduction):
+    """Multi-output arg reduction that returns both the selected value and index."""
+
+    @classmethod
+    def create(  # type: ignore[override]
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
+        reduction_type: ReductionType,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: IRNode | None = None,
+    ) -> Sequence[TensorBox]:
+        assert reduction_type in ("argmax_with_value", "argmin_with_value")
+        reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+        if reduction_numel == 0:
+            raise AssertionError(
+                f"{reduction_type} not supported for zero-dimension tensors!"
+            )
+
+        if reduction_numel == 1:
+
+            def value_fn(index: Sequence[Expr]) -> OpsValue:
+                reduction_index = [sympy.S.Zero for _ in reduction_ranges]
+                value = inner_fn(index, reduction_index)
+                if isinstance(value, tuple):
+                    return value[0]
+                return value
+
+            def index_fn(index: Sequence[Expr]) -> OpsValue:
+                return ops.constant(0, torch.int64)
+
+            return (
+                Pointwise.create(
+                    device=device,
+                    dtype=dst_dtype,
+                    inner_fn=value_fn,
+                    ranges=list(ranges),
+                ),
+                Pointwise.create(
+                    device=device,
+                    dtype=torch.int64,
+                    inner_fn=index_fn,
+                    ranges=list(ranges),
+                ),
+            )
+
+        if (
+            isinstance(reduction_numel, Integer)
+            and int(reduction_numel) < config.unroll_reductions_threshold
+            and (sympy_product(ranges) != 1 or is_gpu(device.type))
+        ):
+            unrolled_fn = Reduction._unroll_reduction_fn(
+                inner_fn, reduction_ranges, reduction_type, src_dtype
+            )
+
+            def project(index: Sequence[Expr], output_index: int) -> OpsValue:
+                result = unrolled_fn(index)
+                assert isinstance(result, tuple)
+                return result[output_index]
+
+            return tuple(
+                Pointwise.create(
+                    device=device,
+                    dtype=dtype,
+                    inner_fn=partial(project, output_index=output_index),
+                    ranges=list(ranges),
+                )
+                for output_index, dtype in enumerate((dst_dtype, torch.int64))
+            )
+
+        hint, split = Reduction.num_splits(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            reduction_numel,
+            input_node,
+        )
+        assert split == 1, "arg reductions do not support split reductions"
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+
+        results = tuple(
+            TensorBox.create(
+                cls(
+                    device,
+                    dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    src_dtype,
+                    reduction_hint,
+                    output_index,
+                )
+            )
+            for output_index, dtype in enumerate((dst_dtype, torch.int64))
+        )
+        for result in results:
+            result.realize()
+        return results
 
 
 class OnlineSoftmaxReduction(MultiOutputReduction):
@@ -6577,7 +6736,8 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs)
+        with enable_python_dispatcher():
+            example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
         if shape_env := V.fake_mode.shape_env:
