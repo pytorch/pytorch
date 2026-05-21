@@ -8164,12 +8164,7 @@ class UserDefinedTritonKernel(ExternKernel):
         if not config.epilogue_fusion_user_defined_triton_kernel:
             return super().get_read_writes()
 
-        # Maps format kernel arg names to inductor buffer names.
-        formal_to_inductor = {
-            formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
-            for formal_arg_dep in self.formal_accesses.read_writes.reads_and_writes()
-        }
-
+        # Map formal kernel arg names to inductor buffer names.
         write_renames = {
             dep.name: mut_output.get_name()
             for dep, mut_output in zip(
@@ -8182,18 +8177,13 @@ class UserDefinedTritonKernel(ExternKernel):
             )
         }
 
-        tracked = OrderedSet(
-            [dep.name for dep in self.formal_accesses.read_writes.reads_and_writes()]
-        )
+        # All tensor args need to be included in reads, to avoid false dead-node-elimination
+        # see: https://github.com/pytorch/pytorch/issues/181864
         reads = OrderedSet(
-            dep.rename(formal_to_inductor)
-            for dep in self.formal_accesses.read_writes.reads_and_writes()
-            if dep.name in formal_to_inductor
+            dependencies.UserTritonDep(arg.get_name())
+            for arg in self.kernel_args.values()
+            if isinstance(arg, TensorBox)
         )
-        # Tensor args not accessed in the kernel body still need to be in reads.
-        for name, arg in self.kernel_args.items():
-            if name not in tracked and isinstance(arg, TensorBox):
-                reads.add(dependencies.UserTritonDep(arg.get_name()))
 
         return dependencies.ReadWrites(
             reads=reads,
