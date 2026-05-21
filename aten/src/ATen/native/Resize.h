@@ -79,6 +79,17 @@ inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
+// Sub-byte quantized dtypes (QUInt4x2, QUInt2x4) pack multiple logical
+// elements per storage byte. Itemsize is still 1, so the standard
+// element*itemsize formula over-counts; divide by this packing factor.
+inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
+  switch (c10::typeMetaToScalarType(data_type)) {
+    case c10::ScalarType::QUInt4x2: return 2;
+    case c10::ScalarType::QUInt2x4: return 4;
+    default: return 1;
+  }
+}
+
 template <typename T>
 inline void checkInBoundsForStorage(
     ArrayRef<T> size,
@@ -97,6 +108,13 @@ inline void checkInBoundsForStorage(
         at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
     storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
         size, data_type.itemsize(), storage_offset);
+  }
+  const int64_t element_per_byte = subByteElementPerByte(data_type);
+  if (element_per_byte > 1) {
+    storage_size_bytes =
+        (storage_size_bytes + element_per_byte - 1) / element_per_byte;
+    storage_size_plus_offset_bytes =
+        (storage_size_plus_offset_bytes + element_per_byte - 1) / element_per_byte;
   }
   // It's ok to always evaluate to False for this early return for SymInts because
   // (1) maybe_convert_symint below only installs guard for int64_t case
