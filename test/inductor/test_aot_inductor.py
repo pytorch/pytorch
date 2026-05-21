@@ -7748,6 +7748,11 @@ class AOTInductorTestsTemplate:
     def test_rocm_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y, m):
@@ -7789,6 +7794,11 @@ class AOTInductorTestsTemplate:
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y, m):
@@ -7836,6 +7846,11 @@ class AOTInductorTestsTemplate:
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         @triton.jit
         def add_one_kernel(X, Y, N):
@@ -7895,6 +7910,11 @@ class AOTInductorTestsTemplate:
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         @triton.autotune(
             configs=[
@@ -7940,6 +7960,11 @@ class AOTInductorTestsTemplate:
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         @triton.autotune(
             configs=[
@@ -8554,6 +8579,11 @@ class AOTInductorTestsTemplate:
     def test_constant_int_kernel_input(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest(
+                "Testing triton.autotune_with_sample_inputs, only works when "
+                "triton.autotune_at_compile_time is True"
+            )
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -9013,6 +9043,107 @@ copy_tests(
     AOTInductorTestABICompatibleGpu,
     GPU_TYPE,
     GPU_TEST_FAILURES,
+)
+
+
+# Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
+GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
+    **GPU_TEST_FAILURES,
+    # torch.cond and torch.while_loop dual-wrapper-mode support is not yet
+    # implemented; skip these tests until the follow-up fix lands.
+    "test_cond_simple": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_nested": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_with_parameters": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_with_reinterpret_view_inputs_outputs": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_with_replace_view_ops": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_with_multiple_outputs": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_with_outer_code_before_after": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_use_buffers_from_outer_scope": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_non_tensor_predicates_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_non_tensor_predicates_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_unbacked_symint_closure_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_symint_input": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_symint_input_disable_one_pass": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_cpu_predicate_cuda_operands_max_autotune_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_cpu_predicate_cuda_operands_max_autotune_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_cond_share_predicate": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_cond_predicate_on_cpu": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_custom_op_in_subgraph": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_simple": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_nested": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_outer_code": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_parameters": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_outer_buffers": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_pytree_inputs": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_while_loop_with_conv_dynamic_False": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_while_loop_with_conv_dynamic_True": fail_gpu(("cuda", "xpu"), is_skip=True),
+}
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+class AOTInductorTestDualWrapper(TestCase):
+    """Run AOTInductor tests with autotune_at_compile_time=False, exercising
+    the lazy Triton compile + dual-wrapper-mode codegen path."""
+
+    device = GPU_TYPE
+    device_type = GPU_TYPE
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+    def setUp(self):
+        super().setUp()
+        ctx = torch._inductor.config.patch("triton.autotune_at_compile_time", False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestDualWrapper,
+    GPU_TYPE,
+    GPU_LAZY_AUTOTUNE_TEST_FAILURES,
 )
 
 
