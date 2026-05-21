@@ -872,6 +872,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
+    def test_dict_reversed_iterator_is_consumed(self):
+        def fn():
+            d = {"a": 1, "b": 2, "foo": 0, "c": 3, "d": 4}
+            del d["foo"]
+            r = reversed(d)
+            return list(r), next(r, None)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), (list("dcba"), None))
+
     def test_dict_subclass_contains(self):
         # pattern from huggingface
         class ClassInstantier(OrderedDict):
