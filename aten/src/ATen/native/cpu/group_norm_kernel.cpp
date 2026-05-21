@@ -1553,8 +1553,9 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
               opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * s;
           const opmath_t c3 = -c2 * opmath_t(mean_data[i]) - (db_gamma * opmath_t(rstd_data[i]) - opmath_t(dmean_data ? dmean_data[i] : T(0)))* s;
           ApplyInputGradientsChannelsLastColMov<T, PT, opmath_t>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
-          data_index_step(n, N, g, G);
         }
+
+        data_index_step(n, N, g, G);
       }
     });
 
@@ -1623,12 +1624,14 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
             const PT* mean_ptr = mean_data + n * G + g;
             const PT* rstd_ptr = rstd_data + n * G + g;
             const PT* gamma_ptr = gamma_data ? (gamma_data + g * D) : nullptr;
+            opmath_t dmean = dmean_data ? opmath_t(dmean_data[n * G + g]) : opmath_t(0);
+            opmath_t drstd = drstd_data ? opmath_t(drstd_data[n * G + g]) : opmath_t(0);
             opmath_t ds_val = tmp_buffer_data ? tmp_buffer_data[n * 2 * G + 2 * g] : opmath_t(0);
             opmath_t db_val = tmp_buffer_data ? tmp_buffer_data[n * 2 * G + 2 * g + 1] : opmath_t(0);
 
-            const opmath_t c2 = (db_val * opmath_t(*mean_ptr) - ds_val - opmath_t(drstd_data ? drstd_data[i] : T(0))) *
+            const opmath_t c2 = (db_val * opmath_t(*mean_ptr) - ds_val - drstd) *
                 opmath_t(*rstd_ptr) * opmath_t(*rstd_ptr)* opmath_t(*rstd_ptr) * s;
-            const opmath_t c3 = -c2 * opmath_t(*mean_ptr) - (db_val * opmath_t(*rstd_ptr) - opmath_t(dmean_data ? dmean_data[i] : T(0))) * s;
+            const opmath_t c3 = -c2 * opmath_t(*mean_ptr) - (db_val * opmath_t(*rstd_ptr) - dmean) * s;
             ApplyInputGradientsChannelsLastRowMov<T, PT, opmath_t>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
           }
 
